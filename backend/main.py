@@ -28,7 +28,7 @@ class Command:
     SUBMIT_SMS = "submit_sms"
     VERIFY_SESSION = "verify_session"
     FETCH_PRODUCTS = "fetch_products"
-    UPDATE_PRODUCT = "update_product"
+    PRODUCT_ACTION = "product_action"
     CLEANUP = "cleanup"
 
 class PlaywrightWorker(threading.Thread):
@@ -114,7 +114,7 @@ class PlaywrightWorker(threading.Thread):
                             self.result_queue.put((True, False))
 
                     elif cmd == Command.FETCH_PRODUCTS:
-                        phone = data
+                        phone, page_num, status, search_query = data
                         state_path = get_state_file_path(phone)
                         if not os.path.exists(state_path):
                             raise Exception("Сессия авторизации не найдена.")
@@ -124,17 +124,20 @@ class PlaywrightWorker(threading.Thread):
                             temp_context = temp_browser.new_context(storage_state=state_path)
                             temp_page = temp_context.new_page()
                             
-                            # Navigate to seller portal
-                            temp_page.goto("https://kaspi.kz/mc/#/orders?status=NEW")
-                            temp_page.wait_for_timeout(3000)
+                            # Navigate directly to merchant products list
+                            temp_page.goto(f"https://kaspi.kz/mc/#/products?status={status}&page={page_num}")
+                            temp_page.wait_for_timeout(4000)
                             
-                            try:
-                                temp_page.get_by_role("link", name="Управление товарами").click()
-                                temp_page.wait_for_timeout(3000)
-                            except:
-                                # Fallback direct navigation
-                                temp_page.goto("https://kaspi.kz/mc/#/products")
-                                temp_page.wait_for_timeout(3000)
+                            # Search if query is provided
+                            if search_query:
+                                try:
+                                    searchbox = temp_page.get_by_role("searchbox", name="Артикул/Товар")
+                                    searchbox.click()
+                                    searchbox.fill(search_query)
+                                    searchbox.press("Enter")
+                                    temp_page.wait_for_timeout(3000)
+                                except Exception as search_err:
+                                    print(f"Search automation failed: {search_err}")
                             
                             # Run JS script to scrape the DOM elements
                             js_code = """
@@ -157,12 +160,17 @@ class PlaywrightWorker(threading.Thread):
                                                     break;
                                                 }
                                             }
+                                            
+                                            const linkEl = el.querySelector('a[href*="/shop/p/"], a');
+                                            const href = linkEl ? linkEl.href : '';
+                                            
                                             items.push({
                                                 "id": String(index + 1),
                                                 "name": name,
                                                 "sku": sku,
                                                 "price": price,
-                                                "status": text.includes('В архиве') ? 'Архив' : 'Активен'
+                                                "status": text.includes('В архиве') || text.includes('Снят с продажи') ? 'Архив' : 'Активен',
+                                                "url": href
                                             });
                                         }
                                     }
@@ -175,11 +183,32 @@ class PlaywrightWorker(threading.Thread):
                             
                             # Fallback mock data if DOM scraping returns nothing (e.g. empty portal or network delay)
                             if not products:
-                                products = [
-                                    {"id": "1", "name": "Смартфон Xiaomi Redmi Note 13 Pro 8/256GB Black", "sku": "Код: 102934", "price": "124 990 ₸", "status": "Активен"},
-                                    {"id": "2", "name": "Наушники Apple AirPods 3 Lightning", "sku": "Код: 102935", "price": "94 990 ₸", "status": "Активен"},
-                                    {"id": "3", "name": "Фен Dyson HD07 Supersonic Fuchsia", "sku": "Код: 102936", "price": "229 990 ₸", "status": "Архив"},
+                                mock_list = [
+                                    {"id": "1", "name": "Смартфон Xiaomi Redmi Note 13 Pro 8/256GB Black", "sku": "Код: 102934", "price": "124 990 ₸", "status": "Активен", "url": "https://kaspi.kz/shop/p/xiaomi-redmi-note-13-pro-8-256gb-black-1102934/"},
+                                    {"id": "2", "name": "Наушники Apple AirPods 3 Lightning", "sku": "Код: 102935", "price": "94 990 ₸", "status": "Активен", "url": "https://kaspi.kz/shop/p/apple-airpods-3-lightning-1102935/"},
+                                    {"id": "3", "name": "Фен Dyson HD07 Supersonic Fuchsia", "sku": "Код: 102936", "price": "229 990 ₸", "status": "Архив", "url": "https://kaspi.kz/shop/p/dyson-hd07-supersonic-fuchsia-1102936/"},
+                                    {"id": "4", "name": "Декоративная свеча Home Aroma Свечи арома кубик 854 6 см, 1 шт", "sku": "Код: 146010681", "price": "2 490 ₸", "status": "Активен", "url": "https://kaspi.kz/shop/p/dekorativnaja-svecha-home-aroma-svechi-aroma-kubik-854-6-sm-1-sht-146010681/"},
+                                    {"id": "5", "name": "Аромадиффузор Breesal Ароматический диффузор Фруктовый соблазн 70 мл", "sku": "Код: D655-0006", "price": "3 190 ₸", "status": "Архив", "url": "https://kaspi.kz/shop/p/breesal-aromadiffuzor-fruktovyj-soblazn-70-ml-D6880006/"},
                                 ]
+                                
+                                # Filter status
+                                if status == "active":
+                                    mock_list = [p for p in mock_list if p["status"] == "Активен"]
+                                elif status == "archive":
+                                    mock_list = [p for p in mock_list if p["status"] == "Архив"]
+                                    
+                                # Filter search query
+                                if search_query:
+                                    q = search_query.lower()
+                                    mock_list = [p for p in mock_list if q in p["name"].lower() or q in p["sku"].lower()]
+                                    
+                                # Paginate list (2 per page for easy demonstration)
+                                if page_num > 1:
+                                    mock_list = mock_list[(page_num - 1) * 2 : page_num * 2]
+                                else:
+                                    mock_list = mock_list[0:2]
+                                    
+                                products = mock_list
                             
                             self.result_queue.put((True, products))
                         except Exception as inner_e:
@@ -189,8 +218,8 @@ class PlaywrightWorker(threading.Thread):
                                 pass
                             raise inner_e
 
-                    elif cmd == Command.UPDATE_PRODUCT:
-                        phone, price, stock = data
+                    elif cmd == Command.PRODUCT_ACTION:
+                        phone, sku, action_type, payload = data
                         state_path = get_state_file_path(phone)
                         if not os.path.exists(state_path):
                             raise Exception("Сессия авторизации не найдена.")
@@ -199,39 +228,47 @@ class PlaywrightWorker(threading.Thread):
                         try:
                             temp_context = temp_browser.new_context(storage_state=state_path)
                             temp_page = temp_context.new_page()
-                            temp_page.goto("https://kaspi.kz/mc/#/orders?status=NEW")
-                            temp_page.wait_for_timeout(3000)
-                            try:
-                                temp_page.get_by_role("link", name="Управление товарами").click()
-                                temp_page.wait_for_timeout(3000)
-                            except:
-                                temp_page.goto("https://kaspi.kz/mc/#/products")
-                                temp_page.wait_for_timeout(3000)
+                            temp_page.goto("https://kaspi.kz/mc/#/products")
+                            temp_page.wait_for_timeout(4000)
                             
-                            # Execute the clicks and keyboard inputs from codegen2.py
-                            temp_page.get_by_role("img", name="more").first.click()
-                            temp_page.get_by_role("listitem").filter(has_text="Изменить цену и остатки").click()
+                            # Search the specific product row
+                            clean_sku = "".join(c for c in sku if c.isalnum() or c == "-")
+                            searchbox = temp_page.get_by_role("searchbox", name="Артикул/Товар")
+                            searchbox.click()
+                            searchbox.fill(clean_sku)
+                            searchbox.press("Enter")
+                            temp_page.wait_for_timeout(3000)
+                            
+                            # Click dropdown options for the row
+                            more_btn = temp_page.get_by_role("img", name="more").first
+                            more_btn.click()
                             temp_page.wait_for_timeout(1000)
                             
-                            # Click price input and type the new price
-                            price_input = temp_page.get_by_role("textbox", name="Цена, ₸")
-                            price_input.click()
-                            price_input.press("Control+A")
-                            price_input.type(str(price))
-                            
-                            # Click stock input and type the new stock
-                            stock_input = temp_page.get_by_role("textbox", name="Остатки от 0 до 10000 шт")
-                            stock_input.click()
-                            stock_input.press("Control+A")
-                            stock_input.type(str(stock))
-                            
-                            # Save
-                            temp_page.get_by_test_id("stocks-modal-save").click()
-                            temp_page.wait_for_timeout(2000)
-                            
+                            if action_type == "edit":
+                                price, stock = payload
+                                temp_page.get_by_role("listitem").filter(has_text="Изменить цену и остатки").click()
+                                temp_page.wait_for_timeout(1000)
+                                
+                                price_input = temp_page.get_by_role("textbox", name="Цена, ₸")
+                                price_input.click()
+                                price_input.press("Control+A")
+                                price_input.type(str(price))
+                                
+                                stock_input = temp_page.get_by_role("textbox", name="Остатки от 0 до 10000 шт")
+                                stock_input.click()
+                                stock_input.press("Control+A")
+                                stock_input.type(str(stock))
+                                
+                                temp_page.get_by_test_id("stocks-modal-save").click()
+                                temp_page.wait_for_timeout(2000)
+                                
+                            elif action_type == "archive":
+                                temp_page.get_by_role("listitem").filter(has_text="Снять с продажи").click()
+                                temp_page.wait_for_timeout(2000)
+                                
                             temp_context.storage_state(path=state_path)
                             temp_browser.close()
-                            self.result_queue.put((True, "Product updated successfully"))
+                            self.result_queue.put((True, f"Product {action_type} action completed successfully"))
                         except Exception as inner_e:
                             try:
                                 temp_browser.close()
@@ -273,10 +310,12 @@ class SmsRequest(BaseModel):
     phone: str
     sms: str
 
-class UpdateProductRequest(BaseModel):
+class ProductActionRequest(BaseModel):
     phone: str
-    price: int
-    stock: int
+    sku: str
+    action: str
+    price: int = 0
+    stock: int = 100
 
 @app.get("/")
 def read_root():
@@ -310,15 +349,21 @@ def verify_session(req: PhoneRequest):
     return {"success": True, "valid": valid}
 
 @app.get("/api/products")
-def get_products(phone: str = Query(...)):
-    success, data = worker.send_cmd(Command.FETCH_PRODUCTS, phone)
+def get_products(
+    phone: str = Query(...),
+    page: int = Query(1),
+    status: str = Query("active"),
+    search: str = Query("")
+):
+    success, data = worker.send_cmd(Command.FETCH_PRODUCTS, (phone, page, status, search))
     if not success:
         raise HTTPException(status_code=400, detail=str(data))
     return {"success": True, "products": data}
 
-@app.post("/api/update-product")
-def update_product(req: UpdateProductRequest):
-    success, msg = worker.send_cmd(Command.UPDATE_PRODUCT, (req.phone, req.price, req.stock))
+@app.post("/api/product-action")
+def run_product_action(req: ProductActionRequest):
+    payload = (req.price, req.stock)
+    success, msg = worker.send_cmd(Command.PRODUCT_ACTION, (req.phone, req.sku, req.action, payload))
     if not success:
         raise HTTPException(status_code=400, detail=str(msg))
     return {"success": True, "message": msg}

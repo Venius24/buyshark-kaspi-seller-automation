@@ -12,6 +12,7 @@ interface Product {
   sku: string;
   price: string;
   status: string;
+  url: string;
 }
 
 export default function App() {
@@ -21,6 +22,14 @@ export default function App() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [fetchingProducts, setFetchingProducts] = useState(false);
+
+  // Search, filter and pagination states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'active' | 'archive'>('active');
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Dropdown menu state
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const [selectedProductForEdit, setSelectedProductForEdit] = useState<Product | null>(null);
   const [newPrice, setNewPrice] = useState('');
@@ -60,7 +69,7 @@ export default function App() {
           setView('dashboard');
           loadedAccounts.forEach(acc => verifyAccount(acc.phone));
           // Load products for the first account
-          loadProducts(parsed[0]);
+          loadProducts(parsed[0], 1, 'active', '');
         }
       } catch (e) {
         // ignore
@@ -104,11 +113,18 @@ export default function App() {
     }
   };
 
-  const loadProducts = async (phone: string) => {
+  const loadProducts = async (
+    phone: string,
+    pageNum: number = currentPage,
+    status: 'active' | 'archive' = statusFilter,
+    search: string = searchQuery
+  ) => {
     setFetchingProducts(true);
-    addLog(`Загрузка списка товаров для ${phone} через Playwright...`);
+    addLog(`Загрузка товаров для ${phone} (Страница: ${pageNum}, Статус: ${status}, Поиск: "${search}")...`);
     try {
-      const res = await fetch(`${API_URL}/api/products?phone=${phone}`);
+      const res = await fetch(
+        `${API_URL}/api/products?phone=${phone}&page=${pageNum}&status=${status}&search=${encodeURIComponent(search)}`
+      );
       const data = await res.json();
       if (res.ok && data.success) {
         setProducts(data.products);
@@ -123,79 +139,42 @@ export default function App() {
     }
   };
 
-  const handleUpdateProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedProductForEdit) return;
-
+  const handleProductAction = async (productSku: string, actionType: 'edit' | 'archive', priceVal = 0, stockVal = 100) => {
     const activeAccount = accounts.find(a => a.status === 'valid') || accounts[0];
     if (!activeAccount) {
-      addLog('Нет активного кабинета для обновления товара.');
+      addLog('Нет активного кабинета для выполнения действия.');
       return;
     }
 
     setUpdatingProduct(true);
-    addLog(`Обновление товара "${selectedProductForEdit.name}" (Новая цена: ${newPrice} ₸, Остаток: ${newStock} шт.)...`);
+    addLog(`Запуск команды автоматизации [${actionType}] для SKU ${productSku}...`);
 
     try {
-      const res = await fetch(`${API_URL}/api/update-product`, {
+      const res = await fetch(`${API_URL}/api/product-action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           phone: activeAccount.phone,
-          price: parseInt(newPrice.replace(/\D/g, '')),
-          stock: parseInt(newStock)
+          sku: productSku,
+          action: actionType,
+          price: priceVal,
+          stock: stockVal
         }),
       });
       const data = await res.json();
 
       if (res.ok && data.success) {
-        addLog(`Товар успешно обновлен в Kaspi: ${data.message}`);
+        addLog(`Действие [${actionType}] для SKU ${productSku} выполнено успешно.`);
         setSelectedProductForEdit(null);
         loadProducts(activeAccount.phone);
       } else {
-        addLog(`Ошибка автоматизации обновления товара: ${data.detail || 'Неизвестная ошибка'}`);
+        addLog(`Ошибка автоматизации: ${data.detail || 'Неизвестная ошибка'}`);
       }
     } catch (err) {
-      addLog('Не удалось передать команду изменения цены серверу автоматизации.');
+      addLog('Не удалось передать команду серверу автоматизации.');
     } finally {
       setUpdatingProduct(false);
     }
-  };
-
-  const handlePhoneInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = e.target.value;
-    if (!value || value.length < 2) {
-      setPhoneInput('+7');
-      return;
-    }
-
-    let digits = value.replace(/\D/g, '');
-    
-    // Paste normalization: if we have 10 or more digits, extract the last 10 
-    // and prepend '7' to form a valid 11-digit Kazakh number starting with 7.
-    // E.g., pasting "+77770001122" into "+7" results in "777770001122" (12 digits),
-    // which normalizes to "7" + "7770001122" = "77770001122".
-    if (digits.length >= 10) {
-      const localNumber = digits.slice(-10);
-      digits = '7' + localNumber;
-    }
-
-    const truncated = digits.slice(0, 11);
-    
-    let formatted = '+7';
-    if (truncated.length > 1) {
-      formatted += ' (' + truncated.substring(1, 4);
-    }
-    if (truncated.length > 4) {
-      formatted += ') ' + truncated.substring(4, 7);
-    }
-    if (truncated.length > 7) {
-      formatted += '-' + truncated.substring(7, 9);
-    }
-    if (truncated.length > 9) {
-      formatted += '-' + truncated.substring(9, 11);
-    }
-    setPhoneInput(formatted);
   };
 
   const handleStartLogin = async (e: React.FormEvent) => {
@@ -256,7 +235,6 @@ export default function App() {
         setLoginStep('success');
         addLog(`Успешный вход в личный кабинет Kaspi для ${phoneInput}`);
         
-        // Add or update account list
         setAccounts(prev => {
           const exists = prev.some(a => a.phone === phoneInput);
           let next;
@@ -293,6 +271,64 @@ export default function App() {
     const raw = val.replace(/\D/g, '');
     if (raw.length <= 1) return raw;
     return `+7 (${raw.slice(1, 4)}) ${raw.slice(4, 7)}-${raw.slice(7, 9)}-${raw.slice(9, 11)}`;
+  };
+
+  const handlePhoneInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = e.target.value;
+    if (!value || value.length < 2) {
+      setPhoneInput('+7');
+      return;
+    }
+
+    let digits = value.replace(/\D/g, '');
+    if (digits.length >= 10) {
+      const localNumber = digits.slice(-10);
+      digits = '7' + localNumber;
+    }
+
+    const truncated = digits.slice(0, 11);
+    
+    let formatted = '+7';
+    if (truncated.length > 1) {
+      formatted += ' (' + truncated.substring(1, 4);
+    }
+    if (truncated.length > 4) {
+      formatted += ') ' + truncated.substring(4, 7);
+    }
+    if (truncated.length > 7) {
+      formatted += '-' + truncated.substring(7, 9);
+    }
+    if (truncated.length > 9) {
+      formatted += '-' + truncated.substring(9, 11);
+    }
+    setPhoneInput(formatted);
+  };
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+    if (activeAcc) {
+      setCurrentPage(1);
+      loadProducts(activeAcc.phone, 1, statusFilter, searchQuery);
+    }
+  };
+
+  const handleStatusFilterChange = (status: 'active' | 'archive') => {
+    setStatusFilter(status);
+    setCurrentPage(1);
+    const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+    if (activeAcc) {
+      loadProducts(activeAcc.phone, 1, status, searchQuery);
+    }
+  };
+
+  const handlePageChange = (page: number) => {
+    if (page < 1) return;
+    setCurrentPage(page);
+    const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+    if (activeAcc) {
+      loadProducts(activeAcc.phone, page, statusFilter, searchQuery);
+    }
   };
 
   // Loading Screen
@@ -513,7 +549,7 @@ export default function App() {
               }}
             >
               {logs.map((log, index) => (
-                <div key={index} style={{ color: log.includes('Успешный') || log.includes('АКТИВНА') ? 'var(--success)' : log.includes('ошибка') || log.includes('Ошибка') ? 'var(--error)' : 'var(--text-muted)' }}>
+                <div key={index} style={{ color: log.includes('Успешный') || log.includes('АКТИВНА') ? 'var(--success)' : log.includes('ошибка') || log.includes('Ошибка') || log.includes('automation failed') ? 'var(--error)' : 'var(--text-muted)' }}>
                   {log}
                 </div>
               ))}
@@ -521,33 +557,78 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right Side: Products Tab (Direct view) */}
+        {/* Right Side: Products Panel */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div className="glass-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '12px' }}>
-              <h2 style={{ fontSize: '18px' }}>🏷️ Товары (Kaspi Products)</h2>
-              <button 
-                className="btn btn-secondary" 
-                style={{ padding: '6px 12px', fontSize: '12px' }}
-                onClick={() => {
-                  const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                  if (activeAcc) loadProducts(activeAcc.phone);
-                }}
-                disabled={fetchingProducts}
-              >
-                {fetchingProducts ? 'Обновление...' : '🔄 Обновить список'}
-              </button>
+            
+            {/* Header with Search and Status Filter */}
+            <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h2 style={{ fontSize: '18px' }}>🏷️ Товары (Kaspi Products)</h2>
+                
+                {/* Status Toggle */}
+                <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', padding: '3px', borderRadius: '8px' }}>
+                  <button 
+                    className="btn" 
+                    style={{ 
+                      background: statusFilter === 'active' ? 'var(--primary)' : 'transparent', 
+                      padding: '5px 12px', fontSize: '12px', borderRadius: '6px'
+                    }}
+                    onClick={() => handleStatusFilterChange('active')}
+                  >
+                    Активные
+                  </button>
+                  <button 
+                    className="btn" 
+                    style={{ 
+                      background: statusFilter === 'archive' ? 'var(--primary)' : 'transparent', 
+                      padding: '5px 12px', fontSize: '12px', borderRadius: '6px'
+                    }}
+                    onClick={() => handleStatusFilterChange('archive')}
+                  >
+                    Архив
+                  </button>
+                </div>
+              </div>
+
+              {/* Search Bar & Refresh */}
+              <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '12px' }}>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  placeholder="Поиск по артикулу / названию..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ flexGrow: 1 }}
+                />
+                <button type="submit" className="btn btn-primary" style={{ padding: '10px 16px' }}>
+                  Найти
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  style={{ padding: '10px 14px' }}
+                  onClick={() => {
+                    const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                    if (activeAcc) loadProducts(activeAcc.phone, currentPage, statusFilter, searchQuery);
+                  }}
+                  disabled={fetchingProducts}
+                >
+                  {fetchingProducts ? '🔄' : 'Refresh'}
+                </button>
+              </form>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {/* Products List */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flexGrow: 1 }}>
               {fetchingProducts ? (
-                <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
                   <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-                  <p>Загрузка товаров из кабинета продавца через Playwright...</p>
+                  <p>Синхронизация товаров через Playwright...</p>
                 </div>
               ) : products.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px 0' }}>
-                  <p>Товары не найдены. Подключите активный кабинет или нажмите «Обновить список».</p>
+                <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
+                  <p>Товары не найдены. Попробуйте изменить параметры поиска/фильтра или нажмите Refresh.</p>
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -561,49 +642,131 @@ export default function App() {
                         border: '1px solid rgba(255, 255, 255, 0.04)',
                         display: 'flex',
                         justifyContent: 'space-between',
-                        alignItems: 'center'
+                        alignItems: 'center',
+                        position: 'relative'
                       }}
                     >
-                      <div style={{ maxWidth: '70%' }}>
+                      <div style={{ maxWidth: '75%' }}>
                         <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
                         <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{product.sku}</p>
-                        <span 
-                          className="badge" 
-                          style={{ 
-                            marginTop: '8px', 
-                            background: product.status === 'Активен' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
-                            color: product.status === 'Активен' ? 'var(--success)' : '#aaa',
-                            border: '1px solid rgba(255,255,255,0.08)'
-                          }}
-                        >
-                          {product.status}
-                        </span>
+                        
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
+                          <span 
+                            className="badge" 
+                            style={{ 
+                              background: product.status === 'Активен' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
+                              color: product.status === 'Активен' ? 'var(--success)' : '#aaa',
+                              border: '1px solid rgba(255,255,255,0.08)'
+                            }}
+                          >
+                            {product.status}
+                          </span>
+                          
+                          {product.url && (
+                            <a 
+                              href={product.url} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              style={{ fontSize: '12px', color: '#3b82f6', textDecoration: 'none' }}
+                            >
+                              🔗 Открыть на Kaspi.kz
+                            </a>
+                          )}
+                        </div>
                       </div>
 
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary)', marginBottom: '8px' }}>{product.price}</div>
-                        <button 
-                          className="btn btn-secondary" 
-                          style={{ padding: '6px 12px', fontSize: '12px' }}
-                          onClick={() => {
-                            setSelectedProductForEdit(product);
-                            setNewPrice(product.price.replace(/\D/g, ''));
-                            setNewStock('100');
-                          }}
-                        >
-                          Изменить цену
-                        </button>
+                      <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+                        <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary)' }}>{product.price}</div>
+                        
+                        {/* Options trigger */}
+                        <div style={{ position: 'relative' }}>
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '6px 12px', fontSize: '12px' }}
+                            onClick={() => setOpenMenuId(openMenuId === product.id ? null : product.id)}
+                          >
+                            Действия ⋮
+                          </button>
+                          
+                          {/* Dropdown Menu */}
+                          {openMenuId === product.id && (
+                            <div 
+                              style={{ 
+                                position: 'absolute', right: 0, top: '100%', marginTop: '6px',
+                                background: '#111827', border: '1px solid var(--card-border)',
+                                borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                                zIndex: 10, width: '180px', display: 'flex', flexDirection: 'column'
+                              }}
+                            >
+                              <button 
+                                style={{ background: 'none', border: 'none', color: '#fff', padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontSize: '12px' }}
+                                onClick={() => {
+                                  setSelectedProductForEdit(product);
+                                  setNewPrice(product.price.replace(/\D/g, ''));
+                                  setNewStock('100');
+                                  setOpenMenuId(null);
+                                }}
+                              >
+                                ✏️ Изменить цену
+                              </button>
+                              {product.status === 'Активен' && (
+                                <button 
+                                  style={{ background: 'none', border: 'none', color: '#ef4444', padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontSize: '12px' }}
+                                  onClick={() => {
+                                    handleProductAction(product.sku, 'archive');
+                                    setOpenMenuId(null);
+                                  }}
+                                >
+                                  📦 Снять с продажи
+                                </button>
+                              )}
+                              {product.url && (
+                                <a 
+                                  href={product.url} target="_blank" rel="noreferrer"
+                                  style={{ color: '#fff', padding: '10px 12px', textDecoration: 'none', fontSize: '12px', display: 'block' }}
+                                  onClick={() => setOpenMenuId(null)}
+                                >
+                                  🔗 Ссылка на Kaspi
+                                </a>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
+
+            {/* Pagination Controls */}
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px', marginTop: '20px' }}>
+              <button 
+                className="btn btn-secondary" 
+                style={{ padding: '6px 12px', fontSize: '12px' }}
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1 || fetchingProducts}
+              >
+                ◀ Назад
+              </button>
+              <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                Страница <strong>{currentPage}</strong>
+              </span>
+              <button 
+                className="btn btn-secondary" 
+                style={{ padding: '6px 12px', fontSize: '12px' }}
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={products.length < 2 || fetchingProducts} // if page has less than 2 items (page limit), disable next
+              >
+                Вперед ▶
+              </button>
+            </div>
+
           </div>
         </div>
       </div>
 
-      {/* Edit Product Modal */}
+      {/* Edit Price Modal */}
       {selectedProductForEdit && (
         <div 
           style={{ 
@@ -642,7 +805,17 @@ export default function App() {
                 <p>Запуск автоматизации Playwright. Изменение цены в кабинете продавца...</p>
               </div>
             ) : (
-              <form onSubmit={handleUpdateProduct}>
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleProductAction(
+                    selectedProductForEdit.sku, 
+                    'edit', 
+                    parseInt(newPrice), 
+                    parseInt(newStock)
+                  );
+                }}
+              >
                 <div style={{ marginBottom: '16px' }}>
                   <label style={{ display: 'block', fontSize: '12px', textTransform: 'uppercase', marginBottom: '6px', color: 'var(--text-muted)' }}>Цена, ₸</label>
                   <input 
