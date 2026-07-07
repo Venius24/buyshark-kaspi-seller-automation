@@ -664,17 +664,24 @@ export default function App() {
 
             {/* Products List */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flexGrow: 1 }}>
-              {fetchingProducts ? (
+              {fetchingProducts && products.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
                   <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
                   <p>Синхронизация товаров через Playwright...</p>
                 </div>
-              ) : products.length === 0 ? (
+              ) : products.length === 0 && !fetchingProducts ? (
                 <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
                   <p>Товары не найдены. Попробуйте изменить параметры поиска/фильтра или нажмите Refresh.</p>
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px',
+                  opacity: fetchingProducts ? 0.6 : 1,
+                  pointerEvents: fetchingProducts ? 'none' : 'auto',
+                  transition: 'opacity 0.2s ease-in-out'
+                }}>
                   {products.map((product) => (
                     <div 
                       key={product.id} 
