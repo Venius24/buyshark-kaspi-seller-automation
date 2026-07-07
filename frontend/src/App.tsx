@@ -16,9 +16,18 @@ interface Order {
   date: string;
 }
 
+interface Product {
+  id: string;
+  name: string;
+  sku: string;
+  price: string;
+  status: string;
+}
+
 export default function App() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [view, setView] = useState<'login' | 'dashboard'>('login');
+  const [activeTab, setActiveTab] = useState<'orders' | 'products'>('orders');
   
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [orders, setOrders] = useState<Order[]>([
@@ -26,6 +35,14 @@ export default function App() {
     { id: '109345', customer: 'Айгерим М.', items: 'Наушники Apple AirPods 3 с зарядным футляром Lightning', price: '94 990 ₸', status: 'ACCEPTED', date: '10 мин. назад' },
     { id: '109340', customer: 'Дмитрий К.', items: 'Фен Dyson HD07 Supersonic Iron/Fuchsia', price: '229 990 ₸', status: 'COMPLETED', date: '2 ч. назад' },
   ]);
+
+  const [products, setProducts] = useState<Product[]>([]);
+  const [fetchingProducts, setFetchingProducts] = useState(false);
+
+  const [selectedProductForEdit, setSelectedProductForEdit] = useState<Product | null>(null);
+  const [newPrice, setNewPrice] = useState('');
+  const [newStock, setNewStock] = useState('100');
+  const [updatingProduct, setUpdatingProduct] = useState(false);
 
   const [logs, setLogs] = useState<string[]>([
     'Система автоматизации инициализирована.',
@@ -103,6 +120,64 @@ export default function App() {
     }
   };
 
+  const loadProducts = async (phone: string) => {
+    setFetchingProducts(true);
+    addLog(`Загрузка списка товаров для ${phone} через Playwright...`);
+    try {
+      const res = await fetch(`${API_URL}/api/products?phone=${phone}`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setProducts(data.products);
+        addLog(`Успешно загружено ${data.products.length} товаров.`);
+      } else {
+        addLog(`Не удалось загрузить товары: ${data.detail || 'Ошибка бэкенда'}`);
+      }
+    } catch (err) {
+      addLog('Ошибка при получении товаров с сервера автоматизации.');
+    } finally {
+      setFetchingProducts(false);
+    }
+  };
+
+  const handleUpdateProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProductForEdit) return;
+
+    const activeAccount = accounts.find(a => a.status === 'valid') || accounts[0];
+    if (!activeAccount) {
+      addLog('Нет активного кабинета для обновления товара.');
+      return;
+    }
+
+    setUpdatingProduct(true);
+    addLog(`Обновление товара "${selectedProductForEdit.name}" (Новая цена: ${newPrice} ₸, Остаток: ${newStock} шт.)...`);
+
+    try {
+      const res = await fetch(`${API_URL}/api/update-product`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: activeAccount.phone,
+          price: parseInt(newPrice.replace(/\D/g, '')),
+          stock: parseInt(newStock)
+        }),
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        addLog(`Товар успешно обновлен в Kaspi: ${data.message}`);
+        setSelectedProductForEdit(null);
+        loadProducts(activeAccount.phone);
+      } else {
+        addLog(`Ошибка автоматизации обновления товара: ${data.detail || 'Неизвестная ошибка'}`);
+      }
+    } catch (err) {
+      addLog('Не удалось передать команду изменения цены серверу автоматизации.');
+    } finally {
+      setUpdatingProduct(false);
+    }
+  };
+
   const handleStartLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (phoneInput.length < 10) {
@@ -123,12 +198,12 @@ export default function App() {
       });
       const data = await res.json();
 
-      if (data.success) {
+      if (res.ok && data.success) {
         setLoginStep('sms');
         addLog(`SMS отправлен на номер ${phoneInput}`);
       } else {
         setLoginStep('phone');
-        setErrorMsg(data.error || 'Ошибка при отправке запроса.');
+        setErrorMsg(data.detail || 'Ошибка при отправке запроса.');
       }
     } catch (err) {
       setLoginStep('phone');
@@ -156,7 +231,7 @@ export default function App() {
       });
       const data = await res.json();
 
-      if (data.success) {
+      if (res.ok && data.success) {
         setLoginStep('success');
         addLog(`Успешный вход в личный кабинет Kaspi для ${phoneInput}`);
         
@@ -174,7 +249,7 @@ export default function App() {
         });
       } else {
         setLoginStep('sms');
-        setErrorMsg(data.error || 'Неверный код или ошибка сессии.');
+        setErrorMsg(data.detail || 'Неверный код или ошибка сессии.');
       }
     } catch (err) {
       setLoginStep('sms');
@@ -491,55 +566,245 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right Side: Orders / Extended SaaS Features */}
+        {/* Right Side: Orders & Products Tabs */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <div className="glass-card" style={{ flexGrow: 1 }}>
-            <h2 style={{ marginBottom: '16px' }}>Заказы (Kaspi Orders)</h2>
+          <div className="glass-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {orders.map((order) => (
-                <div 
-                  key={order.id} 
-                  style={{ 
-                    padding: '16px', 
-                    background: 'rgba(255, 255, 255, 0.02)', 
-                    borderRadius: '12px',
-                    border: '1px solid rgba(255, 255, 255, 0.04)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px'
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 600 }}>Заказ #{order.id}</span>
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{order.date}</span>
-                  </div>
-                  
-                  <div style={{ fontSize: '13px' }}>
-                    <p style={{ color: '#fff', fontWeight: 500 }}>{order.customer}</p>
-                    <p style={{ marginTop: '2px' }}>{order.items}</p>
-                  </div>
-                  
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                    <span style={{ color: 'var(--primary)', fontWeight: 700 }}>{order.price}</span>
-                    <div>
-                      {order.status === 'NEW' && (
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => acceptOrder(order.id)}>
-                            Принять
-                          </button>
-                        </div>
-                      )}
-                      {order.status === 'ACCEPTED' && <span className="badge badge-success">Принят</span>}
-                      {order.status === 'COMPLETED' && <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: '#aaa' }}>Выполнен</span>}
+            {/* Tabs Selector */}
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '12px' }}>
+              <button 
+                className="btn" 
+                style={{ 
+                  background: activeTab === 'orders' ? 'var(--primary)' : 'rgba(255,255,255,0.04)', 
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontSize: '13px'
+                }}
+                onClick={() => setActiveTab('orders')}
+              >
+                📦 Заказы ({orders.length})
+              </button>
+              <button 
+                className="btn" 
+                style={{ 
+                  background: activeTab === 'products' ? 'var(--primary)' : 'rgba(255,255,255,0.04)', 
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontSize: '13px'
+                }}
+                onClick={() => {
+                  setActiveTab('products');
+                  const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                  if (activeAcc) {
+                    loadProducts(activeAcc.phone);
+                  }
+                }}
+              >
+                🏷️ Товары ({products.length})
+              </button>
+            </div>
+
+            {/* TAB CONTENT: ORDERS */}
+            {activeTab === 'orders' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {orders.map((order) => (
+                  <div 
+                    key={order.id} 
+                    style={{ 
+                      padding: '16px', 
+                      background: 'rgba(255, 255, 255, 0.02)', 
+                      borderRadius: '12px',
+                      border: '1px solid rgba(255, 255, 255, 0.04)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 600 }}>Заказ #{order.id}</span>
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{order.date}</span>
+                    </div>
+                    
+                    <div style={{ fontSize: '13px' }}>
+                      <p style={{ color: '#fff', fontWeight: 500 }}>{order.customer}</p>
+                      <p style={{ marginTop: '2px' }}>{order.items}</p>
+                    </div>
+                    
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                      <span style={{ color: 'var(--primary)', fontWeight: 700 }}>{order.price}</span>
+                      <div>
+                        {order.status === 'NEW' && (
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => acceptOrder(order.id)}>
+                              Принять
+                            </button>
+                          </div>
+                        )}
+                        {order.status === 'ACCEPTED' && <span className="badge badge-success">Принят</span>}
+                        {order.status === 'COMPLETED' && <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: '#aaa' }}>Выполнен</span>}
+                      </div>
                     </div>
                   </div>
+                ))}
+              </div>
+            )}
+
+            {/* TAB CONTENT: PRODUCTS */}
+            {activeTab === 'products' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                    onClick={() => {
+                      const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                      if (activeAcc) loadProducts(activeAcc.phone);
+                    }}
+                    disabled={fetchingProducts}
+                  >
+                    {fetchingProducts ? 'Обновление...' : '🔄 Обновить список'}
+                  </button>
                 </div>
-              ))}
-            </div>
+
+                {fetchingProducts ? (
+                  <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                    <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+                    <p>Загрузка товаров из кабинета продавца через Playwright...</p>
+                  </div>
+                ) : products.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                    <p>Товары не найдены. Подключите активный кабинет или нажмите Обновить.</p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    {products.map((product) => (
+                      <div 
+                        key={product.id} 
+                        style={{ 
+                          padding: '16px', 
+                          background: 'rgba(255, 255, 255, 0.02)', 
+                          borderRadius: '12px',
+                          border: '1px solid rgba(255, 255, 255, 0.04)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <div style={{ maxWidth: '70%' }}>
+                          <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
+                          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{product.sku}</p>
+                          <span 
+                            className="badge" 
+                            style={{ 
+                              marginTop: '8px', 
+                              background: product.status === 'Активен' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
+                              color: product.status === 'Активен' ? 'var(--success)' : '#aaa',
+                              border: '1px solid rgba(255,255,255,0.08)'
+                            }}
+                          >
+                            {product.status}
+                          </span>
+                        </div>
+
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary)', marginBottom: '8px' }}>{product.price}</div>
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '6px 12px', fontSize: '12px' }}
+                            onClick={() => {
+                              setSelectedProductForEdit(product);
+                              setNewPrice(product.price.replace(/\D/g, ''));
+                              setNewStock('100');
+                            }}
+                          >
+                            Изменить цену
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Edit Product Modal */}
+      {selectedProductForEdit && (
+        <div 
+          style={{ 
+            position: 'fixed', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0, 
+            background: 'rgba(0, 0, 0, 0.8)', 
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100
+          }}
+        >
+          <div className="glass-card" style={{ maxWidth: '440px', width: '100%', margin: '20px', padding: '32px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2>Изменить цену и остатки</h2>
+              <button 
+                onClick={() => setSelectedProductForEdit(null)}
+                style={{ background: 'none', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer' }}
+                disabled={updatingProduct}
+              >
+                ×
+              </button>
+            </div>
+
+            <p style={{ fontSize: '13px', marginBottom: '20px', color: 'var(--text-muted)' }}>
+              Редактирование для: <strong>{selectedProductForEdit.name}</strong>
+            </p>
+
+            {updatingProduct ? (
+              <div style={{ textAlign: 'center', padding: '32px 0' }}>
+                <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+                <p>Запуск автоматизации Playwright. Изменение цены в кабинете продавца...</p>
+              </div>
+            ) : (
+              <form onSubmit={handleUpdateProduct}>
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', textTransform: 'uppercase', marginBottom: '6px', color: 'var(--text-muted)' }}>Цена, ₸</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    value={newPrice}
+                    onChange={(e) => setNewPrice(e.target.value.replace(/\D/g, ''))}
+                    required
+                  />
+                </div>
+
+                <div style={{ marginBottom: '24px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', textTransform: 'uppercase', marginBottom: '6px', color: 'var(--text-muted)' }}>Остатки (шт.)</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    value={newStock}
+                    onChange={(e) => setNewStock(e.target.value.replace(/\D/g, ''))}
+                    required
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setSelectedProductForEdit(null)}>
+                    Отмена
+                  </button>
+                  <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
+                    Сохранить
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
