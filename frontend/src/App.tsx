@@ -27,13 +27,20 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'active' | 'archive'>('active');
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [pageInputText, setPageInputText] = useState('1');
 
   // Dropdown menu state
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
+  // Modals state
   const [selectedProductForEdit, setSelectedProductForEdit] = useState<Product | null>(null);
+  const [selectedProductForPublish, setSelectedProductForPublish] = useState<Product | null>(null);
+  
   const [newPrice, setNewPrice] = useState('');
-  const [newStock, setNewStock] = useState('100');
+  const [newStock, setNewStock] = useState('20');
   const [updatingProduct, setUpdatingProduct] = useState(false);
 
   const [logs, setLogs] = useState<string[]>([
@@ -69,7 +76,7 @@ export default function App() {
           setView('dashboard');
           loadedAccounts.forEach(acc => verifyAccount(acc.phone));
           // Load products for the first account
-          loadProducts(parsed[0], 1, 'active', '');
+          loadProducts(parsed[0], 1, 'active', '', 10);
         }
       } catch (e) {
         // ignore
@@ -117,18 +124,21 @@ export default function App() {
     phone: string,
     pageNum: number = currentPage,
     status: 'active' | 'archive' = statusFilter,
-    search: string = searchQuery
+    search: string = searchQuery,
+    pSize: number = pageSize
   ) => {
     setFetchingProducts(true);
-    addLog(`Загрузка товаров для ${phone} (Страница: ${pageNum}, Статус: ${status}, Поиск: "${search}")...`);
+    addLog(`Загрузка товаров для ${phone} (Страница: ${pageNum}, Лимит: ${pSize}, Статус: ${status}, Поиск: "${search}")...`);
     try {
       const res = await fetch(
-        `${API_URL}/api/products?phone=${phone}&page=${pageNum}&status=${status}&search=${encodeURIComponent(search)}`
+        `${API_URL}/api/products?phone=${phone}&page=${pageNum}&status=${status}&search=${encodeURIComponent(search)}&page_size=${pSize}`
       );
       const data = await res.json();
       if (res.ok && data.success) {
         setProducts(data.products);
-        addLog(`Успешно загружено ${data.products.length} товаров.`);
+        setTotalPages(data.total_pages || 1);
+        setTotalCount(data.total_count || 0);
+        addLog(`Успешно загружено ${data.products.length} товаров (Всего: ${data.total_count}, Страниц: ${data.total_pages}).`);
       } else {
         addLog(`Не удалось загрузить товары: ${data.detail || 'Ошибка бэкенда'}`);
       }
@@ -139,7 +149,7 @@ export default function App() {
     }
   };
 
-  const handleProductAction = async (productSku: string, actionType: 'edit' | 'archive', priceVal = 0, stockVal = 100) => {
+  const handleProductAction = async (productSku: string, actionType: 'edit' | 'archive' | 'publish', priceVal = 0, stockVal = 100) => {
     const activeAccount = accounts.find(a => a.status === 'valid') || accounts[0];
     if (!activeAccount) {
       addLog('Нет активного кабинета для выполнения действия.');
@@ -166,7 +176,8 @@ export default function App() {
       if (res.ok && data.success) {
         addLog(`Действие [${actionType}] для SKU ${productSku} выполнено успешно.`);
         setSelectedProductForEdit(null);
-        loadProducts(activeAccount.phone);
+        setSelectedProductForPublish(null);
+        loadProducts(activeAccount.phone, currentPage, statusFilter, searchQuery, pageSize);
       } else {
         addLog(`Ошибка автоматизации: ${data.detail || 'Неизвестная ошибка'}`);
       }
@@ -309,25 +320,28 @@ export default function App() {
     const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
     if (activeAcc) {
       setCurrentPage(1);
-      loadProducts(activeAcc.phone, 1, statusFilter, searchQuery);
+      setPageInputText('1');
+      loadProducts(activeAcc.phone, 1, statusFilter, searchQuery, pageSize);
     }
   };
 
   const handleStatusFilterChange = (status: 'active' | 'archive') => {
     setStatusFilter(status);
     setCurrentPage(1);
+    setPageInputText('1');
     const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
     if (activeAcc) {
-      loadProducts(activeAcc.phone, 1, status, searchQuery);
+      loadProducts(activeAcc.phone, 1, status, searchQuery, pageSize);
     }
   };
 
   const handlePageChange = (page: number) => {
-    if (page < 1) return;
+    if (page < 1 || page > totalPages) return;
     setCurrentPage(page);
+    setPageInputText(String(page));
     const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
     if (activeAcc) {
-      loadProducts(activeAcc.phone, page, statusFilter, searchQuery);
+      loadProducts(activeAcc.phone, page, statusFilter, searchQuery, pageSize);
     }
   };
 
@@ -561,37 +575,66 @@ export default function App() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div className="glass-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
             
-            {/* Header with Search and Status Filter */}
+            {/* Header with Search, Filter & Page Size */}
             <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h2 style={{ fontSize: '18px' }}>🏷️ Товары (Kaspi Products)</h2>
+                <h2 style={{ fontSize: '18px' }}>
+                  🏷️ Товары ({totalCount ? `${totalCount} поз.` : 'Загрузка...'})
+                </h2>
                 
-                {/* Status Toggle */}
-                <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', padding: '3px', borderRadius: '8px' }}>
-                  <button 
-                    className="btn" 
-                    style={{ 
-                      background: statusFilter === 'active' ? 'var(--primary)' : 'transparent', 
-                      padding: '5px 12px', fontSize: '12px', borderRadius: '6px'
-                    }}
-                    onClick={() => handleStatusFilterChange('active')}
-                  >
-                    Активные
-                  </button>
-                  <button 
-                    className="btn" 
-                    style={{ 
-                      background: statusFilter === 'archive' ? 'var(--primary)' : 'transparent', 
-                      padding: '5px 12px', fontSize: '12px', borderRadius: '6px'
-                    }}
-                    onClick={() => handleStatusFilterChange('archive')}
-                  >
-                    Архив
-                  </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  {/* Page Size Selector */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Показывать по:</span>
+                    <select 
+                      value={pageSize} 
+                      onChange={(e) => {
+                        const pSize = parseInt(e.target.value);
+                        setPageSize(pSize);
+                        setCurrentPage(1);
+                        setPageInputText('1');
+                        const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                        if (activeAcc) {
+                          loadProducts(activeAcc.phone, 1, statusFilter, searchQuery, pSize);
+                        }
+                      }}
+                      className="form-input"
+                      style={{ width: '70px', padding: '6px 10px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: '#fff', borderRadius: '8px', cursor: 'pointer' }}
+                    >
+                      <option value="5">5</option>
+                      <option value="10">10</option>
+                      <option value="20">20</option>
+                      <option value="50">50</option>
+                    </select>
+                  </div>
+
+                  {/* Status Toggle */}
+                  <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', padding: '3px', borderRadius: '8px' }}>
+                    <button 
+                      className="btn" 
+                      style={{ 
+                        background: statusFilter === 'active' ? 'var(--primary)' : 'transparent', 
+                        padding: '5px 12px', fontSize: '12px', borderRadius: '6px'
+                      }}
+                      onClick={() => handleStatusFilterChange('active')}
+                    >
+                      В продаже
+                    </button>
+                    <button 
+                      className="btn" 
+                      style={{ 
+                        background: statusFilter === 'archive' ? 'var(--primary)' : 'transparent', 
+                        padding: '5px 12px', fontSize: '12px', borderRadius: '6px'
+                      }}
+                      onClick={() => handleStatusFilterChange('archive')}
+                    >
+                      Сняты
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              {/* Search Bar & Refresh */}
+              {/* Search Bar */}
               <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '12px' }}>
                 <input 
                   type="text" 
@@ -610,7 +653,7 @@ export default function App() {
                   style={{ padding: '10px 14px' }}
                   onClick={() => {
                     const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                    if (activeAcc) loadProducts(activeAcc.phone, currentPage, statusFilter, searchQuery);
+                    if (activeAcc) loadProducts(activeAcc.phone, currentPage, statusFilter, searchQuery, pageSize);
                   }}
                   disabled={fetchingProducts}
                 >
@@ -659,7 +702,7 @@ export default function App() {
                               border: '1px solid rgba(255,255,255,0.08)'
                             }}
                           >
-                            {product.status}
+                            {product.status === 'Активен' ? 'В продаже' : 'Снят с продажи'}
                           </span>
                           
                           {product.url && (
@@ -678,7 +721,7 @@ export default function App() {
                       <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
                         <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary)' }}>{product.price}</div>
                         
-                        {/* Options trigger */}
+                        {/* Options Menu */}
                         <div style={{ position: 'relative' }}>
                           <button 
                             className="btn btn-secondary" 
@@ -709,7 +752,7 @@ export default function App() {
                               >
                                 ✏️ Изменить цену
                               </button>
-                              {product.status === 'Активен' && (
+                              {product.status === 'Активен' ? (
                                 <button 
                                   style={{ background: 'none', border: 'none', color: '#ef4444', padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontSize: '12px' }}
                                   onClick={() => {
@@ -718,6 +761,17 @@ export default function App() {
                                   }}
                                 >
                                   📦 Снять с продажи
+                                </button>
+                              ) : (
+                                <button 
+                                  style={{ background: 'none', border: 'none', color: '#10b981', padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontSize: '12px' }}
+                                  onClick={() => {
+                                    setSelectedProductForPublish(product);
+                                    setNewStock('20');
+                                    setOpenMenuId(null);
+                                  }}
+                                >
+                                  🚀 Выставить на продажу
                                 </button>
                               )}
                               {product.url && (
@@ -749,14 +803,42 @@ export default function App() {
               >
                 ◀ Назад
               </button>
-              <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                Страница <strong>{currentPage}</strong>
+              
+              <span style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                Страница 
+                <input 
+                  type="text" 
+                  value={pageInputText}
+                  onChange={(e) => setPageInputText(e.target.value.replace(/\D/g, ''))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const pageNum = parseInt(pageInputText);
+                      if (pageNum >= 1 && pageNum <= totalPages) {
+                        handlePageChange(pageNum);
+                      } else {
+                        setPageInputText(String(currentPage));
+                      }
+                    }
+                  }}
+                  onBlur={() => {
+                    const pageNum = parseInt(pageInputText);
+                    if (pageNum >= 1 && pageNum <= totalPages) {
+                      handlePageChange(pageNum);
+                    } else {
+                      setPageInputText(String(currentPage));
+                    }
+                  }}
+                  className="form-input"
+                  style={{ width: '45px', padding: '4px 8px', textAlign: 'center', display: 'inline-block' }}
+                />
+                из <strong>{totalPages}</strong>
               </span>
+
               <button 
                 className="btn btn-secondary" 
                 style={{ padding: '6px 12px', fontSize: '12px' }}
                 onClick={() => handlePageChange(currentPage + 1)}
-                disabled={products.length < 2 || fetchingProducts} // if page has less than 2 items (page limit), disable next
+                disabled={currentPage === totalPages || fetchingProducts}
               >
                 Вперед ▶
               </button>
@@ -844,6 +926,81 @@ export default function App() {
                   </button>
                   <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
                     Сохранить
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Publish Stock Modal */}
+      {selectedProductForPublish && (
+        <div 
+          style={{ 
+            position: 'fixed', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0, 
+            background: 'rgba(0, 0, 0, 0.8)', 
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100
+          }}
+        >
+          <div className="glass-card" style={{ maxWidth: '440px', width: '100%', margin: '20px', padding: '32px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2>Выставить товар на продажу</h2>
+              <button 
+                onClick={() => setSelectedProductForPublish(null)}
+                style={{ background: 'none', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer' }}
+                disabled={updatingProduct}
+              >
+                ×
+              </button>
+            </div>
+
+            <p style={{ fontSize: '13px', marginBottom: '20px', color: 'var(--text-muted)' }}>
+              Активация товара: <strong>{selectedProductForPublish.name}</strong>
+            </p>
+
+            {updatingProduct ? (
+              <div style={{ textAlign: 'center', padding: '32px 0' }}>
+                <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+                <p>Запуск автоматизации Playwright. Выставление товара на продажу...</p>
+              </div>
+            ) : (
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleProductAction(
+                    selectedProductForPublish.sku, 
+                    'publish', 
+                    0, 
+                    parseInt(newStock)
+                  );
+                }}
+              >
+                <div style={{ marginBottom: '24px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', textTransform: 'uppercase', marginBottom: '6px', color: 'var(--text-muted)' }}>Остатки от 0 до 10000 шт</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    value={newStock}
+                    onChange={(e) => setNewStock(e.target.value.replace(/\D/g, ''))}
+                    required
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setSelectedProductForPublish(null)}>
+                    Отмена
+                  </button>
+                  <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
+                    Выставить на продажу
                   </button>
                 </div>
               </form>
