@@ -4,16 +4,6 @@ interface Account {
   phone: string;
   status: 'valid' | 'invalid' | 'checking';
   lastChecked?: string;
-  autoAccept: boolean;
-}
-
-interface Order {
-  id: string;
-  customer: string;
-  items: string;
-  price: string;
-  status: 'NEW' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED';
-  date: string;
 }
 
 interface Product {
@@ -27,15 +17,8 @@ interface Product {
 export default function App() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [view, setView] = useState<'login' | 'dashboard'>('login');
-  const [activeTab, setActiveTab] = useState<'orders' | 'products'>('orders');
   
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [orders, setOrders] = useState<Order[]>([
-    { id: '109348', customer: 'Арман С.', items: 'Смартфон Xiaomi Redmi Note 13 Pro 8/256GB Black', price: '124 990 ₸', status: 'NEW', date: 'Только что' },
-    { id: '109345', customer: 'Айгерим М.', items: 'Наушники Apple AirPods 3 с зарядным футляром Lightning', price: '94 990 ₸', status: 'ACCEPTED', date: '10 мин. назад' },
-    { id: '109340', customer: 'Дмитрий К.', items: 'Фен Dyson HD07 Supersonic Iron/Fuchsia', price: '229 990 ₸', status: 'COMPLETED', date: '2 ч. назад' },
-  ]);
-
   const [products, setProducts] = useState<Product[]>([]);
   const [fetchingProducts, setFetchingProducts] = useState(false);
 
@@ -49,7 +32,7 @@ export default function App() {
     'Ожидание подключения Kaspi Shop аккаунта...',
   ]);
 
-  const [phoneInput, setPhoneInput] = useState('');
+  const [phoneInput, setPhoneInput] = useState('+7');
   const [smsInput, setSmsInput] = useState('');
   const [loginStep, setLoginStep] = useState<'phone' | 'sms' | 'success' | 'loading'>('phone');
   const [errorMsg, setErrorMsg] = useState('');
@@ -71,12 +54,13 @@ export default function App() {
         if (parsed.length > 0) {
           const loadedAccounts = parsed.map(phone => ({
             phone,
-            status: 'checking' as const,
-            autoAccept: localStorage.getItem(`auto_accept_${phone}`) === 'true',
+            status: 'checking' as const
           }));
           setAccounts(loadedAccounts);
           setView('dashboard');
           loadedAccounts.forEach(acc => verifyAccount(acc.phone));
+          // Load products for the first account
+          loadProducts(parsed[0]);
         }
       } catch (e) {
         // ignore
@@ -178,10 +162,47 @@ export default function App() {
     }
   };
 
+  const handlePhoneInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = e.target.value;
+    if (!value || value.length < 2) {
+      setPhoneInput('+7');
+      return;
+    }
+
+    let digits = value.replace(/\D/g, '');
+    
+    // Paste normalization: if we have 10 or more digits, extract the last 10 
+    // and prepend '7' to form a valid 11-digit Kazakh number starting with 7.
+    // E.g., pasting "+77770001122" into "+7" results in "777770001122" (12 digits),
+    // which normalizes to "7" + "7770001122" = "77770001122".
+    if (digits.length >= 10) {
+      const localNumber = digits.slice(-10);
+      digits = '7' + localNumber;
+    }
+
+    const truncated = digits.slice(0, 11);
+    
+    let formatted = '+7';
+    if (truncated.length > 1) {
+      formatted += ' (' + truncated.substring(1, 4);
+    }
+    if (truncated.length > 4) {
+      formatted += ') ' + truncated.substring(4, 7);
+    }
+    if (truncated.length > 7) {
+      formatted += '-' + truncated.substring(7, 9);
+    }
+    if (truncated.length > 9) {
+      formatted += '-' + truncated.substring(9, 11);
+    }
+    setPhoneInput(formatted);
+  };
+
   const handleStartLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (phoneInput.length < 10) {
-      setErrorMsg('Введите корректный номер телефона.');
+    const rawDigits = phoneInput.replace(/\D/g, '');
+    if (rawDigits.length !== 11) {
+      setErrorMsg('Номер телефона должен состоять ровно из 11 цифр (включая код страны +7).');
       return;
     }
 
@@ -194,7 +215,7 @@ export default function App() {
       const res = await fetch(`${API_URL}/api/start-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: phoneInput }),
+        body: JSON.stringify({ phone: rawDigits }),
       });
       const data = await res.json();
 
@@ -242,7 +263,7 @@ export default function App() {
           if (exists) {
             next = prev.map(a => a.phone === phoneInput ? { ...a, status: 'valid' as const, lastChecked: new Date().toLocaleTimeString() } : a);
           } else {
-            next = [...prev, { phone: phoneInput, status: 'valid' as const, autoAccept: false, lastChecked: new Date().toLocaleTimeString() }];
+            next = [...prev, { phone: phoneInput, status: 'valid' as const, lastChecked: new Date().toLocaleTimeString() }];
           }
           savePhones(next);
           return next;
@@ -257,21 +278,6 @@ export default function App() {
     }
   };
 
-  const toggleAutoAccept = (phone: string) => {
-    setAccounts(prev => {
-      const next = prev.map(acc => {
-        if (acc.phone === phone) {
-          const autoVal = !acc.autoAccept;
-          localStorage.setItem(`auto_accept_${phone}`, String(autoVal));
-          addLog(`Автопринятие заказов для ${phone}: ${autoVal ? 'ВКЛЮЧЕНО' : 'ВЫКЛЮЧЕНО'}`);
-          return { ...acc, autoAccept: autoVal };
-        }
-        return acc;
-      });
-      return next;
-    });
-  };
-
   const removeAccount = (phone: string) => {
     const updated = accounts.filter(acc => acc.phone !== phone);
     setAccounts(updated);
@@ -281,11 +287,6 @@ export default function App() {
       setView('login');
       setLoginStep('phone');
     }
-  };
-
-  const acceptOrder = (orderId: string) => {
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'ACCEPTED' } : o));
-    addLog(`Заказ #${orderId} успешно принят вручную.`);
   };
 
   const formatPhone = (val: string) => {
@@ -341,9 +342,9 @@ export default function App() {
                 <input 
                   type="text" 
                   className="form-input" 
-                  placeholder="Например, 77770001122" 
+                  placeholder="+7 (7xx) xxx-xx-xx" 
                   value={phoneInput}
-                  onChange={(e) => setPhoneInput(e.target.value.replace(/\D/g, ''))}
+                  onChange={handlePhoneInputChange}
                   required
                   autoFocus
                 />
@@ -430,12 +431,12 @@ export default function App() {
             <span style={{ fontSize: '32px' }}>🦊</span>
             <h1>Kaspi SaaS Wrapper</h1>
           </div>
-          <p style={{ marginTop: '4px' }}>Панель автоматизации заказов и расширения функций магазина</p>
+          <p style={{ marginTop: '4px' }}>Панель автоматического извлечения товаров и изменения цен</p>
         </div>
         <button 
           className="btn btn-primary" 
           onClick={() => {
-            setPhoneInput('');
+            setPhoneInput('+7');
             setSmsInput('');
             setLoginStep('phone');
             setErrorMsg('');
@@ -445,40 +446,6 @@ export default function App() {
           <span>+ Подключить магазин</span>
         </button>
       </header>
-
-      {/* Main Grid */}
-      <div className="grid-3" style={{ marginBottom: '24px' }}>
-        {/* Stats 1 */}
-        <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ fontSize: '32px', background: 'rgba(201, 44, 60, 0.1)', padding: '12px', borderRadius: '12px' }}>🏪</div>
-          <div>
-            <p>Активные кабинеты</p>
-            <h2 style={{ fontSize: '28px', marginTop: '4px' }}>
-              {accounts.filter(a => a.status === 'valid').length} / {accounts.length}
-            </h2>
-          </div>
-        </div>
-        {/* Stats 2 */}
-        <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ fontSize: '32px', background: 'rgba(16, 185, 129, 0.1)', padding: '12px', borderRadius: '12px' }}>📦</div>
-          <div>
-            <p>Новые заказы сегодня</p>
-            <h2 style={{ fontSize: '28px', marginTop: '4px' }}>
-              {orders.filter(o => o.status === 'NEW').length}
-            </h2>
-          </div>
-        </div>
-        {/* Stats 3 */}
-        <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ fontSize: '32px', background: 'rgba(245, 158, 11, 0.1)', padding: '12px', borderRadius: '12px' }}>⚡</div>
-          <div>
-            <p>Статус автопринятия</p>
-            <h2 style={{ fontSize: '28px', marginTop: '4px' }}>
-              {accounts.some(a => a.autoAccept) ? 'Активно' : 'Выключено'}
-            </h2>
-          </div>
-        </div>
-      </div>
 
       <div className="grid-2">
         {/* Left Side: Accounts & Control Panel */}
@@ -515,18 +482,6 @@ export default function App() {
                   </div>
                   
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                      <label style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                        <input 
-                          type="checkbox" 
-                          checked={acc.autoAccept} 
-                          onChange={() => toggleAutoAccept(acc.phone)}
-                          style={{ accentColor: 'var(--primary)' }}
-                        />
-                        Автопринятие
-                      </label>
-                    </div>
-                    
                     <button className="btn btn-secondary" style={{ padding: '8px 12px' }} onClick={() => verifyAccount(acc.phone)}>
                       🔄
                     </button>
@@ -566,166 +521,84 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right Side: Orders & Products Tabs */}
+        {/* Right Side: Products Tab (Direct view) */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div className="glass-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-            
-            {/* Tabs Selector */}
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '12px' }}>
+              <h2 style={{ fontSize: '18px' }}>🏷️ Товары (Kaspi Products)</h2>
               <button 
-                className="btn" 
-                style={{ 
-                  background: activeTab === 'orders' ? 'var(--primary)' : 'rgba(255,255,255,0.04)', 
-                  padding: '8px 16px',
-                  borderRadius: '8px',
-                  fontSize: '13px'
-                }}
-                onClick={() => setActiveTab('orders')}
-              >
-                📦 Заказы ({orders.length})
-              </button>
-              <button 
-                className="btn" 
-                style={{ 
-                  background: activeTab === 'products' ? 'var(--primary)' : 'rgba(255,255,255,0.04)', 
-                  padding: '8px 16px',
-                  borderRadius: '8px',
-                  fontSize: '13px'
-                }}
+                className="btn btn-secondary" 
+                style={{ padding: '6px 12px', fontSize: '12px' }}
                 onClick={() => {
-                  setActiveTab('products');
                   const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                  if (activeAcc) {
-                    loadProducts(activeAcc.phone);
-                  }
+                  if (activeAcc) loadProducts(activeAcc.phone);
                 }}
+                disabled={fetchingProducts}
               >
-                🏷️ Товары ({products.length})
+                {fetchingProducts ? 'Обновление...' : '🔄 Обновить список'}
               </button>
             </div>
 
-            {/* TAB CONTENT: ORDERS */}
-            {activeTab === 'orders' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {orders.map((order) => (
-                  <div 
-                    key={order.id} 
-                    style={{ 
-                      padding: '16px', 
-                      background: 'rgba(255, 255, 255, 0.02)', 
-                      borderRadius: '12px',
-                      border: '1px solid rgba(255, 255, 255, 0.04)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px'
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 600 }}>Заказ #{order.id}</span>
-                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{order.date}</span>
-                    </div>
-                    
-                    <div style={{ fontSize: '13px' }}>
-                      <p style={{ color: '#fff', fontWeight: 500 }}>{order.customer}</p>
-                      <p style={{ marginTop: '2px' }}>{order.items}</p>
-                    </div>
-                    
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                      <span style={{ color: 'var(--primary)', fontWeight: 700 }}>{order.price}</span>
-                      <div>
-                        {order.status === 'NEW' && (
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => acceptOrder(order.id)}>
-                              Принять
-                            </button>
-                          </div>
-                        )}
-                        {order.status === 'ACCEPTED' && <span className="badge badge-success">Принят</span>}
-                        {order.status === 'COMPLETED' && <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: '#aaa' }}>Выполнен</span>}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* TAB CONTENT: PRODUCTS */}
-            {activeTab === 'products' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
-                  <button 
-                    className="btn btn-secondary" 
-                    style={{ padding: '6px 12px', fontSize: '12px' }}
-                    onClick={() => {
-                      const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                      if (activeAcc) loadProducts(activeAcc.phone);
-                    }}
-                    disabled={fetchingProducts}
-                  >
-                    {fetchingProducts ? 'Обновление...' : '🔄 Обновить список'}
-                  </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {fetchingProducts ? (
+                <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                  <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+                  <p>Загрузка товаров из кабинета продавца через Playwright...</p>
                 </div>
-
-                {fetchingProducts ? (
-                  <div style={{ textAlign: 'center', padding: '40px 0' }}>
-                    <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-                    <p>Загрузка товаров из кабинета продавца через Playwright...</p>
-                  </div>
-                ) : products.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '40px 0' }}>
-                    <p>Товары не найдены. Подключите активный кабинет или нажмите Обновить.</p>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    {products.map((product) => (
-                      <div 
-                        key={product.id} 
-                        style={{ 
-                          padding: '16px', 
-                          background: 'rgba(255, 255, 255, 0.02)', 
-                          borderRadius: '12px',
-                          border: '1px solid rgba(255, 255, 255, 0.04)',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center'
-                        }}
-                      >
-                        <div style={{ maxWidth: '70%' }}>
-                          <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
-                          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{product.sku}</p>
-                          <span 
-                            className="badge" 
-                            style={{ 
-                              marginTop: '8px', 
-                              background: product.status === 'Активен' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
-                              color: product.status === 'Активен' ? 'var(--success)' : '#aaa',
-                              border: '1px solid rgba(255,255,255,0.08)'
-                            }}
-                          >
-                            {product.status}
-                          </span>
-                        </div>
-
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary)', marginBottom: '8px' }}>{product.price}</div>
-                          <button 
-                            className="btn btn-secondary" 
-                            style={{ padding: '6px 12px', fontSize: '12px' }}
-                            onClick={() => {
-                              setSelectedProductForEdit(product);
-                              setNewPrice(product.price.replace(/\D/g, ''));
-                              setNewStock('100');
-                            }}
-                          >
-                            Изменить цену
-                          </button>
-                        </div>
+              ) : products.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                  <p>Товары не найдены. Подключите активный кабинет или нажмите «Обновить список».</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {products.map((product) => (
+                    <div 
+                      key={product.id} 
+                      style={{ 
+                        padding: '16px', 
+                        background: 'rgba(255, 255, 255, 0.02)', 
+                        borderRadius: '12px',
+                        border: '1px solid rgba(255, 255, 255, 0.04)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <div style={{ maxWidth: '70%' }}>
+                        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
+                        <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{product.sku}</p>
+                        <span 
+                          className="badge" 
+                          style={{ 
+                            marginTop: '8px', 
+                            background: product.status === 'Активен' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
+                            color: product.status === 'Активен' ? 'var(--success)' : '#aaa',
+                            border: '1px solid rgba(255,255,255,0.08)'
+                          }}
+                        >
+                          {product.status}
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary)', marginBottom: '8px' }}>{product.price}</div>
+                        <button 
+                          className="btn btn-secondary" 
+                          style={{ padding: '6px 12px', fontSize: '12px' }}
+                          onClick={() => {
+                            setSelectedProductForEdit(product);
+                            setNewPrice(product.price.replace(/\D/g, ''));
+                            setNewStock('100');
+                          }}
+                        >
+                          Изменить цену
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
