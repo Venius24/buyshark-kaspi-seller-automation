@@ -160,15 +160,36 @@ class KaspiWrapper:
         
         while current_page_num <= total_pages_needed:
             try:
-                # Expect the GraphQL response
-                with page.expect_response(
-                    lambda r: "graphql" in r.url and "opName=getOrders" in r.url and r.request.method == "POST",
-                    timeout=15000
-                ) as response_info:
-                    if current_page_num == 1:
+                if current_page_num == 1:
+                    # Expect the initial load response
+                    with page.expect_response(
+                        lambda r: "graphql" in r.url and "opName=getOrders" in r.url and r.request.method == "POST",
+                        timeout=20000
+                    ) as load_resp:
                         url = f"https://kaspi.kz/mc/#/orders?status={status}"
                         page.goto(url, wait_until="domcontentloaded")
-                    else:
+                    
+                    response_info = load_resp
+                    
+                    # If we need packaging tab, click "Упаковка" sub-tab and intercept the response
+                    if status == "KASPI_DELIVERY_CARGO_ASSEMBLY":
+                        try:
+                            link = page.get_by_role("link", name="Упаковка")
+                            link.wait_for(state="visible", timeout=4000)
+                            with page.expect_response(
+                                lambda r: "graphql" in r.url and "opName=getOrders" in r.url and r.request.method == "POST",
+                                timeout=15000
+                            ) as click_resp:
+                                link.click()
+                            response_info = click_resp
+                        except Exception as click_err:
+                            print(f"[KaspiWrapper] Falling back to load response for Упаковка: {click_err}")
+                else:
+                    # Expect the GraphQL response on button click
+                    with page.expect_response(
+                        lambda r: "graphql" in r.url and "opName=getOrders" in r.url and r.request.method == "POST",
+                        timeout=15000
+                    ) as response_info:
                         clicked = False
                         for candidate_name in [f"Страница {current_page_num}.", f"Page {current_page_num}.", f"{current_page_num}"]:
                             try:
