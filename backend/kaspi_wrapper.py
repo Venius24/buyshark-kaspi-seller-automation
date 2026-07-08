@@ -234,164 +234,270 @@ class KaspiWrapper:
     @staticmethod
     def fetch_orders(page: Page, status: str) -> list:
         """
-        Scrapes orders pending packaging or assembly.
+        Scrapes orders from Kaspi MC.
+        Navigation mirrors codegen_sliced.py:
+        - goto orders page
+        - click "Упаковка" if on CARGO_ASSEMBLY status
+        - wait for SPA to render
+        - scrape order data from the cargo-assembly divs
         """
-        # Go to orders page
-        page.goto(f"https://kaspi.kz/mc/#/orders?status={status}")
+        page.goto(f"https://kaspi.kz/mc/#/orders?status={status}", wait_until="domcontentloaded")
         
-        # Click packaging link if it exists
+        # Wait for SPA to render
         try:
-            page.get_by_role("link", name="Упаковка").click()
-            page.wait_for_timeout(2000)
-        except:
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
             pass
-            
-        try:
-            page.wait_for_selector('tr, .order-item, .card, [role="row"]', timeout=8000)
-        except Exception as err:
-            print(f"Warning: orders wait timed out: {err}")
-            
+        
+        page.wait_for_timeout(3000)
+        
         if "login" in page.url:
             raise Exception("Сессия авторизации Kaspi истекла. Пожалуйста, выполните вход заново.")
+        
+        # Click "Упаковка" link if it exists (navigates to packaging sub-section)
+        try:
+            packaging_link = page.get_by_role("link", name="Упаковка")
+            if packaging_link.is_visible(timeout=3000):
+                packaging_link.click()
+                page.wait_for_timeout(3000)
+        except Exception:
+            pass
+        
+        # Wait for order content to appear
+        try:
+            page.wait_for_selector('.cargo-assembly, .order-list, table tbody tr, [role="row"]', timeout=10000)
+        except Exception as err:
+            print(f"[KaspiWrapper] Orders selector timed out: {err}")
             
         js_code = """
         () => {
             const orders = [];
-            const elements = document.querySelectorAll('tr, .order-item, .card, [role="row"]');
+            // Try cargo-assembly divs first (from codegen_sliced), then fallback to rows
+            let elements = document.querySelectorAll('.cargo-assembly > div, .order-row');
+            
+            if (elements.length === 0) {
+                elements = document.querySelectorAll('tr, .order-item, .card, [role="row"]');
+            }
+            
             elements.forEach((el, index) => {
                 const text = el.innerText || '';
                 const idMatch = text.match(/\\b99\\d{7}\\b/);
-                if (idMatch) {
-                    const orderId = idMatch[0];
-                    if (orders.some(o => o.id === orderId)) return;
-                    
-                    const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
-                    
-                    let deliveryType = 'Kaspi Доставка';
-                    if (text.toLowerCase().includes('express')) deliveryType = 'Express';
-                    else if (text.toLowerCase().includes('postomat')) deliveryType = 'Postomat';
-                    
-                    const timeMatch = text.match(/до \\d{2}:\\d{2}/);
-                    const deadline = timeMatch ? timeMatch[0] : 'N/A';
-                    
-                    const priceMatch = text.match(/(\\d[\\d\\s]*)\\s*\\u20b8/);
-                    const price = priceMatch ? priceMatch[0] : 'Цена не указана';
-                    
-                    // Filter product name line
-                    const itemLines = lines.filter(line => {
-                        const lower = line.toLowerCase();
-                        if (lower.includes('заказ') || lower.includes('доставка') || lower.includes('express') || lower.includes('postomat') || lower.includes('выставить') || lower.includes('сформировать') || lower.includes('накладные')) return false;
-                        if (line.includes('\\u20b8') || line.match(/\\b99\\d{7}\\b/) || line.match(/до \\d{2}:\\d{2}/) || line === '1' || line === '2' || line === '3') return false;
-                        return true;
-                    });
-                    const productName = itemLines.length > 0 ? itemLines[0] : 'Товар';
-                    
-                    let qty = 1;
-                    for (const line of lines) {
-                        if (/^\\d+$/.test(line) && line !== orderId && parseInt(line) < 10) {
-                            qty = parseInt(line);
-                            break;
-                        }
+                if (!idMatch) return;
+                
+                const orderId = idMatch[0];
+                if (orders.some(o => o.id === orderId)) return;
+                
+                const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
+                
+                let deliveryType = 'Kaspi Доставка';
+                if (text.toLowerCase().includes('express')) deliveryType = 'Express';
+                else if (text.toLowerCase().includes('postomat')) deliveryType = 'Postomat';
+                
+                const timeMatch = text.match(/до \\d{2}:\\d{2}/);
+                const deadline = timeMatch ? timeMatch[0] : 'N/A';
+                
+                const priceMatch = text.match(/(\\d[\\d\\s]*)\\s*₸/);
+                const price = priceMatch ? priceMatch[0] : 'Цена не указана';
+                
+                // Filter out non-product lines to find the product name
+                const itemLines = lines.filter(line => {
+                    const lower = line.toLowerCase();
+                    if (lower.includes('заказ') || lower.includes('доставка') || lower.includes('express') || lower.includes('postomat') || lower.includes('выставить') || lower.includes('сформировать') || lower.includes('накладные') || lower.includes('упаковка') || lower.includes('передача')) return false;
+                    if (line.includes('₸') || /\\b99\\d{7}\\b/.test(line) || /до \\d{2}:\\d{2}/.test(line) || /^\\d{1,2}$/.test(line)) return false;
+                    return line.length > 3;
+                });
+                const productName = itemLines.length > 0 ? itemLines[0] : 'Товар';
+                
+                // Find quantity (single digit number that isn't the order ID)
+                let qty = 1;
+                for (const line of lines) {
+                    if (/^\\d+$/.test(line) && line !== orderId && parseInt(line) < 100 && parseInt(line) > 0) {
+                        qty = parseInt(line);
+                        break;
                     }
-                    
-                    orders.push({
-                        "id": orderId,
-                        "deliveryType": deliveryType,
-                        "deadline": deadline,
-                        "price": price,
-                        "productName": productName,
-                        "quantity": qty,
-                        "status": text.includes('Сформировать') ? 'Assembling' : 'New'
-                    });
                 }
+                
+                orders.push({
+                    "id": orderId,
+                    "deliveryType": deliveryType,
+                    "deadline": deadline,
+                    "price": price,
+                    "productName": productName,
+                    "quantity": qty,
+                    "status": text.includes('Сформировать') ? 'Assembling' : 'New'
+                });
             });
+            
+            console.log('[KaspiWrapper] Scraped orders:', orders.length);
             return orders;
         }
         """
-        return page.evaluate(js_code)
+        result = page.evaluate(js_code)
+        print(f"[KaspiWrapper] Fetched {len(result)} orders for status={status}")
+        return result
 
     @staticmethod
     def pack_order(page: Page, order_id: str) -> bool:
         """
         Selects order checkbox by order_id and clicks 'Сформировать накладные'.
+        Checkbox selector from codegen_sliced.py:
+        .b-tooltip.is-dark.is-right > .tooltip-trigger > .b-checkbox > .check
         """
-        page.goto("https://kaspi.kz/mc/#/orders?status=KASPI_DELIVERY_CARGO_ASSEMBLY")
-        page.wait_for_selector('tr, .order-item, .card, [role="row"]', timeout=8000)
+        page.goto("https://kaspi.kz/mc/#/orders?status=KASPI_DELIVERY_CARGO_ASSEMBLY", wait_until="domcontentloaded")
         
-        # Locate the specific row for this order
-        row = page.locator('tr, .order-item, .card, [role="row"]', has_text=order_id)
-        if not row.count():
+        try:
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+        
+        page.wait_for_timeout(3000)
+        
+        if "login" in page.url:
+            raise Exception("Сессия авторизации Kaspi истекла. Пожалуйста, выполните вход заново.")
+        
+        # Wait for order content
+        try:
+            page.wait_for_selector('.cargo-assembly, table tbody tr', timeout=10000)
+        except Exception as err:
+            print(f"[KaspiWrapper] Pack order selector timed out: {err}")
+        
+        # Find the row containing this order ID
+        row = page.locator(f'div:has-text("{order_id}"), tr:has-text("{order_id}")').first
+        if not row.is_visible(timeout=5000):
             raise Exception(f"Заказ #{order_id} не найден на странице.")
             
-        # Click the checkbox inside this row
-        checkbox = row.locator('.b-checkbox, input[type="checkbox"]').first
-        checkbox.click()
+        # Click the checkbox — use the exact selector from codegen_sliced.py
+        try:
+            checkbox = row.locator('.b-tooltip.is-dark.is-right .tooltip-trigger .b-checkbox .check').first
+            if checkbox.is_visible(timeout=3000):
+                checkbox.click()
+            else:
+                # Fallback to any checkbox in the row
+                checkbox = row.locator('.b-checkbox .check, input[type="checkbox"]').first
+                checkbox.click()
+        except Exception:
+            # Last resort: try any checkbox-like element
+            checkbox = row.locator('.check, input[type="checkbox"]').first
+            checkbox.click()
+        
         page.wait_for_timeout(1000)
         
         # Click 'Сформировать накладные'
         pack_btn = page.get_by_role("button", name="Сформировать накладные")
         pack_btn.click()
         page.wait_for_timeout(4000)
+        
+        print(f"[KaspiWrapper] Packed order {order_id}")
         return True
 
     @staticmethod
     def fetch_transfers(page: Page, delivery_filter: str) -> list:
         """
-        Navigates to Handover section and parses orders ready for transfer.
+        Navigates to Handover (Передача) section and parses orders ready for transfer.
+        Navigation from codegen_sliced.py:
+        - goto CARGO_ASSEMBLY page
+        - click "Передача" link (may show count like "Передача 99+")
+        - apply filter via radio labels: #ALL_DELIVERIES-label, #EXPRESS_DELIVERY-label, #TODAY_20-label
         """
-        page.goto("https://kaspi.kz/mc/#/orders?status=KASPI_DELIVERY_CARGO_ASSEMBLY")
-        page.wait_for_selector('a, link', timeout=8000)
+        page.goto("https://kaspi.kz/mc/#/orders?status=KASPI_DELIVERY_CARGO_ASSEMBLY", wait_until="domcontentloaded")
         
-        # Navigate to Handover (Передача)
-        page.get_by_role("link", name=re.compile(r"Передача")).first.click()
+        # Wait for SPA to render
+        try:
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+        
         page.wait_for_timeout(3000)
         
-        # Apply filter
-        if delivery_filter == "ALL":
-            page.locator("#ALL_DELIVERIES-label").click()
-        elif delivery_filter == "EXPRESS":
-            page.locator("#EXPRESS_DELIVERY-label").click()
-        elif delivery_filter == "TODAY":
-            page.locator("#TODAY_20-label").click()
-        page.wait_for_timeout(2000)
+        if "login" in page.url:
+            raise Exception("Сессия авторизации Kaspi истекла. Пожалуйста, выполните вход заново.")
+        
+        # Navigate to "Передача" tab — the link text may contain a count like "Передача 99+"
+        try:
+            # Try finding link that contains text "Передача" (partial match)
+            transfer_link = page.locator('a:has-text("Передача")').first
+            if transfer_link.is_visible(timeout=5000):
+                transfer_link.click()
+                page.wait_for_timeout(3000)
+            else:
+                print("[KaspiWrapper] 'Передача' link not visible, trying alternative navigation")
+                page.goto("https://kaspi.kz/mc/#/orders?status=SIGN_REQUIRED", wait_until="domcontentloaded")
+                page.wait_for_timeout(3000)
+        except Exception as nav_err:
+            print(f"[KaspiWrapper] Navigation to Передача failed: {nav_err}")
+            # Fallback: try direct navigation
+            page.goto("https://kaspi.kz/mc/#/orders?status=SIGN_REQUIRED", wait_until="domcontentloaded")
+            page.wait_for_timeout(3000)
+        
+        # Apply delivery filter
+        try:
+            if delivery_filter == "ALL":
+                filter_el = page.locator("#ALL_DELIVERIES-label")
+                if filter_el.is_visible(timeout=3000):
+                    filter_el.click()
+            elif delivery_filter == "EXPRESS":
+                filter_el = page.locator("#EXPRESS_DELIVERY-label")
+                if filter_el.is_visible(timeout=3000):
+                    filter_el.click()
+            elif delivery_filter == "TODAY":
+                filter_el = page.locator("#TODAY_20-label")
+                if filter_el.is_visible(timeout=3000):
+                    filter_el.click()
+            page.wait_for_timeout(2000)
+        except Exception as filter_err:
+            print(f"[KaspiWrapper] Filter application failed: {filter_err}")
         
         js_code = """
         () => {
             const orders = [];
-            const elements = document.querySelectorAll('tr, .order-item, .card, [role="row"]');
+            // Try multiple selectors for transfer rows
+            let elements = document.querySelectorAll('.cargo-assembly > div, .transfer-row, .order-row');
+            
+            if (elements.length === 0) {
+                elements = document.querySelectorAll('tr, .order-item, .card, [role="row"]');
+            }
+            
             elements.forEach(el => {
                 const text = el.innerText || '';
                 const idMatch = text.match(/\\b99\\d{7}\\b/);
-                if (idMatch) {
-                    const orderId = idMatch[0];
-                    if (orders.some(o => o.id === orderId)) return;
-                    
-                    const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
-                    
-                    let deliveryType = 'Kaspi Доставка';
-                    if (text.toLowerCase().includes('express')) deliveryType = 'Express';
-                    else if (text.toLowerCase().includes('postomat')) deliveryType = 'Postomat';
-                    
-                    const timeMatch = text.match(/до \\d{2}:\\d{2}/);
-                    const deadline = timeMatch ? timeMatch[0] : 'N/A';
-                    
-                    let address = 'Алматы';
-                    for (const line of lines) {
-                        if (line.includes('улица') || line.includes('ул.') || line.includes('проспект') || line.startsWith('г.')) {
-                            address = line;
-                            break;
-                        }
+                if (!idMatch) return;
+                
+                const orderId = idMatch[0];
+                if (orders.some(o => o.id === orderId)) return;
+                
+                const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
+                
+                let deliveryType = 'Kaspi Доставка';
+                if (text.toLowerCase().includes('express')) deliveryType = 'Express';
+                else if (text.toLowerCase().includes('postomat')) deliveryType = 'Postomat';
+                
+                const timeMatch = text.match(/до \\d{2}:\\d{2}/);
+                const deadline = timeMatch ? timeMatch[0] : 'N/A';
+                
+                // Find address line — contains street indicators
+                let address = 'Алматы';
+                for (const line of lines) {
+                    if (line.includes('улица') || line.includes('ул.') || line.includes('проспект') || 
+                        line.includes('пр.') || line.startsWith('г.') || line.includes('мкр') ||
+                        line.includes('район') || line.includes('дом')) {
+                        address = line;
+                        break;
                     }
-                    
-                    orders.push({
-                        "id": orderId,
-                        "deliveryType": deliveryType,
-                        "deadline": deadline,
-                        "address": address
-                    });
                 }
+                
+                orders.push({
+                    "id": orderId,
+                    "deliveryType": deliveryType,
+                    "deadline": deadline,
+                    "address": address
+                });
             });
+            
+            console.log('[KaspiWrapper] Scraped transfers:', orders.length);
             return orders;
         }
         """
-        return page.evaluate(js_code)
+        result = page.evaluate(js_code)
+        print(f"[KaspiWrapper] Fetched {len(result)} transfers with filter={delivery_filter}")
+        return result
+
