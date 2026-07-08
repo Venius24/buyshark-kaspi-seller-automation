@@ -33,6 +33,7 @@ class Command:
     FETCH_ORDERS = "fetch_orders"
     PACK_ORDER = "pack_order"
     FETCH_TRANSFERS = "fetch_transfers"
+    PACK_ALL_ORDERS = "pack_all_orders"
     CLEANUP = "cleanup"
 
 class PlaywrightWorker(threading.Thread):
@@ -165,7 +166,7 @@ class PlaywrightWorker(threading.Thread):
                             raise inner_e
 
                     elif cmd == Command.FETCH_ORDERS:
-                        phone, status = data
+                        phone, status, limit = data
                         state_path = get_state_file_path(phone)
                         if not os.path.exists(state_path):
                             raise Exception("Сессия авторизации не найдена.")
@@ -176,7 +177,7 @@ class PlaywrightWorker(threading.Thread):
                             temp_page = temp_context.new_page()
                             
                             from backend.kaspi_wrapper import KaspiWrapper
-                            orders = KaspiWrapper.fetch_orders(temp_page, status)
+                            orders = KaspiWrapper.fetch_orders(temp_page, status, limit)
                             
                             temp_browser.close()
                             self.result_queue.put((True, orders))
@@ -204,6 +205,30 @@ class PlaywrightWorker(threading.Thread):
                             temp_context.storage_state(path=state_path)
                             temp_browser.close()
                             self.result_queue.put((True, success))
+                        except Exception as inner_e:
+                            try:
+                                temp_browser.close()
+                            except:
+                                pass
+                            raise inner_e
+
+                    elif cmd == Command.PACK_ALL_ORDERS:
+                        phone = data
+                        state_path = get_state_file_path(phone)
+                        if not os.path.exists(state_path):
+                            raise Exception("Сессия авторизации не найдена.")
+                        
+                        temp_browser = playwright.chromium.launch(headless=True)
+                        try:
+                            temp_context = temp_browser.new_context(storage_state=state_path)
+                            temp_page = temp_context.new_page()
+                            
+                            from backend.kaspi_wrapper import KaspiWrapper
+                            result = KaspiWrapper.pack_all_orders(temp_page)
+                            
+                            temp_context.storage_state(path=state_path)
+                            temp_browser.close()
+                            self.result_queue.put((True, result))
                         except Exception as inner_e:
                             try:
                                 temp_browser.close()
@@ -333,8 +358,8 @@ def run_product_action(req: ProductActionRequest):
     return {"success": True, "message": msg}
 
 @app.get("/api/orders")
-def get_orders(phone: str = Query(...), status: str = Query("KASPI_DELIVERY_CARGO_ASSEMBLY")):
-    success, data = worker.send_cmd(Command.FETCH_ORDERS, (phone, status))
+def get_orders(phone: str = Query(...), status: str = Query("KASPI_DELIVERY_CARGO_ASSEMBLY"), limit: int = Query(10)):
+    success, data = worker.send_cmd(Command.FETCH_ORDERS, (phone, status, limit))
     if not success:
         raise HTTPException(status_code=400, detail=str(data))
     return {"success": True, "orders": data}
@@ -349,6 +374,13 @@ def pack_order(req: PackOrderRequest):
     if not success:
         raise HTTPException(status_code=400, detail=str(data))
     return {"success": True, "message": "Заказ успешно собран (накладные сформированы)"}
+
+@app.post("/api/orders/pack-all")
+def pack_all_orders(req: PhoneRequest):
+    success, data = worker.send_cmd(Command.PACK_ALL_ORDERS, req.phone)
+    if not success:
+        raise HTTPException(status_code=400, detail=str(data))
+    return {"success": True, "packed": data["packed"], "message": data["message"]}
 
 @app.get("/api/transfers")
 def get_transfers(phone: str = Query(...), filter: str = Query("ALL")):

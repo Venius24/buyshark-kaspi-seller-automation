@@ -48,6 +48,9 @@ export default function App() {
   const [orders, setOrders] = useState<any[]>([]);
   const [fetchingOrders, setFetchingOrders] = useState(false);
   const [orderStatusFilter, setOrderStatusFilter] = useState<'NEW' | 'KASPI_DELIVERY_CARGO_ASSEMBLY'>('KASPI_DELIVERY_CARGO_ASSEMBLY');
+  const [orderLimit, setOrderLimit] = useState(10);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  const [packingAll, setPackingAll] = useState(false);
 
   const [transfers, setTransfers] = useState<any[]>([]);
   const [fetchingTransfers, setFetchingTransfers] = useState(false);
@@ -159,11 +162,12 @@ export default function App() {
     }
   };
 
-  const loadOrders = async (phone: string, status = orderStatusFilter) => {
+  const loadOrders = async (phone: string, status = orderStatusFilter, limit = orderLimit) => {
     setFetchingOrders(true);
-    addLog(`Загрузка заказов для ${phone} (Статус: ${status === 'NEW' ? 'Новые' : 'На сборке'})...`);
+    setSelectedOrderIds(new Set());
+    addLog(`Загрузка заказов для ${phone} (Статус: ${status === 'NEW' ? 'Новые' : 'На сборке'}, Лимит: ${limit})...`);
     try {
-      const res = await fetch(`${API_URL}/api/orders?phone=${phone}&status=${status}`);
+      const res = await fetch(`${API_URL}/api/orders?phone=${phone}&status=${status}&limit=${limit}`);
       const data = await res.json();
       if (res.ok && data.success) {
         setOrders(data.orders);
@@ -195,6 +199,50 @@ export default function App() {
       }
     } catch (err) {
       addLog(`Ошибка автоматизации сборки для заказа #${orderId}.`);
+    }
+  };
+
+  const packAllOrders = async (phone: string) => {
+    setPackingAll(true);
+    addLog(`Запуск массовой сборки всех заказов...`);
+    try {
+      const res = await fetch(`${API_URL}/api/orders/pack-all`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addLog(`${data.message}`);
+        setSelectedOrderIds(new Set());
+        loadOrders(phone, orderStatusFilter, orderLimit);
+      } else {
+        addLog(`Ошибка массовой сборки: ${data.detail || 'Ошибка бэкенда'}`);
+      }
+    } catch (err) {
+      addLog('Ошибка при массовой сборке заказов.');
+    } finally {
+      setPackingAll(false);
+    }
+  };
+
+  const toggleOrderSelection = (orderId: string) => {
+    setSelectedOrderIds(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) {
+        next.delete(orderId);
+      } else {
+        next.add(orderId);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedOrderIds.size === orders.length) {
+      setSelectedOrderIds(new Set());
+    } else {
+      setSelectedOrderIds(new Set(orders.map(o => o.id)));
     }
   };
 
@@ -672,7 +720,7 @@ export default function App() {
                 onClick={() => {
                   setActiveTab('packaging');
                   const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                  if (activeAcc) loadOrders(activeAcc.phone, orderStatusFilter);
+                  if (activeAcc) loadOrders(activeAcc.phone, orderStatusFilter, orderLimit);
                 }}
               >
                 📦 Упаковка
@@ -972,12 +1020,33 @@ export default function App() {
               <>
                 {/* Header with filters */}
                 <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                     <h2 style={{ fontSize: '16px' }}>
                       📦 Сборка и упаковка заказов ({orders.length})
                     </h2>
                     
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      {/* Order limit selector */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Показывать:</span>
+                        <select 
+                          value={orderLimit} 
+                          onChange={(e) => {
+                            const newLimit = parseInt(e.target.value);
+                            setOrderLimit(newLimit);
+                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                            if (activeAcc) loadOrders(activeAcc.phone, orderStatusFilter, newLimit);
+                          }}
+                          className="form-input"
+                          style={{ width: '75px', padding: '6px 10px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: '#fff', borderRadius: '8px', cursor: 'pointer' }}
+                        >
+                          <option value="10">10</option>
+                          <option value="20">20</option>
+                          <option value="50">50</option>
+                          <option value="100">100</option>
+                        </select>
+                      </div>
+
                       {/* Order status filter */}
                       <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', padding: '3px', borderRadius: '8px' }}>
                         <button 
@@ -989,7 +1058,7 @@ export default function App() {
                           onClick={() => {
                             setOrderStatusFilter('KASPI_DELIVERY_CARGO_ASSEMBLY');
                             const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                            if (activeAcc) loadOrders(activeAcc.phone, 'KASPI_DELIVERY_CARGO_ASSEMBLY');
+                            if (activeAcc) loadOrders(activeAcc.phone, 'KASPI_DELIVERY_CARGO_ASSEMBLY', orderLimit);
                           }}
                         >
                           На сборке
@@ -1003,7 +1072,7 @@ export default function App() {
                           onClick={() => {
                             setOrderStatusFilter('NEW');
                             const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                            if (activeAcc) loadOrders(activeAcc.phone, 'NEW');
+                            if (activeAcc) loadOrders(activeAcc.phone, 'NEW', orderLimit);
                           }}
                         >
                           Новые
@@ -1016,7 +1085,7 @@ export default function App() {
                         style={{ padding: '8px 12px' }}
                         onClick={() => {
                           const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                          if (activeAcc) loadOrders(activeAcc.phone, orderStatusFilter);
+                          if (activeAcc) loadOrders(activeAcc.phone, orderStatusFilter, orderLimit);
                         }}
                         disabled={fetchingOrders}
                       >
@@ -1024,6 +1093,42 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Select All + Bulk Action Bar */}
+                  {orders.length > 0 && orderStatusFilter === 'KASPI_DELIVERY_CARGO_ASSEMBLY' && (
+                    <div style={{ 
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px',
+                      border: '1px solid rgba(255,255,255,0.06)'
+                    }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedOrderIds.size === orders.length && orders.length > 0}
+                          onChange={toggleSelectAll}
+                          style={{ width: '18px', height: '18px', accentColor: 'var(--primary)', cursor: 'pointer' }}
+                        />
+                        <span style={{ color: '#fff', fontWeight: 500 }}>
+                          Выбрать все ({selectedOrderIds.size}/{orders.length})
+                        </span>
+                      </label>
+
+                      <button 
+                        className="btn btn-primary" 
+                        style={{ 
+                          padding: '8px 16px', fontSize: '12px', fontWeight: 600,
+                          opacity: packingAll ? 0.7 : 1
+                        }}
+                        onClick={() => {
+                          const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                          if (activeAcc) packAllOrders(activeAcc.phone);
+                        }}
+                        disabled={packingAll || orders.length === 0}
+                      >
+                        {packingAll ? '⏳ Формирование...' : '📋 Сформировать все накладные'}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Orders List */}
@@ -1031,7 +1136,7 @@ export default function App() {
                   {fetchingOrders ? (
                     <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
                       <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-                      <p>Синхронизация заказов через Playwright...</p>
+                      <p>Синхронизация заказов через Playwright (лимит: {orderLimit})...</p>
                     </div>
                   ) : orders.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
@@ -1044,31 +1149,43 @@ export default function App() {
                           key={order.id} 
                           style={{ 
                             padding: '16px', 
-                            background: 'rgba(255, 255, 255, 0.02)', 
+                            background: selectedOrderIds.has(order.id) ? 'rgba(239, 68, 68, 0.06)' : 'rgba(255, 255, 255, 0.02)', 
                             borderRadius: '12px',
-                            border: '1px solid rgba(255, 255, 255, 0.04)',
+                            border: selectedOrderIds.has(order.id) ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid rgba(255, 255, 255, 0.04)',
                             display: 'flex',
                             justifyContent: 'space-between',
-                            alignItems: 'center'
+                            alignItems: 'center',
+                            transition: 'all 0.2s ease'
                           }}
                         >
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                              <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>Заказ #{order.id}</h3>
-                              <span 
-                                className="badge" 
-                                style={{ 
-                                  background: order.deliveryType === 'Express' ? 'linear-gradient(90deg, #c92c3c, #f43f5e)' : 'rgba(255,255,255,0.05)',
-                                  color: '#fff', border: '1px solid rgba(255,255,255,0.08)'
-                                }}
-                              >
-                                {order.deliveryType}
-                              </span>
-                              <span style={{ fontSize: '12px', color: 'var(--error)' }}>⏱️ {order.deadline}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            {/* Checkbox */}
+                            {orderStatusFilter === 'KASPI_DELIVERY_CARGO_ASSEMBLY' && (
+                              <input 
+                                type="checkbox" 
+                                checked={selectedOrderIds.has(order.id)}
+                                onChange={() => toggleOrderSelection(order.id)}
+                                style={{ width: '18px', height: '18px', accentColor: 'var(--primary)', cursor: 'pointer', flexShrink: 0 }}
+                              />
+                            )}
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>Заказ #{order.id}</h3>
+                                <span 
+                                  className="badge" 
+                                  style={{ 
+                                    background: order.deliveryType === 'Express' ? 'linear-gradient(90deg, #c92c3c, #f43f5e)' : 'rgba(255,255,255,0.05)',
+                                    color: '#fff', border: '1px solid rgba(255,255,255,0.08)'
+                                  }}
+                                >
+                                  {order.deliveryType}
+                                </span>
+                                <span style={{ fontSize: '12px', color: 'var(--error)' }}>⏱️ {order.deadline}</span>
+                              </div>
+                              <p style={{ fontSize: '13px', color: '#fff', marginTop: '8px' }}>
+                                {order.productName} (x{order.quantity})
+                              </p>
                             </div>
-                            <p style={{ fontSize: '13px', color: '#fff', marginTop: '8px' }}>
-                              {order.productName} (x{order.quantity})
-                            </p>
                           </div>
 
                           <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
@@ -1083,7 +1200,7 @@ export default function App() {
                                   if (activeAcc) packOrder(activeAcc.phone, order.id);
                                 }}
                               >
-                                📦 Собрать заказ (накладная)
+                                📦 Собрать заказ
                               </button>
                             )}
                           </div>

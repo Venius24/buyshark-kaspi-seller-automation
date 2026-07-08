@@ -232,14 +232,11 @@ class KaspiWrapper:
         return f"Product {action_type} action completed successfully"
 
     @staticmethod
-    def fetch_orders(page: Page, status: str) -> list:
+    def fetch_orders(page: Page, status: str, limit: int = 10) -> list:
         """
-        Scrapes orders from Kaspi MC.
-        Navigation mirrors codegen_sliced.py:
-        - goto orders page
-        - click "Упаковка" if on CARGO_ASSEMBLY status
-        - wait for SPA to render
-        - scrape order data from the cargo-assembly divs
+        Scrapes orders from Kaspi MC with multi-page pagination.
+        Kaspi shows ~10 orders per page. This method will paginate through
+        multiple pages to collect up to `limit` orders.
         """
         page.goto(f"https://kaspi.kz/mc/#/orders?status={status}", wait_until="domcontentloaded")
         
@@ -328,13 +325,140 @@ class KaspiWrapper:
                 });
             });
             
-            console.log('[KaspiWrapper] Scraped orders:', orders.length);
             return orders;
         }
         """
-        result = page.evaluate(js_code)
-        print(f"[KaspiWrapper] Fetched {len(result)} orders for status={status}")
+        
+        all_orders = []
+        seen_ids = set()
+        
+        # Scrape first page
+        page_orders = page.evaluate(js_code)
+        for order in page_orders:
+            if order["id"] not in seen_ids:
+                seen_ids.add(order["id"])
+                all_orders.append(order)
+        
+        print(f"[KaspiWrapper] Page 1: scraped {len(page_orders)} orders")
+        
+        # Paginate through additional pages if we need more orders
+        max_pages = (limit // 10) + 2  # Safety cap to avoid infinite loops
+        current_page_num = 1
+        
+        while len(all_orders) < limit and current_page_num < max_pages:
+            # Try clicking the "Next page" button
+            try:
+                next_btn = page.get_by_role("button", name="Next page").first
+                if not next_btn.is_visible(timeout=2000):
+                    print(f"[KaspiWrapper] No more pages available (Next page button not visible)")
+                    break
+                
+                next_btn.click()
+                page.wait_for_timeout(2000)
+                
+                # Wait for content to update
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    pass
+                page.wait_for_timeout(1000)
+                
+                current_page_num += 1
+                page_orders = page.evaluate(js_code)
+                
+                new_count = 0
+                for order in page_orders:
+                    if order["id"] not in seen_ids:
+                        seen_ids.add(order["id"])
+                        all_orders.append(order)
+                        new_count += 1
+                
+                print(f"[KaspiWrapper] Page {current_page_num}: scraped {len(page_orders)} orders ({new_count} new)")
+                
+                # If no new orders found, we've reached the end
+                if new_count == 0:
+                    print(f"[KaspiWrapper] No new orders on page {current_page_num}, stopping pagination")
+                    break
+                    
+            except Exception as page_err:
+                print(f"[KaspiWrapper] Pagination stopped: {page_err}")
+                break
+        
+        # Trim to requested limit
+        result = all_orders[:limit]
+        print(f"[KaspiWrapper] Total fetched {len(result)} orders (limit={limit}) for status={status}")
         return result
+
+    @staticmethod
+    def pack_all_orders(page: Page) -> dict:
+        """
+        Navigates to CARGO_ASSEMBLY, selects ALL order checkboxes on the current page,
+        and clicks 'Сформировать накладные' to bulk-transfer them.
+        Uses the checkbox selector from codegen_sliced.py:
+        .b-tooltip.is-dark.is-right > .tooltip-trigger > .b-checkbox > .check
+        """
+        page.goto("https://kaspi.kz/mc/#/orders?status=KASPI_DELIVERY_CARGO_ASSEMBLY", wait_until="domcontentloaded")
+        
+        try:
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+        
+        page.wait_for_timeout(3000)
+        
+        if "login" in page.url:
+            raise Exception("Сессия авторизации Kaspi истекла. Пожалуйста, выполните вход заново.")
+        
+        # Wait for order content
+        try:
+            page.wait_for_selector('.cargo-assembly, table tbody tr', timeout=10000)
+        except Exception as err:
+            print(f"[KaspiWrapper] Pack all - selector timed out: {err}")
+        
+        # Find all checkboxes on the page and click each one
+        checkboxes = page.locator('.b-tooltip.is-dark.is-right .tooltip-trigger .b-checkbox .check')
+        checkbox_count = checkboxes.count()
+        
+        if checkbox_count == 0:
+            # Fallback: try other checkbox selectors
+            checkboxes = page.locator('.b-checkbox .check, input[type="checkbox"]')
+            checkbox_count = checkboxes.count()
+        
+        if checkbox_count == 0:
+            return {"packed": 0, "message": "Не найдено заказов для сборки на текущей странице."}
+        
+        print(f"[KaspiWrapper] Found {checkbox_count} checkboxes to click")
+        
+        # Click each checkbox
+        clicked = 0
+        for i in range(checkbox_count):
+            try:
+                cb = checkboxes.nth(i)
+                if cb.is_visible(timeout=1000):
+                    cb.click()
+                    clicked += 1
+                    page.wait_for_timeout(300)  # Small delay between clicks
+            except Exception as cb_err:
+                print(f"[KaspiWrapper] Could not click checkbox {i}: {cb_err}")
+        
+        if clicked == 0:
+            return {"packed": 0, "message": "Не удалось выбрать ни одного заказа."}
+        
+        page.wait_for_timeout(1000)
+        
+        # Click 'Сформировать накладные'
+        try:
+            pack_btn = page.get_by_role("button", name="Сформировать накладные")
+            if pack_btn.is_visible(timeout=3000):
+                pack_btn.click()
+                page.wait_for_timeout(4000)
+                print(f"[KaspiWrapper] Packed all {clicked} orders")
+                return {"packed": clicked, "message": f"Успешно сформированы накладные для {clicked} заказов."}
+            else:
+                return {"packed": 0, "message": "Кнопка 'Сформировать накладные' не найдена."}
+        except Exception as btn_err:
+            print(f"[KaspiWrapper] Pack all button error: {btn_err}")
+            return {"packed": 0, "message": f"Ошибка при нажатии кнопки: {str(btn_err)}"}
 
     @staticmethod
     def pack_order(page: Page, order_id: str) -> bool:
