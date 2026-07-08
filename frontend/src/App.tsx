@@ -43,6 +43,16 @@ export default function App() {
   const [newStock, setNewStock] = useState('20');
   const [updatingProduct, setUpdatingProduct] = useState(false);
 
+  // Tabs navigation, packaging and transfer states
+  const [activeTab, setActiveTab] = useState<'products' | 'packaging' | 'transfer'>('products');
+  const [orders, setOrders] = useState<any[]>([]);
+  const [fetchingOrders, setFetchingOrders] = useState(false);
+  const [orderStatusFilter, setOrderStatusFilter] = useState<'NEW' | 'KASPI_DELIVERY_CARGO_ASSEMBLY'>('KASPI_DELIVERY_CARGO_ASSEMBLY');
+
+  const [transfers, setTransfers] = useState<any[]>([]);
+  const [fetchingTransfers, setFetchingTransfers] = useState(false);
+  const [transferFilter, setTransferFilter] = useState<'ALL' | 'EXPRESS' | 'TODAY'>('ALL');
+
   const [logs, setLogs] = useState<string[]>([
     'Система автоматизации инициализирована.',
     'Ожидание подключения Kaspi Shop аккаунта...',
@@ -146,6 +156,64 @@ export default function App() {
       addLog('Ошибка при получении товаров с сервера автоматизации.');
     } finally {
       setFetchingProducts(false);
+    }
+  };
+
+  const loadOrders = async (phone: string, status = orderStatusFilter) => {
+    setFetchingOrders(true);
+    addLog(`Загрузка заказов для ${phone} (Статус: ${status === 'NEW' ? 'Новые' : 'На сборке'})...`);
+    try {
+      const res = await fetch(`${API_URL}/api/orders?phone=${phone}&status=${status}`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setOrders(data.orders);
+        addLog(`Успешно загружено ${data.orders.length} заказов.`);
+      } else {
+        addLog(`Не удалось загрузить заказы: ${data.detail || 'Ошибка бэкенда'}`);
+      }
+    } catch (err) {
+      addLog('Ошибка при получении списка заказов с сервера автоматизации.');
+    } finally {
+      setFetchingOrders(false);
+    }
+  };
+
+  const packOrder = async (phone: string, orderId: string) => {
+    addLog(`Запуск автоматической сборки заказа #${orderId}...`);
+    try {
+      const res = await fetch(`${API_URL}/api/orders/pack`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, order_id: orderId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addLog(`Заказ #${orderId} успешно собран, накладные сформированы.`);
+        loadOrders(phone, orderStatusFilter);
+      } else {
+        addLog(`Не удалось собрать заказ #${orderId}: ${data.detail || 'Ошибка бэкенда'}`);
+      }
+    } catch (err) {
+      addLog(`Ошибка автоматизации сборки для заказа #${orderId}.`);
+    }
+  };
+
+  const loadTransfers = async (phone: string, filter = transferFilter) => {
+    setFetchingTransfers(true);
+    addLog(`Загрузка передач для ${phone} (Фильтр: ${filter === 'ALL' ? 'Все' : filter === 'EXPRESS' ? 'Экспресс' : 'Сегодня до 20:00'})...`);
+    try {
+      const res = await fetch(`${API_URL}/api/transfers?phone=${phone}&filter=${filter}`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTransfers(data.transfers);
+        addLog(`Успешно загружено ${data.transfers.length} записей передачи.`);
+      } else {
+        addLog(`Не удалось загрузить список передач: ${data.detail || 'Ошибка бэкенда'}`);
+      }
+    } catch (err) {
+      addLog('Ошибка при получении списка передач.');
+    } finally {
+      setFetchingTransfers(false);
     }
   };
 
@@ -571,285 +639,588 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right Side: Products Panel */}
+        {/* Right Side: Control Tabs & Panels */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div className="glass-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
             
-            {/* Header with Search, Filter & Page Size */}
-            <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h2 style={{ fontSize: '18px' }}>
-                  🏷️ Товары ({totalCount ? `${totalCount} поз.` : 'Загрузка...'})
-                </h2>
-                
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  {/* Page Size Selector */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Показывать по:</span>
-                    <select 
-                      value={pageSize} 
-                      onChange={(e) => {
-                        const pSize = parseInt(e.target.value);
-                        setPageSize(pSize);
-                        setCurrentPage(1);
-                        setPageInputText('1');
-                        const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                        if (activeAcc) {
-                          loadProducts(activeAcc.phone, 1, statusFilter, searchQuery, pSize);
-                        }
-                      }}
-                      className="form-input"
-                      style={{ width: '70px', padding: '6px 10px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: '#fff', borderRadius: '8px', cursor: 'pointer' }}
-                    >
-                      <option value="5">5</option>
-                      <option value="10">10</option>
-                      <option value="20">20</option>
-                      <option value="50">50</option>
-                    </select>
-                  </div>
-
-                  {/* Status Toggle */}
-                  <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', padding: '3px', borderRadius: '8px' }}>
-                    <button 
-                      className="btn" 
-                      style={{ 
-                        background: statusFilter === 'active' ? 'var(--primary)' : 'transparent', 
-                        padding: '5px 12px', fontSize: '12px', borderRadius: '6px'
-                      }}
-                      onClick={() => handleStatusFilterChange('active')}
-                    >
-                      В продаже
-                    </button>
-                    <button 
-                      className="btn" 
-                      style={{ 
-                        background: statusFilter === 'archive' ? 'var(--primary)' : 'transparent', 
-                        padding: '5px 12px', fontSize: '12px', borderRadius: '6px'
-                      }}
-                      onClick={() => handleStatusFilterChange('archive')}
-                    >
-                      Сняты
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Search Bar */}
-              <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '12px' }}>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="Поиск по артикулу / названию..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  style={{ flexGrow: 1 }}
-                />
-                <button type="submit" className="btn btn-primary" style={{ padding: '10px 16px' }}>
-                  Найти
-                </button>
-                <button 
-                  type="button" 
-                  className="btn btn-secondary" 
-                  style={{ padding: '10px 14px' }}
-                  onClick={() => {
-                    const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                    if (activeAcc) loadProducts(activeAcc.phone, currentPage, statusFilter, searchQuery, pageSize);
-                  }}
-                  disabled={fetchingProducts}
-                >
-                  {fetchingProducts ? '🔄' : 'Refresh'}
-                </button>
-              </form>
+            {/* Tabs Header */}
+            <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: '20px', gap: '8px' }}>
+              <button 
+                className="btn" 
+                style={{ 
+                  background: activeTab === 'products' ? 'var(--primary)' : 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.05)', color: '#fff', padding: '12px 18px', fontSize: '13px',
+                  borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderTopLeftRadius: '10px', borderTopRightRadius: '10px',
+                  fontWeight: 600, cursor: 'pointer', transition: 'all 0.3s ease'
+                }}
+                onClick={() => {
+                  setActiveTab('products');
+                  const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                  if (activeAcc) loadProducts(activeAcc.phone, 1, statusFilter, searchQuery, pageSize);
+                }}
+              >
+                🏷️ Товары
+              </button>
+              <button 
+                className="btn" 
+                style={{ 
+                  background: activeTab === 'packaging' ? 'var(--primary)' : 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.05)', color: '#fff', padding: '12px 18px', fontSize: '13px',
+                  borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderTopLeftRadius: '10px', borderTopRightRadius: '10px',
+                  fontWeight: 600, cursor: 'pointer', transition: 'all 0.3s ease'
+                }}
+                onClick={() => {
+                  setActiveTab('packaging');
+                  const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                  if (activeAcc) loadOrders(activeAcc.phone, orderStatusFilter);
+                }}
+              >
+                📦 Упаковка
+              </button>
+              <button 
+                className="btn" 
+                style={{ 
+                  background: activeTab === 'transfer' ? 'var(--primary)' : 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.05)', color: '#fff', padding: '12px 18px', fontSize: '13px',
+                  borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderTopLeftRadius: '10px', borderTopRightRadius: '10px',
+                  fontWeight: 600, cursor: 'pointer', transition: 'all 0.3s ease'
+                }}
+                onClick={() => {
+                  setActiveTab('transfer');
+                  const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                  if (activeAcc) loadTransfers(activeAcc.phone, transferFilter);
+                }}
+              >
+                🚚 Передача
+              </button>
             </div>
 
-            {/* Products List */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flexGrow: 1 }}>
-              {fetchingProducts && products.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-                  <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-                  <p>Синхронизация товаров через Playwright...</p>
-                </div>
-              ) : products.length === 0 && !fetchingProducts ? (
-                <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-                  <p>Товары не найдены. Попробуйте изменить параметры поиска/фильтра или нажмите Refresh.</p>
-                </div>
-              ) : (
-                <div style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '16px',
-                  opacity: fetchingProducts ? 0.6 : 1,
-                  pointerEvents: fetchingProducts ? 'none' : 'auto',
-                  transition: 'opacity 0.2s ease-in-out'
-                }}>
-                  {products.map((product) => (
-                    <div 
-                      key={product.id} 
-                      style={{ 
-                        padding: '16px', 
-                        background: 'rgba(255, 255, 255, 0.02)', 
-                        borderRadius: '12px',
-                        border: '1px solid rgba(255, 255, 255, 0.04)',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        position: 'relative'
-                      }}
-                    >
-                      <div style={{ maxWidth: '75%' }}>
-                        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
-                        <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{product.sku}</p>
-                        
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
-                          <span 
-                            className="badge" 
-                            style={{ 
-                              background: product.status === 'Активен' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
-                              color: product.status === 'Активен' ? 'var(--success)' : '#aaa',
-                              border: '1px solid rgba(255,255,255,0.08)'
-                            }}
-                          >
-                            {product.status === 'Активен' ? 'В продаже' : 'Снят с продажи'}
-                          </span>
-                          
-                          {product.url && (
-                            <a 
-                              href={product.url} 
-                              target="_blank" 
-                              rel="noreferrer" 
-                              style={{ fontSize: '12px', color: '#3b82f6', textDecoration: 'none' }}
-                            >
-                              🔗 Открыть на Kaspi.kz
-                            </a>
-                          )}
-                        </div>
+            {/* TAB 1: PRODUCT MANAGEMENT */}
+            {activeTab === 'products' && (
+              <>
+                {/* Header with Search, Filter & Page Size */}
+                <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h2 style={{ fontSize: '16px' }}>
+                      🏷️ Управление товарами ({totalCount ? `${totalCount} поз.` : '0 поз.'})
+                    </h2>
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                      {/* Page Size Selector */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Показывать по:</span>
+                        <select 
+                          value={pageSize} 
+                          onChange={(e) => {
+                            const pSize = parseInt(e.target.value);
+                            setPageSize(pSize);
+                            setCurrentPage(1);
+                            setPageInputText('1');
+                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                            if (activeAcc) {
+                              loadProducts(activeAcc.phone, 1, statusFilter, searchQuery, pSize);
+                            }
+                          }}
+                          className="form-input"
+                          style={{ width: '70px', padding: '6px 10px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: '#fff', borderRadius: '8px', cursor: 'pointer' }}
+                        >
+                          <option value="5">5</option>
+                          <option value="10">10</option>
+                          <option value="20">20</option>
+                          <option value="50">50</option>
+                        </select>
                       </div>
 
-                      <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
-                        <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary)' }}>{product.price}</div>
-                        
-                        {/* Options Menu */}
-                        <div style={{ position: 'relative' }}>
-                          <button 
-                            className="btn btn-secondary" 
-                            style={{ padding: '6px 12px', fontSize: '12px' }}
-                            onClick={() => setOpenMenuId(openMenuId === product.id ? null : product.id)}
-                          >
-                            Действия ⋮
-                          </button>
-                          
-                          {/* Dropdown Menu */}
-                          {openMenuId === product.id && (
-                            <div 
-                              style={{ 
-                                position: 'absolute', right: 0, top: '100%', marginTop: '6px',
-                                background: '#111827', border: '1px solid var(--card-border)',
-                                borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-                                zIndex: 10, width: '180px', display: 'flex', flexDirection: 'column'
-                              }}
-                            >
-                              <button 
-                                style={{ background: 'none', border: 'none', color: '#fff', padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontSize: '12px' }}
-                                onClick={() => {
-                                  setSelectedProductForEdit(product);
-                                  setNewPrice(product.price.replace(/\D/g, ''));
-                                  setNewStock('100');
-                                  setOpenMenuId(null);
+                      {/* Status Toggle */}
+                      <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', padding: '3px', borderRadius: '8px' }}>
+                        <button 
+                          className="btn" 
+                          style={{ 
+                            background: statusFilter === 'active' ? 'var(--primary)' : 'transparent', 
+                            padding: '5px 12px', fontSize: '11px', borderRadius: '6px'
+                          }}
+                          onClick={() => handleStatusFilterChange('active')}
+                        >
+                          В продаже
+                        </button>
+                        <button 
+                          className="btn" 
+                          style={{ 
+                            background: statusFilter === 'archive' ? 'var(--primary)' : 'transparent', 
+                            padding: '5px 12px', fontSize: '11px', borderRadius: '6px'
+                          }}
+                          onClick={() => handleStatusFilterChange('archive')}
+                        >
+                          Сняты
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Search Bar */}
+                  <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '12px' }}>
+                    <input 
+                      type="text" 
+                      className="form-input" 
+                      placeholder="Поиск по артикулу / названию..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      style={{ flexGrow: 1 }}
+                    />
+                    <button type="submit" className="btn btn-primary" style={{ padding: '10px 16px' }}>
+                      Найти
+                    </button>
+                    <button 
+                      type="button" 
+                      className="btn btn-secondary" 
+                      style={{ padding: '10px 14px' }}
+                      onClick={() => {
+                        const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                        if (activeAcc) loadProducts(activeAcc.phone, currentPage, statusFilter, searchQuery, pageSize);
+                      }}
+                      disabled={fetchingProducts}
+                    >
+                      {fetchingProducts ? '🔄' : 'Refresh'}
+                    </button>
+                  </form>
+                </div>
+
+                {/* Products List */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flexGrow: 1 }}>
+                  {fetchingProducts && products.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
+                      <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+                      <p>Синхронизация товаров через Playwright...</p>
+                    </div>
+                  ) : products.length === 0 && !fetchingProducts ? (
+                    <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
+                      <p>Товары не найдены. Попробуйте изменить параметры поиска/фильтра или нажмите Refresh.</p>
+                    </div>
+                  ) : (
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '16px',
+                      opacity: fetchingProducts ? 0.6 : 1,
+                      pointerEvents: fetchingProducts ? 'none' : 'auto',
+                      transition: 'opacity 0.2s ease-in-out'
+                    }}>
+                      {products.map((product) => (
+                        <div 
+                          key={product.id} 
+                          style={{ 
+                            padding: '16px', 
+                            background: 'rgba(255, 255, 255, 0.02)', 
+                            borderRadius: '12px',
+                            border: '1px solid rgba(255, 255, 255, 0.04)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            position: 'relative'
+                          }}
+                        >
+                          <div style={{ maxWidth: '75%' }}>
+                            <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
+                            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{product.sku}</p>
+                            
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
+                              <span 
+                                className="badge" 
+                                style={{ 
+                                  background: product.status === 'Активен' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
+                                  color: product.status === 'Активен' ? 'var(--success)' : '#aaa',
+                                  border: '1px solid rgba(255,255,255,0.08)'
                                 }}
                               >
-                                ✏️ Изменить цену
-                              </button>
-                              {product.status === 'Активен' ? (
-                                <button 
-                                  style={{ background: 'none', border: 'none', color: '#ef4444', padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontSize: '12px' }}
-                                  onClick={() => {
-                                    handleProductAction(product.sku, 'archive');
-                                    setOpenMenuId(null);
-                                  }}
-                                >
-                                  📦 Снять с продажи
-                                </button>
-                              ) : (
-                                <button 
-                                  style={{ background: 'none', border: 'none', color: '#10b981', padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontSize: '12px' }}
-                                  onClick={() => {
-                                    setSelectedProductForPublish(product);
-                                    setNewStock('20');
-                                    setOpenMenuId(null);
-                                  }}
-                                >
-                                  🚀 Выставить на продажу
-                                </button>
-                              )}
+                                {product.status === 'Активен' ? 'В продаже' : 'Снят с продажи'}
+                              </span>
+                              
                               {product.url && (
                                 <a 
-                                  href={product.url} target="_blank" rel="noreferrer"
-                                  style={{ color: '#fff', padding: '10px 12px', textDecoration: 'none', fontSize: '12px', display: 'block' }}
-                                  onClick={() => setOpenMenuId(null)}
+                                  href={product.url} 
+                                  target="_blank" 
+                                  rel="noreferrer" 
+                                  style={{ fontSize: '12px', color: '#3b82f6', textDecoration: 'none' }}
                                 >
-                                  🔗 Ссылка на Kaspi
+                                  🔗 Открыть на Kaspi.kz
                                 </a>
                               )}
                             </div>
-                          )}
+                          </div>
+
+                          <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+                            <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary)' }}>{product.price}</div>
+                            
+                            {/* Options Menu */}
+                            <div style={{ position: 'relative' }}>
+                              <button 
+                                className="btn btn-secondary" 
+                                style={{ padding: '6px 12px', fontSize: '12px' }}
+                                onClick={() => setOpenMenuId(openMenuId === product.id ? null : product.id)}
+                              >
+                                Действия ⋮
+                              </button>
+                              
+                              {/* Dropdown Menu */}
+                              {openMenuId === product.id && (
+                                <div 
+                                  style={{ 
+                                    position: 'absolute', right: 0, top: '100%', marginTop: '6px',
+                                    background: '#111827', border: '1px solid var(--card-border)',
+                                    borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                                    zIndex: 10, width: '180px', display: 'flex', flexDirection: 'column'
+                                  }}
+                                >
+                                  <button 
+                                    style={{ background: 'none', border: 'none', color: '#fff', padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontSize: '12px' }}
+                                    onClick={() => {
+                                      setSelectedProductForEdit(product);
+                                      setNewPrice(product.price.replace(/\D/g, ''));
+                                      setNewStock('100');
+                                      setOpenMenuId(null);
+                                    }}
+                                  >
+                                    ✏️ Изменить цену
+                                  </button>
+                                  {product.status === 'Активен' ? (
+                                    <button 
+                                      style={{ background: 'none', border: 'none', color: '#ef4444', padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontSize: '12px' }}
+                                      onClick={() => {
+                                        handleProductAction(product.sku, 'archive');
+                                        setOpenMenuId(null);
+                                      }}
+                                    >
+                                      📦 Снять с продажи
+                                    </button>
+                                  ) : (
+                                    <button 
+                                      style={{ background: 'none', border: 'none', color: '#10b981', padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontSize: '12px' }}
+                                      onClick={() => {
+                                        setSelectedProductForPublish(product);
+                                        setNewStock('20');
+                                        setOpenMenuId(null);
+                                      }}
+                                    >
+                                      🚀 Выставить на продажу
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                      </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
 
-            {/* Pagination Controls */}
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px', marginTop: '20px' }}>
-              <button 
-                className="btn btn-secondary" 
-                style={{ padding: '6px 12px', fontSize: '12px' }}
-                onClick={() => handlePageChange(currentPage - 1)}
-                disabled={currentPage === 1 || fetchingProducts}
-              >
-                ◀ Назад
-              </button>
-              
-              <span style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                Страница 
-                <input 
-                  type="text" 
-                  value={pageInputText}
-                  onChange={(e) => setPageInputText(e.target.value.replace(/\D/g, ''))}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const pageNum = parseInt(pageInputText);
-                      if (pageNum >= 1 && pageNum <= totalPages) {
-                        handlePageChange(pageNum);
-                      } else {
-                        setPageInputText(String(currentPage));
-                      }
-                    }
-                  }}
-                  onBlur={() => {
-                    const pageNum = parseInt(pageInputText);
-                    if (pageNum >= 1 && pageNum <= totalPages) {
-                      handlePageChange(pageNum);
-                    } else {
-                      setPageInputText(String(currentPage));
-                    }
-                  }}
-                  className="form-input"
-                  style={{ width: '45px', padding: '4px 8px', textAlign: 'center', display: 'inline-block' }}
-                />
-                из <strong>{totalPages}</strong>
-              </span>
+                {/* Pagination Controls */}
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px', marginTop: '20px' }}>
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1 || fetchingProducts}
+                  >
+                    ◀ Назад
+                  </button>
+                  
+                  <span style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    Страница 
+                    <input 
+                      type="text" 
+                      value={pageInputText}
+                      onChange={(e) => setPageInputText(e.target.value.replace(/\D/g, ''))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const pageNum = parseInt(pageInputText);
+                          if (pageNum >= 1 && pageNum <= totalPages) {
+                            handlePageChange(pageNum);
+                          } else {
+                            setPageInputText(String(currentPage));
+                          }
+                        }
+                      }}
+                      onBlur={() => {
+                        const pageNum = parseInt(pageInputText);
+                        if (pageNum >= 1 && pageNum <= totalPages) {
+                          handlePageChange(pageNum);
+                        } else {
+                          setPageInputText(String(currentPage));
+                        }
+                      }}
+                      className="form-input"
+                      style={{ width: '45px', padding: '4px 8px', textAlign: 'center', display: 'inline-block' }}
+                    />
+                    из <strong>{totalPages}</strong>
+                  </span>
 
-              <button 
-                className="btn btn-secondary" 
-                style={{ padding: '6px 12px', fontSize: '12px' }}
-                onClick={() => handlePageChange(currentPage + 1)}
-                disabled={currentPage === totalPages || fetchingProducts}
-              >
-                Вперед ▶
-              </button>
-            </div>
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages || fetchingProducts}
+                  >
+                    Вперед ▶
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* TAB 2: PACKAGING / ORDERS ASSEMBLY */}
+            {activeTab === 'packaging' && (
+              <>
+                {/* Header with filters */}
+                <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h2 style={{ fontSize: '16px' }}>
+                      📦 Сборка и упаковка заказов ({orders.length})
+                    </h2>
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      {/* Order status filter */}
+                      <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', padding: '3px', borderRadius: '8px' }}>
+                        <button 
+                          className="btn" 
+                          style={{ 
+                            background: orderStatusFilter === 'KASPI_DELIVERY_CARGO_ASSEMBLY' ? 'var(--primary)' : 'transparent', 
+                            padding: '5px 12px', fontSize: '11px', borderRadius: '6px'
+                          }}
+                          onClick={() => {
+                            setOrderStatusFilter('KASPI_DELIVERY_CARGO_ASSEMBLY');
+                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                            if (activeAcc) loadOrders(activeAcc.phone, 'KASPI_DELIVERY_CARGO_ASSEMBLY');
+                          }}
+                        >
+                          На сборке
+                        </button>
+                        <button 
+                          className="btn" 
+                          style={{ 
+                            background: orderStatusFilter === 'NEW' ? 'var(--primary)' : 'transparent', 
+                            padding: '5px 12px', fontSize: '11px', borderRadius: '6px'
+                          }}
+                          onClick={() => {
+                            setOrderStatusFilter('NEW');
+                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                            if (activeAcc) loadOrders(activeAcc.phone, 'NEW');
+                          }}
+                        >
+                          Новые
+                        </button>
+                      </div>
+
+                      <button 
+                        type="button" 
+                        className="btn btn-secondary" 
+                        style={{ padding: '8px 12px' }}
+                        onClick={() => {
+                          const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                          if (activeAcc) loadOrders(activeAcc.phone, orderStatusFilter);
+                        }}
+                        disabled={fetchingOrders}
+                      >
+                        {fetchingOrders ? '🔄' : 'Refresh'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Orders List */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flexGrow: 1 }}>
+                  {fetchingOrders ? (
+                    <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
+                      <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+                      <p>Синхронизация заказов через Playwright...</p>
+                    </div>
+                  ) : orders.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
+                      <p>Заказов в данном статусе не найдено.</p>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {orders.map((order) => (
+                        <div 
+                          key={order.id} 
+                          style={{ 
+                            padding: '16px', 
+                            background: 'rgba(255, 255, 255, 0.02)', 
+                            borderRadius: '12px',
+                            border: '1px solid rgba(255, 255, 255, 0.04)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          }}
+                        >
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>Заказ #{order.id}</h3>
+                              <span 
+                                className="badge" 
+                                style={{ 
+                                  background: order.deliveryType === 'Express' ? 'linear-gradient(90deg, #c92c3c, #f43f5e)' : 'rgba(255,255,255,0.05)',
+                                  color: '#fff', border: '1px solid rgba(255,255,255,0.08)'
+                                }}
+                              >
+                                {order.deliveryType}
+                              </span>
+                              <span style={{ fontSize: '12px', color: 'var(--error)' }}>⏱️ {order.deadline}</span>
+                            </div>
+                            <p style={{ fontSize: '13px', color: '#fff', marginTop: '8px' }}>
+                              {order.productName} (x{order.quantity})
+                            </p>
+                          </div>
+
+                          <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+                            <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--success)' }}>{order.price}</div>
+                            
+                            {orderStatusFilter === 'KASPI_DELIVERY_CARGO_ASSEMBLY' && (
+                              <button 
+                                className="btn btn-primary" 
+                                style={{ padding: '6px 12px', fontSize: '12px' }}
+                                onClick={() => {
+                                  const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                                  if (activeAcc) packOrder(activeAcc.phone, order.id);
+                                }}
+                              >
+                                📦 Собрать заказ (накладная)
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* TAB 3: TRANSFER / HANDOVER */}
+            {activeTab === 'transfer' && (
+              <>
+                {/* Header with filters */}
+                <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h2 style={{ fontSize: '16px' }}>
+                      🚚 Передача заказов курьеру ({transfers.length})
+                    </h2>
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      {/* Handover filters */}
+                      <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', padding: '3px', borderRadius: '8px' }}>
+                        <button 
+                          className="btn" 
+                          style={{ 
+                            background: transferFilter === 'ALL' ? 'var(--primary)' : 'transparent', 
+                            padding: '5px 10px', fontSize: '10px', borderRadius: '5px'
+                          }}
+                          onClick={() => {
+                            setTransferFilter('ALL');
+                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                            if (activeAcc) loadTransfers(activeAcc.phone, 'ALL');
+                          }}
+                        >
+                          Все
+                        </button>
+                        <button 
+                          className="btn" 
+                          style={{ 
+                            background: transferFilter === 'EXPRESS' ? 'var(--primary)' : 'transparent', 
+                            padding: '5px 10px', fontSize: '10px', borderRadius: '5px'
+                          }}
+                          onClick={() => {
+                            setTransferFilter('EXPRESS');
+                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                            if (activeAcc) loadTransfers(activeAcc.phone, 'EXPRESS');
+                          }}
+                        >
+                          Экспресс
+                        </button>
+                        <button 
+                          className="btn" 
+                          style={{ 
+                            background: transferFilter === 'TODAY' ? 'var(--primary)' : 'transparent', 
+                            padding: '5px 10px', fontSize: '10px', borderRadius: '5px'
+                          }}
+                          onClick={() => {
+                            setTransferFilter('TODAY');
+                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                            if (activeAcc) loadTransfers(activeAcc.phone, 'TODAY');
+                          }}
+                        >
+                          Сегодня
+                        </button>
+                      </div>
+
+                      <button 
+                        type="button" 
+                        className="btn btn-secondary" 
+                        style={{ padding: '8px 12px' }}
+                        onClick={() => {
+                          const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
+                          if (activeAcc) loadTransfers(activeAcc.phone, transferFilter);
+                        }}
+                        disabled={fetchingTransfers}
+                      >
+                        {fetchingTransfers ? '🔄' : 'Refresh'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Transfers List */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flexGrow: 1 }}>
+                  {fetchingTransfers ? (
+                    <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
+                      <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+                      <p>Синхронизация передач через Playwright...</p>
+                    </div>
+                  ) : transfers.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
+                      <p>Заказов к передаче не найдено.</p>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {transfers.map((trans) => (
+                        <div 
+                          key={trans.id} 
+                          style={{ 
+                            padding: '16px', 
+                            background: 'rgba(255, 255, 255, 0.02)', 
+                            borderRadius: '12px',
+                            border: '1px solid rgba(255, 255, 255, 0.04)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>Заказ #{trans.id}</h3>
+                              <span 
+                                className="badge" 
+                                style={{ 
+                                  background: trans.deliveryType === 'Express' ? 'linear-gradient(90deg, #c92c3c, #f43f5e)' : 'rgba(255,255,255,0.05)',
+                                  color: '#fff', border: '1px solid rgba(255,255,255,0.08)'
+                                }}
+                              >
+                                {trans.deliveryType}
+                              </span>
+                            </div>
+                            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Срок: {trans.deadline}</span>
+                          </div>
+                          
+                          <div style={{ fontSize: '13px', color: '#9ca3af', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span>📍 Адрес: </span>
+                            <span style={{ color: '#fff' }}>{trans.address}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
 
           </div>
         </div>

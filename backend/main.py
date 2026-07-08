@@ -30,6 +30,9 @@ class Command:
     VERIFY_SESSION = "verify_session"
     FETCH_PRODUCTS = "fetch_products"
     PRODUCT_ACTION = "product_action"
+    FETCH_ORDERS = "fetch_orders"
+    PACK_ORDER = "pack_order"
+    FETCH_TRANSFERS = "fetch_transfers"
     CLEANUP = "cleanup"
 
 class PlaywrightWorker(threading.Thread):
@@ -125,144 +128,10 @@ class PlaywrightWorker(threading.Thread):
                             temp_context = temp_browser.new_context(storage_state=state_path)
                             temp_page = temp_context.new_page()
                             
-                            # Determine start/end Kaspi pages
-                            start_idx = (page_num - 1) * page_size
-                            end_idx = page_num * page_size
-                            kaspi_start_page = (start_idx // 10) + 1
-                            kaspi_end_page = ((end_idx - 1) // 10) + 1
+                            from backend.kaspi_wrapper import KaspiWrapper
+                            result_data = KaspiWrapper.scrape_products(temp_page, status, page_num, search_query, page_size)
                             
-                            combined_products = []
-                            scraped_total = None
-                            
-                            # JS DOM scraper
-                            js_code = """
-                            () => {
-                                const items = [];
-                                const elements = document.querySelectorAll('tr, .product-item, .card, [role="row"]');
-                                elements.forEach((el, index) => {
-                                    const text = el.innerText || '';
-                                    if (text.includes('\u20b8') && (text.includes('\u0448\u0442') || text.includes('\u0418\u0437\u043c\u0435\u043d\u0438\u0442\u044c') || text.includes('\u041a\u043e\u0434'))) {
-                                        const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
-                                        if (lines.length >= 2) {
-                                            const priceMatch = text.match(/(\\d[\\d\\s]*)\\s*\u20b8/);
-                                            const price = priceMatch ? priceMatch[0] : '\u0426\u0435\u043d\u0430 \u043d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d\u0430';
-                                            
-                                            const name = lines[0];
-                                            let sku = 'N/A';
-                                            for (const line of lines) {
-                                                if (line.toLowerCase().includes('\u043a\u043e\u0434') || line.toLowerCase().includes('sku')) {
-                                                    sku = line;
-                                                    break;
-                                                }
-                                            }
-                                            
-                                            const linkEl = el.querySelector('a[href*="/shop/p/"], a');
-                                            const href = linkEl ? linkEl.href : '';
-                                            
-                                            items.push({
-                                                "id": String(index + 1),
-                                                "name": name,
-                                                "sku": sku,
-                                                "price": price,
-                                                "status": text.includes('\u0412 \u0430\u0440\u0445\u0438\u0432\u0435') || text.includes('\u0421\u043d\u044f\u0442 \u0441 \u043f\u0440\u043e\u0434\u0430\u0436\u0438') ? '\u0410\u0440\u0445\u0438\u0432' : '\u0410\u043a\u0442\u0438\u0432\u0435\u043d',
-                                                "url": href
-                                            });
-                                        }
-                                    }
-                                });
-                                return items;
-                            }
-                            """
-                            
-                            # Scrape the range of Kaspi pages under the hood
-                            for k_page in range(kaspi_start_page, kaspi_end_page + 1):
-                                try:
-                                    temp_page.goto(f"https://kaspi.kz/mc/#/products?status={status}&page={k_page}")
-                                    temp_page.wait_for_timeout(4000)
-                                    
-                                    # If redirected to login page, the session is expired
-                                    if "login" in temp_page.url:
-                                        raise Exception("Сессия авторизации Kaspi истекла. Пожалуйста, выполните вход заново.")
-                                    
-                                    # If search query is provided
-                                    if search_query:
-                                        try:
-                                            searchbox = temp_page.get_by_role("searchbox", name="Артикул/Товар")
-                                            searchbox.click()
-                                            searchbox.fill(search_query)
-                                            searchbox.press("Enter")
-                                            temp_page.wait_for_timeout(3000)
-                                        except Exception as search_err:
-                                            print(f"Search automation failed on page {k_page}: {search_err}")
-                                    
-                                    # Scrape total items count from page if visible
-                                    if scraped_total is None:
-                                        try:
-                                            tab_text = temp_page.evaluate("() => document.body.innerText")
-                                            if status == "active":
-                                                match = re.search(r"В продаже\s*\((\d+)\)", tab_text)
-                                            else:
-                                                match = re.search(r"Сняты с продажи\s*\((\d+)\)", tab_text)
-                                            if match:
-                                                scraped_total = int(match.group(1))
-                                        except:
-                                            pass
-                                            
-                                    page_items = temp_page.evaluate(js_code)
-                                    if page_items:
-                                        combined_products.extend(page_items)
-                                except Exception as page_err:
-                                    print(f"Error scraping Kaspi page {k_page}: {page_err}")
-                                    raise page_err
-                                    
                             temp_browser.close()
-                            
-                            # Determine product lists & total counts (with exact match counts from codegen4.py)
-                            if status == "active":
-                                total_count = scraped_total if scraped_total is not None else 904
-                            else:
-                                total_count = scraped_total if scraped_total is not None else 478
-                                
-                            # Slice combined products if we successfully scraped them
-                            if combined_products:
-                                offset = start_idx - (kaspi_start_page - 1) * 10
-                                sliced_products = combined_products[offset : offset + page_size]
-                            else:
-                                # Fallback mock data generation (dynamic size matching)
-                                mock_list = [
-                                    {"id": "1", "name": "Смартфон Xiaomi Redmi Note 13 Pro 8/256GB Black", "sku": "102934", "price": "124 990 ₸", "status": "Активен", "url": "https://kaspi.kz/shop/p/xiaomi-redmi-note-13-pro-8-256gb-black-1102934/"},
-                                    {"id": "2", "name": "Наушники Apple AirPods 3 Lightning", "sku": "102935", "price": "94 990 ₸", "status": "Активен", "url": "https://kaspi.kz/shop/p/apple-airpods-3-lightning-1102935/"},
-                                    {"id": "3", "name": "Фен Dyson HD07 Supersonic Fuchsia", "sku": "102936", "price": "229 990 ₸", "status": "Архив", "url": "https://kaspi.kz/shop/p/dyson-hd07-supersonic-fuchsia-1102936/"},
-                                    {"id": "4", "name": "Декоративная свеча Home Aroma Свечи арома кубик 854 6 см, 1 шт", "sku": "146010681", "price": "2 490 ₸", "status": "Активен", "url": "https://kaspi.kz/shop/p/dekorativnaja-svecha-home-aroma-svechi-aroma-kubik-854-6-sm-1-sht-146010681/"},
-                                    {"id": "5", "name": "Аромадиффузор Breesal Ароматический диффузор Фруктовый соблазн 70 мл", "sku": "D655-0006", "price": "3 190 ₸", "status": "Архив", "url": "https://kaspi.kz/shop/p/breesal-aromadiffuzor-fruktovyj-soblazn-70-ml-D6880006/"},
-                                ]
-                                
-                                full_list = []
-                                for i in range(total_count):
-                                    base = mock_list[i % len(mock_list)]
-                                    full_list.append({
-                                        "id": str(i + 1),
-                                        "name": f"{base['name']} #{i + 1}" if i >= len(mock_list) else base['name'],
-                                        "sku": f"Код: {base['sku']}-{i + 1}" if i >= len(mock_list) else f"Код: {base['sku']}",
-                                        "price": base["price"],
-                                        "status": "Активен" if status == "active" else "Архив",
-                                        "url": base["url"]
-                                    })
-                                    
-                                if search_query:
-                                    q = search_query.lower()
-                                    full_list = [p for p in full_list if q in p["name"].lower() or q in p["sku"].lower()]
-                                    total_count = len(full_list)
-                                    
-                                sliced_products = full_list[start_idx : start_idx + page_size]
-                                
-                            total_pages = math.ceil(total_count / page_size)
-                            
-                            result_data = {
-                                "products": sliced_products,
-                                "total_count": total_count,
-                                "total_pages": total_pages
-                            }
                             self.result_queue.put((True, result_data))
                         except Exception as inner_e:
                             try:
@@ -277,64 +146,87 @@ class PlaywrightWorker(threading.Thread):
                         if not os.path.exists(state_path):
                             raise Exception("Сессия авторизации не найдена.")
                         
-                        temp_browser = playwright.chromium.launch(headless=False)
+                        temp_browser = playwright.chromium.launch(headless=True)
                         try:
                             temp_context = temp_browser.new_context(storage_state=state_path)
                             temp_page = temp_context.new_page()
-                            temp_page.goto("https://kaspi.kz/mc/#/products")
-                            temp_page.wait_for_timeout(4000)
                             
-                            # Search the specific product row
-                            clean_sku = "".join(c for c in sku if c.isalnum() or c == "-")
-                            searchbox = temp_page.get_by_role("searchbox", name="Артикул/Товар")
-                            searchbox.click()
-                            searchbox.fill(clean_sku)
-                            searchbox.press("Enter")
-                            temp_page.wait_for_timeout(3000)
+                            from backend.kaspi_wrapper import KaspiWrapper
+                            msg = KaspiWrapper.perform_product_action(temp_page, sku, action_type, payload)
                             
-                            # Click dropdown options for the row
-                            more_btn = temp_page.get_by_role("img", name="more").first
-                            more_btn.click()
-                            temp_page.wait_for_timeout(1000)
-                            
-                            if action_type == "edit":
-                                price, stock = payload
-                                temp_page.get_by_role("listitem").filter(has_text="Изменить цену и остатки").click()
-                                temp_page.wait_for_timeout(1000)
-                                
-                                price_input = temp_page.get_by_role("textbox", name="Цена, ₸")
-                                price_input.click()
-                                price_input.press("Control+A")
-                                price_input.type(str(price))
-                                
-                                stock_input = temp_page.get_by_role("textbox", name="Остатки от 0 до 10000 шт")
-                                stock_input.click()
-                                stock_input.press("Control+A")
-                                stock_input.type(str(stock))
-                                
-                                temp_page.get_by_test_id("stocks-modal-save").click()
-                                temp_page.wait_for_timeout(2000)
-                                
-                            elif action_type == "archive":
-                                temp_page.get_by_role("listitem").filter(has_text="Снять с продажи").click()
-                                temp_page.wait_for_timeout(2000)
-                                
-                            elif action_type == "publish":
-                                price, stock = payload
-                                temp_page.get_by_role("listitem").filter(has_text="Выставить на продажу").click()
-                                temp_page.wait_for_timeout(1000)
-                                
-                                stock_input = temp_page.get_by_role("textbox", name="Остатки от 0 до 10000 шт")
-                                stock_input.click()
-                                stock_input.press("Control+A")
-                                stock_input.type(str(stock))
-                                
-                                temp_page.get_by_test_id("stocks-modal-save").click()
-                                temp_page.wait_for_timeout(2000)
-                                
                             temp_context.storage_state(path=state_path)
                             temp_browser.close()
-                            self.result_queue.put((True, f"Product {action_type} action completed successfully"))
+                            self.result_queue.put((True, msg))
+                        except Exception as inner_e:
+                            try:
+                                temp_browser.close()
+                            except:
+                                pass
+                            raise inner_e
+
+                    elif cmd == Command.FETCH_ORDERS:
+                        phone, status = data
+                        state_path = get_state_file_path(phone)
+                        if not os.path.exists(state_path):
+                            raise Exception("Сессия авторизации не найдена.")
+                        
+                        temp_browser = playwright.chromium.launch(headless=True)
+                        try:
+                            temp_context = temp_browser.new_context(storage_state=state_path)
+                            temp_page = temp_context.new_page()
+                            
+                            from backend.kaspi_wrapper import KaspiWrapper
+                            orders = KaspiWrapper.fetch_orders(temp_page, status)
+                            
+                            temp_browser.close()
+                            self.result_queue.put((True, orders))
+                        except Exception as inner_e:
+                            try:
+                                temp_browser.close()
+                            except:
+                                pass
+                            raise inner_e
+
+                    elif cmd == Command.PACK_ORDER:
+                        phone, order_id = data
+                        state_path = get_state_file_path(phone)
+                        if not os.path.exists(state_path):
+                            raise Exception("Сессия авторизации не найдена.")
+                        
+                        temp_browser = playwright.chromium.launch(headless=True)
+                        try:
+                            temp_context = temp_browser.new_context(storage_state=state_path)
+                            temp_page = temp_context.new_page()
+                            
+                            from backend.kaspi_wrapper import KaspiWrapper
+                            success = KaspiWrapper.pack_order(temp_page, order_id)
+                            
+                            temp_context.storage_state(path=state_path)
+                            temp_browser.close()
+                            self.result_queue.put((True, success))
+                        except Exception as inner_e:
+                            try:
+                                temp_browser.close()
+                            except:
+                                pass
+                            raise inner_e
+
+                    elif cmd == Command.FETCH_TRANSFERS:
+                        phone, delivery_filter = data
+                        state_path = get_state_file_path(phone)
+                        if not os.path.exists(state_path):
+                            raise Exception("Сессия авторизации не найдена.")
+                        
+                        temp_browser = playwright.chromium.launch(headless=True)
+                        try:
+                            temp_context = temp_browser.new_context(storage_state=state_path)
+                            temp_page = temp_context.new_page()
+                            
+                            from backend.kaspi_wrapper import KaspiWrapper
+                            transfers = KaspiWrapper.fetch_transfers(temp_page, delivery_filter)
+                            
+                            temp_browser.close()
+                            self.result_queue.put((True, transfers))
                         except Exception as inner_e:
                             try:
                                 temp_browser.close()
@@ -439,6 +331,31 @@ def run_product_action(req: ProductActionRequest):
     if not success:
         raise HTTPException(status_code=400, detail=str(msg))
     return {"success": True, "message": msg}
+
+@app.get("/api/orders")
+def get_orders(phone: str = Query(...), status: str = Query("KASPI_DELIVERY_CARGO_ASSEMBLY")):
+    success, data = worker.send_cmd(Command.FETCH_ORDERS, (phone, status))
+    if not success:
+        raise HTTPException(status_code=400, detail=str(data))
+    return {"success": True, "orders": data}
+
+class PackOrderRequest(BaseModel):
+    phone: str
+    order_id: str
+
+@app.post("/api/orders/pack")
+def pack_order(req: PackOrderRequest):
+    success, data = worker.send_cmd(Command.PACK_ORDER, (req.phone, req.order_id))
+    if not success:
+        raise HTTPException(status_code=400, detail=str(data))
+    return {"success": True, "message": "Заказ успешно собран (накладные сформированы)"}
+
+@app.get("/api/transfers")
+def get_transfers(phone: str = Query(...), filter: str = Query("ALL")):
+    success, data = worker.send_cmd(Command.FETCH_TRANSFERS, (phone, filter))
+    if not success:
+        raise HTTPException(status_code=400, detail=str(data))
+    return {"success": True, "transfers": data}
 
 @app.post("/api/close")
 def close_session():
