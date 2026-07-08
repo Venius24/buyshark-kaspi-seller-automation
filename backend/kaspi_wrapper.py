@@ -254,9 +254,9 @@ class KaspiWrapper:
         # Click "Упаковка" link if it exists (navigates to packaging sub-section)
         try:
             packaging_link = page.get_by_role("link", name="Упаковка")
-            if packaging_link.is_visible(timeout=3000):
-                packaging_link.click()
-                page.wait_for_timeout(3000)
+            packaging_link.wait_for(state="visible", timeout=3000)
+            packaging_link.click()
+            page.wait_for_timeout(3000)
         except Exception:
             pass
         
@@ -267,7 +267,7 @@ class KaspiWrapper:
             print(f"[KaspiWrapper] Orders selector timed out: {err}")
             
         js_code = """
-        () => {
+        (pageNum) => {
             const orders = [];
             // Try cargo-assembly divs first (from codegen_sliced), then fallback to rows
             let elements = document.querySelectorAll('.cargo-assembly > div, .order-row');
@@ -321,7 +321,9 @@ class KaspiWrapper:
                     "price": price,
                     "productName": productName,
                     "quantity": qty,
-                    "status": text.includes('Сформировать') ? 'Assembling' : 'New'
+                    "status": text.includes('Сформировать') ? 'Assembling' : 'New',
+                    "pageNumber": pageNum,
+                    "_sourcePage": pageNum
                 });
             });
             
@@ -329,64 +331,112 @@ class KaspiWrapper:
         }
         """
         
+        import datetime
+        import math
+
+        def log_msg(msg: str):
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+            print(f"[{timestamp}] {msg}", flush=True)
+
+        total_pages_needed = math.ceil(limit / 10)
+        log_msg(f"Запрос {limit} заказов (требуется страниц: {total_pages_needed})...")
+
         all_orders = []
         seen_ids = set()
         
-        # Scrape first page
-        page_orders = page.evaluate(js_code)
-        for order in page_orders:
-            if order["id"] not in seen_ids:
-                seen_ids.add(order["id"])
-                all_orders.append(order)
-        
-        print(f"[KaspiWrapper] Page 1: scraped {len(page_orders)} orders")
-        
-        # Paginate through additional pages if we need more orders
-        max_pages = (limit // 10) + 2  # Safety cap to avoid infinite loops
         current_page_num = 1
         
-        while len(all_orders) < limit and current_page_num < max_pages:
-            # Try clicking the "Next page" button
-            try:
-                next_btn = page.get_by_role("button", name="Next page").first
-                if not next_btn.is_visible(timeout=2000):
-                    print(f"[KaspiWrapper] No more pages available (Next page button not visible)")
+        while current_page_num <= total_pages_needed:
+            # Scrape current page
+            page_orders = page.evaluate(js_code, current_page_num)
+            
+            new_count = 0
+            for order in page_orders:
+                if order["id"] not in seen_ids:
+                    seen_ids.add(order["id"])
+                    all_orders.append(order)
+                    new_count += 1
+            
+            log_msg(f"Стр. {current_page_num}/{total_pages_needed}: Загружено {len(page_orders)} заказов.")
+            
+            # If we already have enough orders, or if this page returned 0 orders, we can stop
+            if len(all_orders) >= limit:
+                break
+                
+            if len(page_orders) == 0:
+                break
+
+            # Try to navigate to the next page
+            if current_page_num < total_pages_needed:
+                next_page_num = current_page_num + 1
+                clicked = False
+                
+                # List of possible ways to click the next page button
+                try:
+                    btn = page.get_by_role("button", name=f"Страница {next_page_num}.").first
+                    btn.wait_for(state="visible", timeout=1000)
+                    btn.click()
+                    clicked = True
+                except Exception:
+                    pass
+                    
+                if not clicked:
+                    try:
+                        btn = page.get_by_role("button", name=f"Page {next_page_num}.").first
+                        btn.wait_for(state="visible", timeout=1000)
+                        btn.click()
+                        clicked = True
+                    except Exception:
+                        pass
+                        
+                if not clicked:
+                    try:
+                        btn = page.get_by_role("button", name=f"{next_page_num}").first
+                        btn.wait_for(state="visible", timeout=1000)
+                        btn.click()
+                        clicked = True
+                    except Exception:
+                        pass
+                        
+                if not clicked:
+                    try:
+                        btn = page.get_by_role("button", name="Next page").first
+                        btn.wait_for(state="visible", timeout=1000)
+                        btn.click()
+                        clicked = True
+                    except Exception:
+                        pass
+                        
+                if not clicked:
+                    # Try class-based or aria-based selectors
+                    for sel in [".pagination-next", ".next", ".arrow-right", "button.next", "[aria-label='Next page']", "[aria-label='Следующая страница']"]:
+                        try:
+                            btn = page.locator(sel).first
+                            btn.wait_for(state="visible", timeout=500)
+                            btn.click()
+                            clicked = True
+                            break
+                        except Exception:
+                            pass
+                
+                if not clicked:
+                    log_msg(f"Не удалось найти кнопку перехода на страницу {next_page_num}. Завершаем пагинацию.")
                     break
                 
-                next_btn.click()
+                # Wait for navigation/render
                 page.wait_for_timeout(2000)
-                
-                # Wait for content to update
                 try:
-                    page.wait_for_load_state("networkidle", timeout=8000)
+                    page.wait_for_load_state("networkidle", timeout=5000)
                 except Exception:
                     pass
                 page.wait_for_timeout(1000)
                 
-                current_page_num += 1
-                page_orders = page.evaluate(js_code)
-                
-                new_count = 0
-                for order in page_orders:
-                    if order["id"] not in seen_ids:
-                        seen_ids.add(order["id"])
-                        all_orders.append(order)
-                        new_count += 1
-                
-                print(f"[KaspiWrapper] Page {current_page_num}: scraped {len(page_orders)} orders ({new_count} new)")
-                
-                # If no new orders found, we've reached the end
-                if new_count == 0:
-                    print(f"[KaspiWrapper] No new orders on page {current_page_num}, stopping pagination")
-                    break
-                    
-            except Exception as page_err:
-                print(f"[KaspiWrapper] Pagination stopped: {page_err}")
-                break
+            current_page_num += 1
+            
+        log_msg(f"Итого собрано: {len(all_orders)} заказов с {min(current_page_num, total_pages_needed)} страниц.")
         
         # Trim to requested limit
         result = all_orders[:limit]
-        print(f"[KaspiWrapper] Total fetched {len(result)} orders (limit={limit}) for status={status}")
         return result
 
     @staticmethod
@@ -434,7 +484,7 @@ class KaspiWrapper:
         for i in range(checkbox_count):
             try:
                 cb = checkboxes.nth(i)
-                if cb.is_visible(timeout=1000):
+                if cb.is_visible():
                     cb.click()
                     clicked += 1
                     page.wait_for_timeout(300)  # Small delay between clicks
@@ -461,13 +511,13 @@ class KaspiWrapper:
             return {"packed": 0, "message": f"Ошибка при нажатии кнопки: {str(btn_err)}"}
 
     @staticmethod
-    def pack_order(page: Page, order_id: str) -> bool:
+    def pack_order(page: Page, order_id: str, page_num: int = 1) -> bool:
         """
         Selects order checkbox by order_id and clicks 'Сформировать накладные'.
         Checkbox selector from codegen_sliced.py:
         .b-tooltip.is-dark.is-right > .tooltip-trigger > .b-checkbox > .check
         """
-        page.goto("https://kaspi.kz/mc/#/orders?status=KASPI_DELIVERY_CARGO_ASSEMBLY", wait_until="domcontentloaded")
+        page.goto(f"https://kaspi.kz/mc/#/orders?status=KASPI_DELIVERY_CARGO_ASSEMBLY&page={page_num}", wait_until="domcontentloaded")
         
         try:
             page.wait_for_load_state("networkidle", timeout=15000)
@@ -479,6 +529,25 @@ class KaspiWrapper:
         if "login" in page.url:
             raise Exception("Сессия авторизации Kaspi истекла. Пожалуйста, выполните вход заново.")
         
+        # Click the pagination button as a fallback if page_num > 1
+        if page_num > 1:
+            try:
+                clicked = False
+                for candidate_name in [f"Страница {page_num}.", f"Page {page_num}.", f"{page_num}"]:
+                    btn = page.get_by_role("button", name=candidate_name).first
+                    if btn.is_visible():
+                        btn.click()
+                        clicked = True
+                        break
+                if clicked:
+                    page.wait_for_timeout(2000)
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=5000)
+                    except Exception:
+                        pass
+            except Exception as nav_err:
+                print(f"[KaspiWrapper] Fallback pagination navigation error: {nav_err}")
+        
         # Wait for order content
         try:
             page.wait_for_selector('.cargo-assembly, table tbody tr', timeout=10000)
@@ -487,13 +556,12 @@ class KaspiWrapper:
         
         # Find the row containing this order ID
         row = page.locator(f'div:has-text("{order_id}"), tr:has-text("{order_id}")').first
-        if not row.is_visible(timeout=5000):
-            raise Exception(f"Заказ #{order_id} не найден на странице.")
+        row.wait_for(state="visible", timeout=5000)
             
         # Click the checkbox — use the exact selector from codegen_sliced.py
         try:
             checkbox = row.locator('.b-tooltip.is-dark.is-right .tooltip-trigger .b-checkbox .check').first
-            if checkbox.is_visible(timeout=3000):
+            if checkbox.is_visible():
                 checkbox.click()
             else:
                 # Fallback to any checkbox in the row
@@ -511,7 +579,7 @@ class KaspiWrapper:
         pack_btn.click()
         page.wait_for_timeout(4000)
         
-        print(f"[KaspiWrapper] Packed order {order_id}")
+        print(f"[KaspiWrapper] Packed order {order_id} on page {page_num}")
         return True
 
     @staticmethod
@@ -540,13 +608,9 @@ class KaspiWrapper:
         try:
             # Try finding link that contains text "Передача" (partial match)
             transfer_link = page.locator('a:has-text("Передача")').first
-            if transfer_link.is_visible(timeout=5000):
-                transfer_link.click()
-                page.wait_for_timeout(3000)
-            else:
-                print("[KaspiWrapper] 'Передача' link not visible, trying alternative navigation")
-                page.goto("https://kaspi.kz/mc/#/orders?status=SIGN_REQUIRED", wait_until="domcontentloaded")
-                page.wait_for_timeout(3000)
+            transfer_link.wait_for(state="visible", timeout=5000)
+            transfer_link.click()
+            page.wait_for_timeout(3000)
         except Exception as nav_err:
             print(f"[KaspiWrapper] Navigation to Передача failed: {nav_err}")
             # Fallback: try direct navigation
@@ -557,16 +621,16 @@ class KaspiWrapper:
         try:
             if delivery_filter == "ALL":
                 filter_el = page.locator("#ALL_DELIVERIES-label")
-                if filter_el.is_visible(timeout=3000):
-                    filter_el.click()
+                filter_el.wait_for(state="visible", timeout=3000)
+                filter_el.click()
             elif delivery_filter == "EXPRESS":
                 filter_el = page.locator("#EXPRESS_DELIVERY-label")
-                if filter_el.is_visible(timeout=3000):
-                    filter_el.click()
+                filter_el.wait_for(state="visible", timeout=3000)
+                filter_el.click()
             elif delivery_filter == "TODAY":
                 filter_el = page.locator("#TODAY_20-label")
-                if filter_el.is_visible(timeout=3000):
-                    filter_el.click()
+                filter_el.wait_for(state="visible", timeout=3000)
+                filter_el.click()
             page.wait_for_timeout(2000)
         except Exception as filter_err:
             print(f"[KaspiWrapper] Filter application failed: {filter_err}")

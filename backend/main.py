@@ -189,7 +189,7 @@ class PlaywrightWorker(threading.Thread):
                             raise inner_e
 
                     elif cmd == Command.PACK_ORDER:
-                        phone, order_id = data
+                        phone, order_id, page_num = data
                         state_path = get_state_file_path(phone)
                         if not os.path.exists(state_path):
                             raise Exception("Сессия авторизации не найдена.")
@@ -200,7 +200,7 @@ class PlaywrightWorker(threading.Thread):
                             temp_page = temp_context.new_page()
                             
                             from backend.kaspi_wrapper import KaspiWrapper
-                            success = KaspiWrapper.pack_order(temp_page, order_id)
+                            success = KaspiWrapper.pack_order(temp_page, order_id, page_num)
                             
                             temp_context.storage_state(path=state_path)
                             temp_browser.close()
@@ -367,10 +367,11 @@ def get_orders(phone: str = Query(...), status: str = Query("KASPI_DELIVERY_CARG
 class PackOrderRequest(BaseModel):
     phone: str
     order_id: str
+    page_num: int = 1
 
 @app.post("/api/orders/pack")
 def pack_order(req: PackOrderRequest):
-    success, data = worker.send_cmd(Command.PACK_ORDER, (req.phone, req.order_id))
+    success, data = worker.send_cmd(Command.PACK_ORDER, (req.phone, req.order_id, req.page_num))
     if not success:
         raise HTTPException(status_code=400, detail=str(data))
     return {"success": True, "message": "Заказ успешно собран (накладные сформированы)"}

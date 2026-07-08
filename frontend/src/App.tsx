@@ -182,18 +182,18 @@ export default function App() {
     }
   };
 
-  const packOrder = async (phone: string, orderId: string) => {
-    addLog(`Запуск автоматической сборки заказа #${orderId}...`);
+  const packOrder = async (phone: string, orderId: string, pageNum: number = 1) => {
+    addLog(`Запуск автоматической сборки заказа #${orderId} (Стр: ${pageNum})...`);
     try {
       const res = await fetch(`${API_URL}/api/orders/pack`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, order_id: orderId }),
+        body: JSON.stringify({ phone, order_id: orderId, page_num: pageNum }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
         addLog(`Заказ #${orderId} успешно собран, накладные сформированы.`);
-        loadOrders(phone, orderStatusFilter);
+        loadOrders(phone, orderStatusFilter, orderLimit);
       } else {
         addLog(`Не удалось собрать заказ #${orderId}: ${data.detail || 'Ошибка бэкенда'}`);
       }
@@ -1197,7 +1197,7 @@ export default function App() {
                                 style={{ padding: '6px 12px', fontSize: '12px' }}
                                 onClick={() => {
                                   const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                                  if (activeAcc) packOrder(activeAcc.phone, order.id);
+                                  if (activeAcc) packOrder(activeAcc.phone, order.id, order.pageNumber || 1);
                                 }}
                               >
                                 📦 Собрать заказ
