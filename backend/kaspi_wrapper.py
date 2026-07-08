@@ -6,10 +6,8 @@ class KaspiWrapper:
     @staticmethod
     def scrape_products(page: Page, status: str, page_num: int, search_query: str, page_size: int) -> dict:
         """
-        Scrapes products from the Kaspi Merchant Cabinet.
-        Navigation mirrors codegen3/codegen_sliced: goto MC orders page first,
-        then click "Управление товарами" or navigate via hash URL and wait for
-        the SPA to fully render the product list.
+        Scrapes products from the Kaspi Merchant Cabinet by intercepting
+        the bff/offer-view/list JSON API response.
         """
         # Determine start/end Kaspi pages (Kaspi shows 10 items per page)
         start_idx = (page_num - 1) * page_size
@@ -18,150 +16,58 @@ class KaspiWrapper:
         kaspi_end_page = ((end_idx - 1) // 10) + 1
         
         combined_products = []
-        scraped_total = None
-        
-        # Improved JS DOM Scraper — targets product list items more precisely
-        js_code = """
-        () => {
-            const items = [];
-            // Kaspi MC product page renders products in a list/table structure
-            // Try multiple selectors that match Kaspi's actual DOM
-            let elements = document.querySelectorAll('.product-list-item, .product-row, .b-table tbody tr');
-            
-            // Fallback: if specific selectors found nothing, try generic table rows
-            if (elements.length === 0) {
-                elements = document.querySelectorAll('table tbody tr, .products-table tr');
-            }
-            
-            // Final fallback: any row-like element that contains price symbol
-            if (elements.length === 0) {
-                const allRows = document.querySelectorAll('tr, [role="row"], .card');
-                elements = Array.from(allRows).filter(el => {
-                    const text = el.innerText || '';
-                    return text.includes('₸') && text.split('\\n').filter(Boolean).length >= 2;
-                });
-            }
-            
-            elements.forEach((el, index) => {
-                const text = el.innerText || '';
-                if (!text.includes('₸')) return;
-                
-                const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
-                if (lines.length < 2) return;
-                
-                // Skip header rows
-                if (text.includes('Артикул/Товар') && text.includes('Категория')) return;
-                
-                const priceMatch = text.match(/(\\d[\\d\\s]*)\\s*₸/);
-                const price = priceMatch ? priceMatch[0] : 'Цена не указана';
-                
-                // Product name is typically the first meaningful line
-                let name = lines[0];
-                // If first line looks like just a number or checkbox, try next
-                if (/^\\d+$/.test(name) || name.length < 3) {
-                    name = lines.length > 1 ? lines[1] : name;
-                }
-                
-                let sku = 'N/A';
-                for (const line of lines) {
-                    if (line.toLowerCase().includes('код') || line.toLowerCase().includes('sku')) {
-                        sku = line;
-                        break;
-                    }
-                }
-                // Try matching alphanumeric/dash article codes (like D655-0006, S517-0015)
-                if (sku === 'N/A') {
-                    for (let i = 1; i < lines.length; i++) {
-                        const line = lines[i];
-                        if (/^[A-Za-z0-9][A-Za-z0-9_-]{3,24}$/.test(line) && !line.includes('₸')) {
-                            sku = line;
-                            break;
-                        }
-                    }
-                }
-                
-                const linkEl = el.querySelector('a[href*="/shop/p/"], a[href*="products"]');
-                const href = linkEl ? linkEl.href : '';
-                
-                items.push({
-                    "id": String(index + 1),
-                    "name": name,
-                    "sku": sku,
-                    "price": price,
-                    "status": (text.includes('В архиве') || text.includes('Снят с продажи')) ? 'Архив' : 'Активен',
-                    "url": href
-                });
-            });
-            return items;
-        }
-        """
+        total_count = 0
+        api_status = "true" if status == "active" else "false"
         
         for k_page in range(kaspi_start_page, kaspi_end_page + 1):
             url = f"https://kaspi.kz/mc/#/products?status={status}&page={k_page}"
-            page.goto(url, wait_until="domcontentloaded")
             
-            # Wait for SPA to render — use networkidle + extra timeout for JS rendering
             try:
-                page.wait_for_load_state("networkidle", timeout=15000)
-            except Exception:
-                pass
+                # Expect the products list API response
+                with page.expect_response(lambda r: "bff/offer-view/list" in r.url and f"a={api_status}" in r.url, timeout=15000) as response_info:
+                    page.goto(url, wait_until="domcontentloaded")
+                
+                response_data = response_info.value.json()
+                total_count = response_data.get("total", 0)
+                offers = response_data.get("data", [])
+            except Exception as load_err:
+                print(f"[KaspiWrapper] Initial API product load failed on page {k_page}: {load_err}")
+                offers = []
             
-            # Additional wait for SPA content to fully render
-            page.wait_for_timeout(3000)
-            
-            # Check if session expired (redirected to login)
-            if "login" in page.url:
-                raise Exception("Сессия авторизации Kaspi истекла. Пожалуйста, выполните вход заново.")
-            
-            # Try to wait for actual product content
-            try:
-                page.wait_for_selector('table tbody tr, .product-list-item, .product-row', timeout=10000)
-            except Exception as wait_err:
-                print(f"Warning: product selector timed out on page {k_page}: {wait_err}")
-                # Try clicking "Управление товарами" link as fallback (SPA navigation)
-                try:
-                    link = page.get_by_role("link", name="Управление товарами")
-                    if link.is_visible():
-                        link.click()
-                        page.wait_for_timeout(3000)
-                except Exception:
-                    pass
-            
-            if search_query:
+            # If search is requested, enter search query in DOM and expect updated response
+            if search_query and offers:
                 try:
                     searchbox = page.get_by_role("searchbox", name="Артикул/Товар")
                     searchbox.click()
                     searchbox.fill(search_query)
-                    searchbox.press("Enter")
-                    page.wait_for_timeout(3000)
-                except Exception as search_err:
-                    print(f"Search automation failed on page {k_page}: {search_err}")
-            
-            # Scrape total items count from tab text: "В продаже (904)" or "Сняты с продажи (478)"
-            if scraped_total is None:
-                try:
-                    tab_text = page.evaluate("() => document.body.innerText")
-                    if status == "active":
-                        match = re.search(r"В продаже\s*\((\d+)\)", tab_text)
-                    elif status == "archive":
-                        match = re.search(r"Сняты с продажи\s*\((\d+)\)", tab_text)
-                    else:
-                        match = re.search(r"\((\d+)\)", tab_text)
-                    if match:
-                        scraped_total = int(match.group(1))
-                        print(f"[KaspiWrapper] Found total count: {scraped_total} for status={status}")
-                except Exception as count_err:
-                    print(f"[KaspiWrapper] Could not parse total count: {count_err}")
                     
-            page_items = page.evaluate(js_code)
-            print(f"[KaspiWrapper] Page {k_page}: scraped {len(page_items)} items")
-            if page_items:
-                combined_products.extend(page_items)
+                    with page.expect_response(lambda r: "bff/offer-view/list" in r.url, timeout=10000) as search_response_info:
+                        searchbox.press("Enter")
+                    
+                    response_data = search_response_info.value.json()
+                    total_count = response_data.get("total", 0)
+                    offers = response_data.get("data", [])
+                except Exception as search_err:
+                    print(f"[KaspiWrapper] API product search failed: {search_err}")
+            
+            # Map products from JSON
+            for idx, item in enumerate(offers):
+                master_sku = item.get("masterSku")
+                product_url = f"https://kaspi.kz/shop/p/-{master_sku}/" if master_sku else ""
                 
+                combined_products.append({
+                    "id": item.get("offerId", f"{k_page}_{idx}"),
+                    "name": item.get("title", "Товар"),
+                    "sku": item.get("sku", "N/A"),
+                    "price": f"{item.get('price', 0)} ₸",
+                    "status": "Активен" if item.get("available") else "Архив",
+                    "url": product_url
+                })
+                
+            print(f"[KaspiWrapper] Page {k_page}: scraped {len(offers)} items via API")
+            
         if search_query:
             total_count = len(combined_products)
-        else:
-            total_count = scraped_total if scraped_total is not None else len(combined_products)
             
         offset = start_idx - (kaspi_start_page - 1) * 10
         sliced_products = combined_products[offset : offset + page_size] if combined_products else []
@@ -238,99 +144,6 @@ class KaspiWrapper:
         Kaspi shows ~10 orders per page. This method will paginate through
         multiple pages to collect up to `limit` orders.
         """
-        page.goto(f"https://kaspi.kz/mc/#/orders?status={status}", wait_until="domcontentloaded")
-        
-        # Wait for SPA to render
-        try:
-            page.wait_for_load_state("networkidle", timeout=15000)
-        except Exception:
-            pass
-        
-        page.wait_for_timeout(3000)
-        
-        if "login" in page.url:
-            raise Exception("Сессия авторизации Kaspi истекла. Пожалуйста, выполните вход заново.")
-        
-        # Click "Упаковка" link if it exists (navigates to packaging sub-section)
-        try:
-            packaging_link = page.get_by_role("link", name="Упаковка")
-            packaging_link.wait_for(state="visible", timeout=3000)
-            packaging_link.click()
-            page.wait_for_timeout(3000)
-        except Exception:
-            pass
-        
-        # Wait for order content to appear
-        try:
-            page.wait_for_selector('.cargo-assembly, .order-list, table tbody tr, [role="row"]', timeout=10000)
-        except Exception as err:
-            print(f"[KaspiWrapper] Orders selector timed out: {err}")
-            
-        js_code = """
-        (pageNum) => {
-            const orders = [];
-            // Try cargo-assembly divs first (from codegen_sliced), then fallback to rows
-            let elements = document.querySelectorAll('.cargo-assembly > div, .order-row');
-            
-            if (elements.length === 0) {
-                elements = document.querySelectorAll('tr, .order-item, .card, [role="row"]');
-            }
-            
-            elements.forEach((el, index) => {
-                const text = el.innerText || '';
-                const idMatch = text.match(/\\b99\\d{7}\\b/);
-                if (!idMatch) return;
-                
-                const orderId = idMatch[0];
-                if (orders.some(o => o.id === orderId)) return;
-                
-                const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
-                
-                let deliveryType = 'Kaspi Доставка';
-                if (text.toLowerCase().includes('express')) deliveryType = 'Express';
-                else if (text.toLowerCase().includes('postomat')) deliveryType = 'Postomat';
-                
-                const timeMatch = text.match(/до \\d{2}:\\d{2}/);
-                const deadline = timeMatch ? timeMatch[0] : 'N/A';
-                
-                const priceMatch = text.match(/(\\d[\\d\\s]*)\\s*₸/);
-                const price = priceMatch ? priceMatch[0] : 'Цена не указана';
-                
-                // Filter out non-product lines to find the product name
-                const itemLines = lines.filter(line => {
-                    const lower = line.toLowerCase();
-                    if (lower.includes('заказ') || lower.includes('доставка') || lower.includes('express') || lower.includes('postomat') || lower.includes('выставить') || lower.includes('сформировать') || lower.includes('накладные') || lower.includes('упаковка') || lower.includes('передача')) return false;
-                    if (line.includes('₸') || /\\b99\\d{7}\\b/.test(line) || /до \\d{2}:\\d{2}/.test(line) || /^\\d{1,2}$/.test(line)) return false;
-                    return line.length > 3;
-                });
-                const productName = itemLines.length > 0 ? itemLines[0] : 'Товар';
-                
-                // Find quantity (single digit number that isn't the order ID)
-                let qty = 1;
-                for (const line of lines) {
-                    if (/^\\d+$/.test(line) && line !== orderId && parseInt(line) < 100 && parseInt(line) > 0) {
-                        qty = parseInt(line);
-                        break;
-                    }
-                }
-                
-                orders.push({
-                    "id": orderId,
-                    "deliveryType": deliveryType,
-                    "deadline": deadline,
-                    "price": price,
-                    "productName": productName,
-                    "quantity": qty,
-                    "status": text.includes('Сформировать') ? 'Assembling' : 'New',
-                    "pageNumber": pageNum,
-                    "_sourcePage": pageNum
-                });
-            });
-            
-            return orders;
-        }
-        """
-        
         import datetime
         import math
 
@@ -343,101 +156,132 @@ class KaspiWrapper:
 
         all_orders = []
         seen_ids = set()
-        
         current_page_num = 1
         
         while current_page_num <= total_pages_needed:
-            # Scrape current page
-            page_orders = page.evaluate(js_code, current_page_num)
-            
+            try:
+                # Expect the GraphQL response
+                with page.expect_response(
+                    lambda r: "graphql" in r.url and "opName=getOrders" in r.url and r.request.method == "POST",
+                    timeout=15000
+                ) as response_info:
+                    if current_page_num == 1:
+                        url = f"https://kaspi.kz/mc/#/orders?status={status}"
+                        page.goto(url, wait_until="domcontentloaded")
+                    else:
+                        clicked = False
+                        for candidate_name in [f"Страница {current_page_num}.", f"Page {current_page_num}.", f"{current_page_num}"]:
+                            try:
+                                btn = page.get_by_role("button", name=candidate_name).first
+                                if btn.is_visible():
+                                    btn.click()
+                                    clicked = True
+                                    break
+                            except Exception:
+                                pass
+                        
+                        if not clicked:
+                            for sel in [".pagination-next", ".next", ".arrow-right", "button.next", "[aria-label='Next page']"]:
+                                try:
+                                    btn = page.locator(sel).first
+                                    if btn.is_visible():
+                                        btn.click()
+                                        clicked = True
+                                        break
+                                except Exception:
+                                    pass
+                                    
+                        if not clicked:
+                            raise Exception(f"Не удалось кликнуть кнопку перехода на страницу {current_page_num}")
+                
+                # Check for login redirection
+                if "login" in page.url:
+                    raise Exception("Сессия авторизации Kaspi истекла. Пожалуйста, выполните вход заново.")
+                
+                # Retrieve JSON
+                response_data = response_info.value.json()
+                
+                # Navigate nested structure
+                merchant = response_data.get("data", {}).get("merchant", {})
+                orders_wrapper = merchant.get("orders", {}) if merchant else {}
+                orders_dict = orders_wrapper.get("orders", {}) if orders_wrapper else {}
+                orders_list = orders_dict.get("orders", []) if orders_dict else []
+                
+                # Dynamic page calculation based on real total count from first page
+                if current_page_num == 1 and orders_dict:
+                    total_orders = orders_dict.get("total", 0)
+                    actual_pages_needed = math.ceil(total_orders / 10)
+                    total_pages_needed = min(total_pages_needed, actual_pages_needed)
+                    log_msg(f"Общее количество заказов: {total_orders}. Корректируем число страниц до: {total_pages_needed}")
+            except Exception as load_err:
+                log_msg(f"Ошибка загрузки страницы {current_page_num}: {load_err}")
+                orders_list = []
+                
+            # If no orders returned on this page, we reached the end
+            if not orders_list:
+                break
+                
             new_count = 0
-            for order in page_orders:
-                if order["id"] not in seen_ids:
-                    seen_ids.add(order["id"])
-                    all_orders.append(order)
+            for order in orders_list:
+                order_id = order.get("code")
+                if not order_id:
+                    continue
+                    
+                if order_id not in seen_ids:
+                    seen_ids.add(order_id)
+                    
+                    # Parse deadline
+                    planning_date = order.get("delivery", {}).get("transmissionPlanningDate")
+                    if planning_date:
+                        try:
+                            time_part = planning_date.split('T')[1][:5]
+                            deadline = f"до {time_part}"
+                        except:
+                            deadline = planning_date
+                    else:
+                        deadline = "N/A"
+                        
+                    # Parse deliveryType
+                    is_express = order.get("delivery", {}).get("isExpress", False)
+                    dest_type = order.get("destination", {}).get("__typename", "")
+                    if is_express:
+                        delivery_type = "Express"
+                    elif dest_type == "Postomat":
+                        delivery_type = "Postomat"
+                    else:
+                        delivery_type = "Kaspi Доставка"
+                        
+                    # Parse entries
+                    entries = order.get("entries", [])
+                    product_name = "Товар"
+                    quantity = 1
+                    if entries:
+                        entry = entries[0]
+                        product_name = entry.get("merchantProduct", {}).get("name") or entry.get("product", {}).get("name") or "Товар"
+                        quantity = entry.get("quantity", 1)
+                        
+                    all_orders.append({
+                        "id": order_id,
+                        "deliveryType": delivery_type,
+                        "deadline": deadline,
+                        "price": f"{int(order.get('totalPrice', 0))} ₸",
+                        "productName": product_name,
+                        "quantity": quantity,
+                        "status": "Assembling" if status == "KASPI_DELIVERY_CARGO_ASSEMBLY" else "New",
+                        "pageNumber": current_page_num,
+                        "_sourcePage": current_page_num
+                    })
                     new_count += 1
+                    
+            log_msg(f"Стр. {current_page_num}/{total_pages_needed}: Загружено {len(orders_list)} заказов.")
             
-            log_msg(f"Стр. {current_page_num}/{total_pages_needed}: Загружено {len(page_orders)} заказов.")
-            
-            # If we already have enough orders, or if this page returned 0 orders, we can stop
             if len(all_orders) >= limit:
                 break
-                
-            if len(page_orders) == 0:
-                break
-
-            # Try to navigate to the next page
-            if current_page_num < total_pages_needed:
-                next_page_num = current_page_num + 1
-                clicked = False
-                
-                # List of possible ways to click the next page button
-                try:
-                    btn = page.get_by_role("button", name=f"Страница {next_page_num}.").first
-                    btn.wait_for(state="visible", timeout=1000)
-                    btn.click()
-                    clicked = True
-                except Exception:
-                    pass
-                    
-                if not clicked:
-                    try:
-                        btn = page.get_by_role("button", name=f"Page {next_page_num}.").first
-                        btn.wait_for(state="visible", timeout=1000)
-                        btn.click()
-                        clicked = True
-                    except Exception:
-                        pass
-                        
-                if not clicked:
-                    try:
-                        btn = page.get_by_role("button", name=f"{next_page_num}").first
-                        btn.wait_for(state="visible", timeout=1000)
-                        btn.click()
-                        clicked = True
-                    except Exception:
-                        pass
-                        
-                if not clicked:
-                    try:
-                        btn = page.get_by_role("button", name="Next page").first
-                        btn.wait_for(state="visible", timeout=1000)
-                        btn.click()
-                        clicked = True
-                    except Exception:
-                        pass
-                        
-                if not clicked:
-                    # Try class-based or aria-based selectors
-                    for sel in [".pagination-next", ".next", ".arrow-right", "button.next", "[aria-label='Next page']", "[aria-label='Следующая страница']"]:
-                        try:
-                            btn = page.locator(sel).first
-                            btn.wait_for(state="visible", timeout=500)
-                            btn.click()
-                            clicked = True
-                            break
-                        except Exception:
-                            pass
-                
-                if not clicked:
-                    log_msg(f"Не удалось найти кнопку перехода на страницу {next_page_num}. Завершаем пагинацию.")
-                    break
-                
-                # Wait for navigation/render
-                page.wait_for_timeout(2000)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=5000)
-                except Exception:
-                    pass
-                page.wait_for_timeout(1000)
                 
             current_page_num += 1
             
         log_msg(f"Итого собрано: {len(all_orders)} заказов с {min(current_page_num, total_pages_needed)} страниц.")
-        
-        # Trim to requested limit
-        result = all_orders[:limit]
-        return result
+        return all_orders[:limit]
 
     @staticmethod
     def pack_all_orders(page: Page) -> dict:
