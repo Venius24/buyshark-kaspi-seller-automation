@@ -1,16 +1,22 @@
+"""
+FastAPI backend — token-first architecture.
+
+Все данные привязаны к токену, не к номеру телефона.
+Токен хранится в states/session.json.
+"""
+
 import os
 import json
-import math
-import queue
-import threading
+import requests
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from playwright.sync_api import sync_playwright
+from backend.kaspi_wrapper import KaspiAPI
 
 app = FastAPI(title="Kaspi SaaS Wrapper API")
 
-# Enable CORS for frontend Vite dev server
+# CORS — разрешаем Vite dev server
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,378 +25,284 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def get_state_file_path(phone: str) -> str:
-    sanitized = "".join(c for c in phone if c.isdigit())
+# Статика для ping-pong
+app.mount("/ping-pong", StaticFiles(directory="api-ping-pong", html=True), name="ping-pong")
+
+# ── Session storage ──────────────────────────────────────────
+
+SESSION_FILE = "states/session.json"
+
+
+def _load_session() -> dict:
+    if os.path.exists(SESSION_FILE):
+        try:
+            with open(SESSION_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_session(data: dict):
     os.makedirs("states", exist_ok=True)
-    return f"states/state_{sanitized}.json"
+    with open(SESSION_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-class Command:
-    START_LOGIN = "start_login"
-    SUBMIT_SMS = "submit_sms"
-    VERIFY_SESSION = "verify_session"
-    FETCH_PRODUCTS = "fetch_products"
-    PRODUCT_ACTION = "product_action"
-    FETCH_ORDERS = "fetch_orders"
-    PACK_ORDER = "pack_order"
-    FETCH_TRANSFERS = "fetch_transfers"
-    PACK_ALL_ORDERS = "pack_all_orders"
-    CLEANUP = "cleanup"
 
-class PlaywrightWorker(threading.Thread):
-    def __init__(self):
-        super().__init__(daemon=True)
-        self.cmd_queue = queue.Queue()
-        self.result_queue = queue.Queue()
-        self.current_phone = None
+def _get_token() -> str:
+    """Retrieve saved token or return None."""
+    session = _load_session()
+    return session.get("token")
 
-    def run(self):
-        with sync_playwright() as playwright:
-            browser = None
-            context = None
-            page = None
-            
-            while True:
-                cmd, data = self.cmd_queue.get()
-                try:
-                    if cmd == Command.START_LOGIN:
-                        phone = data
-                        self.current_phone = phone
-                        
-                        if browser:
-                            try:
-                                browser.close()
-                            except:
-                                pass
-                            browser, context, page = None, None, None
-                        
-                        # Launch headful browser so the user can verify visually/submit sms
-                        browser = playwright.chromium.launch(headless=False)
-                        context = browser.new_context()
-                        page = context.new_page()
-                        
-                        page.goto("https://idmc.shop.kaspi.kz/login")
-                        page.get_by_role("tab", name="Телефон").click()
-                        page.get_by_role("textbox", name="+7 ( ) - -").click()
-                        page.get_by_role("textbox", name="+7 ( ) - -").fill(phone)
-                        page.get_by_role("button", name="Продолжить").click()
-                        
-                        page.wait_for_timeout(1000)
-                        self.result_queue.put((True, "SMS sent to phone"))
-                        
-                    elif cmd == Command.SUBMIT_SMS:
-                        sms = data
-                        if not page:
-                            raise Exception("Сессия авторизации не начата.")
-                        
-                        page.get_by_role("textbox", name="Введите код").click()
-                        page.get_by_role("textbox", name="Введите код").fill(sms)
-                        page.get_by_role("button", name="Продолжить").click()
-                        
-                        page.wait_for_timeout(4000)
-                        
-                        if "login" in page.url:
-                            raise Exception("Вход не удался. Пожалуйста, проверьте код из SMS.")
-                        
-                        # Save session state for the specific phone number
-                        if self.current_phone:
-                            state_path = get_state_file_path(self.current_phone)
-                            context.storage_state(path=state_path)
-                        else:
-                            raise Exception("Не найден привязанный номер телефона для сессии.")
-                        
-                        browser.close()
-                        browser, context, page = None, None, None
-                        self.result_queue.put((True, "Success"))
-                        
-                    elif cmd == Command.VERIFY_SESSION:
-                        phone = data
-                        state_path = get_state_file_path(phone)
-                        if os.path.exists(state_path):
-                            temp_browser = playwright.chromium.launch(headless=True)
-                            temp_context = temp_browser.new_context(storage_state=state_path)
-                            temp_page = temp_context.new_page()
-                            temp_page.goto("https://kaspi.kz/mc/#/orders?status=NEW")
-                            temp_page.wait_for_timeout(3000)
-                            
-                            is_valid = "login" not in temp_page.url
-                            temp_browser.close()
-                            self.result_queue.put((True, is_valid))
-                        else:
-                            self.result_queue.put((True, False))
 
-                    elif cmd == Command.FETCH_PRODUCTS:
-                        phone, page_num, status, search_query, page_size = data
-                        state_path = get_state_file_path(phone)
-                        if not os.path.exists(state_path):
-                            raise Exception("Сессия авторизации не найдена.")
-                        
-                        temp_browser = playwright.chromium.launch(headless=True)
-                        try:
-                            temp_context = temp_browser.new_context(storage_state=state_path)
-                            temp_page = temp_context.new_page()
-                            
-                            from backend.kaspi_wrapper import KaspiWrapper
-                            result_data = KaspiWrapper.scrape_products(temp_page, status, page_num, search_query, page_size)
-                            
-                            temp_browser.close()
-                            self.result_queue.put((True, result_data))
-                        except Exception as inner_e:
-                            try:
-                                temp_browser.close()
-                            except:
-                                pass
-                            raise inner_e
+def _require_token() -> str:
+    """Retrieve saved token or raise 401."""
+    token = _get_token()
+    if not token:
+        raise HTTPException(status_code=401, detail="Токен не найден. Пожалуйста, авторизуйтесь.")
+    return token
 
-                    elif cmd == Command.PRODUCT_ACTION:
-                        phone, sku, action_type, payload = data
-                        state_path = get_state_file_path(phone)
-                        if not os.path.exists(state_path):
-                            raise Exception("Сессия авторизации не найдена.")
-                        
-                        temp_browser = playwright.chromium.launch(headless=True)
-                        try:
-                            temp_context = temp_browser.new_context(storage_state=state_path)
-                            temp_page = temp_context.new_page()
-                            
-                            from backend.kaspi_wrapper import KaspiWrapper
-                            msg = KaspiWrapper.perform_product_action(temp_page, sku, action_type, payload)
-                            
-                            temp_context.storage_state(path=state_path)
-                            temp_browser.close()
-                            self.result_queue.put((True, msg))
-                        except Exception as inner_e:
-                            try:
-                                temp_browser.close()
-                            except:
-                                pass
-                            raise inner_e
 
-                    elif cmd == Command.FETCH_ORDERS:
-                        phone, status, limit = data
-                        state_path = get_state_file_path(phone)
-                        if not os.path.exists(state_path):
-                            raise Exception("Сессия авторизации не найдена.")
-                        
-                        temp_browser = playwright.chromium.launch(headless=True)
-                        try:
-                            temp_context = temp_browser.new_context(storage_state=state_path)
-                            temp_page = temp_context.new_page()
-                            
-                            from backend.kaspi_wrapper import KaspiWrapper
-                            orders = KaspiWrapper.fetch_orders(temp_page, status, limit)
-                            
-                            temp_browser.close()
-                            self.result_queue.put((True, orders))
-                        except Exception as inner_e:
-                            try:
-                                temp_browser.close()
-                            except:
-                                pass
-                            raise inner_e
+# ── Request models ───────────────────────────────────────────
 
-                    elif cmd == Command.PACK_ORDER:
-                        phone, order_id, page_num = data
-                        state_path = get_state_file_path(phone)
-                        if not os.path.exists(state_path):
-                            raise Exception("Сессия авторизации не найдена.")
-                        
-                        temp_browser = playwright.chromium.launch(headless=True)
-                        try:
-                            temp_context = temp_browser.new_context(storage_state=state_path)
-                            temp_page = temp_context.new_page()
-                            
-                            from backend.kaspi_wrapper import KaspiWrapper
-                            success = KaspiWrapper.pack_order(temp_page, order_id, page_num)
-                            
-                            temp_context.storage_state(path=state_path)
-                            temp_browser.close()
-                            self.result_queue.put((True, success))
-                        except Exception as inner_e:
-                            try:
-                                temp_browser.close()
-                            except:
-                                pass
-                            raise inner_e
+class AuthRequest(BaseModel):
+    token: str
 
-                    elif cmd == Command.PACK_ALL_ORDERS:
-                        phone = data
-                        state_path = get_state_file_path(phone)
-                        if not os.path.exists(state_path):
-                            raise Exception("Сессия авторизации не найдена.")
-                        
-                        temp_browser = playwright.chromium.launch(headless=True)
-                        try:
-                            temp_context = temp_browser.new_context(storage_state=state_path)
-                            temp_page = temp_context.new_page()
-                            
-                            from backend.kaspi_wrapper import KaspiWrapper
-                            result = KaspiWrapper.pack_all_orders(temp_page)
-                            
-                            temp_context.storage_state(path=state_path)
-                            temp_browser.close()
-                            self.result_queue.put((True, result))
-                        except Exception as inner_e:
-                            try:
-                                temp_browser.close()
-                            except:
-                                pass
-                            raise inner_e
 
-                    elif cmd == Command.FETCH_TRANSFERS:
-                        phone, delivery_filter = data
-                        state_path = get_state_file_path(phone)
-                        if not os.path.exists(state_path):
-                            raise Exception("Сессия авторизации не найдена.")
-                        
-                        temp_browser = playwright.chromium.launch(headless=True)
-                        try:
-                            temp_context = temp_browser.new_context(storage_state=state_path)
-                            temp_page = temp_context.new_page()
-                            
-                            from backend.kaspi_wrapper import KaspiWrapper
-                            transfers = KaspiWrapper.fetch_transfers(temp_page, delivery_filter)
-                            
-                            temp_browser.close()
-                            self.result_queue.put((True, transfers))
-                        except Exception as inner_e:
-                            try:
-                                temp_browser.close()
-                            except:
-                                pass
-                            raise inner_e
-                            
-                    elif cmd == Command.CLEANUP:
-                        if browser:
-                            try:
-                                browser.close()
-                            except:
-                                pass
-                            browser, context, page = None, None, None
-                        self.result_queue.put((True, "Cleaned up"))
-                        
-                except Exception as e:
-                    self.result_queue.put((False, str(e)))
+class PackOrderRequest(BaseModel):
+    order_id: str  # internal Base64 id
+    new_status: str = "ACCEPTED_BY_MERCHANT"
 
-    def send_cmd(self, cmd, data=None):
-        self.cmd_queue.put((cmd, data))
-        return self.result_queue.get()
 
-# Global worker instance
-worker = PlaywrightWorker()
+# ── Legacy models (kept for future phone-based auth) ─────────
+# class PhoneRequest(BaseModel):
+#     phone: str
+# class SmsRequest(BaseModel):
+#     phone: str
+#     sms: str
 
-@app.on_event("startup")
-def startup_event():
-    worker.start()
 
-@app.on_event("shutdown")
-def shutdown_event():
-    worker.send_cmd(Command.CLEANUP)
-
-class PhoneRequest(BaseModel):
-    phone: str
-
-class SmsRequest(BaseModel):
-    phone: str
-    sms: str
-
-class ProductActionRequest(BaseModel):
-    phone: str
-    sku: str
-    action: str
-    price: int = 0
-    stock: int = 100
+# ── Routes ───────────────────────────────────────────────────
 
 @app.get("/")
 def read_root():
-    return {"status": "FastAPI Kaspi SaaS Wrapper is running"}
+    return {"status": "Kaspi SaaS Wrapper API is running", "auth": "token-first"}
 
-@app.get("/api/status")
-def get_status(phone: str = Query(...)):
-    state_path = get_state_file_path(phone)
-    has_session = os.path.exists(state_path)
-    return {"success": True, "has_session": has_session}
 
-@app.post("/api/start-login")
-def start_login(req: PhoneRequest):
-    success, msg = worker.send_cmd(Command.START_LOGIN, req.phone)
-    if not success:
-        raise HTTPException(status_code=400, detail=msg)
-    return {"success": True, "message": msg}
+# ── Auth ─────────────────────────────────────────────────────
 
-@app.post("/api/submit-sms")
-def submit_sms(req: SmsRequest):
-    success, msg = worker.send_cmd(Command.SUBMIT_SMS, req.sms)
-    if not success:
-        raise HTTPException(status_code=400, detail=msg)
-    return {"success": True, "message": msg}
+@app.post("/api/auth")
+def authenticate(req: AuthRequest):
+    """
+    Принимает API токен, верифицирует через GET /cities и сохраняет.
+    """
+    token = req.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Токен не может быть пустым.")
+
+    try:
+        valid = KaspiAPI.verify_token(token)
+        if not valid:
+            raise HTTPException(status_code=401, detail="Kaspi API отклонил токен. Проверьте правильность.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        err = str(e)
+        # Timeout/network — save anyway (offline mode)
+        if "timeout" in err.lower() or "Connection" in err or "NameResolution" in err:
+            _save_session({"token": token})
+            return {
+                "success": True,
+                "verified": False,
+                "message": f"Токен сохранён (оффлайн-режим: {err})",
+            }
+        raise HTTPException(status_code=400, detail=f"Ошибка верификации: {err}")
+
+    _save_session({"token": token})
+    return {"success": True, "verified": True, "message": "Токен верифицирован и сохранён."}
+
 
 @app.post("/api/verify-session")
-def verify_session(req: PhoneRequest):
-    success, valid = worker.send_cmd(Command.VERIFY_SESSION, req.phone)
-    if not success:
-        raise HTTPException(status_code=400, detail=str(valid))
-    return {"success": True, "valid": valid}
+def verify_session():
+    """Проверить, есть ли сохранённый токен и валиден ли он."""
+    token = _get_token()
+    if not token:
+        return {"valid": False}
 
-@app.get("/api/products")
-def get_products(
-    phone: str = Query(...),
-    page: int = Query(1),
-    status: str = Query("active"),
-    search: str = Query(""),
-    page_size: int = Query(10)
-):
-    success, data = worker.send_cmd(Command.FETCH_PRODUCTS, (phone, page, status, search, page_size))
-    if not success:
-        raise HTTPException(status_code=400, detail=str(data))
-    return {
-        "success": True,
-        "products": data["products"],
-        "total_count": data["total_count"],
-        "total_pages": data["total_pages"]
-    }
+    try:
+        valid = KaspiAPI.verify_token(token)
+        return {"valid": valid}
+    except Exception:
+        return {"valid": True}  # offline fallback
 
-@app.post("/api/product-action")
-def run_product_action(req: ProductActionRequest):
-    payload = (req.price, req.stock)
-    success, msg = worker.send_cmd(Command.PRODUCT_ACTION, (req.phone, req.sku, req.action, payload))
-    if not success:
-        raise HTTPException(status_code=400, detail=str(msg))
-    return {"success": True, "message": msg}
+
+@app.post("/api/logout")
+def logout():
+    """Удалить сохранённый токен."""
+    if os.path.exists(SESSION_FILE):
+        os.remove(SESSION_FILE)
+    return {"success": True, "message": "Сессия удалена."}
+
+
+# ── Orders ───────────────────────────────────────────────────
 
 @app.get("/api/orders")
-def get_orders(phone: str = Query(...), status: str = Query("KASPI_DELIVERY_CARGO_ASSEMBLY"), limit: int = Query(10)):
-    success, data = worker.send_cmd(Command.FETCH_ORDERS, (phone, status, limit))
-    if not success:
-        raise HTTPException(status_code=400, detail=str(data))
-    return {"success": True, "orders": data}
+def get_orders(
+    state: str = Query("NEW"),
+    status: str = Query("APPROVED_BY_BANK"),
+    limit: int = Query(20),
+):
+    """
+    Получить заказы с полной цепочкой (orders → entries → product).
+    """
+    token = _require_token()
+    try:
+        orders = KaspiAPI.get_orders_with_products(token, state=state, status=status, limit=limit)
+        return {"success": True, "orders": orders, "count": len(orders)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-class PackOrderRequest(BaseModel):
-    phone: str
-    order_id: str
-    page_num: int = 1
+
+# ── Order status change ─────────────────────────────────────
 
 @app.post("/api/orders/pack")
 def pack_order(req: PackOrderRequest):
-    success, data = worker.send_cmd(Command.PACK_ORDER, (req.phone, req.order_id, req.page_num))
-    if not success:
-        raise HTTPException(status_code=400, detail=str(data))
-    return {"success": True, "message": "Заказ успешно собран (накладные сформированы)"}
+    """Перевести заказ в новый статус (e.g. ACCEPTED_BY_MERCHANT)."""
+    token = _require_token()
+    try:
+        KaspiAPI.update_order_status(token, req.order_id, req.new_status)
+        return {"success": True, "message": f"Заказ {req.order_id} переведён в {req.new_status}."}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @app.post("/api/orders/pack-all")
-def pack_all_orders(req: PhoneRequest):
-    success, data = worker.send_cmd(Command.PACK_ALL_ORDERS, req.phone)
-    if not success:
-        raise HTTPException(status_code=400, detail=str(data))
-    return {"success": True, "packed": data["packed"], "message": data["message"]}
+def pack_all_orders():
+    """Принять все новые заказы (перевести в ACCEPTED_BY_MERCHANT)."""
+    token = _require_token()
+    try:
+        orders = KaspiAPI.get_orders_with_products(token, state="NEW", status="APPROVED_BY_BANK", limit=50)
+        packed = 0
+        for o in orders:
+            try:
+                KaspiAPI.update_order_status(token, o["internalId"], "ACCEPTED_BY_MERCHANT")
+                packed += 1
+            except Exception as e:
+                print(f"[API] Pack failed for {o['id']}: {e}")
+        return {"success": True, "packed": packed, "message": f"Обработано {packed} заказов."}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Products ─────────────────────────────────────────────────
+
+@app.get("/api/products")
+def get_products(
+    page: int = Query(1),
+    page_size: int = Query(20),
+    search: str = Query(""),
+    status: str = Query("active"),
+):
+    """
+    Получить список товаров из истории заказов (3-step chain → deduplicate).
+    Кэшируется в states/products.json.
+    """
+    token = _require_token()
+    products_file = "states/products.json"
+
+    # Try to load cached products, or fetch fresh
+    all_products = []
+    if os.path.exists(products_file):
+        try:
+            with open(products_file, "r", encoding="utf-8") as f:
+                all_products = json.load(f)
+        except Exception:
+            all_products = []
+
+    if not all_products:
+        # Fetch from Kaspi API
+        try:
+            all_products = KaspiAPI.extract_products_from_orders(token)
+            os.makedirs("states", exist_ok=True)
+            with open(products_file, "w", encoding="utf-8") as f:
+                json.dump(all_products, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Не удалось получить товары: {e}")
+
+    # Filter by status
+    target_status = "Активен" if status == "active" else "Архив"
+    filtered = [p for p in all_products if p.get("status") == target_status]
+
+    # Filter by search
+    if search:
+        q = search.lower()
+        filtered = [p for p in filtered if q in p.get("name", "").lower() or q in p.get("sku", "").lower()]
+
+    total_count = len(filtered)
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+    start = (page - 1) * page_size
+    sliced = filtered[start : start + page_size]
+
+    return {
+        "success": True,
+        "products": sliced,
+        "total_count": total_count,
+        "total_pages": total_pages,
+    }
+
+
+@app.post("/api/products/refresh")
+def refresh_products():
+    """Принудительно обновить кеш товаров из Kaspi API."""
+    token = _require_token()
+    products_file = "states/products.json"
+    try:
+        products = KaspiAPI.extract_products_from_orders(token)
+        os.makedirs("states", exist_ok=True)
+        with open(products_file, "w", encoding="utf-8") as f:
+            json.dump(products, f, ensure_ascii=False, indent=2)
+        return {"success": True, "count": len(products), "message": f"Обновлено {len(products)} товаров."}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Transfers ────────────────────────────────────────────────
 
 @app.get("/api/transfers")
-def get_transfers(phone: str = Query(...), filter: str = Query("ALL")):
-    success, data = worker.send_cmd(Command.FETCH_TRANSFERS, (phone, filter))
-    if not success:
-        raise HTTPException(status_code=400, detail=str(data))
-    return {"success": True, "transfers": data}
+def get_transfers(filter: str = Query("ALL")):
+    """Получить список передач (SIGN_REQUIRED orders)."""
+    token = _require_token()
+    try:
+        transfers = KaspiAPI.get_transfers(token, delivery_filter=filter)
+        return {"success": True, "transfers": transfers, "count": len(transfers)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Cities ───────────────────────────────────────────────────
+
+@app.get("/api/cities")
+def get_cities():
+    """Получить справочник городов."""
+    token = _require_token()
+    try:
+        cities = KaspiAPI.get_cities(token)
+        return {"success": True, "cities": cities}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Legacy endpoints (commented out, kept for future use) ────
+# @app.post("/api/start-login")
+# def start_login(req: PhoneRequest):
+#     return {"success": True, "message": "Store identifier received."}
+#
+# @app.post("/api/submit-sms")
+# def submit_sms(req: SmsRequest):
+#     token = req.sms.strip()
+#     save_token(req.phone, token)
+#     return {"success": True}
 
 @app.post("/api/close")
 def close_session():
-    worker.send_cmd(Command.CLEANUP)
     return {"success": True}

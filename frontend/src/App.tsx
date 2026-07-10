@@ -1,11 +1,5 @@
 import React, { useState, useEffect } from 'react';
 
-interface Account {
-  phone: string;
-  status: 'valid' | 'invalid' | 'checking';
-  lastChecked?: string;
-}
-
 interface Product {
   id: string;
   name: string;
@@ -15,11 +9,42 @@ interface Product {
   url: string;
 }
 
+interface OrderEntry {
+  entryId: string;
+  productName: string;
+  sku: string;
+  quantity: number;
+  basePrice: number;
+  totalPrice: number;
+}
+
+interface Order {
+  id: string;
+  internalId: string;
+  deliveryType: string;
+  createdAt: string;
+  price: string;
+  productName: string;
+  quantity: number;
+  status: string;
+  state: string;
+  entries: OrderEntry[];
+  customer: { name: string; phone: string };
+  address: string;
+}
+
+interface Transfer {
+  id: string;
+  deliveryType: string;
+  deadline: string;
+  address: string;
+}
+
 export default function App() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [view, setView] = useState<'login' | 'dashboard'>('login');
-  
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [isAuthed, setIsAuthed] = useState(false);
+
   const [products, setProducts] = useState<Product[]>([]);
   const [fetchingProducts, setFetchingProducts] = useState(false);
 
@@ -35,37 +60,35 @@ export default function App() {
   // Dropdown menu state
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  // Modals state
-  const [selectedProductForEdit, setSelectedProductForEdit] = useState<Product | null>(null);
-  const [selectedProductForPublish, setSelectedProductForPublish] = useState<Product | null>(null);
-  
-  const [newPrice, setNewPrice] = useState('');
-  const [newStock, setNewStock] = useState('20');
-  const [updatingProduct, setUpdatingProduct] = useState(false);
-
   // Tabs navigation, packaging and transfer states
   const [activeTab, setActiveTab] = useState<'products' | 'packaging' | 'transfer'>('products');
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [fetchingOrders, setFetchingOrders] = useState(false);
-  const [orderStatusFilter, setOrderStatusFilter] = useState<'NEW' | 'KASPI_DELIVERY_CARGO_ASSEMBLY'>('KASPI_DELIVERY_CARGO_ASSEMBLY');
+  const [orderStatusFilter, setOrderStatusFilter] = useState<'NEW' | 'ASSEMBLY'>('ASSEMBLY');
   const [orderLimit, setOrderLimit] = useState(10);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [packingAll, setPackingAll] = useState(false);
 
-  const [transfers, setTransfers] = useState<any[]>([]);
+  const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [fetchingTransfers, setFetchingTransfers] = useState(false);
   const [transferFilter, setTransferFilter] = useState<'ALL' | 'EXPRESS' | 'TODAY'>('ALL');
 
   const [logs, setLogs] = useState<string[]>([
     'Система автоматизации инициализирована.',
-    'Ожидание подключения Kaspi Shop аккаунта...',
+    'Ожидание подключения Kaspi API...',
   ]);
 
+  // Token-first auth
+  const [tokenInput, setTokenInput] = useState('');
+  const [loginStep, setLoginStep] = useState<'token' | 'loading' | 'success'>('token');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [loadingMsg, setLoadingMsg] = useState('');
+
+  /* ── LEGACY: Phone-based auth (disabled, kept for future restoration) ──
   const [phoneInput, setPhoneInput] = useState('+7');
   const [smsInput, setSmsInput] = useState('');
   const [loginStep, setLoginStep] = useState<'phone' | 'sms' | 'success' | 'loading'>('phone');
-  const [errorMsg, setErrorMsg] = useState('');
-  const [loadingMsg, setLoadingMsg] = useState('');
+  */
 
   const API_URL = 'http://localhost:5000';
 
@@ -74,153 +97,137 @@ export default function App() {
     setLogs((prev) => [`[${timestamp}] ${message}`, ...prev.slice(0, 49)]);
   };
 
-  // Check initial account status
+  // Check initial session on mount
   useEffect(() => {
-    const savedPhones = localStorage.getItem('kaspi_saved_phones');
-    if (savedPhones) {
+    (async () => {
       try {
-        const parsed = JSON.parse(savedPhones) as string[];
-        if (parsed.length > 0) {
-          const loadedAccounts = parsed.map(phone => ({
-            phone,
-            status: 'checking' as const
-          }));
-          setAccounts(loadedAccounts);
+        const res = await fetch(`${API_URL}/api/verify-session`, { method: 'POST' });
+        const data = await res.json();
+        if (data.valid) {
+          setIsAuthed(true);
           setView('dashboard');
-          loadedAccounts.forEach(acc => verifyAccount(acc.phone));
-          // Load products for the first account
-          loadProducts(parsed[0], 1, 'active', '', 10);
+          addLog('Сессия активна, токен подтвержден.');
+          loadProducts(1, 'active', '', 10);
         }
-      } catch (e) {
-        // ignore
+      } catch {
+        // Backend not available
       }
-    }
-    setIsLoaded(true);
+      setIsLoaded(true);
+    })();
   }, []);
 
-  const savePhones = (updated: Account[]) => {
-    localStorage.setItem('kaspi_saved_phones', JSON.stringify(updated.map(a => a.phone)));
-  };
-
-  const verifyAccount = async (phone: string) => {
-    try {
-      const res = await fetch(`${API_URL}/api/verify-session`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone }),
-      });
-      const data = await res.json();
-      
-      setAccounts(prev => {
-        const next = prev.map(acc => {
-          if (acc.phone === phone) {
-            return {
-              ...acc,
-              status: data.valid ? ('valid' as const) : ('invalid' as const),
-              lastChecked: new Date().toLocaleTimeString(),
-            };
-          }
-          return acc;
-        });
-        savePhones(next);
-        return next;
-      });
-      
-      addLog(`Проверена сессия для ${phone}: ${data.valid ? 'АКТИВНА' : 'ТРЕБУЕТСЯ АВТОРИЗАЦИЯ'}`);
-    } catch (e) {
-      addLog(`Не удалось проверить сессию для ${phone}.`);
-      setAccounts(prev => prev.map(acc => acc.phone === phone ? { ...acc, status: 'invalid' } : acc));
-    }
-  };
+  // ── Data loaders (no phone parameter) ──────────────────
 
   const loadProducts = async (
-    phone: string,
     pageNum: number = currentPage,
     status: 'active' | 'archive' = statusFilter,
     search: string = searchQuery,
     pSize: number = pageSize
   ) => {
     setFetchingProducts(true);
-    addLog(`Загрузка товаров для ${phone} (Страница: ${pageNum}, Лимит: ${pSize}, Статус: ${status}, Поиск: "${search}")...`);
+    addLog(`Загрузка товаров (Стр: ${pageNum}, Лимит: ${pSize}, Статус: ${status})...`);
     try {
       const res = await fetch(
-        `${API_URL}/api/products?phone=${phone}&page=${pageNum}&status=${status}&search=${encodeURIComponent(search)}&page_size=${pSize}`
+        `${API_URL}/api/products?page=${pageNum}&status=${status}&search=${encodeURIComponent(search)}&page_size=${pSize}`
       );
       const data = await res.json();
       if (res.ok && data.success) {
         setProducts(data.products);
         setTotalPages(data.total_pages || 1);
         setTotalCount(data.total_count || 0);
-        addLog(`Успешно загружено ${data.products.length} товаров (Всего: ${data.total_count}, Страниц: ${data.total_pages}).`);
+        addLog(`Загружено ${data.products.length} товаров (Всего: ${data.total_count}).`);
       } else {
-        addLog(`Не удалось загрузить товары: ${data.detail || 'Ошибка бэкенда'}`);
+        addLog(`Ошибка загрузки товаров: ${data.detail || 'Ошибка бэкенда'}`);
       }
-    } catch (err) {
-      addLog('Ошибка при получении товаров с сервера автоматизации.');
+    } catch {
+      addLog('Ошибка сети при загрузке товаров.');
     } finally {
       setFetchingProducts(false);
     }
   };
 
-  const loadOrders = async (phone: string, status = orderStatusFilter, limit = orderLimit) => {
+  const refreshProducts = async () => {
+    setFetchingProducts(true);
+    addLog('Принудительное обновление кэша товаров из Kaspi API...');
+    try {
+      const res = await fetch(`${API_URL}/api/products/refresh`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addLog(`Кэш обновлен: ${data.count} товаров.`);
+        loadProducts(1, statusFilter, searchQuery, pageSize);
+      } else {
+        addLog(`Ошибка обновления: ${data.detail || 'Ошибка бэкенда'}`);
+      }
+    } catch {
+      addLog('Ошибка сети при обновлении кэша товаров.');
+    } finally {
+      setFetchingProducts(false);
+    }
+  };
+
+  const getOrderParams = (statusFilter: 'NEW' | 'ASSEMBLY') => {
+    if (statusFilter === 'NEW') {
+      return { state: 'NEW', status: 'APPROVED_BY_BANK' };
+    }
+    return { state: 'DELIVERY', status: 'ACCEPTED_BY_MERCHANT' };
+  };
+
+  const loadOrders = async (statusF = orderStatusFilter, limit = orderLimit) => {
     setFetchingOrders(true);
     setSelectedOrderIds(new Set());
-    addLog(`Загрузка заказов для ${phone} (Статус: ${status === 'NEW' ? 'Новые' : 'На сборке'}, Лимит: ${limit})...`);
+    const { state, status } = getOrderParams(statusF);
+    addLog(`Загрузка заказов (${statusF === 'NEW' ? 'Новые' : 'На сборке'}, Лимит: ${limit})...`);
     try {
-      const res = await fetch(`${API_URL}/api/orders?phone=${phone}&status=${status}&limit=${limit}`);
+      const res = await fetch(`${API_URL}/api/orders?state=${state}&status=${status}&limit=${limit}`);
       const data = await res.json();
       if (res.ok && data.success) {
         setOrders(data.orders);
-        addLog(`Успешно загружено ${data.orders.length} заказов.`);
+        addLog(`Загружено ${data.orders.length} заказов.`);
       } else {
-        addLog(`Не удалось загрузить заказы: ${data.detail || 'Ошибка бэкенда'}`);
+        addLog(`Ошибка загрузки заказов: ${data.detail || 'Ошибка бэкенда'}`);
       }
-    } catch (err) {
-      addLog('Ошибка при получении списка заказов с сервера автоматизации.');
+    } catch {
+      addLog('Ошибка сети при загрузке заказов.');
     } finally {
       setFetchingOrders(false);
     }
   };
 
-  const packOrder = async (phone: string, orderId: string, pageNum: number = 1) => {
-    addLog(`Запуск автоматической сборки заказа #${orderId} (Стр: ${pageNum})...`);
+  const packOrder = async (orderId: string, internalId: string) => {
+    addLog(`Сборка заказа #${orderId}...`);
     try {
       const res = await fetch(`${API_URL}/api/orders/pack`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, order_id: orderId, page_num: pageNum }),
+        body: JSON.stringify({ order_id: internalId, new_status: 'ACCEPTED_BY_MERCHANT' }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        addLog(`Заказ #${orderId} успешно собран, накладные сформированы.`);
-        loadOrders(phone, orderStatusFilter, orderLimit);
+        addLog(`Заказ #${orderId} успешно обработан.`);
+        loadOrders(orderStatusFilter, orderLimit);
       } else {
-        addLog(`Не удалось собрать заказ #${orderId}: ${data.detail || 'Ошибка бэкенда'}`);
+        addLog(`Ошибка сборки #${orderId}: ${data.detail || 'Ошибка'}`);
       }
-    } catch (err) {
-      addLog(`Ошибка автоматизации сборки для заказа #${orderId}.`);
+    } catch {
+      addLog(`Ошибка сети при сборке заказа #${orderId}.`);
     }
   };
 
-  const packAllOrders = async (phone: string) => {
+  const packAllOrders = async () => {
     setPackingAll(true);
-    addLog(`Запуск массовой сборки всех заказов...`);
+    addLog('Массовая сборка всех заказов...');
     try {
-      const res = await fetch(`${API_URL}/api/orders/pack-all`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone }),
-      });
+      const res = await fetch(`${API_URL}/api/orders/pack-all`, { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.success) {
-        addLog(`${data.message}`);
+        addLog(data.message);
         setSelectedOrderIds(new Set());
-        loadOrders(phone, orderStatusFilter, orderLimit);
+        loadOrders(orderStatusFilter, orderLimit);
       } else {
-        addLog(`Ошибка массовой сборки: ${data.detail || 'Ошибка бэкенда'}`);
+        addLog(`Ошибка массовой сборки: ${data.detail || 'Ошибка'}`);
       }
-    } catch (err) {
-      addLog('Ошибка при массовой сборке заказов.');
+    } catch {
+      addLog('Ошибка сети при массовой сборке.');
     } finally {
       setPackingAll(false);
     }
@@ -229,11 +236,8 @@ export default function App() {
   const toggleOrderSelection = (orderId: string) => {
     setSelectedOrderIds(prev => {
       const next = new Set(prev);
-      if (next.has(orderId)) {
-        next.delete(orderId);
-      } else {
-        next.add(orderId);
-      }
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
       return next;
     });
   };
@@ -246,219 +250,97 @@ export default function App() {
     }
   };
 
-  const loadTransfers = async (phone: string, filter = transferFilter) => {
+  const loadTransfers = async (filter = transferFilter) => {
     setFetchingTransfers(true);
-    addLog(`Загрузка передач для ${phone} (Фильтр: ${filter === 'ALL' ? 'Все' : filter === 'EXPRESS' ? 'Экспресс' : 'Сегодня до 20:00'})...`);
+    addLog(`Загрузка передач (Фильтр: ${filter === 'ALL' ? 'Все' : filter === 'EXPRESS' ? 'Экспресс' : 'Сегодня'})...`);
     try {
-      const res = await fetch(`${API_URL}/api/transfers?phone=${phone}&filter=${filter}`);
+      const res = await fetch(`${API_URL}/api/transfers?filter=${filter}`);
       const data = await res.json();
       if (res.ok && data.success) {
         setTransfers(data.transfers);
-        addLog(`Успешно загружено ${data.transfers.length} записей передачи.`);
+        addLog(`Загружено ${data.transfers.length} передач.`);
       } else {
-        addLog(`Не удалось загрузить список передач: ${data.detail || 'Ошибка бэкенда'}`);
+        addLog(`Ошибка загрузки передач: ${data.detail || 'Ошибка бэкенда'}`);
       }
-    } catch (err) {
-      addLog('Ошибка при получении списка передач.');
+    } catch {
+      addLog('Ошибка сети при загрузке передач.');
     } finally {
       setFetchingTransfers(false);
     }
   };
 
-  const handleProductAction = async (productSku: string, actionType: 'edit' | 'archive' | 'publish', priceVal = 0, stockVal = 100) => {
-    const activeAccount = accounts.find(a => a.status === 'valid') || accounts[0];
-    if (!activeAccount) {
-      addLog('Нет активного кабинета для выполнения действия.');
-      return;
-    }
+  // ── Auth handler ───────────────────────────────────────
 
-    setUpdatingProduct(true);
-    addLog(`Запуск команды автоматизации [${actionType}] для SKU ${productSku}...`);
-
-    try {
-      const res = await fetch(`${API_URL}/api/product-action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: activeAccount.phone,
-          sku: productSku,
-          action: actionType,
-          price: priceVal,
-          stock: stockVal
-        }),
-      });
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        addLog(`Действие [${actionType}] для SKU ${productSku} выполнено успешно.`);
-        setSelectedProductForEdit(null);
-        setSelectedProductForPublish(null);
-        loadProducts(activeAccount.phone, currentPage, statusFilter, searchQuery, pageSize);
-      } else {
-        addLog(`Ошибка автоматизации: ${data.detail || 'Неизвестная ошибка'}`);
-      }
-    } catch (err) {
-      addLog('Не удалось передать команду серверу автоматизации.');
-    } finally {
-      setUpdatingProduct(false);
-    }
-  };
-
-  const handleStartLogin = async (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    const rawDigits = phoneInput.replace(/\D/g, '');
-    if (rawDigits.length !== 11) {
-      setErrorMsg('Номер телефона должен состоять ровно из 11 цифр (включая код страны +7).');
+    const token = tokenInput.trim();
+    if (!token) {
+      setErrorMsg('Токен не может быть пустым.');
       return;
     }
 
     setErrorMsg('');
     setLoginStep('loading');
-    setLoadingMsg('Инициализация сессии браузера Playwright...');
-    addLog(`Запуск авторизации для ${phoneInput}...`);
+    setLoadingMsg('Верификация API токена...');
+    addLog('Проверка API токена...');
 
     try {
-      const res = await fetch(`${API_URL}/api/start-login`, {
+      const res = await fetch(`${API_URL}/api/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: rawDigits }),
-      });
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        setLoginStep('sms');
-        addLog(`SMS отправлен на номер ${phoneInput}`);
-      } else {
-        setLoginStep('phone');
-        setErrorMsg(data.detail || 'Ошибка при отправке запроса.');
-      }
-    } catch (err) {
-      setLoginStep('phone');
-      setErrorMsg('Не удалось связаться с сервером автоматизации.');
-    }
-  };
-
-  const handleConfirmSms = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (smsInput.length !== 6) {
-      setErrorMsg('Введите 6-значный код.');
-      return;
-    }
-
-    setErrorMsg('');
-    setLoginStep('loading');
-    setLoadingMsg('Отправка SMS-кода в Playwright браузер...');
-    addLog(`Подтверждение кода для ${phoneInput}...`);
-
-    try {
-      const res = await fetch(`${API_URL}/api/submit-sms`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: phoneInput, sms: smsInput }),
+        body: JSON.stringify({ token }),
       });
       const data = await res.json();
 
       if (res.ok && data.success) {
         setLoginStep('success');
-        addLog(`Успешный вход в личный кабинет Kaspi для ${phoneInput}`);
-        
-        setAccounts(prev => {
-          const exists = prev.some(a => a.phone === phoneInput);
-          let next;
-          if (exists) {
-            next = prev.map(a => a.phone === phoneInput ? { ...a, status: 'valid' as const, lastChecked: new Date().toLocaleTimeString() } : a);
-          } else {
-            next = [...prev, { phone: phoneInput, status: 'valid' as const, lastChecked: new Date().toLocaleTimeString() }];
-          }
-          savePhones(next);
-          return next;
-        });
+        setIsAuthed(true);
+        addLog(data.verified ? 'Токен верифицирован через Kaspi API.' : `Токен сохранен (оффлайн-режим).`);
       } else {
-        setLoginStep('sms');
-        setErrorMsg(data.detail || 'Неверный код или ошибка сессии.');
+        setLoginStep('token');
+        setErrorMsg(data.detail || 'Неверный токен API.');
       }
-    } catch (err) {
-      setLoginStep('sms');
-      setErrorMsg('Ошибка связи при отправке кода подтверждения.');
+    } catch {
+      setLoginStep('token');
+      setErrorMsg('Ошибка связи с бэкендом.');
     }
   };
 
-  const removeAccount = (phone: string) => {
-    const updated = accounts.filter(acc => acc.phone !== phone);
-    setAccounts(updated);
-    savePhones(updated);
-    addLog(`Удален аккаунт ${phone} из панели управления.`);
-    if (updated.length === 0) {
-      setView('login');
-      setLoginStep('phone');
-    }
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_URL}/api/logout`, { method: 'POST' });
+    } catch { /* ignore */ }
+    setIsAuthed(false);
+    setView('login');
+    setLoginStep('token');
+    setTokenInput('');
+    setProducts([]);
+    setOrders([]);
+    setTransfers([]);
+    addLog('Сессия завершена.');
   };
 
-  const formatPhone = (val: string) => {
-    const raw = val.replace(/\D/g, '');
-    if (raw.length <= 1) return raw;
-    return `+7 (${raw.slice(1, 4)}) ${raw.slice(4, 7)}-${raw.slice(7, 9)}-${raw.slice(9, 11)}`;
-  };
-
-  const handlePhoneInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = e.target.value;
-    if (!value || value.length < 2) {
-      setPhoneInput('+7');
-      return;
-    }
-
-    let digits = value.replace(/\D/g, '');
-    if (digits.length >= 10) {
-      const localNumber = digits.slice(-10);
-      digits = '7' + localNumber;
-    }
-
-    const truncated = digits.slice(0, 11);
-    
-    let formatted = '+7';
-    if (truncated.length > 1) {
-      formatted += ' (' + truncated.substring(1, 4);
-    }
-    if (truncated.length > 4) {
-      formatted += ') ' + truncated.substring(4, 7);
-    }
-    if (truncated.length > 7) {
-      formatted += '-' + truncated.substring(7, 9);
-    }
-    if (truncated.length > 9) {
-      formatted += '-' + truncated.substring(9, 11);
-    }
-    setPhoneInput(formatted);
-  };
+  // ── UI helpers ─────────────────────────────────────────
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-    if (activeAcc) {
-      setCurrentPage(1);
-      setPageInputText('1');
-      loadProducts(activeAcc.phone, 1, statusFilter, searchQuery, pageSize);
-    }
+    setCurrentPage(1);
+    setPageInputText('1');
+    loadProducts(1, statusFilter, searchQuery, pageSize);
   };
 
   const handleStatusFilterChange = (status: 'active' | 'archive') => {
     setStatusFilter(status);
     setCurrentPage(1);
     setPageInputText('1');
-    const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-    if (activeAcc) {
-      loadProducts(activeAcc.phone, 1, status, searchQuery, pageSize);
-    }
+    loadProducts(1, status, searchQuery, pageSize);
   };
 
   const handlePageChange = (page: number) => {
     if (page < 1 || page > totalPages) return;
     setCurrentPage(page);
     setPageInputText(String(page));
-    const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-    if (activeAcc) {
-      loadProducts(activeAcc.phone, page, statusFilter, searchQuery, pageSize);
-    }
+    loadProducts(page, statusFilter, searchQuery, pageSize);
   };
 
   // Loading Screen
@@ -470,11 +352,11 @@ export default function App() {
     );
   }
 
-  // Centered SMS Login Screen
+  // ── Token Login Screen ─────────────────────────────────
   if (view === 'login') {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', padding: '20px' }}>
-        <div className="glass-card" style={{ maxWidth: '440px', width: '100%', padding: '40px', position: 'relative' }}>
+        <div className="glass-card" style={{ maxWidth: '480px', width: '100%', padding: '40px', position: 'relative' }}>
           
           {/* Header */}
           <div style={{ textAlign: 'center', marginBottom: '30px' }}>
@@ -486,10 +368,9 @@ export default function App() {
               fontWeight: 700, fontSize: '28px', color: '#fff', 
               boxShadow: '0 8px 16px var(--primary-glow)', marginBottom: '16px' 
             }}>K</div>
-            <h1 style={{ fontSize: '24px', fontWeight: 700 }}>Kaspi MC Login</h1>
+            <h1 style={{ fontSize: '24px', fontWeight: 700 }}>Kaspi Merchant API</h1>
             <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginTop: '6px' }}>
-              {loginStep === 'phone' && 'Авторизация для управления заказами'}
-              {loginStep === 'sms' && `Код отправлен на номер ${formatPhone(phoneInput)}`}
+              {loginStep === 'token' && 'Введите ваш API-токен продавца для подключения'}
               {loginStep === 'loading' && 'Пожалуйста, подождите'}
               {loginStep === 'success' && 'Авторизация выполнена'}
             </p>
@@ -501,55 +382,27 @@ export default function App() {
             </div>
           )}
 
-          {loginStep === 'phone' && (
-            <form onSubmit={handleStartLogin}>
+          {loginStep === 'token' && (
+            <form onSubmit={handleAuth}>
               <div style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)', marginBottom: '8px' }}>Номер телефона</label>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)', marginBottom: '8px' }}>API Токен (X-Auth-Token)</label>
                 <input 
                   type="text" 
                   className="form-input" 
-                  placeholder="+7 (7xx) xxx-xx-xx" 
-                  value={phoneInput}
-                  onChange={handlePhoneInputChange}
+                  placeholder="Вставьте ваш токен из кабинета Kaspi" 
+                  value={tokenInput}
+                  onChange={(e) => setTokenInput(e.target.value)}
                   required
                   autoFocus
+                  style={{ fontFamily: 'ui-monospace, Consolas, monospace', fontSize: '13px' }}
                 />
+                <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
+                  Токен можно найти в кабинете продавца Kaspi → Настройки → API
+                </p>
               </div>
               <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '16px' }}>
-                <span>Продолжить</span>
+                <span>Подключить по API</span>
               </button>
-              
-              {accounts.length > 0 && (
-                <button type="button" className="btn btn-secondary" style={{ width: '100%', padding: '16px', marginTop: '12px' }} onClick={() => setView('dashboard')}>
-                  Отмена
-                </button>
-              )}
-            </form>
-          )}
-
-          {loginStep === 'sms' && (
-            <form onSubmit={handleConfirmSms}>
-              <div style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)', marginBottom: '8px' }}>Код подтверждения из SMS</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="Введите 6 цифр" 
-                  value={smsInput}
-                  onChange={(e) => setSmsInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  maxLength={6}
-                  required
-                  autoFocus
-                />
-              </div>
-              <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '16px' }}>
-                <span>Войти</span>
-              </button>
-              <div style={{ textAlign: 'center', marginTop: '16px' }}>
-                <a href="#" style={{ color: 'var(--text-muted)', fontSize: '13px', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); setLoginStep('phone'); }}>
-                  ← Изменить номер телефона
-                </a>
-              </div>
             </form>
           )}
 
@@ -574,9 +427,9 @@ export default function App() {
               }}>✓</div>
               <h2 style={{ fontSize: '22px', fontWeight: 600, marginBottom: '10px' }}>Успешный вход!</h2>
               <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '24px' }}>
-                Магазин {formatPhone(phoneInput)} успешно верифицирован, сессия сохранена.
+                API токен подтверждён и сохранён.
               </p>
-              <button className="btn btn-primary" style={{ width: '100%', padding: '16px' }} onClick={() => setView('dashboard')}>
+              <button className="btn btn-primary" style={{ width: '100%', padding: '16px' }} onClick={() => { setView('dashboard'); loadProducts(1, 'active', '', 10); }}>
                 Перейти в панель управления
               </button>
             </div>
@@ -587,7 +440,7 @@ export default function App() {
     );
   }
 
-  // Dashboard Screen
+  // ── Dashboard Screen ───────────────────────────────────
   return (
     <div className="dashboard-container">
       {/* Header */}
@@ -597,72 +450,54 @@ export default function App() {
             <span style={{ fontSize: '32px' }}>🦊</span>
             <h1>Kaspi SaaS Wrapper</h1>
           </div>
-          <p style={{ marginTop: '4px' }}>Панель автоматического извлечения товаров и изменения цен</p>
+          <p style={{ marginTop: '4px' }}>Панель управления заказами и товарами через Kaspi API</p>
         </div>
-        <button 
-          className="btn btn-primary" 
-          onClick={() => {
-            setPhoneInput('+7');
-            setSmsInput('');
-            setLoginStep('phone');
-            setErrorMsg('');
-            setView('login');
-          }}
-        >
-          <span>+ Подключить магазин</span>
-        </button>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button 
+            className="btn btn-secondary" 
+            style={{ padding: '10px 16px', color: 'var(--error)' }}
+            onClick={handleLogout}
+          >
+            🚪 Выйти
+          </button>
+        </div>
       </header>
 
       <div className="grid-2">
-        {/* Left Side: Accounts & Control Panel */}
+        {/* Left Side: Status & Logs */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div className="glass-card">
-            <h2 style={{ marginBottom: '16px' }}>Подключенные аккаунты Kaspi</h2>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {accounts.map((acc) => (
-                <div 
-                  key={acc.phone} 
-                  style={{ 
-                    padding: '16px', 
-                    background: 'rgba(255, 255, 255, 0.03)', 
-                    borderRadius: '12px',
-                    border: '1px solid rgba(255, 255, 255, 0.05)',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}
-                >
-                  <div>
-                    <h3 style={{ fontSize: '15px' }}>{formatPhone(acc.phone)}</h3>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
-                      {acc.status === 'valid' && <span className="badge badge-success">Сессия активна</span>}
-                      {acc.status === 'invalid' && <span className="badge badge-error">Требуется вход</span>}
-                      {acc.status === 'checking' && <span className="badge badge-warning">Проверка...</span>}
-                      {acc.lastChecked && (
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                          Проверен в {acc.lastChecked}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <button className="btn btn-secondary" style={{ padding: '8px 12px' }} onClick={() => verifyAccount(acc.phone)}>
-                      🔄
-                    </button>
-                    <button className="btn btn-secondary" style={{ padding: '8px 12px', color: 'var(--error)' }} onClick={() => removeAccount(acc.phone)}>
-                      🗑️
-                    </button>
-                  </div>
+            <h2 style={{ marginBottom: '16px' }}>Статус подключения</h2>
+            <div style={{ 
+              padding: '16px', 
+              background: 'rgba(255, 255, 255, 0.03)', 
+              borderRadius: '12px',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div>
+                <h3 style={{ fontSize: '15px' }}>Kaspi Merchant API</h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                  <span className="badge badge-success">Сессия активна</span>
                 </div>
-              ))}
+              </div>
+              <button className="btn btn-secondary" style={{ padding: '8px 12px' }} onClick={() => {
+                addLog('Проверка состояния сессии...');
+                fetch(`${API_URL}/api/verify-session`, { method: 'POST' })
+                  .then(r => r.json())
+                  .then(d => addLog(d.valid ? 'Сессия активна ✓' : 'Сессия невалидна ✗'))
+                  .catch(() => addLog('Ошибка проверки сессии'));
+              }}>
+                🔄
+              </button>
             </div>
           </div>
 
           {/* Logs */}
           <div className="glass-card" style={{ flexGrow: 1 }}>
-            <h2 style={{ marginBottom: '12px' }}>Журнал событий (Logs)</h2>
+            <h2 style={{ marginBottom: '12px' }}>Журнал событий</h2>
             <div 
               style={{ 
                 background: 'rgba(0, 0, 0, 0.4)', 
@@ -679,7 +514,7 @@ export default function App() {
               }}
             >
               {logs.map((log, index) => (
-                <div key={index} style={{ color: log.includes('Успешный') || log.includes('АКТИВНА') ? 'var(--success)' : log.includes('ошибка') || log.includes('Ошибка') || log.includes('automation failed') ? 'var(--error)' : 'var(--text-muted)' }}>
+                <div key={index} style={{ color: log.includes('Успеш') || log.includes('активна') || log.includes('✓') ? 'var(--success)' : log.includes('ошибка') || log.includes('Ошибка') || log.includes('✗') ? 'var(--error)' : 'var(--text-muted)' }}>
                   {log}
                 </div>
               ))}
@@ -703,8 +538,7 @@ export default function App() {
                 }}
                 onClick={() => {
                   setActiveTab('products');
-                  const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                  if (activeAcc) loadProducts(activeAcc.phone, 1, statusFilter, searchQuery, pageSize);
+                  loadProducts(1, statusFilter, searchQuery, pageSize);
                 }}
               >
                 🏷️ Товары
@@ -719,8 +553,7 @@ export default function App() {
                 }}
                 onClick={() => {
                   setActiveTab('packaging');
-                  const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                  if (activeAcc) loadOrders(activeAcc.phone, orderStatusFilter, orderLimit);
+                  loadOrders(orderStatusFilter, orderLimit);
                 }}
               >
                 📦 Упаковка
@@ -735,8 +568,7 @@ export default function App() {
                 }}
                 onClick={() => {
                   setActiveTab('transfer');
-                  const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                  if (activeAcc) loadTransfers(activeAcc.phone, transferFilter);
+                  loadTransfers(transferFilter);
                 }}
               >
                 🚚 Передача
@@ -764,10 +596,7 @@ export default function App() {
                             setPageSize(pSize);
                             setCurrentPage(1);
                             setPageInputText('1');
-                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                            if (activeAcc) {
-                              loadProducts(activeAcc.phone, 1, statusFilter, searchQuery, pSize);
-                            }
+                            loadProducts(1, statusFilter, searchQuery, pSize);
                           }}
                           className="form-input"
                           style={{ width: '70px', padding: '6px 10px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: '#fff', borderRadius: '8px', cursor: 'pointer' }}
@@ -822,13 +651,10 @@ export default function App() {
                       type="button" 
                       className="btn btn-secondary" 
                       style={{ padding: '10px 14px' }}
-                      onClick={() => {
-                        const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                        if (activeAcc) loadProducts(activeAcc.phone, currentPage, statusFilter, searchQuery, pageSize);
-                      }}
+                      onClick={refreshProducts}
                       disabled={fetchingProducts}
                     >
-                      {fetchingProducts ? '🔄' : 'Refresh'}
+                      {fetchingProducts ? '🔄' : '♻️ Обновить'}
                     </button>
                   </form>
                 </div>
@@ -838,11 +664,11 @@ export default function App() {
                   {fetchingProducts && products.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
                       <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-                      <p>Синхронизация товаров через Playwright...</p>
+                      <p>Загрузка товаров через Kaspi API...</p>
                     </div>
                   ) : products.length === 0 && !fetchingProducts ? (
                     <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-                      <p>Товары не найдены. Попробуйте изменить параметры поиска/фильтра или нажмите Refresh.</p>
+                      <p>Товары не найдены. Нажмите «♻️ Обновить» для загрузки из Kaspi API.</p>
                     </div>
                   ) : (
                     <div style={{
@@ -898,63 +724,6 @@ export default function App() {
 
                           <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
                             <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary)' }}>{product.price}</div>
-                            
-                            {/* Options Menu */}
-                            <div style={{ position: 'relative' }}>
-                              <button 
-                                className="btn btn-secondary" 
-                                style={{ padding: '6px 12px', fontSize: '12px' }}
-                                onClick={() => setOpenMenuId(openMenuId === product.id ? null : product.id)}
-                              >
-                                Действия ⋮
-                              </button>
-                              
-                              {/* Dropdown Menu */}
-                              {openMenuId === product.id && (
-                                <div 
-                                  style={{ 
-                                    position: 'absolute', right: 0, top: '100%', marginTop: '6px',
-                                    background: '#111827', border: '1px solid var(--card-border)',
-                                    borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-                                    zIndex: 10, width: '180px', display: 'flex', flexDirection: 'column'
-                                  }}
-                                >
-                                  <button 
-                                    style={{ background: 'none', border: 'none', color: '#fff', padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontSize: '12px' }}
-                                    onClick={() => {
-                                      setSelectedProductForEdit(product);
-                                      setNewPrice(product.price.replace(/\D/g, ''));
-                                      setNewStock('100');
-                                      setOpenMenuId(null);
-                                    }}
-                                  >
-                                    ✏️ Изменить цену
-                                  </button>
-                                  {product.status === 'Активен' ? (
-                                    <button 
-                                      style={{ background: 'none', border: 'none', color: '#ef4444', padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontSize: '12px' }}
-                                      onClick={() => {
-                                        handleProductAction(product.sku, 'archive');
-                                        setOpenMenuId(null);
-                                      }}
-                                    >
-                                      📦 Снять с продажи
-                                    </button>
-                                  ) : (
-                                    <button 
-                                      style={{ background: 'none', border: 'none', color: '#10b981', padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontSize: '12px' }}
-                                      onClick={() => {
-                                        setSelectedProductForPublish(product);
-                                        setNewStock('20');
-                                        setOpenMenuId(null);
-                                      }}
-                                    >
-                                      🚀 Выставить на продажу
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
                           </div>
                         </div>
                       ))}
@@ -1034,8 +803,7 @@ export default function App() {
                           onChange={(e) => {
                             const newLimit = parseInt(e.target.value);
                             setOrderLimit(newLimit);
-                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                            if (activeAcc) loadOrders(activeAcc.phone, orderStatusFilter, newLimit);
+                            loadOrders(orderStatusFilter, newLimit);
                           }}
                           className="form-input"
                           style={{ width: '75px', padding: '6px 10px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: '#fff', borderRadius: '8px', cursor: 'pointer' }}
@@ -1052,13 +820,12 @@ export default function App() {
                         <button 
                           className="btn" 
                           style={{ 
-                            background: orderStatusFilter === 'KASPI_DELIVERY_CARGO_ASSEMBLY' ? 'var(--primary)' : 'transparent', 
+                            background: orderStatusFilter === 'ASSEMBLY' ? 'var(--primary)' : 'transparent', 
                             padding: '5px 12px', fontSize: '11px', borderRadius: '6px'
                           }}
                           onClick={() => {
-                            setOrderStatusFilter('KASPI_DELIVERY_CARGO_ASSEMBLY');
-                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                            if (activeAcc) loadOrders(activeAcc.phone, 'KASPI_DELIVERY_CARGO_ASSEMBLY', orderLimit);
+                            setOrderStatusFilter('ASSEMBLY');
+                            loadOrders('ASSEMBLY', orderLimit);
                           }}
                         >
                           На сборке
@@ -1071,8 +838,7 @@ export default function App() {
                           }}
                           onClick={() => {
                             setOrderStatusFilter('NEW');
-                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                            if (activeAcc) loadOrders(activeAcc.phone, 'NEW', orderLimit);
+                            loadOrders('NEW', orderLimit);
                           }}
                         >
                           Новые
@@ -1083,10 +849,7 @@ export default function App() {
                         type="button" 
                         className="btn btn-secondary" 
                         style={{ padding: '8px 12px' }}
-                        onClick={() => {
-                          const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                          if (activeAcc) loadOrders(activeAcc.phone, orderStatusFilter, orderLimit);
-                        }}
+                        onClick={() => loadOrders(orderStatusFilter, orderLimit)}
                         disabled={fetchingOrders}
                       >
                         {fetchingOrders ? '🔄' : 'Refresh'}
@@ -1095,7 +858,7 @@ export default function App() {
                   </div>
 
                   {/* Select All + Bulk Action Bar */}
-                  {orders.length > 0 && orderStatusFilter === 'KASPI_DELIVERY_CARGO_ASSEMBLY' && (
+                  {orders.length > 0 && orderStatusFilter === 'ASSEMBLY' && (
                     <div style={{ 
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                       padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px',
@@ -1119,10 +882,7 @@ export default function App() {
                           padding: '8px 16px', fontSize: '12px', fontWeight: 600,
                           opacity: packingAll ? 0.7 : 1
                         }}
-                        onClick={() => {
-                          const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                          if (activeAcc) packAllOrders(activeAcc.phone);
-                        }}
+                        onClick={packAllOrders}
                         disabled={packingAll || orders.length === 0}
                       >
                         {packingAll ? '⏳ Формирование...' : '📋 Сформировать все накладные'}
@@ -1136,7 +896,7 @@ export default function App() {
                   {fetchingOrders ? (
                     <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
                       <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-                      <p>Синхронизация заказов через Playwright (лимит: {orderLimit})...</p>
+                      <p>Загрузка заказов через Kaspi API...</p>
                     </div>
                   ) : orders.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
@@ -1160,7 +920,7 @@ export default function App() {
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                             {/* Checkbox */}
-                            {orderStatusFilter === 'KASPI_DELIVERY_CARGO_ASSEMBLY' && (
+                            {orderStatusFilter === 'ASSEMBLY' && (
                               <input 
                                 type="checkbox" 
                                 checked={selectedOrderIds.has(order.id)}
@@ -1180,25 +940,27 @@ export default function App() {
                                 >
                                   {order.deliveryType}
                                 </span>
-                                <span style={{ fontSize: '12px', color: 'var(--error)' }}>⏱️ {order.deadline}</span>
+                                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>📅 {order.createdAt}</span>
                               </div>
                               <p style={{ fontSize: '13px', color: '#fff', marginTop: '8px' }}>
-                                {order.productName} (x{order.quantity})
+                                {order.productName} {order.quantity > 1 && `(x${order.quantity})`}
                               </p>
+                              {order.customer?.name && (
+                                <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                  👤 {order.customer.name} {order.address && `• 📍 ${order.address}`}
+                                </p>
+                              )}
                             </div>
                           </div>
 
                           <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
                             <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--success)' }}>{order.price}</div>
                             
-                            {orderStatusFilter === 'KASPI_DELIVERY_CARGO_ASSEMBLY' && (
+                            {orderStatusFilter === 'ASSEMBLY' && (
                               <button 
                                 className="btn btn-primary" 
                                 style={{ padding: '6px 12px', fontSize: '12px' }}
-                                onClick={() => {
-                                  const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                                  if (activeAcc) packOrder(activeAcc.phone, order.id, order.pageNumber || 1);
-                                }}
+                                onClick={() => packOrder(order.id, order.internalId)}
                               >
                                 📦 Собрать заказ
                               </button>
@@ -1233,8 +995,7 @@ export default function App() {
                           }}
                           onClick={() => {
                             setTransferFilter('ALL');
-                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                            if (activeAcc) loadTransfers(activeAcc.phone, 'ALL');
+                            loadTransfers('ALL');
                           }}
                         >
                           Все
@@ -1247,8 +1008,7 @@ export default function App() {
                           }}
                           onClick={() => {
                             setTransferFilter('EXPRESS');
-                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                            if (activeAcc) loadTransfers(activeAcc.phone, 'EXPRESS');
+                            loadTransfers('EXPRESS');
                           }}
                         >
                           Экспресс
@@ -1261,8 +1021,7 @@ export default function App() {
                           }}
                           onClick={() => {
                             setTransferFilter('TODAY');
-                            const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                            if (activeAcc) loadTransfers(activeAcc.phone, 'TODAY');
+                            loadTransfers('TODAY');
                           }}
                         >
                           Сегодня
@@ -1273,10 +1032,7 @@ export default function App() {
                         type="button" 
                         className="btn btn-secondary" 
                         style={{ padding: '8px 12px' }}
-                        onClick={() => {
-                          const activeAcc = accounts.find(a => a.status === 'valid') || accounts[0];
-                          if (activeAcc) loadTransfers(activeAcc.phone, transferFilter);
-                        }}
+                        onClick={() => loadTransfers(transferFilter)}
                         disabled={fetchingTransfers}
                       >
                         {fetchingTransfers ? '🔄' : 'Refresh'}
@@ -1290,7 +1046,7 @@ export default function App() {
                   {fetchingTransfers ? (
                     <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
                       <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-                      <p>Синхронизация передач через Playwright...</p>
+                      <p>Загрузка передач через Kaspi API...</p>
                     </div>
                   ) : transfers.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
@@ -1342,167 +1098,6 @@ export default function App() {
           </div>
         </div>
       </div>
-
-      {/* Edit Price Modal */}
-      {selectedProductForEdit && (
-        <div 
-          style={{ 
-            position: 'fixed', 
-            top: 0, 
-            left: 0, 
-            right: 0, 
-            bottom: 0, 
-            background: 'rgba(0, 0, 0, 0.8)', 
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100
-          }}
-        >
-          <div className="glass-card" style={{ maxWidth: '440px', width: '100%', margin: '20px', padding: '32px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2>Изменить цену и остатки</h2>
-              <button 
-                onClick={() => setSelectedProductForEdit(null)}
-                style={{ background: 'none', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer' }}
-                disabled={updatingProduct}
-              >
-                ×
-              </button>
-            </div>
-
-            <p style={{ fontSize: '13px', marginBottom: '20px', color: 'var(--text-muted)' }}>
-              Редактирование для: <strong>{selectedProductForEdit.name}</strong>
-            </p>
-
-            {updatingProduct ? (
-              <div style={{ textAlign: 'center', padding: '32px 0' }}>
-                <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-                <p>Запуск автоматизации Playwright. Изменение цены в кабинете продавца...</p>
-              </div>
-            ) : (
-              <form 
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleProductAction(
-                    selectedProductForEdit.sku, 
-                    'edit', 
-                    parseInt(newPrice), 
-                    parseInt(newStock)
-                  );
-                }}
-              >
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', textTransform: 'uppercase', marginBottom: '6px', color: 'var(--text-muted)' }}>Цена, ₸</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={newPrice}
-                    onChange={(e) => setNewPrice(e.target.value.replace(/\D/g, ''))}
-                    required
-                  />
-                </div>
-
-                <div style={{ marginBottom: '24px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', textTransform: 'uppercase', marginBottom: '6px', color: 'var(--text-muted)' }}>Остатки (шт.)</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={newStock}
-                    onChange={(e) => setNewStock(e.target.value.replace(/\D/g, ''))}
-                    required
-                  />
-                </div>
-
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setSelectedProductForEdit(null)}>
-                    Отмена
-                  </button>
-                  <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
-                    Сохранить
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Publish Stock Modal */}
-      {selectedProductForPublish && (
-        <div 
-          style={{ 
-            position: 'fixed', 
-            top: 0, 
-            left: 0, 
-            right: 0, 
-            bottom: 0, 
-            background: 'rgba(0, 0, 0, 0.8)', 
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100
-          }}
-        >
-          <div className="glass-card" style={{ maxWidth: '440px', width: '100%', margin: '20px', padding: '32px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2>Выставить товар на продажу</h2>
-              <button 
-                onClick={() => setSelectedProductForPublish(null)}
-                style={{ background: 'none', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer' }}
-                disabled={updatingProduct}
-              >
-                ×
-              </button>
-            </div>
-
-            <p style={{ fontSize: '13px', marginBottom: '20px', color: 'var(--text-muted)' }}>
-              Активация товара: <strong>{selectedProductForPublish.name}</strong>
-            </p>
-
-            {updatingProduct ? (
-              <div style={{ textAlign: 'center', padding: '32px 0' }}>
-                <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-                <p>Запуск автоматизации Playwright. Выставление товара на продажу...</p>
-              </div>
-            ) : (
-              <form 
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleProductAction(
-                    selectedProductForPublish.sku, 
-                    'publish', 
-                    0, 
-                    parseInt(newStock)
-                  );
-                }}
-              >
-                <div style={{ marginBottom: '24px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', textTransform: 'uppercase', marginBottom: '6px', color: 'var(--text-muted)' }}>Остатки от 0 до 10000 шт</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={newStock}
-                    onChange={(e) => setNewStock(e.target.value.replace(/\D/g, ''))}
-                    required
-                  />
-                </div>
-
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setSelectedProductForPublish(null)}>
-                    Отмена
-                  </button>
-                  <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
-                    Выставить на продажу
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

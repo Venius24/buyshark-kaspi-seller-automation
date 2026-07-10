@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kaspi API Ping-Pong Validator</title>
+  <meta name="description" content="Инструмент для мгновенной проверки работоспособности Kaspi Merchant API токенов">
+  <!-- Google Fonts: Outfit & Space Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="stars"></div>
+  <div class="glow-container">
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+  </div>
+
+  <main class="app-container">
+    <header class="app-header">
+      <div class="logo-box">
+        <span class="logo-icon">🏓</span>
+        <h1>Kaspi API Ping-Pong</h1>
+      </div>
+      <p class="subtitle">Изолированная панель для мгновенной верификации и тестирования Kaspi Merchant API v2</p>
+    </header>
+
+    <div class="dashboard-grid">
+      <!-- Left column: Configuration -->
+      <section class="panel-section config-panel">
+        <div class="glass-card">
+          <h2 class="card-title">🔑 Параметры авторизации</h2>
+          <p class="card-desc">Вставьте ваш API-токен для верификации и выполнения проверочных запросов.</p>
+          
+          <form id="auth-form" class="auth-form">
+            <input 
+              type="hidden" 
+              id="store-phone" 
+              value="+7 (777) 000-11-22"
+            >
+
+            <div class="input-group">
+              <label for="api-token">Kaspi API Токен (X-Auth-Token)</label>
+              <div class="password-wrapper">
+                <input 
+                  type="password" 
+                  id="api-token" 
+                  placeholder="Вставьте ваш токен API..." 
+                  required
+                >
+                <button type="button" class="toggle-password" id="toggle-pwd">👁️</button>
+              </div>
+            </div>
+
+            <button type="submit" id="btn-save-auth" class="btn btn-primary">
+              <span>Сохранить и проверить токен</span>
+            </button>
+          </form>
+
+          <div class="status-box" id="auth-status-box">
+            <div class="status-indicator" id="status-dot"></div>
+            <span class="status-text" id="status-label">Сессия не настроена</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right column: Interactive Actions & Console -->
+      <section class="panel-section actions-panel">
+        <div class="glass-card flex-column">
+          <h2 class="card-title">🧪 Тестирование эндпоинтов (Ping-Pong)</h2>
+          <p class="card-desc">Нажимайте на кнопки ниже для отправки тестовых запросов через наш бэкенд.</p>
+          
+          <div class="actions-grid">
+            <button id="btn-ping-cities" class="btn btn-action" disabled>
+              <span class="action-icon">🏙️</span>
+              <div class="action-details">
+                <span class="action-name">Получить города</span>
+                <span class="action-route">GET /cities</span>
+              </div>
+            </button>
+
+            <button id="btn-ping-orders-new" class="btn btn-action" disabled>
+              <span class="action-icon">📥</span>
+              <div class="action-details">
+                <span class="action-name">Новые заказы</span>
+                <span class="action-route">GET /orders (NEW)</span>
+              </div>
+            </button>
+
+            <button id="btn-ping-orders-assembly" class="btn btn-action" disabled>
+              <span class="action-icon">📦</span>
+              <div class="action-details">
+                <span class="action-name">Заказы на сборке</span>
+                <span class="action-route">GET /orders (ASSEMBLY)</span>
+              </div>
+            </button>
+
+            <button id="btn-ping-products" class="btn btn-action" disabled>
+              <span class="action-icon">🏷️</span>
+              <div class="action-details">
+                <span class="action-name">Мок-товары</span>
+                <span class="action-route">GET /products</span>
+              </div>
+            </button>
+
+            <button id="btn-ping-transfers" class="btn btn-action" disabled>
+              <span class="action-icon">🚚</span>
+              <div class="action-details">
+                <span class="action-name">Передачи (Handover)</span>
+                <span class="action-route">GET /transfers</span>
+              </div>
+            </button>
+          </div>
+
+          <div class="console-box">
+            <div class="console-header">
+              <span class="console-title">🖥️ Терминал ответа (Console)</span>
+              <div class="console-meta" id="response-meta">
+                <span class="meta-item code" id="response-status">—</span>
+                <span class="meta-item time" id="response-time">— ms</span>
+              </div>
+            </div>
+            <pre class="console-body"><code id="console-output">// Результаты запросов будут отображены здесь...</code></pre>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="app-footer">
+    <p>Спроектировано для интеграции с <strong>Kaspi MC Wrapper backend (Port 5000)</strong>.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
