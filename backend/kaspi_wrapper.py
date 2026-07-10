@@ -137,17 +137,32 @@ class KaspiAPI:
         limit: int = 20,
     ) -> list:
         """
-        Full query chain:
-          GET /orders
-          -> GET /orders/{id}/entries (for each order)
-          -> GET /orderentries/{id}/product (for each entry)
-
-        Returns a list of enriched order dicts.
+        Retrieves orders with entries using include[orders]=entries
+        in a single request to prevent 429 errors and slow performance.
         """
-        raw = KaspiAPI.get_orders(token, state=state, status=status, size=limit)
-        orders_data = raw.get("data", [])
-        meta = raw.get("meta", {})
-
+        ge, le = KaspiAPI._date_range(14)
+        params = {
+            "page[number]": 0,
+            "page[size]": limit,
+            "filter[orders][creationDate][$ge]": ge,
+            "filter[orders][creationDate][$le]": le,
+            "filter[orders][state]": state,
+            "filter[orders][status]": status,
+            "include[orders]": "entries"
+        }
+        resp = KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        orders_data = data.get("data", [])
+        included = data.get("included", [])
+        
+        # Index entries by ID
+        entry_map = {}
+        for item in included:
+            if item.get("type") == "orderentries":
+                entry_map[item.get("id")] = item
+                
         results = []
         for item in orders_data:
             attr = item.get("attributes", {})
@@ -155,8 +170,8 @@ class KaspiAPI:
             code = attr.get("code")
             if not internal_id or not code:
                 continue
-
-            # Delivery type mapping
+                
+            # Delivery mode mapping
             dm = attr.get("deliveryMode", "")
             if "EXPRESS" in dm.upper():
                 delivery_type = "Express"
@@ -174,44 +189,35 @@ class KaspiAPI:
                 created_str = dt.strftime("%d.%m.%Y %H:%M")
             else:
                 created_str = "N/A"
-
-            # Chain step 2: entries
+                
+            # Map entries
+            order_entries_data = item.get("relationships", {}).get("entries", {}).get("data", [])
             entries_enriched = []
-            try:
-                entries = KaspiAPI.get_order_entries(token, internal_id)
-                for entry in entries:
-                    eid = entry.get("id")
+            for ref in order_entries_data:
+                entry_id = ref.get("id")
+                entry = entry_map.get(entry_id)
+                if entry:
                     e_attr = entry.get("attributes", {})
                     offer = e_attr.get("offer", {})
                     quantity = e_attr.get("quantity", 1)
                     base_price = e_attr.get("basePrice", 0)
                     total_price = e_attr.get("totalPrice") or e_attr.get("entryTotalPrice", 0)
-
-                    # Chain step 3: product
+                    
                     product_name = offer.get("name", "Товар")
                     product_sku = offer.get("code", "")
-                    try:
-                        if eid:
-                            prod = KaspiAPI.get_entry_product(token, eid)
-                            product_name = prod.get("attributes", {}).get("name") or product_name
-                    except Exception as pe:
-                        print(f"[KaspiAPI] Product lookup failed for entry {eid}: {pe}")
-
+                    
                     entries_enriched.append({
-                        "entryId": eid,
+                        "entryId": entry_id,
                         "productName": product_name,
                         "sku": product_sku,
                         "quantity": quantity,
                         "basePrice": base_price,
                         "totalPrice": total_price,
                     })
-            except Exception as ee:
-                print(f"[KaspiAPI] Entries lookup failed for order {code}: {ee}")
-
-            # Compose the first product name for UI display
+                    
             first_product = entries_enriched[0]["productName"] if entries_enriched else "Товар"
             total_qty = sum(e["quantity"] for e in entries_enriched) if entries_enriched else 1
-
+            
             # Customer info
             customer = attr.get("customer", {})
             recipient = attr.get("recipient", {})
@@ -234,7 +240,7 @@ class KaspiAPI:
                 },
                 "address": delivery_addr.get("formattedAddress") or delivery_addr.get("town", ""),
             })
-
+            
         return results
 
     # ── 6. update order status ───────────────────────────────
@@ -285,61 +291,91 @@ class KaspiAPI:
     # ── 9. extract products from order history ───────────────
 
     @staticmethod
-    def extract_products_from_orders(token: str, days_back: int = 14, max_orders: int = 100) -> list:
+    def extract_products_from_orders(token: str, days_back: int = 60, max_orders: int = 500) -> list:
         """
-        Crawl recent orders via the 3-step chain and extract unique products.
-        Returns a list of product dicts (deduplicated by SKU).
+        Crawl recent orders over the last `days_back` days (60 by default) in chunks of 12 days
+        using JSON:API inclusions (include[orders]=entries) to extract unique products.
+        Deduplicates products by SKU.
         """
-        raw = KaspiAPI.get_orders(
-            token,
-            state="ARCHIVE",
-            status="COMPLETED",
-            size=max_orders,
-            days_back=days_back,
-        )
-        orders_data = raw.get("data", [])
+        import datetime
+        now = datetime.datetime.now()
         unique: Dict[str, dict] = {}
-
-        for order in orders_data:
-            internal_id = order.get("id")
-            if not internal_id:
-                continue
-
-            try:
-                entries = KaspiAPI.get_order_entries(token, internal_id)
-            except Exception as e:
-                print(f"[KaspiAPI] Failed to get entries for {internal_id}: {e}")
-                continue
-
-            for entry in entries:
-                eid = entry.get("id")
-                e_attr = entry.get("attributes", {})
-                offer = e_attr.get("offer", {})
-                sku = offer.get("code")
-                price = e_attr.get("basePrice", 0)
-
-                if not sku or sku in unique:
-                    continue
-
-                name = offer.get("name", "Товар")
-                try:
-                    if eid:
-                        prod = KaspiAPI.get_entry_product(token, eid)
-                        name = prod.get("attributes", {}).get("name") or name
-                except Exception:
-                    pass
-
-                unique[sku] = {
-                    "id": f"p_{sku}",
-                    "name": name,
-                    "sku": sku,
-                    "price": f"{int(price)} ₸" if price else "0 ₸",
-                    "status": "Активен",
-                    "url": f"https://kaspi.kz/shop/p/-{sku}/",
+        
+        # 12-day chunks to respect the 14-day limit per request
+        chunk_days = 12
+        num_chunks = (days_back + chunk_days - 1) // chunk_days
+        
+        print(f"[KaspiAPI] Crawling products over the last {days_back} days in {num_chunks} chunks...")
+        
+        for i in range(num_chunks):
+            start_date = now - datetime.timedelta(days=(i + 1) * chunk_days)
+            end_date = now - datetime.timedelta(days=i * chunk_days)
+            
+            ge = int(start_date.timestamp() * 1000)
+            le = int(end_date.timestamp() * 1000)
+            
+            print(f"[KaspiAPI] Chunk {i+1}/{num_chunks}: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}")
+            
+            page_num = 0
+            while True:
+                # Fetch orders in ARCHIVE state
+                params = {
+                    "page[number]": page_num,
+                    "page[size]": 100,
+                    "filter[orders][creationDate][$ge]": ge,
+                    "filter[orders][creationDate][$le]": le,
+                    "filter[orders][state]": "ARCHIVE",
+                    "include[orders]": "entries"
                 }
-
+                
+                try:
+                    resp = KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
+                    if resp.status_code != 200:
+                        print(f"[KaspiAPI] Failed to get orders chunk: {resp.status_code}")
+                        break
+                        
+                    data = resp.json()
+                except Exception as e:
+                    print(f"[KaspiAPI] Network error fetching orders: {e}")
+                    break
+                    
+                orders_data = data.get("data", [])
+                included = data.get("included", [])
+                
+                # Extract products from entries
+                page_products_count = 0
+                for item in included:
+                    if item.get("type") == "orderentries":
+                        attr = item.get("attributes", {})
+                        offer = attr.get("offer", {})
+                        sku = offer.get("code")
+                        name = offer.get("name", "Товар")
+                        price = attr.get("basePrice", 0)
+                        
+                        if sku and sku not in unique:
+                            unique[sku] = {
+                                "id": f"p_{sku}",
+                                "name": name,
+                                "sku": sku,
+                                "price": f"{int(price)} ₸" if price else "0 ₸",
+                                "status": "Активен",
+                                "url": f"https://kaspi.kz/shop/p/-{sku}/",
+                            }
+                            page_products_count += 1
+                            
+                print(f"[KaspiAPI]   Page {page_num}: processed {len(orders_data)} orders. Extracted {page_products_count} new unique products.")
+                
+                # Check pagination bounds
+                if len(orders_data) < 100 or len(unique) >= max_orders:
+                    break
+                page_num += 1
+                
+            if len(unique) >= max_orders:
+                print(f"[KaspiAPI] Reached max_orders limit of {max_orders}.")
+                break
+                
         products = list(unique.values())
-        print(f"[KaspiAPI] Extracted {len(products)} unique products from {len(orders_data)} orders.")
+        print(f"[KaspiAPI] Extracted total of {len(products)} unique products from order history.")
         return products
 
     # ── 10. transfers (SIGN_REQUIRED orders) ─────────────────
