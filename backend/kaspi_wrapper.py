@@ -57,6 +57,26 @@ class KaspiAPI:
         le = int(now.timestamp() * 1000)
         return ge, le
 
+    # ── 0. merchant id discovery ─────────────────────────────
+
+    @staticmethod
+    def get_merchant_id(token: str) -> str:
+        """
+        Dynamically retrieve the merchant ID using the pointofservices API.
+        Prefix of the service point ID is the merchant ID (e.g. 20186986 from 20186986_001).
+        """
+        try:
+            pos_list = KaspiAPI.get_point_of_services(token)
+            if pos_list:
+                pos_id = pos_list[0].get("id", "")
+                if "_" in pos_id:
+                    return pos_id.split("_")[0]
+                elif pos_id:
+                    return pos_id
+        except Exception as e:
+            print(f"[KaspiAPI] get_merchant_id error: {e}")
+        return "20186986" # fallback
+
     # ── 1. token verification ────────────────────────────────
 
     @staticmethod
@@ -135,12 +155,12 @@ class KaspiAPI:
         state: str = "NEW",
         status: str = "APPROVED_BY_BANK",
         limit: int = 20,
+        assembled: Optional[bool] = None,
     ) -> list:
         """
-        Retrieves orders with entries using include[orders]=entries
-        in a single request to prevent 429 errors and slow performance.
+        Retrieves orders and sequentially fetches entries for each order to guarantee 100% correct data.
         """
-        ge, le = KaspiAPI._date_range(14)
+        ge, le = KaspiAPI._date_range(13) # 13 days as per reference example
         params = {
             "page[number]": 0,
             "page[size]": limit,
@@ -148,22 +168,17 @@ class KaspiAPI:
             "filter[orders][creationDate][$le]": le,
             "filter[orders][state]": state,
             "filter[orders][status]": status,
-            "include[orders]": "entries"
         }
+        if assembled is not None:
+            params["filter[orders][assembled]"] = "true" if assembled else "false"
+            
         resp = KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
         resp.raise_for_status()
         data = resp.json()
         
         orders_data = data.get("data", [])
-        included = data.get("included", [])
-        
-        # Index entries by ID
-        entry_map = {}
-        for item in included:
-            if item.get("type") == "orderentries":
-                entry_map[item.get("id")] = item
-                
         results = []
+        
         for item in orders_data:
             attr = item.get("attributes", {})
             internal_id = item.get("id")
@@ -190,13 +205,12 @@ class KaspiAPI:
             else:
                 created_str = "N/A"
                 
-            # Map entries
-            order_entries_data = item.get("relationships", {}).get("entries", {}).get("data", [])
+            # Fetch entries sequentially for each order
             entries_enriched = []
-            for ref in order_entries_data:
-                entry_id = ref.get("id")
-                entry = entry_map.get(entry_id)
-                if entry:
+            try:
+                entries_data = KaspiAPI.get_order_entries(token, internal_id)
+                for entry in entries_data:
+                    entry_id = entry.get("id")
                     e_attr = entry.get("attributes", {})
                     offer = e_attr.get("offer", {})
                     quantity = e_attr.get("quantity", 1)
@@ -214,6 +228,8 @@ class KaspiAPI:
                         "basePrice": base_price,
                         "totalPrice": total_price,
                     })
+            except Exception as e:
+                print(f"[KaspiAPI] Failed to fetch entries for order {code}: {e}")
                     
             first_product = entries_enriched[0]["productName"] if entries_enriched else "Товар"
             total_qty = sum(e["quantity"] for e in entries_enriched) if entries_enriched else 1
@@ -222,6 +238,7 @@ class KaspiAPI:
             customer = attr.get("customer", {})
             recipient = attr.get("recipient", {})
             delivery_addr = attr.get("deliveryAddress", {})
+            kaspi_deliv = attr.get("kaspiDelivery", {})
 
             results.append({
                 "id": code,
@@ -233,6 +250,10 @@ class KaspiAPI:
                 "quantity": total_qty,
                 "status": attr.get("status", ""),
                 "state": attr.get("state", ""),
+                "assembled": attr.get("assembled", False),
+                "waybillNumber": kaspi_deliv.get("waybillNumber"),
+                "waybillUrl": kaspi_deliv.get("waybill"),
+                "courierTransmissionDate": kaspi_deliv.get("courierTransmissionDate"),
                 "entries": entries_enriched,
                 "customer": {
                     "name": customer.get("name") or recipient.get("name", ""),
@@ -269,6 +290,120 @@ class KaspiAPI:
         )
         resp.raise_for_status()
         return True
+
+    # ── 6.1. cargo assembly ──────────────────────────────────
+
+    @staticmethod
+    def assemble_cargo(token: str, order_code: str, quantity: int) -> bool:
+        """
+        POST to mc.shop.kaspi.kz/mc/api/order/cargo/assembled
+        to move the order to 'Awaiting Courier' (Передача).
+        """
+        merchant_id = KaspiAPI.get_merchant_id(token)
+        
+        # Load cookies from state.json
+        cookies = {}
+        if os.path.exists("state.json"):
+            try:
+                with open("state.json", "r", encoding="utf-8") as f:
+                    state_data = json.load(f)
+                    for c in state_data.get("cookies", []):
+                        if c.get("name") in ["mc-session", "mc-sid"] and "mc.shop.kaspi.kz" in c.get("domain", ""):
+                            cookies[c["name"]] = c["value"]
+            except Exception as e:
+                print(f"[KaspiAPI] Error parsing state.json: {e}")
+                
+        if not cookies.get("mc-session") or not cookies.get("mc-sid"):
+            raise Exception("Cookies mc-session or mc-sid are missing. Please log in via idmc.shop.kaspi.kz first.")
+            
+        headers = {
+            "Content-Type": "application/json",
+            "x-auth-version": "3",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/148.0.0.0 Safari/537.36 OPR/132.0.0.0"
+            ),
+            "Origin": "https://kaspi.kz",
+            "Referer": "https://kaspi.kz/",
+        }
+        
+        payload = {
+            "cargos": [
+                {
+                    "orderCode": str(order_code),
+                    "newCargoSpace": 1,
+                    "quantity": int(quantity)
+                }
+            ]
+        }
+        
+        url = f"https://mc.shop.kaspi.kz/mc/api/order/cargo/assembled?_m={merchant_id}"
+        resp = requests.post(url, headers=headers, cookies=cookies, json=payload, timeout=15)
+        
+        if resp.status_code == 200:
+            return True
+        else:
+            raise Exception(f"Kaspi MC API returned {resp.status_code}: {resp.text}")
+
+    @staticmethod
+    def assemble_cargos(token: str, cargo_items: list) -> int:
+        """
+        POST multiple cargos to mc.shop.kaspi.kz/mc/api/order/cargo/assembled.
+        cargo_items format: [{"orderCode": "...", "quantity": ...}]
+        Returns the number of successfully assembled orders.
+        """
+        if not cargo_items:
+            return 0
+            
+        merchant_id = KaspiAPI.get_merchant_id(token)
+        
+        # Load cookies from state.json
+        cookies = {}
+        if os.path.exists("state.json"):
+            try:
+                with open("state.json", "r", encoding="utf-8") as f:
+                    state_data = json.load(f)
+                    for c in state_data.get("cookies", []):
+                        if c.get("name") in ["mc-session", "mc-sid"] and "mc.shop.kaspi.kz" in c.get("domain", ""):
+                            cookies[c["name"]] = c["value"]
+            except Exception as e:
+                print(f"[KaspiAPI] Error parsing state.json: {e}")
+                
+        if not cookies.get("mc-session") or not cookies.get("mc-sid"):
+            raise Exception("Cookies mc-session or mc-sid are missing. Please log in via idmc.shop.kaspi.kz first.")
+            
+        headers = {
+            "Content-Type": "application/json",
+            "x-auth-version": "3",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/148.0.0.0 Safari/537.36 OPR/132.0.0.0"
+            ),
+            "Origin": "https://kaspi.kz",
+            "Referer": "https://kaspi.kz/",
+        }
+        
+        cargos_payload = []
+        for item in cargo_items:
+            cargos_payload.append({
+                "orderCode": str(item["orderCode"]),
+                "newCargoSpace": 1,
+                "quantity": int(item["quantity"])
+            })
+            
+        payload = {
+            "cargos": cargos_payload
+        }
+        
+        url = f"https://mc.shop.kaspi.kz/mc/api/order/cargo/assembled?_m={merchant_id}"
+        resp = requests.post(url, headers=headers, cookies=cookies, json=payload, timeout=15)
+        
+        if resp.status_code == 200:
+            return len(cargo_items)
+        else:
+            raise Exception(f"Kaspi MC API returned {resp.status_code}: {resp.text}")
 
     # ── 7. cities ────────────────────────────────────────────
 
@@ -378,51 +513,80 @@ class KaspiAPI:
         print(f"[KaspiAPI] Extracted total of {len(products)} unique products from order history.")
         return products
 
-    # ── 10. transfers (SIGN_REQUIRED orders) ─────────────────
+    # ── 10. transfers (assembled orders awaiting courier) ────
 
     @staticmethod
     def get_transfers(token: str, delivery_filter: str = "ALL") -> list:
         """
-        Fetch orders awaiting courier transfer (state = SIGN_REQUIRED).
+        Fetch orders awaiting courier transfer (assembled = True and courierTransmissionDate == null).
         """
-        raw = KaspiAPI.get_orders(
-            token,
-            state="SIGN_REQUIRED",
-            status="ACCEPTED_BY_MERCHANT",
-            size=100,
-        )
-        orders_data = raw.get("data", [])
-
+        ge, le = KaspiAPI._date_range(14)
+        params = {
+            "page[number]": 0,
+            "page[size]": 100,
+            "filter[orders][creationDate][$ge]": ge,
+            "filter[orders][creationDate][$le]": le,
+            "filter[orders][state]": "KASPI_DELIVERY",
+            "filter[orders][status]": "ACCEPTED_BY_MERCHANT",
+            "filter[orders][assembled]": "true",
+        }
+        
+        resp = KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        orders_data = data.get("data", [])
+        
         results = []
         for item in orders_data:
             attr = item.get("attributes", {})
             code = attr.get("code")
             if not code:
                 continue
-
+                
+            kaspi_delivery = attr.get("kaspiDelivery", {})
+            
+            # Filter: courierTransmissionDate must be null
+            if kaspi_delivery.get("courierTransmissionDate") is not None:
+                continue
+                
+            # Delivery mode mapping
             dm = attr.get("deliveryMode", "")
             if "EXPRESS" in dm.upper():
                 dt = "Express"
             elif "POSTOMAT" in dm.upper():
                 dt = "Postomat"
+            elif "PICKUP" in dm.upper():
+                dt = "Самовывоз"
             else:
                 dt = "Kaspi Доставка"
-
+                
+            # Filter by delivery type
             if delivery_filter == "EXPRESS" and dt != "Express":
                 continue
-
+            if delivery_filter == "TODAY":
+                today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                cd = attr.get("creationDate", 0)
+                order_dt = datetime.datetime.fromtimestamp(cd / 1000.0)
+                if order_dt < today_start:
+                    continue
+            
             cd = attr.get("creationDate", 0)
             if cd:
                 deadline = f"до {datetime.datetime.fromtimestamp(cd / 1000.0).strftime('%H:%M')}"
             else:
                 deadline = "N/A"
-
+                
             addr = attr.get("deliveryAddress", {})
-
+            waybill_number = kaspi_delivery.get("waybillNumber", "")
+            waybill_url = kaspi_delivery.get("waybill", "")
+            
             results.append({
                 "id": code,
                 "deliveryType": dt,
                 "deadline": deadline,
                 "address": addr.get("formattedAddress") or addr.get("town", "Kaspi курьер"),
+                "waybillNumber": waybill_number,
+                "waybillUrl": waybill_url
             })
         return results

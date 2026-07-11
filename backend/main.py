@@ -8,7 +8,8 @@ FastAPI backend — token-first architecture.
 import os
 import json
 import requests
-from fastapi import FastAPI, HTTPException, Query
+from typing import Optional, List
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -63,6 +64,70 @@ def _require_token() -> str:
     return token
 
 
+# ── Product Overrides & Brands ───────────────────────────────
+
+def extract_brand(name: Optional[str]) -> str:
+    if not name:
+        return "Barkhan"
+    name_upper = name.upper()
+    for b in ["BARKHAN", "RIDERACE", "CAMPGEAR", "VISION", "FIKS"]:
+        if b in name_upper:
+            return b.capitalize()
+    return "Barkhan"
+
+
+OVERRIDES_FILE = "states/products_overrides.json"
+
+def _load_overrides() -> dict:
+    if os.path.exists(OVERRIDES_FILE):
+        try:
+            with open(OVERRIDES_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def _save_override(sku: str, price: int, stock: int, brand: Optional[str] = None, status: Optional[str] = None):
+    overrides = _load_overrides()
+    overrides[sku] = {
+        "price_num": price,
+        "stock": stock,
+        "brand": brand,
+        "status": status or ("Активен" if stock > 0 else "Архив")
+    }
+    os.makedirs("states", exist_ok=True)
+    with open(OVERRIDES_FILE, "w", encoding="utf-8") as f:
+        json.dump(overrides, f, ensure_ascii=False, indent=2)
+
+def _apply_overrides(products: list) -> list:
+    overrides = _load_overrides()
+    for p in products:
+        sku = p.get("sku")
+        if "price_num" not in p:
+            try:
+                price_str = p.get("price", "0").replace(" ₸", "").replace(" ", "").strip()
+                p["price_num"] = int(price_str)
+            except:
+                p["price_num"] = 0
+        if "stock" not in p:
+            p["stock"] = 10
+        if "brand" not in p:
+            p["brand"] = extract_brand(p.get("name"))
+            
+        if sku in overrides:
+            ov = overrides[sku]
+            if "price_num" in ov:
+                p["price_num"] = ov["price_num"]
+                p["price"] = f"{ov['price_num']} ₸"
+            if "stock" in ov:
+                p["stock"] = ov["stock"]
+            if "brand" in ov:
+                p["brand"] = ov["brand"]
+            if "status" in ov:
+                p["status"] = ov["status"]
+    return products
+
+
 # ── Request models ───────────────────────────────────────────
 
 class AuthRequest(BaseModel):
@@ -71,7 +136,17 @@ class AuthRequest(BaseModel):
 
 class PackOrderRequest(BaseModel):
     order_id: str  # internal Base64 id
+    order_code: Optional[str] = None
+    quantity: Optional[int] = None
     new_status: str = "ACCEPTED_BY_MERCHANT"
+
+
+class UpdateProductRequest(BaseModel):
+    sku: str
+    price: int
+    stock: int
+    brand: Optional[str] = None
+    status: Optional[str] = None
 
 
 # ── Legacy models (kept for future phone-based auth) ─────────
@@ -118,7 +193,11 @@ def authenticate(req: AuthRequest):
             }
         raise HTTPException(status_code=400, detail=f"Ошибка верификации: {err}")
 
-    _save_session({"token": token})
+    try:
+        merchant_id = KaspiAPI.get_merchant_id(token)
+    except Exception:
+        merchant_id = "20186986"
+    _save_session({"token": token, "merchant_id": merchant_id})
     return {"success": True, "verified": True, "message": "Токен верифицирован и сохранён."}
 
 
@@ -151,13 +230,14 @@ def get_orders(
     state: str = Query("NEW"),
     status: str = Query("APPROVED_BY_BANK"),
     limit: int = Query(20),
+    assembled: Optional[bool] = None,
 ):
     """
     Получить заказы с полной цепочкой (orders → entries → product).
     """
     token = _require_token()
     try:
-        orders = KaspiAPI.get_orders_with_products(token, state=state, status=status, limit=limit)
+        orders = KaspiAPI.get_orders_with_products(token, state=state, status=status, limit=limit, assembled=assembled)
         return {"success": True, "orders": orders, "count": len(orders)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -167,29 +247,69 @@ def get_orders(
 
 @app.post("/api/orders/pack")
 def pack_order(req: PackOrderRequest):
-    """Перевести заказ в новый статус (e.g. ACCEPTED_BY_MERCHANT)."""
+    """Перевести заказ в новый статус (e.g. ACCEPTED_BY_MERCHANT) или упаковать."""
     token = _require_token()
     try:
-        KaspiAPI.update_order_status(token, req.order_id, req.new_status)
-        return {"success": True, "message": f"Заказ {req.order_id} переведён в {req.new_status}."}
+        # Check if the order is NEW and needs accepting
+        new_orders = KaspiAPI.get_orders_with_products(token, state="KASPI_DELIVERY", status="APPROVED_BY_BANK", limit=50)
+        order_item = next((o for o in new_orders if o["internalId"] == req.order_id), None)
+        
+        if order_item:
+            # Transition status to ACCEPTED_BY_MERCHANT
+            KaspiAPI.update_order_status(token, req.order_id, "ACCEPTED_BY_MERCHANT")
+            return {"success": True, "message": f"Заказ {order_item['id']} принят в обработку."}
+            
+        # If it's already accepted, it needs cargo assembly
+        assembly_orders = KaspiAPI.get_orders_with_products(token, state="KASPI_DELIVERY", status="ACCEPTED_BY_MERCHANT", limit=50, assembled=False)
+        order_item = next((o for o in assembly_orders if o["internalId"] == req.order_id), None)
+        
+        if order_item:
+            code = order_item["id"]
+            qty = order_item["quantity"]
+            KaspiAPI.assemble_cargo(token, code, qty)
+            return {"success": True, "message": f"Заказ {code} успешно упакован и готов к передаче."}
+            
+        raise Exception("Заказ не найден в статусах NEW или ACCEPTED_BY_MERCHANT.")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/orders/pack-all")
 def pack_all_orders():
-    """Принять все новые заказы (перевести в ACCEPTED_BY_MERCHANT)."""
+    """Принять все новые заказы и упаковать все заказы на сборке."""
     token = _require_token()
     try:
-        orders = KaspiAPI.get_orders_with_products(token, state="NEW", status="APPROVED_BY_BANK", limit=50)
-        packed = 0
-        for o in orders:
+        # 1. Accept all new orders
+        new_orders = KaspiAPI.get_orders_with_products(token, state="KASPI_DELIVERY", status="APPROVED_BY_BANK", limit=50)
+        accepted_count = 0
+        for o in new_orders:
             try:
                 KaspiAPI.update_order_status(token, o["internalId"], "ACCEPTED_BY_MERCHANT")
-                packed += 1
+                accepted_count += 1
             except Exception as e:
-                print(f"[API] Pack failed for {o['id']}: {e}")
-        return {"success": True, "packed": packed, "message": f"Обработано {packed} заказов."}
+                print(f"[API] Accept failed for {o['id']}: {e}")
+                
+        # 2. Assemble all orders currently on assembly
+        assembly_orders = KaspiAPI.get_orders_with_products(token, state="KASPI_DELIVERY", status="ACCEPTED_BY_MERCHANT", limit=50, assembled=False)
+        non_assembled = assembly_orders
+        
+        assembled_count = 0
+        if non_assembled:
+            cargo_items = [{"orderCode": o["id"], "quantity": o["quantity"]} for o in non_assembled]
+            try:
+                assembled_count = KaspiAPI.assemble_cargos(token, cargo_items)
+            except Exception as e:
+                print(f"[API] Cargo assembly batch failed: {e}")
+                # Fallback to single assembly
+                for o in non_assembled:
+                    try:
+                        KaspiAPI.assemble_cargo(token, o["id"], o["quantity"])
+                        assembled_count += 1
+                    except Exception as ex:
+                        print(f"[API] Cargo assembly failed for {o['id']}: {ex}")
+                        
+        msg = f"Принято новых заказов: {accepted_count}. Упаковано заказов: {assembled_count}."
+        return {"success": True, "packed": accepted_count + assembled_count, "message": msg}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -216,6 +336,7 @@ def get_products(
         try:
             with open(products_file, "r", encoding="utf-8") as f:
                 all_products = json.load(f)
+                all_products = _apply_overrides(all_products)
         except Exception:
             all_products = []
 
@@ -223,6 +344,7 @@ def get_products(
         # Fetch from Kaspi API
         try:
             all_products = KaspiAPI.extract_products_from_orders(token)
+            all_products = _apply_overrides(all_products)
             os.makedirs("states", exist_ok=True)
             with open(products_file, "w", encoding="utf-8") as f:
                 json.dump(all_products, f, ensure_ascii=False, indent=2)
@@ -251,6 +373,47 @@ def get_products(
     }
 
 
+@app.post("/api/products/update")
+def update_product(req: UpdateProductRequest):
+    """Обновить цену и остаток товара (сохранить в overrides)."""
+    _require_token()
+    products_file = "states/products.json"
+    if not os.path.exists(products_file):
+        raise HTTPException(status_code=404, detail="Список товаров не найден. Загрузите товары сначала.")
+        
+    try:
+        # Save override
+        _save_override(req.sku, req.price, req.stock, req.brand, req.status)
+        
+        # Load and update products list
+        with open(products_file, "r", encoding="utf-8") as f:
+            products = json.load(f)
+            
+        updated = False
+        for p in products:
+            if p.get("sku") == req.sku:
+                p["price_num"] = req.price
+                p["price"] = f"{req.price} ₸"
+                p["stock"] = req.stock
+                if req.brand:
+                    p["brand"] = req.brand
+                p["status"] = req.status or ("Активен" if req.stock > 0 else "Архив")
+                updated = True
+                break
+                
+        if not updated:
+            raise HTTPException(status_code=404, detail=f"Товар с SKU {req.sku} не найден.")
+            
+        with open(products_file, "w", encoding="utf-8") as f:
+            json.dump(products, f, ensure_ascii=False, indent=2)
+            
+        return {"success": True, "message": f"Товар {req.sku} успешно обновлен."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/api/products/refresh")
 def refresh_products():
     """Принудительно обновить кеш товаров из Kaspi API."""
@@ -258,12 +421,89 @@ def refresh_products():
     products_file = "states/products.json"
     try:
         products = KaspiAPI.extract_products_from_orders(token)
+        products = _apply_overrides(products)
         os.makedirs("states", exist_ok=True)
         with open(products_file, "w", encoding="utf-8") as f:
             json.dump(products, f, ensure_ascii=False, indent=2)
         return {"success": True, "count": len(products), "message": f"Обновлено {len(products)} товаров."}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/feed")
+def get_xml_feed():
+    """Сгенерировать XML-фид для Kaspi Catalog Sync."""
+    session = _load_session()
+    merchant_id = session.get("merchant_id", "20186986")
+    
+    products_file = "states/products.json"
+    products = []
+    if os.path.exists(products_file):
+        try:
+            with open(products_file, "r", encoding="utf-8") as f:
+                products = json.load(f)
+        except Exception:
+            pass
+            
+    from xml.etree.ElementTree import Element, SubElement, tostring
+    import datetime
+    
+    now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    
+    root_el = Element("kaspi_catalog", {
+        "date": now_str,
+        "xmlns": "http://chat.carstyle.kz/kaspi_catalog",
+        "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance"
+    })
+    
+    company_el = SubElement(root_el, "company")
+    company_el.text = "ИП Твой Мерчант"
+    
+    merchant_el = SubElement(root_el, "merchantid")
+    merchant_el.text = str(merchant_id)
+    
+    offers_el = SubElement(root_el, "offers")
+    
+    for p in products:
+        sku = p.get("sku")
+        if not sku:
+            continue
+            
+        name = p.get("name") or f"Товар {sku}"
+        brand = p.get("brand") or extract_brand(name)
+        
+        price_num = p.get("price_num")
+        if price_num is None:
+            try:
+                price_str = p.get("price", "0").replace(" ₸", "").replace(" ", "").strip()
+                price_num = int(price_str)
+            except:
+                price_num = 0
+                
+        stock = p.get("stock", 10)
+        status = p.get("status", "Активен")
+        
+        available = "yes" if stock > 0 and status == "Активен" else "no"
+        
+        offer_el = SubElement(offers_el, "offer", {"sku": str(sku)})
+        model_el = SubElement(offer_el, "model")
+        model_el.text = str(name)
+        
+        brand_el = SubElement(offer_el, "brand")
+        brand_el.text = str(brand)
+        
+        avail_parent = SubElement(offer_el, "availabilities")
+        SubElement(avail_parent, "availability", {
+            "available": available,
+            "storeId": f"{merchant_id}_001",
+            "stock": str(stock)
+        })
+        
+        price_el = SubElement(offer_el, "price")
+        price_el.text = str(price_num)
+        
+    xml_str = tostring(root_el, encoding="utf-8")
+    return Response(content=b'<?xml version="1.0" encoding="utf-8"?>\n' + xml_str, media_type="application/xml")
 
 
 # ── Transfers ────────────────────────────────────────────────

@@ -167,27 +167,33 @@ export default function App() {
 
   const getOrderParams = (statusFilter: 'NEW' | 'ASSEMBLY') => {
     if (statusFilter === 'NEW') {
-      return { state: 'NEW', status: 'APPROVED_BY_BANK' };
+      return { state: 'KASPI_DELIVERY', status: 'APPROVED_BY_BANK', assembled: undefined };
     }
-    return { state: 'DELIVERY', status: 'ACCEPTED_BY_MERCHANT' };
+    return { state: 'KASPI_DELIVERY', status: 'ACCEPTED_BY_MERCHANT', assembled: false };
   };
 
   const loadOrders = async (statusF = orderStatusFilter, limit = orderLimit) => {
     setFetchingOrders(true);
     setSelectedOrderIds(new Set());
-    const { state, status } = getOrderParams(statusF);
+    const { state, status, assembled } = getOrderParams(statusF);
     addLog(`Загрузка заказов (${statusF === 'NEW' ? 'Новые' : 'На сборке'}, Лимит: ${limit})...`);
     try {
-      const res = await fetch(`${API_URL}/api/orders?state=${state}&status=${status}&limit=${limit}`);
+      let url = `${API_URL}/api/orders?state=${state}&status=${status}&limit=${limit}`;
+      if (assembled !== undefined) url += `&assembled=${assembled}`;
+      const res = await fetch(url);
       const data = await res.json();
       if (res.ok && data.success) {
         setOrders(data.orders);
-        addLog(`Загружено ${data.orders.length} заказов.`);
+        const total = data.orders.length;
+        const assembledCount = data.orders.filter(o => o.assembled).length;
+        const transmittedCount = data.orders.filter(o => o.courierTransmissionDate !== null).length;
+        const types = Array.from(new Set(data.orders.map(o => o.deliveryType))).join(', ');
+        addLog(`Загружено ${total} заказов. Из них собранных (assembled): ${assembledCount}, переданных курьеру: ${transmittedCount}. Типы доставки: [${types}]`);
       } else {
         addLog(`Ошибка загрузки заказов: ${data.detail || 'Ошибка бэкенда'}`);
       }
-    } catch {
-      addLog('Ошибка сети при загрузке заказов.');
+    } catch (err: any) {
+      addLog(`Ошибка сети при загрузке заказов: ${err.message || err}`);
     } finally {
       setFetchingOrders(false);
     }
@@ -342,6 +348,16 @@ export default function App() {
     setPageInputText(String(page));
     loadProducts(page, statusFilter, searchQuery, pageSize);
   };
+
+  const [pkgDeliveryFilter, setPkgDeliveryFilter] = useState<'ALL' | 'EXPRESS' | 'PICKUP' | 'STANDARD'>('ALL');
+
+  const filteredOrders = orders.filter(order => {
+    if (pkgDeliveryFilter === 'ALL') return true;
+    if (pkgDeliveryFilter === 'EXPRESS') return order.deliveryType === 'Express';
+    if (pkgDeliveryFilter === 'PICKUP') return order.deliveryType === 'Самовывоз';
+    if (pkgDeliveryFilter === 'STANDARD') return order.deliveryType === 'Kaspi Доставка' || order.deliveryType === 'Postomat';
+    return true;
+  });
 
   // Loading Screen
   if (!isLoaded) {
@@ -558,23 +574,7 @@ export default function App() {
               >
                 📦 Упаковка
               </button>
-              <button 
-                className="btn" 
-                style={{ 
-                  background: activeTab === 'transfer' ? 'var(--primary)' : 'rgba(255,255,255,0.02)',
-                  border: '1px solid rgba(255,255,255,0.05)', color: '#fff', padding: '12px 18px', fontSize: '13px',
-                  borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderTopLeftRadius: '10px', borderTopRightRadius: '10px',
-                  fontWeight: 600, cursor: 'pointer', transition: 'all 0.3s ease'
-                }}
-                onClick={() => {
-                  setActiveTab('transfer');
-                  loadTransfers(transferFilter);
-                }}
-              >
-                🚚 Передача
-              </button>
             </div>
-
             {/* TAB 1: PRODUCT MANAGEMENT */}
             {activeTab === 'products' && (
               <>
@@ -857,8 +857,68 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Delivery Type Sub-tabs */}
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', background: 'rgba(255,255,255,0.02)', padding: '4px', borderRadius: '8px', width: 'fit-content', border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <button 
+                      className="btn" 
+                      style={{ 
+                        background: pkgDeliveryFilter === 'ALL' ? 'var(--primary)' : 'transparent', 
+                        padding: '6px 14px', fontSize: '11px', borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s',
+                        height: 'auto', border: 'none', fontWeight: 600, color: '#fff'
+                      }}
+                      onClick={() => {
+                        setPkgDeliveryFilter('ALL');
+                        setSelectedOrderIds(new Set());
+                      }}
+                    >
+                      Все
+                    </button>
+                    <button 
+                      className="btn" 
+                      style={{ 
+                        background: pkgDeliveryFilter === 'EXPRESS' ? 'var(--primary)' : 'transparent', 
+                        padding: '6px 14px', fontSize: '11px', borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s',
+                        height: 'auto', border: 'none', fontWeight: 600, color: '#fff'
+                      }}
+                      onClick={() => {
+                        setPkgDeliveryFilter('EXPRESS');
+                        setSelectedOrderIds(new Set());
+                      }}
+                    >
+                      🏃‍♂️ Экспресс
+                    </button>
+                    <button 
+                      className="btn" 
+                      style={{ 
+                        background: pkgDeliveryFilter === 'PICKUP' ? 'var(--primary)' : 'transparent', 
+                        padding: '6px 14px', fontSize: '11px', borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s',
+                        height: 'auto', border: 'none', fontWeight: 600, color: '#fff'
+                      }}
+                      onClick={() => {
+                        setPkgDeliveryFilter('PICKUP');
+                        setSelectedOrderIds(new Set());
+                      }}
+                    >
+                      🏪 Самовывоз
+                    </button>
+                    <button 
+                      className="btn" 
+                      style={{ 
+                        background: pkgDeliveryFilter === 'STANDARD' ? 'var(--primary)' : 'transparent', 
+                        padding: '6px 14px', fontSize: '11px', borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s',
+                        height: 'auto', border: 'none', fontWeight: 600, color: '#fff'
+                      }}
+                      onClick={() => {
+                        setPkgDeliveryFilter('STANDARD');
+                        setSelectedOrderIds(new Set());
+                      }}
+                    >
+                      🚚 Доставка / Постамат
+                    </button>
+                  </div>
+
                   {/* Select All + Bulk Action Bar */}
-                  {orders.length > 0 && orderStatusFilter === 'ASSEMBLY' && (
+                  {filteredOrders.length > 0 && orderStatusFilter === 'ASSEMBLY' && (
                     <div style={{ 
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                       padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px',
@@ -867,12 +927,12 @@ export default function App() {
                       <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
                         <input 
                           type="checkbox" 
-                          checked={selectedOrderIds.size === orders.length && orders.length > 0}
+                          checked={selectedOrderIds.size === filteredOrders.length && filteredOrders.length > 0}
                           onChange={toggleSelectAll}
                           style={{ width: '18px', height: '18px', accentColor: 'var(--primary)', cursor: 'pointer' }}
                         />
                         <span style={{ color: '#fff', fontWeight: 500 }}>
-                          Выбрать все ({selectedOrderIds.size}/{orders.length})
+                          Выбрать все ({selectedOrderIds.size}/{filteredOrders.length})
                         </span>
                       </label>
 
@@ -883,7 +943,7 @@ export default function App() {
                           opacity: packingAll ? 0.7 : 1
                         }}
                         onClick={packAllOrders}
-                        disabled={packingAll || orders.length === 0}
+                        disabled={packingAll || filteredOrders.length === 0}
                       >
                         {packingAll ? '⏳ Формирование...' : '📋 Сформировать все накладные'}
                       </button>
@@ -898,13 +958,13 @@ export default function App() {
                       <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
                       <p>Загрузка заказов через Kaspi API...</p>
                     </div>
-                  ) : orders.length === 0 ? (
+                  ) : filteredOrders.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
                       <p>Заказов в данном статусе не найдено.</p>
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                      {orders.map((order) => (
+                      {filteredOrders.map((order) => (
                         <div 
                           key={order.id} 
                           style={{ 
@@ -942,9 +1002,19 @@ export default function App() {
                                 </span>
                                 <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>📅 {order.createdAt}</span>
                               </div>
-                              <p style={{ fontSize: '13px', color: '#fff', marginTop: '8px' }}>
-                                {order.productName} {order.quantity > 1 && `(x${order.quantity})`}
-                              </p>
+                              <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px', background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '8px' }}>
+                                {order.entries && order.entries.length > 0 ? (
+                                  order.entries.map((entry, idx) => (
+                                    <p key={idx} style={{ fontSize: '12px', color: '#e2e8f0', margin: 0 }}>
+                                      <span style={{ color: 'var(--text-muted)' }}>└─ SKU: {entry.sku} |</span> {entry.productName} <span style={{ color: 'var(--primary)' }}>| Кол-во: {entry.quantity} шт.</span>
+                                    </p>
+                                  ))
+                                ) : (
+                                  <p style={{ fontSize: '13px', color: '#fff', margin: 0 }}>
+                                    {order.productName} {order.quantity > 1 && `(x${order.quantity})`}
+                                  </p>
+                                )}
+                              </div>
                               {order.customer?.name && (
                                 <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
                                   👤 {order.customer.name} {order.address && `• 📍 ${order.address}`}
@@ -974,126 +1044,7 @@ export default function App() {
               </>
             )}
 
-            {/* TAB 3: TRANSFER / HANDOVER */}
-            {activeTab === 'transfer' && (
-              <>
-                {/* Header with filters */}
-                <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h2 style={{ fontSize: '16px' }}>
-                      🚚 Передача заказов курьеру ({transfers.length})
-                    </h2>
-                    
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      {/* Handover filters */}
-                      <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', padding: '3px', borderRadius: '8px' }}>
-                        <button 
-                          className="btn" 
-                          style={{ 
-                            background: transferFilter === 'ALL' ? 'var(--primary)' : 'transparent', 
-                            padding: '5px 10px', fontSize: '10px', borderRadius: '5px'
-                          }}
-                          onClick={() => {
-                            setTransferFilter('ALL');
-                            loadTransfers('ALL');
-                          }}
-                        >
-                          Все
-                        </button>
-                        <button 
-                          className="btn" 
-                          style={{ 
-                            background: transferFilter === 'EXPRESS' ? 'var(--primary)' : 'transparent', 
-                            padding: '5px 10px', fontSize: '10px', borderRadius: '5px'
-                          }}
-                          onClick={() => {
-                            setTransferFilter('EXPRESS');
-                            loadTransfers('EXPRESS');
-                          }}
-                        >
-                          Экспресс
-                        </button>
-                        <button 
-                          className="btn" 
-                          style={{ 
-                            background: transferFilter === 'TODAY' ? 'var(--primary)' : 'transparent', 
-                            padding: '5px 10px', fontSize: '10px', borderRadius: '5px'
-                          }}
-                          onClick={() => {
-                            setTransferFilter('TODAY');
-                            loadTransfers('TODAY');
-                          }}
-                        >
-                          Сегодня
-                        </button>
-                      </div>
 
-                      <button 
-                        type="button" 
-                        className="btn btn-secondary" 
-                        style={{ padding: '8px 12px' }}
-                        onClick={() => loadTransfers(transferFilter)}
-                        disabled={fetchingTransfers}
-                      >
-                        {fetchingTransfers ? '🔄' : 'Refresh'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Transfers List */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flexGrow: 1 }}>
-                  {fetchingTransfers ? (
-                    <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-                      <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-                      <p>Загрузка передач через Kaspi API...</p>
-                    </div>
-                  ) : transfers.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-                      <p>Заказов к передаче не найдено.</p>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                      {transfers.map((trans) => (
-                        <div 
-                          key={trans.id} 
-                          style={{ 
-                            padding: '16px', 
-                            background: 'rgba(255, 255, 255, 0.02)', 
-                            borderRadius: '12px',
-                            border: '1px solid rgba(255, 255, 255, 0.04)',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '8px'
-                          }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                              <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>Заказ #{trans.id}</h3>
-                              <span 
-                                className="badge" 
-                                style={{ 
-                                  background: trans.deliveryType === 'Express' ? 'linear-gradient(90deg, #c92c3c, #f43f5e)' : 'rgba(255,255,255,0.05)',
-                                  color: '#fff', border: '1px solid rgba(255,255,255,0.08)'
-                                }}
-                              >
-                                {trans.deliveryType}
-                              </span>
-                            </div>
-                            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Срок: {trans.deadline}</span>
-                          </div>
-                          
-                          <div style={{ fontSize: '13px', color: '#9ca3af', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span>📍 Адрес: </span>
-                            <span style={{ color: '#fff' }}>{trans.address}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
 
           </div>
         </div>
