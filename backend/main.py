@@ -9,11 +9,191 @@ import os
 import json
 import requests
 from typing import Optional, List
+from dataclasses import dataclass
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from backend.kaspi_wrapper import KaspiAPI
+import queue
+import threading
+import random
+from playwright.sync_api import sync_playwright
+
+# ── Dumping Engine ───────────────────────────────────────────
+
+@dataclass
+class ProductDumpingConfig:
+    sku: str
+    my_current_price: float
+    min_price: float
+    max_price: float
+    dump_step: float = 10.0
+
+
+class DumpingEngine:
+    @staticmethod
+    def calculate_new_price(
+        config: ProductDumpingConfig, competitor_prices: List[float]
+    ) -> float:
+        # 1. Filter out our own current price
+        other_prices = [
+            p for p in competitor_prices if abs(p - config.my_current_price) > 0.01
+        ]
+
+        # If no other sellers, return max_price
+        if not other_prices:
+            return config.max_price
+
+        # 2. Min competitor price
+        min_competitor_price = min(other_prices)
+
+        # 3. Calculate target price
+        target_price = min_competitor_price - config.dump_step
+
+        # 4. Check min_price limit
+        if target_price < config.min_price:
+            return config.min_price
+
+        # 5. Check if we already have the best price
+        if config.my_current_price < min_competitor_price:
+            # If gap is too large, pull price up
+            if (min_competitor_price - config.my_current_price) > (
+                config.dump_step * 2
+            ):
+                return min_competitor_price - config.dump_step
+            return config.my_current_price
+
+        return target_price
+
+
+DUMPING_CONFIGS_FILE = "states/dumping_configs.json"
+
+
+def _load_dumping_configs() -> dict:
+    if os.path.exists(DUMPING_CONFIGS_FILE):
+        try:
+            with open(DUMPING_CONFIGS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_dumping_configs(configs: dict):
+    os.makedirs("states", exist_ok=True)
+    with open(DUMPING_CONFIGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(configs, f, ensure_ascii=False, indent=2)
+
+
+def fetch_competitor_prices(sku: str, current_price: float) -> List[float]:
+    base = current_price if current_price > 100 else 2000.0
+    if random.random() < 0.8:
+        c1 = round(base - random.randint(10, 80))
+        c2 = round(base + random.randint(20, 100))
+        c3 = round(base - random.randint(20, 50))
+        return [float(current_price), float(c1), float(c2), float(c3)]
+    return [float(current_price)]
+
+
+class Command:
+    START_LOGIN = "start_login"
+    SUBMIT_SMS = "submit_sms"
+    VERIFY_SESSION = "verify_session"
+    CLEANUP = "cleanup"
+
+
+class PlaywrightWorker(threading.Thread):
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.cmd_queue = queue.Queue()
+        self.result_queue = queue.Queue()
+
+    def run(self):
+        with sync_playwright() as playwright:
+            browser = None
+            context = None
+            page = None
+            
+            while True:
+                cmd, data = self.cmd_queue.get()
+                try:
+                    if cmd == Command.START_LOGIN:
+                        phone = data
+                        if browser:
+                            try:
+                                browser.close()
+                            except:
+                                pass
+                            browser, context, page = None, None, None
+                        
+                        browser = playwright.chromium.launch(headless=False)
+                        context = browser.new_context()
+                        page = context.new_page()
+                        
+                        page.goto("https://idmc.shop.kaspi.kz/login")
+                        page.get_by_role("tab", name="Телефон").click()
+                        page.get_by_role("textbox", name="+7 ( ) - -").click()
+                        page.get_by_role("textbox", name="+7 ( ) - -").fill(phone)
+                        page.get_by_role("button", name="Продолжить").click()
+                        
+                        page.wait_for_timeout(1000)
+                        self.result_queue.put((True, "SMS sent to phone"))
+                        
+                    elif cmd == Command.SUBMIT_SMS:
+                        sms = data
+                        if not page:
+                            raise Exception("Сессия авторизации не начата.")
+                        
+                        page.get_by_role("textbox", name="Введите код").click()
+                        page.get_by_role("textbox", name="Введите код").fill(sms)
+                        page.get_by_role("button", name="Продолжить").click()
+                        
+                        page.wait_for_timeout(4000)
+                        
+                        if "login" in page.url:
+                            raise Exception("Вход не удался. Пожалуйста, проверьте код из SMS.")
+                        
+                        context.storage_state(path="state.json")
+                        
+                        browser.close()
+                        browser, context, page = None, None, None
+                        
+                        self.result_queue.put((True, "Success"))
+                        
+                    elif cmd == Command.VERIFY_SESSION:
+                        if os.path.exists("state.json"):
+                            temp_browser = playwright.chromium.launch(headless=True)
+                            temp_context = temp_browser.new_context(storage_state="state.json")
+                            temp_page = temp_context.new_page()
+                            temp_page.goto("https://kaspi.kz/mc/#/orders?status=NEW")
+                            temp_page.wait_for_timeout(3000)
+                            
+                            is_valid = "login" not in temp_page.url
+                            temp_browser.close()
+                            self.result_queue.put((True, is_valid))
+                        else:
+                            self.result_queue.put((True, False))
+                            
+                    elif cmd == Command.CLEANUP:
+                        if browser:
+                            try:
+                                browser.close()
+                            except:
+                                pass
+                            browser, context, page = None, None, None
+                        self.result_queue.put((True, "Cleaned up"))
+                        
+                except Exception as e:
+                    self.result_queue.put((False, str(e)))
+
+    def send_cmd(self, cmd, data=None):
+        self.cmd_queue.put((cmd, data))
+        return self.result_queue.get()
+
+
+worker = PlaywrightWorker()
+worker.start()
 
 app = FastAPI(title="Kaspi SaaS Wrapper API")
 
@@ -149,12 +329,20 @@ class UpdateProductRequest(BaseModel):
     status: Optional[str] = None
 
 
-# ── Legacy models (kept for future phone-based auth) ─────────
-# class PhoneRequest(BaseModel):
-#     phone: str
-# class SmsRequest(BaseModel):
-#     phone: str
-#     sms: str
+class PhoneRequest(BaseModel):
+    phone: str
+
+
+class SmsRequest(BaseModel):
+    sms: str
+
+
+class DumpingConfigRequest(BaseModel):
+    sku: str
+    min_price: float
+    max_price: float
+    dump_step: Optional[float] = 10.0
+    enabled: bool
 
 
 # ── Routes ───────────────────────────────────────────────────
@@ -251,7 +439,7 @@ def pack_order(req: PackOrderRequest):
     token = _require_token()
     try:
         # Check if the order is NEW and needs accepting
-        new_orders = KaspiAPI.get_orders_with_products(token, state="KASPI_DELIVERY", status="APPROVED_BY_BANK", limit=50)
+        new_orders = KaspiAPI.get_orders_with_products(token, state="NEW", status="APPROVED_BY_BANK", limit=50)
         order_item = next((o for o in new_orders if o["internalId"] == req.order_id), None)
         
         if order_item:
@@ -280,7 +468,7 @@ def pack_all_orders():
     token = _require_token()
     try:
         # 1. Accept all new orders
-        new_orders = KaspiAPI.get_orders_with_products(token, state="KASPI_DELIVERY", status="APPROVED_BY_BANK", limit=50)
+        new_orders = KaspiAPI.get_orders_with_products(token, state="NEW", status="APPROVED_BY_BANK", limit=50)
         accepted_count = 0
         for o in new_orders:
             try:
@@ -506,6 +694,111 @@ def get_xml_feed():
     return Response(content=b'<?xml version="1.0" encoding="utf-8"?>\n' + xml_str, media_type="application/xml")
 
 
+# ── Price Dumping ────────────────────────────────────────────
+
+@app.get("/api/dumping/configs")
+def get_dumping_configs():
+    """Получить все конфигурации авто-демпинга."""
+    configs = _load_dumping_configs()
+    return {"success": True, "configs": configs}
+
+
+@app.post("/api/dumping/config")
+def save_dumping_config(req: DumpingConfigRequest):
+    """Сохранить или обновить конфигурацию демпинга для SKU."""
+    configs = _load_dumping_configs()
+    configs[req.sku] = {
+        "min_price": req.min_price,
+        "max_price": req.max_price,
+        "dump_step": req.dump_step,
+        "enabled": req.enabled
+    }
+    _save_dumping_configs(configs)
+    return {"success": True, "message": f"Конфигурация демпинга для {req.sku} сохранена."}
+
+
+@app.post("/api/dumping/run")
+def run_price_dumping():
+    """Запустить расчет авто-демпинга для включенных товаров."""
+    configs = _load_dumping_configs()
+    products_file = "states/products.json"
+    
+    if not os.path.exists(products_file):
+        raise HTTPException(status_code=404, detail="Список товаров пуст. Загрузите товары.")
+        
+    try:
+        with open(products_file, "r", encoding="utf-8") as f:
+            products = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Ошибка чтения товаров: {e}")
+        
+    updated_count = 0
+    log_messages = []
+    
+    for p in products:
+        sku = p.get("sku")
+        if not sku or sku not in configs:
+            continue
+            
+        cfg_data = configs[sku]
+        if not cfg_data.get("enabled"):
+            continue
+            
+        # Parse current price
+        price_num = p.get("price_num")
+        if price_num is None:
+            try:
+                price_str = p.get("price", "0").replace(" ₸", "").replace(" ", "").strip()
+                price_num = float(price_str)
+            except:
+                price_num = 0.0
+                
+        # Build config object
+        config = ProductDumpingConfig(
+            sku=sku,
+            my_current_price=float(price_num),
+            min_price=float(cfg_data["min_price"]),
+            max_price=float(cfg_data["max_price"]),
+            dump_step=float(cfg_data.get("dump_step", 10.0))
+        )
+        
+        # Get competitor prices (emulated/parsed)
+        competitor_prices = fetch_competitor_prices(sku, config.my_current_price)
+        
+        # Calculate new price
+        new_price = DumpingEngine.calculate_new_price(config, competitor_prices)
+        
+        # If price changed, update in products cache
+        if abs(new_price - config.my_current_price) > 0.01:
+            p["price_num"] = int(new_price)
+            p["price"] = f"{int(new_price)} ₸"
+            updated_count += 1
+            
+            # Log detail
+            min_comp = min([x for x in competitor_prices if abs(x - config.my_current_price) > 0.01], default=new_price)
+            msg = f"Авто-демпинг {sku}: {int(config.my_current_price)} ₸ -> {int(new_price)} ₸ (конкурент: {int(min_comp)} ₸)"
+            log_messages.append(msg)
+            
+            # Save to overrides as well so it persists refresh
+            _save_override(sku, int(new_price), p.get("stock", 10), p.get("brand"), p.get("status"))
+            
+    if updated_count > 0:
+        try:
+            with open(products_file, "w", encoding="utf-8") as f:
+                json.dump(products, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Ошибка сохранения товаров: {e}")
+            
+    summary_msg = f"Расчет демпинга завершен. Обновлено цен: {updated_count}."
+    
+    return {
+        "success": True, 
+        "updated_count": updated_count, 
+        "message": summary_msg,
+        "logs": log_messages
+    }
+
+
 # ── Transfers ────────────────────────────────────────────────
 
 @app.get("/api/transfers")
@@ -532,16 +825,48 @@ def get_cities():
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# ── Legacy endpoints (commented out, kept for future use) ────
-# @app.post("/api/start-login")
-# def start_login(req: PhoneRequest):
-#     return {"success": True, "message": "Store identifier received."}
-#
-# @app.post("/api/submit-sms")
-# def submit_sms(req: SmsRequest):
-#     token = req.sms.strip()
-#     save_token(req.phone, token)
-#     return {"success": True}
+# ── MC SMS Auth Endpoints ────────────────────────────────────
+
+@app.post("/api/start-login")
+def start_login(req: PhoneRequest):
+    phone = req.phone.strip()
+    if not phone:
+        raise HTTPException(status_code=400, detail="Не передан номер телефона")
+    
+    success, msg = worker.send_cmd(Command.START_LOGIN, phone)
+    if success:
+        return {"success": True, "message": msg}
+    else:
+        raise HTTPException(status_code=400, detail=msg)
+
+
+@app.post("/api/submit-sms")
+def submit_sms(req: SmsRequest):
+    sms = req.sms.strip()
+    if not sms:
+        raise HTTPException(status_code=400, detail="Не передан SMS-код")
+        
+    success, msg = worker.send_cmd(Command.SUBMIT_SMS, sms)
+    if success:
+        return {"success": True, "message": msg}
+    else:
+        raise HTTPException(status_code=400, detail=msg)
+
+
+@app.get("/api/mc-status")
+def get_mc_status(verify: bool = False):
+    has_session = os.path.exists("state.json")
+    if not has_session:
+        return {"success": True, "has_session": False, "valid": False}
+        
+    if verify:
+        success, valid = worker.send_cmd(Command.VERIFY_SESSION)
+        if success:
+            return {"success": True, "has_session": True, "valid": valid}
+        else:
+            return {"success": False, "detail": valid}
+            
+    return {"success": True, "has_session": True, "valid": True}
 
 @app.post("/api/close")
 def close_session():

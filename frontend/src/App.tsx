@@ -64,7 +64,7 @@ export default function App() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   // Tabs navigation, packaging and transfer states
-  const [activeTab, setActiveTab] = useState<'products' | 'packaging' | 'transfer'>('products');
+  const [activeTab, setActiveTab] = useState<'products' | 'dumping' | 'packaging' | 'transfer'>('products');
   const [orders, setOrders] = useState<Order[]>([]);
   const [fetchingOrders, setFetchingOrders] = useState(false);
   const [orderStatusFilter, setOrderStatusFilter] = useState<'NEW' | 'ASSEMBLY'>('ASSEMBLY');
@@ -87,13 +87,94 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState('');
   const [loadingMsg, setLoadingMsg] = useState('');
 
-  /* ── LEGACY: Phone-based auth (disabled, kept for future restoration) ──
   const [phoneInput, setPhoneInput] = useState('+7');
   const [smsInput, setSmsInput] = useState('');
-  const [loginStep, setLoginStep] = useState<'phone' | 'sms' | 'success' | 'loading'>('phone');
-  */
+  const [mcAuthStep, setMcAuthStep] = useState<'idle' | 'phone' | 'sms' | 'loading' | 'success'>('idle');
+  const [mcHasSession, setMcHasSession] = useState(false);
+  const [mcAuthError, setMcAuthError] = useState('');
+
+  // Dumping States
+  const [dumpingConfigs, setDumpingConfigs] = useState<Record<string, { min_price: number; max_price: number; dump_step: number; enabled: boolean }>>({});
+  const [expandedSkus, setExpandedSkus] = useState<Set<string>>(new Set());
+  const [isRunningDumping, setIsRunningDumping] = useState(false);
 
   const API_URL = 'http://localhost:5000';
+
+  const checkMcStatus = async (verify = false) => {
+    try {
+      const res = await fetch(`${API_URL}/api/mc-status?verify=${verify}`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setMcHasSession(data.has_session && data.valid);
+        return data.has_session && data.valid;
+      }
+    } catch {
+      // Ignore
+    }
+    return false;
+  };
+
+  const loadDumpingConfigs = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/dumping/configs`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDumpingConfigs(data.configs || {});
+      }
+    } catch {
+      // Ignore
+    }
+  };
+
+  const saveDumpingConfig = async (sku: string, minPrice: number, maxPrice: number, step: number, enabled: boolean) => {
+    addLog(`Сохранение настроек демпинга для ${sku}...`);
+    try {
+      const res = await fetch(`${API_URL}/api/dumping/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sku,
+          min_price: minPrice,
+          max_price: maxPrice,
+          dump_step: step,
+          enabled
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addLog(`Настройки для ${sku} успешно сохранены.`);
+        loadDumpingConfigs();
+      } else {
+        addLog(`Ошибка сохранения настроек: ${data.detail || 'Неизвестная ошибка'}`);
+      }
+    } catch {
+      addLog('Сбой сети при сохранении настроек демпинга.');
+    }
+  };
+
+  const runDumpingCycle = async () => {
+    setIsRunningDumping(true);
+    addLog('Запуск автоматического расчета демпинга цен...');
+    try {
+      const res = await fetch(`${API_URL}/api/dumping/run`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addLog(data.message);
+        if (data.logs && data.logs.length > 0) {
+          data.logs.forEach((logMsg: string) => addLog(logMsg));
+        } else {
+          addLog('Цены всех товаров соответствуют оптимальным, изменений нет.');
+        }
+        loadProducts(currentPage, statusFilter, searchQuery, pageSize);
+      } else {
+        addLog(`Сбой демпинга: ${data.detail || 'Неизвестная ошибка'}`);
+      }
+    } catch {
+      addLog('Сетевая ошибка при выполнении расчета демпинга.');
+    } finally {
+      setIsRunningDumping(false);
+    }
+  };
 
   const addLog = (message: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -109,8 +190,10 @@ export default function App() {
         if (data.valid) {
           setIsAuthed(true);
           setView('dashboard');
-          addLog('Сессия активна, токен подтвержден.');
+          addLog('Сессия REST API активна, токен подтвержден.');
           loadProducts(1, 'active', '', 10);
+          checkMcStatus(false);
+          loadDumpingConfigs();
         }
       } catch {
         // Backend not available
@@ -514,58 +597,94 @@ export default function App() {
       <div className="grid-2">
         {/* Left Side: Status & Logs */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <div className="glass-card">
-            <h2 style={{ marginBottom: '16px' }}>Статус подключения</h2>
-            <div style={{ 
-              padding: '16px', 
-              background: 'rgba(255, 255, 255, 0.03)', 
-              borderRadius: '12px',
-              border: '1px solid rgba(255, 255, 255, 0.05)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
+          <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <h2>Статус подключения</h2>
+            
+            {/* Item 1: REST API */}
+            <div className="status-widget">
               <div>
-                <h3 style={{ fontSize: '15px' }}>Kaspi Merchant API</h3>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi Merchant API (REST)</h3>
+                <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
+                  <span className="glow-dot glow-dot-success"></span>
                   <span className="badge badge-success">Сессия активна</span>
                 </div>
               </div>
-              <button className="btn btn-secondary" style={{ padding: '8px 12px' }} onClick={() => {
-                addLog('Проверка состояния сессии...');
+              <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => {
+                addLog('Проверка состояния сессии REST API...');
                 fetch(`${API_URL}/api/verify-session`, { method: 'POST' })
                   .then(r => r.json())
-                  .then(d => addLog(d.valid ? 'Сессия активна ✓' : 'Сессия невалидна ✗'))
-                  .catch(() => addLog('Ошибка проверки сессии'));
+                  .then(d => addLog(d.valid ? 'Сессия REST API активна ✓' : 'Сессия REST API невалидна ✗'))
+                  .catch(() => addLog('Ошибка проверки сессии REST API'));
               }}>
                 🔄
               </button>
             </div>
+
+            {/* Item 2: MC (SMS cookies) */}
+            <div className="status-widget">
+              <div>
+                <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi MC (SMS куки)</h3>
+                <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
+                  <span className={`glow-dot ${mcHasSession ? 'glow-dot-success' : 'glow-dot-warning'}`}></span>
+                  {mcHasSession ? (
+                    <span className="badge badge-success">Активны</span>
+                  ) : (
+                    <span className="badge badge-warning">Требуется вход</span>
+                  )}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => setMcAuthStep('phone')}>
+                  🔑 {mcHasSession ? 'Войти заново' : 'Войти'}
+                </button>
+                <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => {
+                  addLog('Проверка кук Kaspi MC...');
+                  checkMcStatus(true).then(() => addLog('Проверка завершена.'));
+                }}>
+                  🔄
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Logs */}
-          <div className="glass-card" style={{ flexGrow: 1 }}>
-            <h2 style={{ marginBottom: '12px' }}>Журнал событий</h2>
-            <div 
-              style={{ 
-                background: 'rgba(0, 0, 0, 0.4)', 
-                border: '1px solid var(--card-border)', 
-                borderRadius: '8px',
-                padding: '16px',
-                fontFamily: 'ui-monospace, Consolas, monospace',
-                fontSize: '13px',
-                height: '220px',
-                overflowY: 'auto',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '6px'
-              }}
-            >
-              {logs.map((log, index) => (
-                <div key={index} style={{ color: log.includes('Успеш') || log.includes('активна') || log.includes('✓') ? 'var(--success)' : log.includes('ошибка') || log.includes('Ошибка') || log.includes('✗') ? 'var(--error)' : 'var(--text-muted)' }}>
-                  {log}
-                </div>
-              ))}
+          <div className="glass-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <h2>Журнал событий</h2>
+              <button 
+                className="btn btn-secondary" 
+                style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '6px' }}
+                onClick={() => setLogs(['Журнал событий очищен.'])}
+              >
+                Очистить
+              </button>
+            </div>
+            <div className="console-box">
+              {logs.map((log, index) => {
+                const timeMatch = log.match(/^\[([0-9:]+)\]\s*(.*)$/);
+                const isError = log.includes('Ошибка') || log.includes('✗');
+                const isWarning = log.includes('Предупреждение') || log.includes('WARN');
+                const isSuccess = log.includes('успешно') || log.includes('✓') || log.includes('активна') || log.includes('обработан');
+                
+                let textColor = '#e5e7eb';
+                if (isError) textColor = 'var(--error)';
+                else if (isWarning) textColor = 'var(--warning)';
+                else if (isSuccess) textColor = '#34d399';
+
+                if (timeMatch) {
+                  return (
+                    <div key={index} className="console-line" style={{ color: textColor }}>
+                      <span className="console-timestamp">[{timeMatch[1]}]</span>
+                      <span>{timeMatch[2]}</span>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={index} className="console-line" style={{ color: textColor }}>
+                    {log}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -575,30 +694,29 @@ export default function App() {
           <div className="glass-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
             
             {/* Tabs Header */}
-            <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: '20px', gap: '8px' }}>
+            <div className="tab-nav">
               <button 
-                className="btn" 
-                style={{ 
-                  background: activeTab === 'products' ? 'var(--primary)' : 'rgba(255,255,255,0.02)',
-                  border: '1px solid rgba(255,255,255,0.05)', color: '#fff', padding: '12px 18px', fontSize: '13px',
-                  borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderTopLeftRadius: '10px', borderTopRightRadius: '10px',
-                  fontWeight: 600, cursor: 'pointer', transition: 'all 0.3s ease'
-                }}
+                className={`tab-btn ${activeTab === 'products' ? 'active' : ''}`}
                 onClick={() => {
                   setActiveTab('products');
                   loadProducts(1, statusFilter, searchQuery, pageSize);
+                  loadDumpingConfigs();
                 }}
               >
                 🏷️ Товары
               </button>
               <button 
-                className="btn" 
-                style={{ 
-                  background: activeTab === 'packaging' ? 'var(--primary)' : 'rgba(255,255,255,0.02)',
-                  border: '1px solid rgba(255,255,255,0.05)', color: '#fff', padding: '12px 18px', fontSize: '13px',
-                  borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderTopLeftRadius: '10px', borderTopRightRadius: '10px',
-                  fontWeight: 600, cursor: 'pointer', transition: 'all 0.3s ease'
+                className={`tab-btn ${activeTab === 'dumping' ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveTab('dumping');
+                  loadProducts(1, statusFilter, searchQuery, pageSize);
+                  loadDumpingConfigs();
                 }}
+              >
+                ⚡ Демпинг
+              </button>
+              <button 
+                className={`tab-btn ${activeTab === 'packaging' ? 'active' : ''}`}
                 onClick={() => {
                   setActiveTab('packaging');
                   loadOrders(orderStatusFilter, orderLimit);
@@ -607,13 +725,7 @@ export default function App() {
                 📦 Упаковка
               </button>
               <button 
-                className="btn" 
-                style={{ 
-                  background: activeTab === 'transfer' ? 'var(--primary)' : 'rgba(255,255,255,0.02)',
-                  border: '1px solid rgba(255,255,255,0.05)', color: '#fff', padding: '12px 18px', fontSize: '13px',
-                  borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderTopLeftRadius: '10px', borderTopRightRadius: '10px',
-                  fontWeight: 600, cursor: 'pointer', transition: 'all 0.3s ease'
-                }}
+                className={`tab-btn ${activeTab === 'transfer' ? 'active' : ''}`}
                 onClick={() => {
                   setActiveTab('transfer');
                   loadTransfers(transferFilter);
@@ -729,15 +841,13 @@ export default function App() {
                       {products.map((product) => (
                         <div 
                           key={product.id} 
+                          className="order-card"
                           style={{ 
                             padding: '16px', 
-                            background: 'rgba(255, 255, 255, 0.02)', 
-                            borderRadius: '12px',
-                            border: '1px solid rgba(255, 255, 255, 0.04)',
                             display: 'flex',
                             justifyContent: 'space-between',
                             alignItems: 'center',
-                            position: 'relative'
+                            margin: 0
                           }}
                         >
                           <div style={{ maxWidth: '75%' }}>
@@ -774,6 +884,268 @@ export default function App() {
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Pagination Controls */}
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px', marginTop: '20px' }}>
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1 || fetchingProducts}
+                  >
+                    ◀ Назад
+                  </button>
+                  
+                  <span style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    Страница 
+                    <input 
+                      type="text" 
+                      value={pageInputText}
+                      onChange={(e) => setPageInputText(e.target.value.replace(/\D/g, ''))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const pageNum = parseInt(pageInputText);
+                          if (pageNum >= 1 && pageNum <= totalPages) {
+                            handlePageChange(pageNum);
+                          } else {
+                            setPageInputText(String(currentPage));
+                          }
+                        }
+                      }}
+                      onBlur={() => {
+                        const pageNum = parseInt(pageInputText);
+                        if (pageNum >= 1 && pageNum <= totalPages) {
+                          handlePageChange(pageNum);
+                        } else {
+                          setPageInputText(String(currentPage));
+                        }
+                      }}
+                      className="form-input"
+                      style={{ width: '45px', padding: '4px 8px', textAlign: 'center', display: 'inline-block' }}
+                    />
+                    из <strong>{totalPages}</strong>
+                  </span>
+
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages || fetchingProducts}
+                  >
+                    Вперед ▶
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* TAB 4: AUTOMATIC PRICE DUMPING */}
+            {activeTab === 'dumping' && (
+              <>
+                {/* Header with Search, Filter & Page Size */}
+                <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h2 style={{ fontSize: '16px' }}>
+                      ⚡ Настройка авто-демпинга ({totalCount ? `${totalCount} поз.` : '0 поз.'})
+                    </h2>
+                    
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ 
+                        background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)', 
+                        boxShadow: '0 4px 12px rgba(139, 92, 246, 0.25)',
+                        padding: '10px 20px',
+                        color: '#fff',
+                        fontWeight: 600,
+                        borderRadius: '8px'
+                      }}
+                      onClick={runDumpingCycle}
+                      disabled={isRunningDumping || products.length === 0}
+                    >
+                      {isRunningDumping ? '⏳ Расчет выполняется...' : '⚡ Запустить авто-демпинг'}
+                    </button>
+                  </div>
+
+                  {/* Search Bar */}
+                  <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '12px' }}>
+                    <input 
+                      type="text" 
+                      className="form-input" 
+                      placeholder="Поиск по артикулу / названию..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      style={{ flexGrow: 1 }}
+                    />
+                    <button type="submit" className="btn btn-primary" style={{ padding: '10px 16px' }}>
+                      Найти
+                    </button>
+                    <button 
+                      type="button" 
+                      className="btn btn-secondary" 
+                      style={{ padding: '10px 14px' }}
+                      onClick={loadDumpingConfigs}
+                    >
+                      🔄 Обновить настройки
+                    </button>
+                  </form>
+                </div>
+
+                {/* Products List with Dumping Controls */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flexGrow: 1 }}>
+                  {fetchingProducts && products.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
+                      <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+                      <p>Загрузка товаров...</p>
+                    </div>
+                  ) : products.length === 0 && !fetchingProducts ? (
+                    <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
+                      <p>Товары не найдены. Смените фильтр поиска.</p>
+                    </div>
+                  ) : (
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '16px',
+                      opacity: fetchingProducts ? 0.6 : 1,
+                      pointerEvents: fetchingProducts ? 'none' : 'auto',
+                      transition: 'opacity 0.2s ease-in-out'
+                    }}>
+                      {products.map((product) => {
+                        const sku = product.sku;
+                        const isExpanded = expandedSkus.has(sku);
+                        const cfg = dumpingConfigs[sku] || { min_price: 0, max_price: 0, dump_step: 10, enabled: false };
+                        const hasConfig = !!dumpingConfigs[sku];
+                        const isDumpingActive = hasConfig && dumpingConfigs[sku].enabled;
+
+                        return (
+                          <div 
+                            key={product.id} 
+                            className="order-card"
+                            style={{ padding: '16px', margin: 0 }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ maxWidth: '70%' }}>
+                                <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
+                                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{product.sku}</p>
+                                
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
+                                  <span 
+                                    className="badge" 
+                                    style={{ 
+                                      background: isDumpingActive ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
+                                      color: isDumpingActive ? 'var(--success)' : '#aaa',
+                                      border: '1px solid rgba(255,255,255,0.08)'
+                                    }}
+                                  >
+                                    {isDumpingActive ? 'Демпинг активен' : 'Демпинг выключен'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                <div>
+                                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Текущая цена:</div>
+                                  <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>{product.price}</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ padding: '8px 12px', fontSize: '12px', borderColor: isExpanded ? 'var(--secondary)' : 'transparent' }}
+                                  onClick={() => {
+                                    const next = new Set(expandedSkus);
+                                    if (next.has(sku)) {
+                                      next.delete(sku);
+                                    } else {
+                                      next.add(sku);
+                                    }
+                                    setExpandedSkus(next);
+                                  }}
+                                >
+                                  ⚙️ {isExpanded ? 'Закрыть' : 'Настроить'}
+                                </button>
+                              </div>
+                            </div>
+
+                            {isExpanded && (
+                              <div style={{ 
+                                marginTop: '16px', 
+                                paddingTop: '16px', 
+                                borderTop: '1px solid rgba(255,255,255,0.05)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '12px'
+                              }}>
+                                <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--secondary)' }}>
+                                  Параметры авто-демпинга цен
+                                </h4>
+                                
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px' }}>
+                                  <div>
+                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Минимальная цена (₸)</label>
+                                    <input 
+                                      type="number" 
+                                      id={`min-${sku}`} 
+                                      className="form-input" 
+                                      defaultValue={cfg.min_price || ''}
+                                      placeholder="Себестоимость"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Максимальная цена (₸)</label>
+                                    <input 
+                                      type="number" 
+                                      id={`max-${sku}`} 
+                                      className="form-input" 
+                                      defaultValue={cfg.max_price || ''}
+                                      placeholder="МРЦ / RRP"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Шаг снижения (₸)</label>
+                                    <input 
+                                      type="number" 
+                                      id={`step-${sku}`} 
+                                      className="form-input" 
+                                      defaultValue={cfg.dump_step ?? 10}
+                                    />
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: '#fff', marginTop: '12px' }}>
+                                      <input 
+                                        type="checkbox" 
+                                        id={`enabled-${sku}`} 
+                                        defaultChecked={cfg.enabled}
+                                        style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                                      />
+                                      Демпинг активен
+                                    </label>
+                                  </div>
+                                </div>
+
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                                    onClick={() => {
+                                      const minVal = parseFloat((document.getElementById(`min-${sku}`) as HTMLInputElement).value) || 0;
+                                      const maxVal = parseFloat((document.getElementById(`max-${sku}`) as HTMLInputElement).value) || 0;
+                                      const stepVal = parseFloat((document.getElementById(`step-${sku}`) as HTMLInputElement).value) || 10;
+                                      const enabledVal = (document.getElementById(`enabled-${sku}`) as HTMLInputElement).checked;
+                                      saveDumpingConfig(sku, minVal, maxVal, stepVal, enabledVal);
+                                    }}
+                                  >
+                                    Сохранить
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -988,16 +1360,7 @@ export default function App() {
                         return (
                           <div 
                             key={order.id} 
-                            style={{ 
-                              padding: '20px', 
-                              background: isSelected ? 'rgba(201, 44, 60, 0.05)' : 'rgba(255, 255, 255, 0.02)', 
-                              borderRadius: '16px',
-                              border: isSelected ? '1px solid rgba(201, 44, 60, 0.3)' : '1px solid rgba(255, 255, 255, 0.05)',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: '12px',
-                              transition: 'all 0.2s ease-in-out'
-                            }}
+                            className={`order-card ${isSelected ? 'selected' : ''}`}
                           >
                             {/* Card Top Row */}
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1032,7 +1395,7 @@ export default function App() {
                                 </div>
                               </div>
                               <div style={{ textAlign: 'right' }}>
-                                <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--success)' }}>{order.price}</div>
+                                <div className="order-price">{order.price}</div>
                               </div>
                             </div>
 
@@ -1238,6 +1601,150 @@ export default function App() {
           </div>
         </div>
       </div>
+      {mcAuthStep !== 'idle' && (
+        <div className="modal-overlay">
+          <div className="glass-card modal-content" style={{ maxWidth: '400px', width: '100%', padding: '30px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: 700 }}>Авторизация Kaspi MC</h3>
+              <button 
+                onClick={() => setMcAuthStep('idle')} 
+                style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {mcAuthError && (
+              <div style={{ padding: '10px 12px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#fca5a5', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
+                {mcAuthError}
+              </div>
+            )}
+
+            {mcAuthStep === 'phone' && (
+              <div>
+                <p style={{ fontSize: '13px', marginBottom: '16px', color: 'var(--text-muted)' }}>
+                  Введите номер телефона, привязанный к вашему кабинету Kaspi Merchant. Мы запустим браузер для входа.
+                </p>
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>Номер телефона</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="+77771234567" 
+                    value={phoneInput}
+                    onChange={(e) => setPhoneInput(e.target.value)}
+                  />
+                </div>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ width: '100%' }}
+                  onClick={async () => {
+                    setMcAuthError('');
+                    setMcAuthStep('loading');
+                    addLog('Запуск SMS авторизации для ' + phoneInput);
+                    try {
+                      const res = await fetch(`${API_URL}/api/start-login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ phone: phoneInput })
+                      });
+                      const data = await res.json();
+                      if (res.ok && data.success) {
+                        setMcAuthStep('sms');
+                        addLog('SMS код отправлен на ' + phoneInput);
+                      } else {
+                        setMcAuthError(data.detail || 'Не удалось начать авторизацию.');
+                        setMcAuthStep('phone');
+                      }
+                    } catch {
+                      setMcAuthError('Ошибка сети.');
+                      setMcAuthStep('phone');
+                    }
+                  }}
+                >
+                  Отправить SMS-код
+                </button>
+              </div>
+            )}
+
+            {mcAuthStep === 'sms' && (
+              <div>
+                <p style={{ fontSize: '13px', marginBottom: '16px', color: 'var(--text-muted)' }}>
+                  На ваш номер телефона отправлен код подтверждения. Введите его ниже.
+                </p>
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>Код из SMS</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="123456" 
+                    value={smsInput}
+                    onChange={(e) => setSmsInput(e.target.value)}
+                  />
+                </div>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ width: '100%' }}
+                  onClick={async () => {
+                    setMcAuthError('');
+                    setMcAuthStep('loading');
+                    addLog('Отправка SMS-кода...');
+                    try {
+                      const res = await fetch(`${API_URL}/api/submit-sms`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ sms: smsInput })
+                      });
+                      const data = await res.json();
+                      if (res.ok && data.success) {
+                        setMcAuthStep('success');
+                        setMcHasSession(true);
+                        addLog('Авторизация Kaspi MC успешна! Сессионные куки сохранены.');
+                      } else {
+                        setMcAuthError(data.detail || 'Неверный код.');
+                        setMcAuthStep('sms');
+                      }
+                    } catch {
+                      setMcAuthError('Ошибка сети.');
+                      setMcAuthStep('sms');
+                    }
+                  }}
+                >
+                  Подтвердить код
+                </button>
+              </div>
+            )}
+
+            {mcAuthStep === 'loading' && (
+              <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Выполняется действие в браузере...</p>
+              </div>
+            )}
+
+            {mcAuthStep === 'success' && (
+              <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                <div style={{ 
+                  width: '48px', height: '48px', 
+                  background: 'rgba(16, 185, 129, 0.1)', 
+                  border: '2px solid var(--success)', 
+                  borderRadius: '50%', display: 'inline-flex', 
+                  justifyContent: 'center', alignItems: 'center', 
+                  color: 'var(--success)', fontSize: '24px',
+                  margin: '0 auto 16px auto'
+                }}>✓</div>
+                <h4 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>Авторизовано!</h4>
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px' }}>
+                  Сессия Kaspi MC успешно настроена.
+                </p>
+                <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => setMcAuthStep('idle')}>
+                  Закрыть
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
