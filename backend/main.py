@@ -640,7 +640,7 @@ def get_xml_feed():
     
     root_el = Element("kaspi_catalog", {
         "date": now_str,
-        "xmlns": "http://chat.carstyle.kz/kaspi_catalog",
+        "xmlns": "http://kaspi.kz/kaspicatalog",
         "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance"
     })
     

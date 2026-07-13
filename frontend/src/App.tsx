@@ -1070,14 +1070,17 @@ export default function App() {
                             </div>
 
                             {isExpanded && (
-                              <div style={{ 
-                                marginTop: '16px', 
-                                paddingTop: '16px', 
-                                borderTop: '1px solid rgba(255,255,255,0.05)',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '12px'
-                              }}>
+                              <div 
+                                key={`${sku}-${cfg.min_price}-${cfg.max_price}-${cfg.dump_step}-${cfg.enabled}`}
+                                style={{ 
+                                  marginTop: '16px', 
+                                  paddingTop: '16px', 
+                                  borderTop: '1px solid rgba(255,255,255,0.05)',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '12px'
+                                }}
+                              >
                                 <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--secondary)' }}>
                                   Параметры авто-демпинга цен
                                 </h4>
