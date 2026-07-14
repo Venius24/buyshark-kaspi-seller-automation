@@ -4,6 +4,8 @@ interface Product {
   id: string;
   name: string;
   sku: string;
+  merchantSku?: string;
+  kaspiSku?: string;
   price: string;
   status: string;
   url: string;
@@ -13,6 +15,9 @@ interface OrderEntry {
   entryId: string;
   productName: string;
   sku: string;
+  merchantSku?: string;
+  kaspiSku?: string;
+  productUrl?: string;
   quantity: number;
   basePrice: number;
   totalPrice: number;
@@ -192,7 +197,14 @@ export default function App() {
           setView('dashboard');
           addLog('Сессия REST API активна, токен подтвержден.');
           loadProducts(1, 'active', '', 10);
-          checkMcStatus(false);
+          // Проверяем куки MC с валидацией сразу при запуске
+          checkMcStatus(true).then((valid) => {
+            if (valid) {
+              addLog('Куки Kaspi MC активны ✓');
+            } else {
+              addLog('⚠️ Куки Kaspi MC недействительны или отсутствуют. Требуется SMS-авторизация.');
+            }
+          });
           loadDumpingConfigs();
         }
       } catch {
@@ -275,6 +287,16 @@ export default function App() {
         const transmittedCount = data.orders.filter((o: any) => o.courierTransmissionDate !== null).length;
         const types = Array.from(new Set(data.orders.map((o: any) => o.deliveryType))).join(', ');
         addLog(`Загружено ${total} заказов. Из них собранных (assembled): ${assembledCount}, переданных курьеру: ${transmittedCount}. Типы доставки: [${types}]`);
+        // Логируем SKU для каждой позиции заказа
+        for (const order of data.orders) {
+          if (order.entries && order.entries.length > 0) {
+            for (const entry of order.entries) {
+              const mSku = entry.merchantSku || '—';
+              const kSku = entry.kaspiSku || '—';
+              addLog(`  📦 Заказ #${order.id} → ${entry.productName}: Merchant SKU: ${mSku}, Kaspi SKU: ${kSku}`);
+            }
+          }
+        }
       } else {
         addLog(`Ошибка загрузки заказов: ${data.detail || 'Ошибка бэкенда'}`);
       }

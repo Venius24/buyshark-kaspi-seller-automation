@@ -483,18 +483,21 @@ def pack_all_orders():
         
         assembled_count = 0
         if non_assembled:
-            cargo_items = [{"orderCode": o["id"], "quantity": o["quantity"]} for o in non_assembled]
-            try:
-                assembled_count = KaspiAPI.assemble_cargos(token, cargo_items)
-            except Exception as e:
-                print(f"[API] Cargo assembly batch failed: {e}")
-                # Fallback to single assembly
-                for o in non_assembled:
+            import concurrent.futures
+            
+            # Запускаем сборку параллельно в 3 потока, так как пакетный метод Kaspi (assemble_cargos) не работает
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                futures = {
+                    executor.submit(KaspiAPI.assemble_cargo, token, o["id"], o["quantity"]): o
+                    for o in non_assembled
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    order = futures[future]
                     try:
-                        KaspiAPI.assemble_cargo(token, o["id"], o["quantity"])
+                        future.result()
                         assembled_count += 1
                     except Exception as ex:
-                        print(f"[API] Cargo assembly failed for {o['id']}: {ex}")
+                        print(f"[API] Cargo assembly failed for order {order['id']}: {ex}")
                         
         msg = f"Принято новых заказов: {accepted_count}. Упаковано заказов: {assembled_count}."
         return {"success": True, "packed": accepted_count + assembled_count, "message": msg}
@@ -546,7 +549,7 @@ def get_products(
     # Filter by search
     if search:
         q = search.lower()
-        filtered = [p for p in filtered if q in p.get("name", "").lower() or q in p.get("sku", "").lower()]
+        filtered = [p for p in filtered if q in (p.get("name") or "").lower() or q in (p.get("sku") or "").lower()]
 
     total_count = len(filtered)
     total_pages = max(1, (total_count + page_size - 1) // page_size)

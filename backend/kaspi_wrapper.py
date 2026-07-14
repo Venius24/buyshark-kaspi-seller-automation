@@ -6,6 +6,7 @@ KaspiAPI — чистый REST-клиент для Kaspi Merchant API v2 & MC AP
 import os
 import json
 import time
+import base64
 import datetime
 import requests
 from typing import Dict, Any, List, Optional
@@ -22,6 +23,27 @@ class KaspiAPI:
     )
 
     # ── helpers ──────────────────────────────────────────────
+
+    @staticmethod
+    def _decode_base64_if_needed(val: str) -> str:
+        """Декодирует Base64 строку в числовой Kaspi Master SKU.
+        
+        Kaspi API может возвращать ID товара в Base64-кодировке.
+        Kaspi Master SKU ОБЯЗАТЕЛЬНО состоит только из цифр.
+        Если значение уже числовое — возвращает как есть.
+        """
+        if not val:
+            return ""
+        val_str = str(val).strip()
+        if val_str.isdigit():
+            return val_str
+        try:
+            decoded = base64.b64decode(val_str).decode("utf-8")
+            if decoded.isdigit():
+                return decoded
+        except Exception:
+            pass
+        return val_str
 
     @staticmethod
     def _headers(token: str) -> dict:
@@ -234,12 +256,35 @@ class KaspiAPI:
                 try:
                     entries_data = KaspiAPI.get_order_entries(token, internal_id)
                     for entry in entries_data:
+                        entry_id = entry.get("id")
                         e_attr = entry.get("attributes", {})
                         offer = e_attr.get("offer", {})
+                        merchant_sku = offer.get("code", "")
+
+                        # Вытягиваем и декодируем настоящий Kaspi Master SKU (только цифры)
+                        kaspi_sku = ""
+                        try:
+                            master_prod = KaspiAPI.get_entry_product(token, entry_id)
+                            attr_code = master_prod.get("attributes", {}).get("code")
+                            raw_id = master_prod.get("id", "")
+                            kaspi_sku = KaspiAPI._decode_base64_if_needed(attr_code or raw_id)
+                        except Exception:
+                            pass
+
+                        # Ссылка валидна только если kaspi_sku числовой
+                        product_url = (
+                            f"https://kaspi.kz/shop/p/-{kaspi_sku}/?c=750000000#offers"
+                            if kaspi_sku and kaspi_sku.isdigit()
+                            else ""
+                        )
+
                         entries_enriched.append({
-                            "entryId": entry.get("id"),
+                            "entryId": entry_id,
                             "productName": offer.get("name", "Товар"),
-                            "sku": offer.get("code", ""),
+                            "sku": kaspi_sku or merchant_sku,  # Обратная совместимость с фронтом
+                            "merchantSku": merchant_sku,        # Внутренний артикул продавца
+                            "kaspiSku": kaspi_sku,              # Мастер SKU Kaspi (числовой)
+                            "productUrl": product_url,
                             "quantity": e_attr.get("quantity", 1),
                             "basePrice": e_attr.get("basePrice", 0),
                             "totalPrice": e_attr.get("totalPrice") or e_attr.get("entryTotalPrice", 0),
@@ -355,6 +400,8 @@ class KaspiAPI:
 
     @staticmethod
     def assemble_cargos(token: str, cargo_items: list) -> int:
+        # ВНИМАНИЕ: Метод пакетной отправки не работает (Kaspi API возвращает 500).
+        # Не использовать в продакшене. Оставлен для совместимости/документации.
         if not cargo_items:
             return 0
 
@@ -431,22 +478,53 @@ class KaspiAPI:
                 orders_data = data.get("data", [])
                 included = data.get("included", [])
 
+                # Строим карту мастер-продуктов (type == "products") из included
+                products_map: Dict[str, dict] = {}
+                for item in included:
+                    if item.get("type") == "products":
+                        products_map[item.get("id", "")] = item
+
                 for item in included:
                     if item.get("type") == "orderentries":
                         attr = item.get("attributes", {})
                         offer = attr.get("offer", {})
-                        sku = offer.get("code")
+                        merchant_sku = offer.get("code", "")
                         name = offer.get("name", "Товар")
                         price = attr.get("basePrice", 0)
 
-                        if sku and sku not in unique:
-                            unique[sku] = {
-                                "id": f"p_{sku}",
+                        # Извлекаем и декодируем Kaspi Master SKU (только цифры)
+                        kaspi_sku = ""
+                        try:
+                            product_rel = item.get("relationships", {}).get("product", {}).get("data", {})
+                            rel_id = product_rel.get("id", "")
+                            if rel_id and rel_id in products_map:
+                                raw_code = str(products_map[rel_id].get("attributes", {}).get("code", "") or rel_id)
+                            elif rel_id:
+                                raw_code = rel_id
+                            else:
+                                raw_code = ""
+                            kaspi_sku = KaspiAPI._decode_base64_if_needed(raw_code)
+                        except Exception:
+                            pass
+
+                        # Используем kaspiSku для ключа и ссылки, fallback на merchantSku
+                        key = kaspi_sku or merchant_sku
+                        if key and key not in unique:
+                            # Ссылка валидна только если kaspi_sku числовой
+                            product_url = (
+                                f"https://kaspi.kz/shop/p/-{kaspi_sku}/?c=750000000#offers"
+                                if kaspi_sku and kaspi_sku.isdigit()
+                                else ""
+                            )
+                            unique[key] = {
+                                "id": f"p_{key}",
                                 "name": name,
-                                "sku": sku,
+                                "sku": kaspi_sku or merchant_sku,  # Обратная совместимость
+                                "merchantSku": merchant_sku,
+                                "kaspiSku": kaspi_sku,
                                 "price": f"{int(price)} ₸" if price else "0 ₸",
                                 "status": "Активен",
-                                "url": f"https://kaspi.kz/shop/p/-{sku}/",
+                                "url": product_url,
                             }
 
                 if len(orders_data) < 100 or len(unique) >= max_orders:
