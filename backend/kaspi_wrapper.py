@@ -119,6 +119,7 @@ class KaspiAPI:
 
     @staticmethod
     def get_merchant_id(token: str) -> str:
+        # 1. Попытка через pointofservices
         try:
             pos_list = KaspiAPI.get_point_of_services(token)
             if pos_list:
@@ -128,7 +129,43 @@ class KaspiAPI:
                 elif pos_id:
                     return pos_id
         except Exception as e:
-            print(f"[KaspiAPI] get_merchant_id error: {e}")
+            print(f"[KaspiAPI] get_merchant_id (pointofservices failed): {e}")
+
+        # 2. Фаллбек через первый заказ из истории (если pointofservices вернул 500)
+        try:
+            now = datetime.datetime.now()
+            ge = int((now - datetime.timedelta(days=30)).timestamp() * 1000)
+            le = int(now.timestamp() * 1000)
+            params = {
+                "page[number]": 0,
+                "page[size]": 1,
+                "filter[orders][creationDate][$ge]": ge,
+                "filter[orders][creationDate][$le]": le,
+            }
+            resp = KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
+            if resp.status_code == 200:
+                data = resp.json().get("data", [])
+                if data:
+                    order = data[0]
+                    # Извлекаем из pickupPointId
+                    pickup_id = order.get("attributes", {}).get("pickupPointId")
+                    if pickup_id and "_" in pickup_id:
+                        merchant_id = pickup_id.split("_")[0]
+                        print(f"[KaspiAPI] get_merchant_id resolved from order pickupPointId: {merchant_id}")
+                        return merchant_id
+                    
+                    # Или из originAddress.id (в Base64)
+                    origin_address = order.get("attributes", {}).get("originAddress", {})
+                    origin_id = origin_address.get("id")
+                    if origin_id:
+                        decoded = KaspiAPI._decode_base64_if_needed(origin_id)
+                        if "_" in decoded:
+                            merchant_id = decoded.split("_")[0]
+                            print(f"[KaspiAPI] get_merchant_id resolved from decoded originAddress ID: {merchant_id}")
+                            return merchant_id
+        except Exception as e:
+            print(f"[KaspiAPI] get_merchant_id (orders fallback failed): {e}")
+
         return "20186986"
 
     # ── 1. token verification ────────────────────────────────
@@ -363,7 +400,7 @@ class KaspiAPI:
                 with open("state.json", "r", encoding="utf-8") as f:
                     state_data = json.load(f)
                     for c in state_data.get("cookies", []):
-                        if c.get("name") in ["mc-session", "mc-sid"] and "mc.shop.kaspi.kz" in c.get("domain", ""):
+                        if c.get("name") in ["mc-session", "mc-sid"] and "kaspi.kz" in c.get("domain", ""):
                             cookies[c["name"]] = c["value"]
             except Exception as e:
                 print(f"[KaspiAPI] Error parsing state.json: {e}")
@@ -442,99 +479,91 @@ class KaspiAPI:
         resp.raise_for_status()
         return resp.json().get("data", [])
 
-    # ── 9. extract products from order history ───────────────
+    # ── 9. sync merchant assortment (BFF offer-view) ─────────
 
     @staticmethod
-    def extract_products_from_orders(token: str, days_back: int = 60, max_orders: int = 500) -> list:
-        now = datetime.datetime.now()
-        unique: Dict[str, dict] = {}
-        chunk_days = 12
-        num_chunks = (days_back + chunk_days - 1) // chunk_days
+    def sync_merchant_assortment(token: str) -> list:
+        """Выкачивает ВСЕ товары из кабинета Kaspi (ассортимент) через BFF эндпоинт."""
+        merchant_id = KaspiAPI.get_merchant_id(token)
+        cookies = KaspiAPI._load_mc_cookies()
 
-        for i in range(num_chunks):
-            start_date = now - datetime.timedelta(days=(i + 1) * chunk_days)
-            end_date = now - datetime.timedelta(days=i * chunk_days)
-            ge = int(start_date.timestamp() * 1000)
-            le = int(end_date.timestamp() * 1000)
+        url = "https://mc.shop.kaspi.kz/bff/offer-view/list"
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "ru,en-US;q=0.9",
+            "User-Agent": KaspiAPI.USER_AGENT,
+            "x-auth-version": "3",
+            "Origin": "https://kaspi.kz",
+            "Referer": "https://kaspi.kz/",
+        }
 
-            page_num = 0
-            while True:
-                params = {
-                    "page[number]": page_num,
-                    "page[size]": 100,
-                    "filter[orders][creationDate][$ge]": ge,
-                    "filter[orders][creationDate][$le]": le,
-                    "filter[orders][state]": "ARCHIVE",
-                    "include[orders]": "entries"
-                }
-                try:
-                    resp = KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
-                    if resp.status_code != 200:
-                        break
-                    data = resp.json()
-                except Exception:
-                    break
+        page = 0
+        limit = 100
+        all_products = []
 
-                orders_data = data.get("data", [])
-                included = data.get("included", [])
+        print("[BFF Sync] Запуск полной синхронизации ассортимента через BFF...")
 
-                # Строим карту мастер-продуктов (type == "products") из included
-                products_map: Dict[str, dict] = {}
-                for item in included:
-                    if item.get("type") == "products":
-                        products_map[item.get("id", "")] = item
+        while True:
+            params = {
+                "m": str(merchant_id),
+                "p": page,
+                "l": limit,
+                "a": "true",  # Только активные (в продаже)
+            }
 
-                for item in included:
-                    if item.get("type") == "orderentries":
-                        attr = item.get("attributes", {})
-                        offer = attr.get("offer", {})
-                        merchant_sku = offer.get("code", "")
-                        name = offer.get("name", "Товар")
-                        price = attr.get("basePrice", 0)
+            resp = requests.get(
+                url, headers=headers, cookies=cookies, params=params, timeout=15
+            )
 
-                        # Извлекаем и декодируем Kaspi Master SKU (только цифры)
-                        kaspi_sku = ""
-                        try:
-                            product_rel = item.get("relationships", {}).get("product", {}).get("data", {})
-                            rel_id = product_rel.get("id", "")
-                            if rel_id and rel_id in products_map:
-                                raw_code = str(products_map[rel_id].get("attributes", {}).get("code", "") or rel_id)
-                            elif rel_id:
-                                raw_code = rel_id
-                            else:
-                                raw_code = ""
-                            kaspi_sku = KaspiAPI._decode_base64_if_needed(raw_code)
-                        except Exception:
-                            pass
-
-                        # Используем kaspiSku для ключа и ссылки, fallback на merchantSku
-                        key = kaspi_sku or merchant_sku
-                        if key and key not in unique:
-                            # Ссылка валидна только если kaspi_sku числовой
-                            product_url = (
-                                f"https://kaspi.kz/shop/p/-{kaspi_sku}/?c=750000000#offers"
-                                if kaspi_sku and kaspi_sku.isdigit()
-                                else ""
-                            )
-                            unique[key] = {
-                                "id": f"p_{key}",
-                                "name": name,
-                                "sku": kaspi_sku or merchant_sku,  # Обратная совместимость
-                                "merchantSku": merchant_sku,
-                                "kaspiSku": kaspi_sku,
-                                "price": f"{int(price)} ₸" if price else "0 ₸",
-                                "status": "Активен",
-                                "url": product_url,
-                            }
-
-                if len(orders_data) < 100 or len(unique) >= max_orders:
-                    break
-                page_num += 1
-
-            if len(unique) >= max_orders:
+            if resp.status_code != 200:
+                print(f"[BFF Sync] Ошибка пагинации на странице {page} [{resp.status_code}]: {resp.text}")
                 break
 
-        return list(unique.values())
+            data_json = resp.json()
+            offers = data_json.get("data", [])
+
+            if not offers:
+                break
+
+            for offer in offers:
+                master_sku = offer.get("masterSku")
+                merchant_sku = offer.get("sku")
+
+                if not master_sku or not merchant_sku:
+                    continue
+
+                stock_count = 0
+                availabilities = offer.get("availabilities", [])
+                if availabilities:
+                    stock_count = availabilities[0].get("stockCount", 0)
+
+                price_num = offer.get("price", 0)
+                brand_name = offer.get("brandName") or "Без бренда"
+                title = offer.get("title") or f"Товар {merchant_sku}"
+
+                product_entry = {
+                    "id": f"p_{master_sku}",
+                    "name": title,
+                    "sku": str(master_sku),
+                    "merchantSku": str(merchant_sku),
+                    "kaspiSku": str(master_sku),
+                    "price": f"{int(price_num)} ₸",
+                    "status": "Активен" if offer.get("available", True) else "Архив",
+                    "url": f"https://kaspi.kz/shop/p/-{master_sku}/?c=750000000#offers",
+                    "price_num": int(price_num),
+                    "stock": int(stock_count),
+                    "brand": brand_name,
+                }
+                all_products.append(product_entry)
+
+            if len(offers) < limit:
+                break
+
+            page += 1
+            time.sleep(0.3)  # Защита от WAF (Anti-DDoS)
+
+        print(f"[BFF Sync] Синхронизация завершена! Всего выкачано: {len(all_products)} товаров.")
+        return all_products
 
     # ── 10. transfers (assembled orders awaiting courier) ────
 

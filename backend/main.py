@@ -149,7 +149,18 @@ class PlaywrightWorker(threading.Thread):
                         page.get_by_role("textbox", name="Введите код").fill(sms)
                         page.get_by_role("button", name="Продолжить").click()
                         
-                        page.wait_for_timeout(4000)
+                        # Ожидаем появление кук mc-session и mc-sid
+                        success_cookies = False
+                        for _ in range(30):  # до 15 секунд
+                            cookies = context.cookies()
+                            names = [c["name"] for c in cookies]
+                            if "mc-session" in names and "mc-sid" in names:
+                                success_cookies = True
+                                break
+                            page.wait_for_timeout(500)
+                        
+                        if not success_cookies:
+                            page.wait_for_timeout(2000)  # дополнительный таймаут-бекдор
                         
                         if "login" in page.url:
                             raise Exception("Вход не удался. Пожалуйста, проверьте код из SMS.")
@@ -170,6 +181,9 @@ class PlaywrightWorker(threading.Thread):
                             temp_page.wait_for_timeout(3000)
                             
                             is_valid = "login" not in temp_page.url
+                            if is_valid:
+                                # Сохраняем обновленный стейт (куки mc-session, mc-sid и т.д.)
+                                temp_context.storage_state(path="state.json")
                             temp_browser.close()
                             self.result_queue.put((True, is_valid))
                         else:
@@ -343,6 +357,7 @@ class DumpingConfigRequest(BaseModel):
     max_price: float
     dump_step: Optional[float] = 10.0
     enabled: bool
+    city_code: Optional[str] = "750000000"
 
 
 # ── Routes ───────────────────────────────────────────────────
@@ -534,7 +549,7 @@ def get_products(
     if not all_products:
         # Fetch from Kaspi API
         try:
-            all_products = KaspiAPI.extract_products_from_orders(token)
+            all_products = KaspiAPI.sync_merchant_assortment(token)
             all_products = _apply_overrides(all_products)
             os.makedirs("states", exist_ok=True)
             with open(products_file, "w", encoding="utf-8") as f:
@@ -611,7 +626,7 @@ def refresh_products():
     token = _require_token()
     products_file = "states/products.json"
     try:
-        products = KaspiAPI.extract_products_from_orders(token)
+        products = KaspiAPI.sync_merchant_assortment(token)
         products = _apply_overrides(products)
         os.makedirs("states", exist_ok=True)
         with open(products_file, "w", encoding="utf-8") as f:
@@ -636,65 +651,9 @@ def get_xml_feed():
         except Exception:
             pass
             
-    from xml.etree.ElementTree import Element, SubElement, tostring
-    import datetime
-    
-    now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-    
-    root_el = Element("kaspi_catalog", {
-        "date": now_str,
-        "xmlns": "http://kaspi.kz/kaspicatalog",
-        "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance"
-    })
-    
-    company_el = SubElement(root_el, "company")
-    company_el.text = "ИП Твой Мерчант"
-    
-    merchant_el = SubElement(root_el, "merchantid")
-    merchant_el.text = str(merchant_id)
-    
-    offers_el = SubElement(root_el, "offers")
-    
-    for p in products:
-        sku = p.get("sku")
-        if not sku:
-            continue
-            
-        name = p.get("name") or f"Товар {sku}"
-        brand = p.get("brand") or extract_brand(name)
-        
-        price_num = p.get("price_num")
-        if price_num is None:
-            try:
-                price_str = p.get("price", "0").replace(" ₸", "").replace(" ", "").strip()
-                price_num = int(price_str)
-            except:
-                price_num = 0
-                
-        stock = p.get("stock", 10)
-        status = p.get("status", "Активен")
-        
-        available = "yes" if stock > 0 and status == "Активен" else "no"
-        
-        offer_el = SubElement(offers_el, "offer", {"sku": str(sku)})
-        model_el = SubElement(offer_el, "model")
-        model_el.text = str(name)
-        
-        brand_el = SubElement(offer_el, "brand")
-        brand_el.text = str(brand)
-        
-        avail_parent = SubElement(offer_el, "availabilities")
-        SubElement(avail_parent, "availability", {
-            "available": available,
-            "storeId": f"{merchant_id}_001",
-            "stock": str(stock)
-        })
-        
-        price_el = SubElement(offer_el, "price")
-        price_el.text = str(price_num)
-        
-    xml_str = tostring(root_el, encoding="utf-8")
-    return Response(content=b'<?xml version="1.0" encoding="utf-8"?>\n' + xml_str, media_type="application/xml")
+    from backend.price_dumper import generate_xml_feed
+    xml_data = generate_xml_feed(merchant_id, products)
+    return Response(content=xml_data, media_type="application/xml")
 
 
 # ── Price Dumping ────────────────────────────────────────────
@@ -714,14 +673,15 @@ def save_dumping_config(req: DumpingConfigRequest):
         "min_price": req.min_price,
         "max_price": req.max_price,
         "dump_step": req.dump_step,
-        "enabled": req.enabled
+        "enabled": req.enabled,
+        "city_code": req.city_code
     }
     _save_dumping_configs(configs)
     return {"success": True, "message": f"Конфигурация демпинга для {req.sku} сохранена."}
 
 
 @app.post("/api/dumping/run")
-def run_price_dumping():
+async def run_price_dumping():
     """Запустить расчет авто-демпинга для включенных товаров."""
     configs = _load_dumping_configs()
     products_file = "states/products.json"
@@ -735,71 +695,25 @@ def run_price_dumping():
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ошибка чтения товаров: {e}")
         
-    updated_count = 0
-    log_messages = []
+    token = _require_token()
     
-    for p in products:
-        sku = p.get("sku")
-        if not sku or sku not in configs:
-            continue
-            
-        cfg_data = configs[sku]
-        if not cfg_data.get("enabled"):
-            continue
-            
-        # Parse current price
-        price_num = p.get("price_num")
-        if price_num is None:
-            try:
-                price_str = p.get("price", "0").replace(" ₸", "").replace(" ", "").strip()
-                price_num = float(price_str)
-            except:
-                price_num = 0.0
-                
-        # Build config object
-        config = ProductDumpingConfig(
-            sku=sku,
-            my_current_price=float(price_num),
-            min_price=float(cfg_data["min_price"]),
-            max_price=float(cfg_data["max_price"]),
-            dump_step=float(cfg_data.get("dump_step", 10.0))
-        )
-        
-        # Get competitor prices (emulated/parsed)
-        competitor_prices = fetch_competitor_prices(sku, config.my_current_price)
-        
-        # Calculate new price
-        new_price = DumpingEngine.calculate_new_price(config, competitor_prices)
-        
-        # If price changed, update in products cache
-        if abs(new_price - config.my_current_price) > 0.01:
-            p["price_num"] = int(new_price)
-            p["price"] = f"{int(new_price)} ₸"
-            updated_count += 1
-            
-            # Log detail
-            min_comp = min([x for x in competitor_prices if abs(x - config.my_current_price) > 0.01], default=new_price)
-            msg = f"Авто-демпинг {sku}: {int(config.my_current_price)} ₸ -> {int(new_price)} ₸ (конкурент: {int(min_comp)} ₸)"
-            log_messages.append(msg)
-            
-            # Save to overrides as well so it persists refresh
-            _save_override(sku, int(new_price), p.get("stock", 10), p.get("brand"), p.get("status"))
-            
-    if updated_count > 0:
+    from backend.price_dumper import run_price_dumping_job
+    
+    res = await run_price_dumping_job(
+        token=token,
+        configs=configs,
+        products=products,
+        save_override_func=_save_override
+    )
+    
+    if res.get("updated_count", 0) > 0:
         try:
             with open(products_file, "w", encoding="utf-8") as f:
                 json.dump(products, f, ensure_ascii=False, indent=2)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Ошибка сохранения товаров: {e}")
             
-    summary_msg = f"Расчет демпинга завершен. Обновлено цен: {updated_count}."
-    
-    return {
-        "success": True, 
-        "updated_count": updated_count, 
-        "message": summary_msg,
-        "logs": log_messages
-    }
+    return res
 
 
 # ── Transfers ────────────────────────────────────────────────
