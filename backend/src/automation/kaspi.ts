@@ -26,9 +26,17 @@ class KaspiAutomation {
     this.page = await this.context.newPage();
 
     await this.page.goto('https://idmc.shop.kaspi.kz/login');
-    await this.page.getByRole('tab', { name: 'Телефон' }).click();
-    await this.page.getByRole('textbox', { name: '+7 ( ) - -' }).click();
-    await this.page.getByRole('textbox', { name: '+7 ( ) - -' }).fill(phone);
+    try {
+      await this.page.getByRole('tab', { name: 'Телефон' }).click();
+    } catch (e) {}
+
+    try {
+      await this.page.getByPlaceholder('Телефон').click();
+      await this.page.getByPlaceholder('Телефон').fill(phone);
+    } catch (e) {
+      await this.page.getByRole('textbox', { name: '+7 ( ) - -' }).click();
+      await this.page.getByRole('textbox', { name: '+7 ( ) - -' }).fill(phone);
+    }
     await this.page.getByRole('button', { name: 'Продолжить' }).click();
 
     // Short sleep for transition animations
@@ -41,8 +49,13 @@ class KaspiAutomation {
       throw new Error('Authorization session not started.');
     }
 
-    await this.page.getByRole('textbox', { name: 'Введите код' }).click();
-    await this.page.getByRole('textbox', { name: 'Введите код' }).fill(sms);
+    try {
+      await this.page.getByPlaceholder('Введите код').click();
+      await this.page.getByPlaceholder('Введите код').fill(sms);
+    } catch (e) {
+      await this.page.getByRole('textbox', { name: 'Введите код' }).click();
+      await this.page.getByRole('textbox', { name: 'Введите код' }).fill(sms);
+    }
     await this.page.getByRole('button', { name: 'Продолжить' }).click();
 
     // Wait for potential redirects/navigation
