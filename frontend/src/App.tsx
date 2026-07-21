@@ -106,6 +106,7 @@ export default function App() {
   const [expandedSkus, setExpandedSkus] = useState<Set<string>>(new Set());
   const [expandedEditSkus, setExpandedEditSkus] = useState<Set<string>>(new Set());
   const [isRunningDumping, setIsRunningDumping] = useState(false);
+  const [nextRunSeconds, setNextRunSeconds] = useState<number | null>(null);
 
   const API_URL = 'http://localhost:5000';
 
@@ -133,6 +134,26 @@ export default function App() {
     } catch {
       // Ignore
     }
+  };
+
+  const loadDumpingStatus = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/dumping/status`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setNextRunSeconds(data.next_run_seconds);
+        setIsRunningDumping(data.is_running);
+      }
+    } catch {
+      // Ignore
+    }
+  };
+
+  const formatTime = (seconds: number | null) => {
+    if (seconds === null) return '--:--';
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
   const saveDumpingConfig = async (sku: string, minPrice: number, maxPrice: number, step: number, enabled: boolean) => {
@@ -242,6 +263,7 @@ export default function App() {
             }
           });
           loadDumpingConfigs();
+          loadDumpingStatus();
         }
       } catch {
         // Backend not available
@@ -249,6 +271,27 @@ export default function App() {
       setIsLoaded(true);
     })();
   }, []);
+
+  // Poll dumping status & countdown
+  useEffect(() => {
+    if (!isAuthed) return;
+    
+    // Опрашиваем бэкенд каждые 10 секунд
+    const syncInterval = setInterval(loadDumpingStatus, 10000);
+    
+    // Уменьшаем таймер локально каждую секунду
+    const countdownInterval = setInterval(() => {
+      setNextRunSeconds((prev) => {
+        if (prev === null || prev <= 0) return prev;
+        return prev - 1;
+      });
+    }, 1000);
+    
+    return () => {
+      clearInterval(syncInterval);
+      clearInterval(countdownInterval);
+    };
+  }, [isAuthed]);
 
   // ── Data loaders (no phone parameter) ──────────────────
 
@@ -1126,22 +1169,41 @@ export default function App() {
                       ⚡ Настройка авто-демпинга ({totalCount ? `${totalCount} поз.` : '0 поз.'})
                     </h2>
                     
-                    <button
-                      type="button"
-                      className="btn"
-                      style={{ 
-                        background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)', 
-                        boxShadow: '0 4px 12px rgba(139, 92, 246, 0.25)',
-                        padding: '10px 20px',
-                        color: '#fff',
-                        fontWeight: 600,
-                        borderRadius: '8px'
-                      }}
-                      onClick={runDumpingCycle}
-                      disabled={isRunningDumping || products.length === 0}
-                    >
-                      {isRunningDumping ? '⏳ Расчет выполняется...' : '⚡ Запустить авто-демпинг'}
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                      {nextRunSeconds !== null && (
+                        <div style={{
+                          fontSize: '13px',
+                          color: 'var(--text-muted)',
+                          background: 'rgba(255,255,255,0.04)',
+                          padding: '6px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid rgba(255,255,255,0.06)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}>
+                          <span className="glow-dot glow-dot-success" style={{ display: 'inline-block', position: 'static', marginRight: '4px' }}></span>
+                          Следующий запуск через: <strong style={{ color: 'var(--success)', fontFamily: 'monospace' }}>{formatTime(nextRunSeconds)}</strong>
+                        </div>
+                      )}
+                      
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{ 
+                          background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)', 
+                          boxShadow: '0 4px 12px rgba(139, 92, 246, 0.25)',
+                          padding: '10px 20px',
+                          color: '#fff',
+                          fontWeight: 600,
+                          borderRadius: '8px'
+                        }}
+                        onClick={runDumpingCycle}
+                        disabled={isRunningDumping || products.length === 0}
+                      >
+                        {isRunningDumping ? '⏳ Расчет выполняется...' : '⚡ Запустить авто-демпинг'}
+                      </button>
+                    </div>
                   </div>
 
                   {/* Search Bar */}

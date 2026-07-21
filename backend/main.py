@@ -10,6 +10,13 @@ from backend.routers import auth, products, orders, dumping
 
 app = FastAPI(title="Kaspi SaaS Wrapper API")
 
+import asyncio
+from backend.routers.dumping import background_dumping_loop
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(background_dumping_loop())
+
 # CORS — разрешаем Vite dev server
 app.add_middleware(
     CORSMiddleware,
