@@ -155,7 +155,7 @@ class RateLimitExecutorWorker:
                 success, val = RateLimitExecutorWorker._update_kaspi_price_sync(
                     merchant_uid=merchant_id,
                     cookies=cookies,
-                    sku=sku_key,
+                    sku=p.get("merchantSku") or sku_key,
                     master_sku=config.master_sku,
                     model_name=p.get("name", "Товар"),
                     new_price=int(new_price),

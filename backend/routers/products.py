@@ -108,7 +108,7 @@ def update_product(req: UpdateProductRequest):
             success, val = RateLimitExecutorWorker._update_kaspi_price_sync(
                 merchant_uid=merchant_id,
                 cookies=cookies,
-                sku=req.sku,
+                sku=target_p.get("merchantSku") or req.sku,
                 master_sku=decoded_master,
                 model_name=target_p.get("name", "Товар"),
                 new_price=int(req.price),
