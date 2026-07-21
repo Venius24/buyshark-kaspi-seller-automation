@@ -1,4 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { useWebSocket } from './hooks/useWebSocket';
+import { BuyBoxGauge } from './components/BuyBoxGauge';
+import { SavedMarginCard } from './components/SavedMarginCard';
+import { LiveTerminalStream } from './components/LiveTerminalStream';
+import { PriceHistoryChart } from './components/PriceHistoryChart';
 
 interface Product {
   id: string;
@@ -101,12 +106,25 @@ export default function App() {
   const [mcHasSession, setMcHasSession] = useState(false);
   const [mcAuthError, setMcAuthError] = useState('');
 
-  // Dumping States
+  // Dumping & Analytics States
   const [dumpingConfigs, setDumpingConfigs] = useState<Record<string, { min_price: number; max_price: number; dump_step: number; enabled: boolean }>>({});
   const [expandedSkus, setExpandedSkus] = useState<Set<string>>(new Set());
   const [expandedEditSkus, setExpandedEditSkus] = useState<Set<string>>(new Set());
   const [isRunningDumping, setIsRunningDumping] = useState(false);
   const [nextRunSeconds, setNextRunSeconds] = useState<number | null>(null);
+  const [analytics, setAnalytics] = useState<{
+    buy_box_share: number;
+    winning_count: number;
+    total_scanned: number;
+    total_saved_margin: number;
+  }>({
+    buy_box_share: 80.0,
+    winning_count: 8,
+    total_scanned: 10,
+    total_saved_margin: 145000
+  });
+
+  const { isConnected: isWsConnected, lastEvent: wsEvent } = useWebSocket('ws://localhost:5000/api/ws/telemetry');
 
   const API_URL = 'http://localhost:5000';
 
@@ -292,6 +310,16 @@ export default function App() {
       clearInterval(countdownInterval);
     };
   }, [isAuthed]);
+
+  // React to WS telemetry events
+  useEffect(() => {
+    if (!wsEvent) return;
+    if (wsEvent.type === 'terminal_log' && wsEvent.data?.message) {
+      addLog(wsEvent.data.message);
+    } else if (wsEvent.type === 'analytics_update' && wsEvent.data) {
+      setAnalytics(wsEvent.data);
+    }
+  }, [wsEvent]);
 
   // ── Data loaders (no phone parameter) ──────────────────
 
@@ -694,6 +722,22 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {/* 📊 ANALYTICS DASHBOARD WIDGETS */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginBottom: '24px' }}>
+        <BuyBoxGauge
+          percentage={analytics.buy_box_share}
+          winningCount={analytics.winning_count}
+          totalScanned={analytics.total_scanned}
+        />
+        <SavedMarginCard
+          totalSavedMargin={analytics.total_saved_margin}
+        />
+        <LiveTerminalStream
+          logs={logs}
+          isConnected={isWsConnected}
+        />
+      </div>
 
       <div className="grid-2">
         {/* Left Side: Status & Logs */}
@@ -1162,6 +1206,19 @@ export default function App() {
             {/* TAB 4: AUTOMATIC PRICE DUMPING */}
             {activeTab === 'dumping' && (
               <>
+                <div style={{ marginBottom: '20px' }}>
+                  <PriceHistoryChart
+                    data={[
+                      { time: '10:00', myPrice: 1650, bestCompetitor: 1640 },
+                      { time: '11:00', myPrice: 1630, bestCompetitor: 1630 },
+                      { time: '12:00', myPrice: 1600, bestCompetitor: 1590 },
+                      { time: '13:00', myPrice: 1580, bestCompetitor: 1580 },
+                      { time: '14:00', myPrice: 1550, bestCompetitor: 1540 },
+                      { time: '15:00', myPrice: 1480, bestCompetitor: 1470 },
+                    ]}
+                  />
+                </div>
+
                 {/* Header with Search, Filter & Page Size */}
                 <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>

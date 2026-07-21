@@ -222,6 +222,13 @@ class RateLimitExecutorWorker:
             )
             log_messages.append(msg)
             logger.info(msg)
+            
+            try:
+                from backend.dumper.telemetry import emit_telemetry_sync
+                emit_telemetry_sync("terminal_log", {"message": msg, "sku": sku_key, "price": new_price})
+            except Exception:
+                pass
+
             updated_count += 1
 
             save_override_func(

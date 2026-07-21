@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict
+from typing import List, Dict, Any
 from backend.dumper.config import DumpingProductConfig
 
 logger = logging.getLogger(__name__)
@@ -147,11 +147,14 @@ class BrainWorker:
         market_snapshot: Dict[str, dict],
         configs: dict,
         merchant_id: str
-    ) -> List[dict]:
+    ) -> Dict[str, Any]:
         """
-        Принимает снимок рынка и возвращает список команд (PriceUpdateTask) на изменение цен.
+        Принимает снимок рынка и возвращает задачи на изменение цен и сводную аналитику.
         """
         update_queue = []
+        total_scanned = len(market_snapshot)
+        winning_count = 0
+        total_saved_margin = 0.0
 
         for sku_key, snap in market_snapshot.items():
             cfg_data = configs.get(sku_key, {})
@@ -179,6 +182,12 @@ class BrainWorker:
             res = DumpingEngine.calculate_new_price(config, merchant_id, snap["offers"])
             new_price = res["targetPrice"]
 
+            if res["currentPos"] == 1:
+                winning_count += 1
+
+            if config.min_price > 0 and new_price > config.min_price:
+                total_saved_margin += (new_price - config.min_price)
+
             if abs(new_price - config.my_current_price) > 0.01:
                 update_queue.append({
                     "sku": sku_key,
@@ -189,5 +198,18 @@ class BrainWorker:
                     "product_ref": p
                 })
 
-        logger.info(f"🧠 [Brain Worker] Рассчитано решений для выполнения: {len(update_queue)}")
-        return update_queue
+        buy_box_share = round((winning_count / total_scanned * 100.0), 1) if total_scanned > 0 else 0.0
+
+        analytics = {
+            "total_scanned": total_scanned,
+            "winning_count": winning_count,
+            "buy_box_share": buy_box_share,
+            "total_saved_margin": round(total_saved_margin, 2)
+        }
+
+        logger.info(f"🧠 [Brain Worker] Решений: {len(update_queue)}, Buy Box Share: {buy_box_share}%, Сохраненная маржа: {round(total_saved_margin)} ₸")
+        
+        return {
+            "update_queue": update_queue,
+            "analytics": analytics
+        }

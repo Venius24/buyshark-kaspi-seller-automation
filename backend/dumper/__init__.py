@@ -34,10 +34,27 @@ async def run_price_dumping_job(
         }
 
     # 2. 🧠 Воркер-Мозг
-    update_queue = BrainWorker.calculate_price_decisions(market_snapshot, configs, merchant_id)
+    brain_result = BrainWorker.calculate_price_decisions(market_snapshot, configs, merchant_id)
+    update_queue = brain_result["update_queue"]
+    analytics = brain_result["analytics"]
+
+    # Сохраняем агрегированную аналитику в стейт
+    try:
+        import os, json
+        os.makedirs("states", exist_ok=True)
+        with open("states/analytics.json", "w", encoding="utf-8") as f:
+            json.dump(analytics, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+    # Бродкаст аналитики в WebSocket
+    from backend.dumper.telemetry import telemetry_manager
+    await telemetry_manager.broadcast("analytics_update", analytics)
 
     # 3. 🚀 Воркер-Исполнитель
-    return RateLimitExecutorWorker.execute_updates(update_queue, save_override_func, merchant_id=merchant_id)
+    exec_result = RateLimitExecutorWorker.execute_updates(update_queue, save_override_func, merchant_id=merchant_id)
+    exec_result["analytics"] = analytics
+    return exec_result
 
 __all__ = [
     "discover_merchant_id",
