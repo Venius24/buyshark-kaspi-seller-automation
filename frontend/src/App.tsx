@@ -9,6 +9,9 @@ interface Product {
   price: string;
   status: string;
   url: string;
+  price_num?: number;
+  stock?: number;
+  brand?: string;
 }
 
 interface OrderEntry {
@@ -101,6 +104,7 @@ export default function App() {
   // Dumping States
   const [dumpingConfigs, setDumpingConfigs] = useState<Record<string, { min_price: number; max_price: number; dump_step: number; enabled: boolean }>>({});
   const [expandedSkus, setExpandedSkus] = useState<Set<string>>(new Set());
+  const [expandedEditSkus, setExpandedEditSkus] = useState<Set<string>>(new Set());
   const [isRunningDumping, setIsRunningDumping] = useState(false);
 
   const API_URL = 'http://localhost:5000';
@@ -154,6 +158,38 @@ export default function App() {
       }
     } catch {
       addLog('Сбой сети при сохранении настроек демпинга.');
+    }
+  };
+
+  const saveProductUpdate = async (sku: string, price: number, stock: number, brand: string | undefined, status: string | undefined) => {
+    addLog(`Сохранение параметров товара ${sku}...`);
+    try {
+      const res = await fetch(`${API_URL}/api/products/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sku,
+          price,
+          stock,
+          brand,
+          status
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addLog(`Товар ${sku} успешно обновлен.`);
+        loadProducts(currentPage, statusFilter, searchQuery, pageSize);
+        // Закрываем панель редактирования
+        setExpandedEditSkus(prev => {
+          const next = new Set(prev);
+          next.delete(sku);
+          return next;
+        });
+      } else {
+        addLog(`Ошибка обновления товара: ${data.detail || 'Неизвестная ошибка'}`);
+      }
+    } catch {
+      addLog('Сетевая ошибка при обновлении товара.');
     }
   };
 
@@ -860,52 +896,169 @@ export default function App() {
                       pointerEvents: fetchingProducts ? 'none' : 'auto',
                       transition: 'opacity 0.2s ease-in-out'
                     }}>
-                      {products.map((product) => (
-                        <div 
-                          key={product.id} 
-                          className="order-card"
-                          style={{ 
-                            padding: '16px', 
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            margin: 0
-                          }}
-                        >
-                          <div style={{ maxWidth: '75%' }}>
-                            <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
-                            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{product.sku}</p>
-                            
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
-                              <span 
-                                className="badge" 
+                      {products.map((product) => {
+                        const isEditing = expandedEditSkus.has(product.sku);
+                        return (
+                          <div 
+                            key={product.id} 
+                            className="order-card"
+                            style={{ 
+                              padding: '16px', 
+                              display: 'flex',
+                              flexDirection: 'column',
+                              margin: 0
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ maxWidth: '70%' }}>
+                                <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
+                                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                  Артикул (SKU): <strong>{product.sku}</strong>
+                                </p>
+                                
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
+                                  <span 
+                                    className="badge" 
+                                    style={{ 
+                                      background: product.status === 'Активен' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
+                                      color: product.status === 'Активен' ? 'var(--success)' : '#aaa',
+                                      border: '1px solid rgba(255,255,255,0.08)'
+                                    }}
+                                  >
+                                    {product.status === 'Активен' ? 'В продаже' : 'Снят с продажи'}
+                                  </span>
+
+                                  <span 
+                                    className="badge" 
+                                    style={{ 
+                                      background: 'rgba(255,255,255,0.05)',
+                                      color: '#eee',
+                                      border: '1px solid rgba(255,255,255,0.08)'
+                                    }}
+                                  >
+                                    Остаток: {product.stock ?? 0} шт.
+                                  </span>
+                                  
+                                  {product.url && (
+                                    <a 
+                                      href={product.url} 
+                                      target="_blank" 
+                                      rel="noreferrer" 
+                                      style={{ fontSize: '12px', color: '#3b82f6', textDecoration: 'none' }}
+                                    >
+                                      🔗 Карточка товара
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                <div>
+                                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Цена:</div>
+                                  <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary)' }}>{product.price}</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ padding: '8px 12px', fontSize: '12px', borderColor: isEditing ? 'var(--secondary)' : 'transparent' }}
+                                  onClick={() => {
+                                    setExpandedEditSkus(prev => {
+                                      const next = new Set(prev);
+                                      if (next.has(product.sku)) {
+                                        next.delete(product.sku);
+                                      } else {
+                                        next.add(product.sku);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  ✏️ {isEditing ? 'Закрыть' : 'Изменить'}
+                                </button>
+                              </div>
+                            </div>
+
+                            {isEditing && (
+                              <div 
                                 style={{ 
-                                  background: product.status === 'Активен' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
-                                  color: product.status === 'Активен' ? 'var(--success)' : '#aaa',
-                                  border: '1px solid rgba(255,255,255,0.08)'
+                                  marginTop: '16px', 
+                                  paddingTop: '16px', 
+                                  borderTop: '1px solid rgba(255,255,255,0.05)',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '12px'
                                 }}
                               >
-                                {product.status === 'Активен' ? 'В продаже' : 'Снят с продажи'}
-                              </span>
-                              
-                              {product.url && (
-                                <a 
-                                  href={product.url} 
-                                  target="_blank" 
-                                  rel="noreferrer" 
-                                  style={{ fontSize: '12px', color: '#3b82f6', textDecoration: 'none' }}
-                                >
-                                  🔗 Открыть на Kaspi.kz
-                                </a>
-                              )}
-                            </div>
-                          </div>
+                                <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--secondary)' }}>
+                                  Параметры товара на Kaspi
+                                </h4>
+                                
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px' }}>
+                                  <div>
+                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Цена (₸)</label>
+                                    <input 
+                                      type="number" 
+                                      id={`edit-price-${product.sku}`} 
+                                      className="form-input" 
+                                      defaultValue={product.price_num || ''}
+                                      placeholder="Цена товара"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Остаток на складе (шт)</label>
+                                    <input 
+                                      type="number" 
+                                      id={`edit-stock-${product.sku}`} 
+                                      className="form-input" 
+                                      defaultValue={product.stock ?? 10}
+                                      placeholder="Остаток"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Бренд</label>
+                                    <input 
+                                      type="text" 
+                                      id={`edit-brand-${product.sku}`} 
+                                      className="form-input" 
+                                      defaultValue={product.brand || ''}
+                                      placeholder="Бренд"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Статус</label>
+                                    <select 
+                                      id={`edit-status-${product.sku}`} 
+                                      className="form-input"
+                                      defaultValue={product.status || 'Активен'}
+                                      style={{ background: 'var(--input-bg)', color: '#fff', border: '1px solid var(--input-border)', height: '38px', borderRadius: '8px' }}
+                                    >
+                                      <option value="Активен">В продаже (Активен)</option>
+                                      <option value="Архив">Снят с продажи (Архив)</option>
+                                    </select>
+                                  </div>
+                                </div>
 
-                          <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
-                            <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary)' }}>{product.price}</div>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                                    onClick={() => {
+                                      const priceVal = parseFloat((document.getElementById(`edit-price-${product.sku}`) as HTMLInputElement).value) || 0;
+                                      const stockVal = parseInt((document.getElementById(`edit-stock-${product.sku}`) as HTMLInputElement).value) || 0;
+                                      const brandVal = (document.getElementById(`edit-brand-${product.sku}`) as HTMLInputElement).value || undefined;
+                                      const statusVal = (document.getElementById(`edit-status-${product.sku}`) as HTMLSelectElement).value || undefined;
+                                      saveProductUpdate(product.sku, priceVal, stockVal, brandVal, statusVal);
+                                    }}
+                                  >
+                                    Сохранить изменения
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
