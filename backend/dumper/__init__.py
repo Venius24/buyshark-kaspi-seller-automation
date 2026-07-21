@@ -37,7 +37,7 @@ async def run_price_dumping_job(
     update_queue = BrainWorker.calculate_price_decisions(market_snapshot, configs, merchant_id)
 
     # 3. 🚀 Воркер-Исполнитель
-    return RateLimitExecutorWorker.execute_updates(update_queue, save_override_func)
+    return RateLimitExecutorWorker.execute_updates(update_queue, save_override_func, merchant_id=merchant_id)
 
 __all__ = [
     "discover_merchant_id",

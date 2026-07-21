@@ -59,8 +59,8 @@ def get_products(
 
 @router.post("/products/update")
 def update_product(req: UpdateProductRequest):
-    """Обновить цену и остаток товара (сохранить в overrides)."""
-    _require_token()
+    """Обновить цену и остаток товара (сохранить в overrides и применить в Kaspi MC)."""
+    token = _require_token()
     products_file = "states/products.json"
     if not os.path.exists(products_file):
         raise HTTPException(status_code=404, detail="Список товаров не найден. Загрузите товары сначала.")
@@ -72,6 +72,7 @@ def update_product(req: UpdateProductRequest):
             products = json.load(f)
             
         updated = False
+        target_p = None
         for p in products:
             if p.get("sku") == req.sku:
                 p["price_num"] = req.price
@@ -80,6 +81,7 @@ def update_product(req: UpdateProductRequest):
                 if req.brand:
                     p["brand"] = req.brand
                 p["status"] = req.status or ("Активен" if req.stock > 0 else "Архив")
+                target_p = p
                 updated = True
                 break
                 
@@ -89,7 +91,39 @@ def update_product(req: UpdateProductRequest):
         with open(products_file, "w", encoding="utf-8") as f:
             json.dump(products, f, ensure_ascii=False, indent=2)
             
-        return {"success": True, "message": f"Товар {req.sku} успешно обновлен."}
+        # Моментальный push в Kaspi MC
+        from backend.dumper.executor import _load_mc_cookies, RateLimitExecutorWorker
+        from backend.dumper.config import discover_merchant_id, _decode_base64_if_needed
+        
+        cookies = _load_mc_cookies()
+        mc_info = ""
+        if cookies and "mc-session" in cookies and "mc-sid" in cookies:
+            merchant_id = discover_merchant_id(token) or "20186986"
+            master_sku = target_p.get("kaspiSku") or target_p.get("sku")
+            decoded_master = _decode_base64_if_needed(master_sku)
+            
+            store_full_id = target_p.get("storeId") or f"{merchant_id}_001"
+            store_suffix = store_full_id.split("_")[1] if "_" in store_full_id else "001"
+            
+            success, val = RateLimitExecutorWorker._update_kaspi_price_sync(
+                merchant_uid=merchant_id,
+                cookies=cookies,
+                sku=req.sku,
+                master_sku=decoded_master,
+                model_name=target_p.get("name", "Товар"),
+                new_price=int(req.price),
+                stock=int(req.stock),
+                store_id_suffix=store_suffix,
+                city_id="750000000"
+            )
+            if success:
+                mc_info = f" и успешно отправлен в Kaspi MC (ID: {val})"
+            else:
+                mc_info = f" (локально, ошибка MC: {val})"
+        else:
+            mc_info = " (локально, куки MC отсутствуют)"
+            
+        return {"success": True, "message": f"Товар {req.sku} успешно обновлен{mc_info}."}
     except HTTPException:
         raise
     except Exception as e:
