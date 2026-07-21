@@ -3,6 +3,7 @@ import json
 import os
 import requests
 import time
+import random
 from typing import List
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ class RateLimitExecutorWorker:
     ) -> tuple:
         """
         Синхронный запуск трехшагового пайплайна Kaspi MC.
-        Возвращает (success: bool, tx_id_or_error_msg: str)
+        Возвращает (success: bool, tx_id_or_error_msg_or_code: str)
         """
         headers = {
             "Accept": "application/json, text/plain, */*",
@@ -60,6 +61,8 @@ class RateLimitExecutorWorker:
         }
         try:
             r1 = requests.post(discount_url, headers=headers, cookies=cookies, json=discount_payload, timeout=10)
+            if r1.status_code in [403, 429]:
+                return False, f"{r1.status_code}_BLOCKED"
             if r1.status_code != 200:
                 return False, f"Шаг 1 (Discount) провален со статусом {r1.status_code}: {r1.text[:200]}"
         except Exception as e:
@@ -83,6 +86,8 @@ class RateLimitExecutorWorker:
         }
         try:
             r2 = requests.post(val_url, headers=headers, cookies=cookies, json=val_payload, timeout=10)
+            if r2.status_code in [403, 429]:
+                return False, f"{r2.status_code}_BLOCKED"
             if r2.status_code != 200:
                 return False, f"Шаг 2 (Validation) провален со статусом {r2.status_code}: {r2.text[:200]}"
             resp_data = r2.json()
@@ -103,6 +108,8 @@ class RateLimitExecutorWorker:
         }
         try:
             r3 = requests.post(process_url, headers=headers, cookies=cookies, json=process_payload, timeout=10)
+            if r3.status_code in [403, 429]:
+                return False, f"{r3.status_code}_BLOCKED"
             if r3.status_code == 200:
                 res_json = r3.json()
                 if "id" in res_json:
@@ -121,6 +128,15 @@ class RateLimitExecutorWorker:
         """
         Разбирает очередь задач с удержанием паузы между обновлениями и шлет запросы на Kaspi MC API.
         """
+        # 1. Smart Debounce: исключаем дубликаты SKU, оставляя только самое последнее/свежее решение
+        deduped_tasks = {}
+        for task in update_queue:
+            deduped_tasks[task["sku"]] = task
+        deduped_queue = list(deduped_tasks.values())
+
+        if len(update_queue) != len(deduped_queue):
+            logger.info(f"🧹 [Smart Debounce] Очередь оптимизирована: {len(update_queue)} -> {len(deduped_queue)} запросов.")
+
         updated_count = 0
         log_messages = []
 
@@ -133,7 +149,7 @@ class RateLimitExecutorWorker:
         else:
             has_mc_auth = True
 
-        for task in update_queue:
+        for task in deduped_queue:
             sku_key = task["sku"]
             new_price = task["new_price"]
             config = task["config"]
@@ -163,6 +179,35 @@ class RateLimitExecutorWorker:
                     store_id_suffix=store_suffix,
                     city_id=config.city_code
                 )
+                
+                # 2. Backoff при 429 (Too Many Requests) / 403 (Forbidden/Rate limit)
+                if not success and val in ["429_BLOCKED", "403_BLOCKED"]:
+                    block_code = val.split("_")[0]
+                    cooldown_msg = f"⚠️ [Executor] Обнаружен блок {block_code} от Kaspi. Включаем Backoff: пауза 60 секунд для защиты от флуда..."
+                    logger.warning(cooldown_msg)
+                    log_messages.append(cooldown_msg)
+                    
+                    time.sleep(60) # Cooldown pause
+                    
+                    # Повторная одиночная попытка после паузы
+                    success, val = RateLimitExecutorWorker._update_kaspi_price_sync(
+                        merchant_uid=merchant_id,
+                        cookies=cookies,
+                        sku=p.get("merchantSku") or sku_key,
+                        master_sku=config.master_sku,
+                        model_name=p.get("name", "Товар"),
+                        new_price=int(new_price),
+                        stock=int(p.get("stock", 75)),
+                        store_id_suffix=store_suffix,
+                        city_id=config.city_code
+                    )
+                    
+                    if not success:
+                        abort_msg = f"🚨 [Executor] Повторный запрос после Backoff завершился неудачно ({val}). Останавливаем выполнение очереди!"
+                        logger.error(abort_msg)
+                        log_messages.append(abort_msg)
+                        break # Прерываем всю очередь во избежание дальнейшей блокировки
+                
                 if success:
                     mc_success = True
                     tx_info = f" (MC API: ✓, ID транзакции: {val})"
@@ -187,8 +232,10 @@ class RateLimitExecutorWorker:
                 p.get("status")
             )
             
+            # 3. Jitter & Micro-delays: случайная задержка 1.2 - 2.8 сек вместо ровных интервалов
             if rate_limit_delay > 0:
-                time.sleep(rate_limit_delay)
+                jitter = random.uniform(1.2, 2.8)
+                time.sleep(jitter)
 
         summary_msg = f"🚀 [Executor] Исполнение очереди завершено. Применено изменений: {updated_count}."
         return {
