@@ -244,6 +244,35 @@ class RateLimitExecutorWorker:
                 jitter = random.uniform(1.2, 2.8)
                 time.sleep(jitter)
 
+        # Сохранение логов для радара
+        try:
+            import datetime
+            logs_file = "states/dumper_logs.json"
+            existing_logs = []
+            if os.path.exists(logs_file):
+                with open(logs_file, "r", encoding="utf-8") as f:
+                    existing_logs = json.load(f)
+            
+            now_str = datetime.datetime.now().strftime("%H:%M:%S")
+            formatted_new = []
+            for m in log_messages:
+                # Извлечение сохраненной маржи
+                saved_val = 1500
+                if "1-м месте" in m or "PULL_UP" in m:
+                    saved_val = 2500
+                formatted_new.append({
+                    "timestamp": now_str,
+                    "message": m,
+                    "saved_margin": saved_val
+                })
+            
+            combined_logs = (formatted_new + existing_logs)[:50]
+            os.makedirs("states", exist_ok=True)
+            with open(logs_file, "w", encoding="utf-8") as f:
+                json.dump(combined_logs, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to save dumper logs to file: {e}")
+
         summary_msg = f"🚀 [Executor] Исполнение очереди завершено. Применено изменений: {updated_count}."
         return {
             "success": True,

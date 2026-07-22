@@ -48,6 +48,8 @@ def _decode_base64_if_needed(val: str) -> str:
         pass
     return val_str
 
+from typing import Optional, List
+
 @dataclass
 class DumpingProductConfig:
     sku: str  # Внутренний артикул (merchantSku)
@@ -57,4 +59,11 @@ class DumpingProductConfig:
     max_price: float
     step: float = 10.0
     enabled: bool = True
+    mode: str = "TOP_1"  # OFF, TOP_1, TOP_2, MATCH_FIRST, TARGET_POSITION
+    target_position: int = 1
+    max_delivery_days: Optional[int] = None
+    min_seller_rating: Optional[float] = None
+    same_city_only: bool = False
+    blacklisted_merchants: Optional[List[str]] = None
     city_code: str = "750000000"
+

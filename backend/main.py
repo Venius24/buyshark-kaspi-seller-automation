@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.routers import auth, products, orders, dumping, ws
+from backend.routers import auth, products, orders, dumping, ws, analytics
 
 app = FastAPI(title="Kaspi SaaS Wrapper API")
 
@@ -35,6 +35,7 @@ app.include_router(products.router)
 app.include_router(orders.router)
 app.include_router(dumping.router)
 app.include_router(ws.router)
+app.include_router(analytics.router)
 
 @app.get("/")
 def read_root():

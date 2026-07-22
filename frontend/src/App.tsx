@@ -4,6 +4,8 @@ import { BuyBoxGauge } from './components/BuyBoxGauge';
 import { SavedMarginCard } from './components/SavedMarginCard';
 import { LiveTerminalStream } from './components/LiveTerminalStream';
 import { PriceHistoryChart } from './components/PriceHistoryChart';
+import { PriceRadarWidget } from './components/PriceRadarWidget';
+import { AiChatSentimentWidget } from './components/AiChatSentimentWidget';
 
 interface Product {
   id: string;
@@ -17,6 +19,8 @@ interface Product {
   price_num?: number;
   stock?: number;
   brand?: string;
+  dumping_status?: string;
+  dumping_config?: any;
 }
 
 interface OrderEntry {
@@ -77,7 +81,7 @@ export default function App() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   // Tabs navigation, packaging and transfer states
-  const [activeTab, setActiveTab] = useState<'products' | 'dumping' | 'packaging' | 'transfer'>('products');
+  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'dumping' | 'packaging' | 'transfer' | 'logs' | 'settings'>('overview');
   const [orders, setOrders] = useState<Order[]>([]);
   const [fetchingOrders, setFetchingOrders] = useState(false);
   const [orderStatusFilter, setOrderStatusFilter] = useState<'NEW' | 'ASSEMBLY'>('ASSEMBLY');
@@ -107,9 +111,22 @@ export default function App() {
   const [mcAuthError, setMcAuthError] = useState('');
 
   // Dumping & Analytics States
-  const [dumpingConfigs, setDumpingConfigs] = useState<Record<string, { min_price: number; max_price: number; dump_step: number; enabled: boolean }>>({});
+  const [dumpingConfigs, setDumpingConfigs] = useState<Record<string, {
+    min_price: number;
+    max_price: number;
+    dump_step: number;
+    enabled: boolean;
+    mode?: string;
+    target_position?: number;
+    max_delivery_days?: number | null;
+    min_seller_rating?: number | null;
+    same_city_only?: boolean;
+    blacklisted_merchants?: string[];
+  }>>({});
   const [expandedSkus, setExpandedSkus] = useState<Set<string>>(new Set());
   const [expandedEditSkus, setExpandedEditSkus] = useState<Set<string>>(new Set());
+  const [expandedFilterSkus, setExpandedFilterSkus] = useState<Set<string>>(new Set());
+  const [selectedModes, setSelectedModes] = useState<Record<string, string>>({});
   const [isRunningDumping, setIsRunningDumping] = useState(false);
   const [nextRunSeconds, setNextRunSeconds] = useState<number | null>(null);
   const [analytics, setAnalytics] = useState<{
@@ -124,9 +141,37 @@ export default function App() {
     total_saved_margin: 145000
   });
 
+  const [widgetData, setWidgetData] = useState<any>(null);
+  const [dumpingOnlyFilter, setDumpingOnlyFilter] = useState(false);
+  const [dumpingStatusFilter, setDumpingStatusFilter] = useState<string>('');
+
   const { isConnected: isWsConnected, lastEvent: wsEvent } = useWebSocket('ws://localhost:5000/api/ws/telemetry');
 
   const API_URL = 'http://localhost:5000';
+
+  useEffect(() => {
+    const fetchWidgets = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/analytics/widgets`);
+        const data = await res.json();
+        if (res.ok && data.success) {
+          setWidgetData(data);
+          if (data.analytics) {
+            setAnalytics(prev => ({
+              ...prev,
+              buy_box_share: data.analytics.buy_box_share ?? prev.buy_box_share,
+              winning_count: data.analytics.winning_count ?? prev.winning_count,
+              total_scanned: data.analytics.total_scanned ?? prev.total_scanned,
+              total_saved_margin: data.analytics.total_saved_margin ?? prev.total_saved_margin,
+            }));
+          }
+        }
+      } catch { /* ignore */ }
+    };
+    fetchWidgets();
+    const interval = setInterval(fetchWidgets, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   const checkMcStatus = async (verify = false) => {
     try {
@@ -174,8 +219,20 @@ export default function App() {
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
-  const saveDumpingConfig = async (sku: string, minPrice: number, maxPrice: number, step: number, enabled: boolean) => {
-    addLog(`Сохранение настроек демпинга для ${sku}...`);
+  const saveDumpingConfig = async (
+    sku: string, 
+    minPrice: number, 
+    maxPrice: number, 
+    step: number, 
+    enabled: boolean,
+    mode: string = "TOP_1",
+    targetPosition: number = 1,
+    maxDeliveryDays: number | null = null,
+    minSellerRating: number | null = null,
+    sameCityOnly: boolean = false,
+    blacklistedMerchants: string[] = []
+  ) => {
+    addLog(`Сохранение настроек демпинга для ${sku} (Режим: ${mode})...`);
     try {
       const res = await fetch(`${API_URL}/api/dumping/config`, {
         method: 'POST',
@@ -185,13 +242,20 @@ export default function App() {
           min_price: minPrice,
           max_price: maxPrice,
           dump_step: step,
-          enabled
+          enabled,
+          mode,
+          target_position: targetPosition,
+          max_delivery_days: maxDeliveryDays,
+          min_seller_rating: minSellerRating,
+          same_city_only: sameCityOnly,
+          blacklisted_merchants: blacklistedMerchants
         })
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        addLog(`Настройки для ${sku} успешно сохранены.`);
+        addLog(`Настройки демпинга для ${sku} успешно сохранены.`);
         loadDumpingConfigs();
+        loadProducts(currentPage, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, dumpingStatusFilter);
       } else {
         addLog(`Ошибка сохранения настроек: ${data.detail || 'Неизвестная ошибка'}`);
       }
@@ -327,13 +391,15 @@ export default function App() {
     pageNum: number = currentPage,
     status: 'active' | 'archive' = statusFilter,
     search: string = searchQuery,
-    pSize: number = pageSize
+    pSize: number = pageSize,
+    dumpingOnly: boolean = dumpingOnlyFilter,
+    statusFilterParam: string = dumpingStatusFilter
   ) => {
     setFetchingProducts(true);
-    addLog(`Загрузка товаров (Стр: ${pageNum}, Лимит: ${pSize}, Статус: ${status})...`);
+    addLog(`Загрузка товаров (Стр: ${pageNum}, Лимит: ${pSize}, Статус: ${status}, Демпинг: ${dumpingOnly}, Фильтр статуса: ${statusFilterParam || 'Все'})...`);
     try {
       const res = await fetch(
-        `${API_URL}/api/products?page=${pageNum}&status=${status}&search=${encodeURIComponent(search)}&page_size=${pSize}`
+        `${API_URL}/api/products?page=${pageNum}&status=${status}&search=${encodeURIComponent(search)}&page_size=${pSize}&dumping_only=${dumpingOnly}&dumping_status_filter=${encodeURIComponent(statusFilterParam)}`
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -576,21 +642,21 @@ export default function App() {
     e.preventDefault();
     setCurrentPage(1);
     setPageInputText('1');
-    loadProducts(1, statusFilter, searchQuery, pageSize);
+    loadProducts(1, statusFilter, searchQuery, pageSize, activeTab === 'dumping' ? dumpingOnlyFilter : false);
   };
 
   const handleStatusFilterChange = (status: 'active' | 'archive') => {
     setStatusFilter(status);
     setCurrentPage(1);
     setPageInputText('1');
-    loadProducts(1, status, searchQuery, pageSize);
+    loadProducts(1, status, searchQuery, pageSize, activeTab === 'dumping' ? dumpingOnlyFilter : false);
   };
 
   const handlePageChange = (page: number) => {
     if (page < 1 || page > totalPages) return;
     setCurrentPage(page);
     setPageInputText(String(page));
-    loadProducts(page, statusFilter, searchQuery, pageSize);
+    loadProducts(page, statusFilter, searchQuery, pageSize, activeTab === 'dumping' ? dumpingOnlyFilter : false);
   };
 
   const [pkgDeliveryFilter, setPkgDeliveryFilter] = useState<'ALL' | 'EXPRESS' | 'POSTOMAT' | 'STANDARD'>('ALL');
@@ -701,184 +767,407 @@ export default function App() {
   }
 
   // ── Dashboard Screen ───────────────────────────────────
+  // ── Dashboard Screen ───────────────────────────────────
   return (
-    <div className="dashboard-container">
-      {/* Header */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '32px' }}>🦊</span>
-            <h1>Kaspi SaaS Wrapper</h1>
+    <div className="app-shell">
+      {/* ── STITCH MCP SIDEBAR ─────────────────────────────────── */}
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <div className="sidebar-logo-icon">K</div>
+          <div>
+            <div className="sidebar-brand-title">Kaspi SaaS</div>
+            <div className="sidebar-brand-subtitle">Lumina Automation</div>
           </div>
-          <p style={{ marginTop: '4px' }}>Панель управления заказами и товарами через Kaspi API</p>
         </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <button 
-            className="btn btn-secondary" 
-            style={{ padding: '10px 16px', color: 'var(--error)' }}
-            onClick={handleLogout}
-          >
-            🚪 Выйти
-          </button>
-        </div>
-      </header>
 
-      {/* 📊 ANALYTICS DASHBOARD WIDGETS */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginBottom: '24px' }}>
-        <BuyBoxGauge
-          percentage={analytics.buy_box_share}
-          winningCount={analytics.winning_count}
-          totalScanned={analytics.total_scanned}
-        />
-        <SavedMarginCard
-          totalSavedMargin={analytics.total_saved_margin}
-        />
-        <LiveTerminalStream
-          logs={logs}
-          isConnected={isWsConnected}
-        />
-      </div>
-
-      <div className="grid-2">
-        {/* Left Side: Status & Logs */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <h2>Статус подключения</h2>
+        <div className="sidebar-nav">
+          <div className="sidebar-group">
+            <div className="sidebar-group-title">Главное</div>
             
-            {/* Item 1: REST API */}
-            <div className="status-widget">
-              <div>
-                <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi Merchant API (REST)</h3>
-                <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
-                  <span className="glow-dot glow-dot-success"></span>
-                  <span className="badge badge-success">Сессия активна</span>
-                </div>
+            <button 
+              className={`sidebar-item ${activeTab === 'overview' ? 'active' : ''}`}
+              onClick={() => setActiveTab('overview')}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">📊</span>
+                <span>Обзор</span>
               </div>
-              <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => {
-                addLog('Проверка состояния сессии REST API...');
-                fetch(`${API_URL}/api/verify-session`, { method: 'POST' })
-                  .then(r => r.json())
-                  .then(d => addLog(d.valid ? 'Сессия REST API активна ✓' : 'Сессия REST API невалидна ✗'))
-                  .catch(() => addLog('Ошибка проверки сессии REST API'));
-              }}>
-                🔄
-              </button>
-            </div>
+              <span className="sidebar-pill">Dashboard</span>
+            </button>
 
-            {/* Item 2: MC (SMS cookies) */}
-            <div className="status-widget">
-              <div>
-                <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi MC (SMS куки)</h3>
-                <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
-                  <span className={`glow-dot ${mcHasSession ? 'glow-dot-success' : 'glow-dot-warning'}`}></span>
-                  {mcHasSession ? (
-                    <span className="badge badge-success">Активны</span>
-                  ) : (
-                    <span className="badge badge-warning">Требуется вход</span>
-                  )}
-                </div>
+            <button 
+              className={`sidebar-item ${activeTab === 'products' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTab('products');
+                loadProducts(1, statusFilter, searchQuery, pageSize, false);
+                loadDumpingConfigs();
+              }}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">🏷️</span>
+                <span>Товары</span>
               </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => setMcAuthStep('phone')}>
-                  🔑 {mcHasSession ? 'Войти заново' : 'Войти'}
-                </button>
-                <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => {
-                  addLog('Проверка кук Kaspi MC...');
-                  checkMcStatus(true).then(() => addLog('Проверка завершена.'));
-                }}>
-                  🔄
-                </button>
+              {totalCount > 0 && <span className="sidebar-pill">{totalCount}</span>}
+            </button>
+
+            <button 
+              className={`sidebar-item ${activeTab === 'dumping' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTab('dumping');
+                loadProducts(1, statusFilter, searchQuery, pageSize, dumpingOnlyFilter);
+                loadDumpingConfigs();
+              }}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">⚡</span>
+                <span>Авто-Демпинг</span>
               </div>
+              <span className="sidebar-pill" style={{ color: 'var(--secondary)' }}>Auto</span>
+            </button>
+          </div>
+
+          <div className="sidebar-group">
+            <div className="sidebar-group-title">Заказы & Логистика</div>
+
+            <button 
+              className={`sidebar-item ${activeTab === 'packaging' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTab('packaging');
+                loadOrders(orderStatusFilter, orderLimit);
+              }}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">📦</span>
+                <span>Упаковка</span>
+              </div>
+              {orders.length > 0 && <span className="sidebar-pill">{orders.length}</span>}
+            </button>
+
+            <button 
+              className={`sidebar-item ${activeTab === 'transfer' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTab('transfer');
+                loadTransfers(transferFilter);
+              }}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">🚚</span>
+                <span>Передача</span>
+              </div>
+              {transfers.length > 0 && <span className="sidebar-pill">{transfers.length}</span>}
+            </button>
+          </div>
+
+          <div className="sidebar-group">
+            <div className="sidebar-group-title">Система</div>
+
+            <button 
+              className={`sidebar-item ${activeTab === 'logs' ? 'active' : ''}`}
+              onClick={() => setActiveTab('logs')}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">📜</span>
+                <span>Терминал логов</span>
+              </div>
+              <span className="sidebar-pill" style={{ background: isWsConnected ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', color: isWsConnected ? '#34d399' : '#f87171' }}>
+                {isWsConnected ? 'LIVE' : 'OFF'}
+              </span>
+            </button>
+
+            <button 
+              className={`sidebar-item ${activeTab === 'settings' ? 'active' : ''}`}
+              onClick={() => setActiveTab('settings')}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">⚙️</span>
+                <span>Подключения & Сессия</span>
+              </div>
+              <span className="sidebar-pill">API</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="sidebar-footer">
+          <div className="sidebar-user-card">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span className="glow-dot glow-dot-success"></span>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#e5e7eb' }}>Kaspi API Online</span>
+            </div>
+            <button 
+              className="btn btn-secondary"
+              style={{ padding: '4px 8px', fontSize: '11px', color: 'var(--error)' }}
+              onClick={handleLogout}
+              title="Выйти из аккаунта"
+            >
+              🚪
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* ── MAIN CONTENT AREA ─────────────────────────────────── */}
+      <main className="main-content">
+        {/* TOP CONTENT HEADER */}
+        <header className="content-header">
+          <div className="content-title-area">
+            <span className="content-title-icon">
+              {activeTab === 'overview' && '📊'}
+              {activeTab === 'products' && '🏷️'}
+              {activeTab === 'dumping' && '⚡'}
+              {activeTab === 'packaging' && '📦'}
+              {activeTab === 'transfer' && '🚚'}
+              {activeTab === 'logs' && '📜'}
+              {activeTab === 'settings' && '⚙️'}
+            </span>
+            <div className="content-title-text">
+              <h1>
+                {activeTab === 'overview' && 'Аналитический Обзор'}
+                {activeTab === 'products' && 'Управление Товарами'}
+                {activeTab === 'dumping' && 'Автоматический Демпинг'}
+                {activeTab === 'packaging' && 'Упаковка Заказов'}
+                {activeTab === 'transfer' && 'Передача Курьеру'}
+                {activeTab === 'logs' && 'Терминал Системных Событий'}
+                {activeTab === 'settings' && 'Статус Сессии & Настройки'}
+              </h1>
+              <p>
+                {activeTab === 'overview' && 'Ключевая аналитика доли BuyBox, сохранение маржи и поток активности'}
+                {activeTab === 'products' && 'Каталог товаров, остатки, цены и статус продажи на Kaspi'}
+                {activeTab === 'dumping' && 'Настройка минимальных цен, шагов снижения и маржинальности'}
+                {activeTab === 'packaging' && 'Формирование и печать упаковочных актов и маркировок'}
+                {activeTab === 'transfer' && 'Управление актами приема-сдачи и курьерскими передачами'}
+                {activeTab === 'logs' && 'Поток событий системы в реальном времени через WebSocket'}
+                {activeTab === 'settings' && 'Состояние авторизации Kaspi REST API и SMS-сессии Kaspi MC'}
+              </p>
             </div>
           </div>
 
-          {/* Logs */}
-          <div className="glass-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <h2>Журнал событий</h2>
-              <button 
-                className="btn btn-secondary" 
-                style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '6px' }}
-                onClick={() => setLogs(['Журнал событий очищен.'])}
-              >
-                Очистить
-              </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div className="status-widget" style={{ padding: '6px 14px', borderRadius: '20px' }}>
+              <span className="glow-dot glow-dot-success"></span>
+              <span style={{ fontSize: '12px', fontWeight: 600 }}>REST API Active</span>
             </div>
-            <div className="console-box">
-              {logs.map((log, index) => {
-                const timeMatch = log.match(/^\[([0-9:]+)\]\s*(.*)$/);
-                const isError = log.includes('Ошибка') || log.includes('✗');
-                const isWarning = log.includes('Предупреждение') || log.includes('WARN');
-                const isSuccess = log.includes('успешно') || log.includes('✓') || log.includes('активна') || log.includes('обработан');
-                
-                let textColor = '#e5e7eb';
-                if (isError) textColor = 'var(--error)';
-                else if (isWarning) textColor = 'var(--warning)';
-                else if (isSuccess) textColor = '#34d399';
+            <button className="btn btn-secondary" style={{ padding: '8px 14px' }} onClick={handleLogout}>
+              🚪 Выйти
+            </button>
+          </div>
+        </header>
 
-                if (timeMatch) {
+        {/* 📊 TAB: OVERVIEW */}
+        {activeTab === 'overview' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+              <BuyBoxGauge
+                percentage={analytics.buy_box_share}
+                winningCount={analytics.winning_count}
+                totalScanned={analytics.total_scanned}
+              />
+              <SavedMarginCard
+                totalSavedMargin={analytics.total_saved_margin}
+              />
+              <LiveTerminalStream
+                logs={logs}
+                isConnected={isWsConnected}
+              />
+            </div>
+
+            {/* ⚔️ LIVE PRICE RADAR (REAL-TIME PRICE WAR MONITOR) */}
+            <PriceRadarWidget
+              topProduct={widgetData?.price_radar?.top_product}
+              events={widgetData?.price_radar?.recent_events}
+            />
+
+            {/* 🧠 AI CHAT SENTIMENT & STORE PULSE SHELL */}
+            <AiChatSentimentWidget
+              statusLabel={widgetData?.ai_sentiment_shell?.status_label}
+              categories={widgetData?.ai_sentiment_shell?.categories}
+              hourlyHeatmap={widgetData?.ai_sentiment_shell?.hourly_heatmap}
+              pulseStatus={widgetData?.ai_sentiment_shell?.store_pulse}
+            />
+
+            <div className="grid-2">
+              <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <h2>Статус системы</h2>
+                <div className="status-widget">
+                  <div>
+                    <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi Merchant API (REST)</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
+                      <span className="glow-dot glow-dot-success"></span>
+                      <span className="badge badge-success">Сессия активна</span>
+                    </div>
+                  </div>
+                  <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => {
+                    addLog('Проверка состояния сессии REST API...');
+                    fetch(`${API_URL}/api/verify-session`, { method: 'POST' })
+                      .then(r => r.json())
+                      .then(d => addLog(d.valid ? 'Сессия REST API активна ✓' : 'Сессия REST API невалидна ✗'))
+                      .catch(() => addLog('Ошибка проверки сессии REST API'));
+                  }}>
+                    🔄
+                  </button>
+                </div>
+
+                <div className="status-widget">
+                  <div>
+                    <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi MC (SMS куки)</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
+                      <span className={`glow-dot ${mcHasSession ? 'glow-dot-success' : 'glow-dot-warning'}`}></span>
+                      {mcHasSession ? (
+                        <span className="badge badge-success">Активны</span>
+                      ) : (
+                        <span className="badge badge-warning">Требуется вход</span>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => setMcAuthStep('phone')}>
+                      🔑 {mcHasSession ? 'Войти заново' : 'Войти'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h2>Быстрые действия</h2>
+                  <span className="badge badge-success">Lumina Engine</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '8px' }}>
+                  <button className="btn btn-primary" style={{ padding: '14px' }} onClick={() => {
+                    setActiveTab('products');
+                    loadProducts(1, statusFilter, searchQuery, pageSize);
+                  }}>
+                    🏷️ Открыть каталог
+                  </button>
+                  <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={() => {
+                    setActiveTab('dumping');
+                    loadDumpingConfigs();
+                  }}>
+                    ⚡ Настроить демпинг
+                  </button>
+                  <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={() => {
+                    setActiveTab('packaging');
+                    loadOrders('ASSEMBLY', 10);
+                  }}>
+                    📦 Сборка заказов
+                  </button>
+                  <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={() => {
+                    setActiveTab('logs');
+                  }}>
+                    📜 Открыть консоль
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 📜 TAB: LOGS / TERMINAL */}
+        {activeTab === 'logs' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <LiveTerminalStream
+              logs={logs}
+              isConnected={isWsConnected}
+            />
+            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h2>Подробный системный журнал</h2>
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '6px' }}
+                  onClick={() => setLogs(['Журнал событий очищен.'])}
+                >
+                  Очистить
+                </button>
+              </div>
+              <div className="console-box" style={{ height: '420px' }}>
+                {logs.map((log, index) => {
+                  const timeMatch = log.match(/^\[([0-9:]+)\]\s*(.*)$/);
+                  const isError = log.includes('Ошибка') || log.includes('✗');
+                  const isWarning = log.includes('Предупреждение') || log.includes('WARN');
+                  const isSuccess = log.includes('успешно') || log.includes('✓') || log.includes('активна') || log.includes('обработан');
+                  
+                  let textColor = '#e5e7eb';
+                  if (isError) textColor = 'var(--error)';
+                  else if (isWarning) textColor = 'var(--warning)';
+                  else if (isSuccess) textColor = '#34d399';
+
+                  if (timeMatch) {
+                    return (
+                      <div key={index} className="console-line" style={{ color: textColor }}>
+                        <span className="console-timestamp">[{timeMatch[1]}]</span>
+                        <span>{timeMatch[2]}</span>
+                      </div>
+                    );
+                  }
                   return (
                     <div key={index} className="console-line" style={{ color: textColor }}>
-                      <span className="console-timestamp">[{timeMatch[1]}]</span>
-                      <span>{timeMatch[2]}</span>
+                      {log}
                     </div>
                   );
-                }
-                return (
-                  <div key={index} className="console-line" style={{ color: textColor }}>
-                    {log}
-                  </div>
-                );
-              })}
+                })}
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Right Side: Control Tabs & Panels */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <div className="glass-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-            
-            {/* Tabs Header */}
-            <div className="tab-nav">
-              <button 
-                className={`tab-btn ${activeTab === 'products' ? 'active' : ''}`}
-                onClick={() => {
-                  setActiveTab('products');
-                  loadProducts(1, statusFilter, searchQuery, pageSize);
-                  loadDumpingConfigs();
-                }}
-              >
-                🏷️ Товары
-              </button>
-              <button 
-                className={`tab-btn ${activeTab === 'dumping' ? 'active' : ''}`}
-                onClick={() => {
-                  setActiveTab('dumping');
-                  loadProducts(1, statusFilter, searchQuery, pageSize);
-                  loadDumpingConfigs();
-                }}
-              >
-                ⚡ Демпинг
-              </button>
-              <button 
-                className={`tab-btn ${activeTab === 'packaging' ? 'active' : ''}`}
-                onClick={() => {
-                  setActiveTab('packaging');
-                  loadOrders(orderStatusFilter, orderLimit);
-                }}
-              >
-                📦 Упаковка
-              </button>
-              <button 
-                className={`tab-btn ${activeTab === 'transfer' ? 'active' : ''}`}
-                onClick={() => {
-                  setActiveTab('transfer');
-                  loadTransfers(transferFilter);
-                }}
-              >
-                🚚 Передача
-              </button>
+        {/* ⚙️ TAB: SETTINGS & SESSION */}
+        {activeTab === 'settings' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '800px' }}>
+            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <h2>Статус авторизации и сессии</h2>
+
+              <div className="status-widget">
+                <div>
+                  <h3 style={{ fontSize: '15px', fontWeight: 600 }}>Kaspi Merchant API (REST)</h3>
+                  <p style={{ marginTop: '4px', fontSize: '12px' }}>Токен X-Auth-Token проверен и сохранен.</p>
+                  <div style={{ display: 'flex', alignItems: 'center', marginTop: '8px' }}>
+                    <span className="glow-dot glow-dot-success"></span>
+                    <span className="badge badge-success">Сессия активна</span>
+                  </div>
+                </div>
+                <button className="btn btn-secondary" onClick={() => {
+                  addLog('Проверка состояния сессии REST API...');
+                  fetch(`${API_URL}/api/verify-session`, { method: 'POST' })
+                    .then(r => r.json())
+                    .then(d => addLog(d.valid ? 'Сессия REST API активна ✓' : 'Сессия REST API невалидна ✗'))
+                    .catch(() => addLog('Ошибка проверки сессии REST API'));
+                }}>
+                  🔄 Проверить
+                </button>
+              </div>
+
+              <div className="status-widget">
+                <div>
+                  <h3 style={{ fontSize: '15px', fontWeight: 600 }}>Kaspi MC (SMS куки браузера)</h3>
+                  <p style={{ marginTop: '4px', fontSize: '12px' }}>Используется для получения цен конкурентов и управления демпингом.</p>
+                  <div style={{ display: 'flex', alignItems: 'center', marginTop: '8px' }}>
+                    <span className={`glow-dot ${mcHasSession ? 'glow-dot-success' : 'glow-dot-warning'}`}></span>
+                    {mcHasSession ? (
+                      <span className="badge badge-success">Сессионные куки активны</span>
+                    ) : (
+                      <span className="badge badge-warning">Требуется повторный вход</span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button className="btn btn-primary" onClick={() => setMcAuthStep('phone')}>
+                    🔑 {mcHasSession ? 'Авторизоваться заново' : 'Войти через SMS'}
+                  </button>
+                  <button className="btn btn-secondary" onClick={() => {
+                    addLog('Проверка кук Kaspi MC...');
+                    checkMcStatus(true).then(() => addLog('Проверка завершена.'));
+                  }}>
+                    🔄 Проверить
+                  </button>
+                </div>
+              </div>
             </div>
+          </div>
+        )}
+
+        {/* 🏷️ TAB 1, ⚡ TAB 2, 📦 TAB 3, 🚚 TAB 4: RENDER IN GLASS CARD */}
+        {(activeTab === 'products' || activeTab === 'dumping' || activeTab === 'packaging' || activeTab === 'transfer') && (
+          <div className="glass-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
             {/* TAB 1: PRODUCT MANAGEMENT */}
             {activeTab === 'products' && (
               <>
@@ -1264,7 +1553,7 @@ export default function App() {
                   </div>
 
                   {/* Search Bar */}
-                  <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '12px' }}>
+                  <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                     <input 
                       type="text" 
                       className="form-input" 
@@ -1273,6 +1562,67 @@ export default function App() {
                       onChange={(e) => setSearchQuery(e.target.value)}
                       style={{ flexGrow: 1 }}
                     />
+                    
+                    {/* Dumping Only Filter Toggle */}
+                    <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', padding: '3px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <button 
+                        type="button"
+                        className="btn" 
+                        style={{ 
+                          background: !dumpingOnlyFilter ? 'var(--primary)' : 'transparent', 
+                          padding: '6px 14px', fontSize: '12px', borderRadius: '6px',
+                          color: '#fff', border: 'none', cursor: 'pointer', transition: 'all 0.2s ease'
+                        }}
+                        onClick={() => {
+                          setDumpingOnlyFilter(false);
+                          setCurrentPage(1);
+                          setPageInputText('1');
+                          loadProducts(1, statusFilter, searchQuery, pageSize, false, dumpingStatusFilter);
+                        }}
+                      >
+                        Все товары
+                      </button>
+                      <button 
+                        type="button"
+                        className="btn" 
+                        style={{ 
+                          background: dumpingOnlyFilter ? 'var(--primary)' : 'transparent', 
+                          padding: '6px 14px', fontSize: '12px', borderRadius: '6px',
+                          color: '#fff', border: 'none', cursor: 'pointer', transition: 'all 0.2s ease'
+                        }}
+                        onClick={() => {
+                          setDumpingOnlyFilter(true);
+                          setCurrentPage(1);
+                          setPageInputText('1');
+                          loadProducts(1, statusFilter, searchQuery, pageSize, true, dumpingStatusFilter);
+                        }}
+                      >
+                        Активный демпинг
+                      </button>
+                    </div>
+
+                    {/* Dumping Status Filter Selector */}
+                    <select
+                      value={dumpingStatusFilter}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDumpingStatusFilter(val);
+                        setCurrentPage(1);
+                        setPageInputText('1');
+                        loadProducts(1, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, val);
+                      }}
+                      className="form-input"
+                      style={{ background: 'var(--input-bg)', color: '#fff', border: '1px solid var(--input-border)', height: '38px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px' }}
+                    >
+                      <option value="">Все статусы</option>
+                      <option value="WINNING_1ST">👑 1-е место</option>
+                      <option value="HOLDING_2ND">🥈 2-е место</option>
+                      <option value="TARGET_POS_REACHED">🎯 На целевой позиции</option>
+                      <option value="AT_MIN_PRICE">⚠️ Достигнут минималки</option>
+                      <option value="MAX_PRICE_SINGLE">💎 Max Price (Единственный)</option>
+                      <option value="OFF">⏸️ Отключен</option>
+                    </select>
+
                     <button type="submit" className="btn btn-primary" style={{ padding: '10px 16px' }}>
                       Найти
                     </button>
@@ -1310,9 +1660,32 @@ export default function App() {
                       {products.map((product) => {
                         const sku = product.sku;
                         const isExpanded = expandedSkus.has(sku);
-                        const cfg = dumpingConfigs[sku] || { min_price: 0, max_price: 0, dump_step: 10, enabled: false };
+                        const isFiltersExpanded = expandedFilterSkus.has(sku);
+                        const cfg = dumpingConfigs[sku] || { 
+                          min_price: 0, max_price: 0, dump_step: 10, enabled: false,
+                          mode: 'TOP_1', target_position: 1, max_delivery_days: null,
+                          min_seller_rating: null, same_city_only: false, blacklisted_merchants: []
+                        };
                         const hasConfig = !!dumpingConfigs[sku];
-                        const isDumpingActive = hasConfig && dumpingConfigs[sku].enabled;
+                        const isDumpingActive = hasConfig && cfg.enabled && cfg.mode !== 'OFF';
+                        const dStatus = product.dumping_status || (isDumpingActive ? 'WINNING_1ST' : 'OFF');
+
+                        const getStatusBadge = (status: string) => {
+                          switch (status) {
+                            case 'WINNING_1ST':
+                              return <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>👑 1-е место</span>;
+                            case 'HOLDING_2ND':
+                              return <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)' }}>🥈 2-е место</span>;
+                            case 'TARGET_POS_REACHED':
+                              return <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#a855f7', border: '1px solid rgba(168, 85, 247, 0.3)' }}>🎯 На целевой позиции</span>;
+                            case 'AT_MIN_PRICE':
+                              return <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)' }}>⚠️ Достигнут минималки</span>;
+                            case 'MAX_PRICE_SINGLE':
+                              return <span className="badge" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#ec4899', border: '1px solid rgba(236, 72, 153, 0.3)' }}>💎 Max Price (Единственный)</span>;
+                            default:
+                              return <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)', color: '#888', border: '1px solid rgba(255, 255, 255, 0.1)' }}>⏸️ Отключен</span>;
+                          }
+                        };
 
                         return (
                           <div 
@@ -1323,18 +1696,13 @@ export default function App() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <div style={{ maxWidth: '70%' }}>
                                 <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
-                                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{product.sku}</p>
+                                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Артикул: <strong>{product.sku}</strong></p>
                                 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
-                                  <span 
-                                    className="badge" 
-                                    style={{ 
-                                      background: isDumpingActive ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
-                                      color: isDumpingActive ? 'var(--success)' : '#aaa',
-                                      border: '1px solid rgba(255,255,255,0.08)'
-                                    }}
-                                  >
-                                    {isDumpingActive ? 'Демпинг активен' : 'Демпинг выключен'}
+                                  {getStatusBadge(dStatus)}
+                                  
+                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: '#ccc', border: '1px solid rgba(255,255,255,0.08)' }}>
+                                    Режим: {cfg.mode || 'TOP_1'}
                                   </span>
                                 </div>
                               </div>
@@ -1365,21 +1733,54 @@ export default function App() {
 
                             {isExpanded && (
                               <div 
-                                key={`${sku}-${cfg.min_price}-${cfg.max_price}-${cfg.dump_step}-${cfg.enabled}`}
+                                key={`${sku}-${cfg.min_price}-${cfg.max_price}-${cfg.dump_step}-${cfg.enabled}-${cfg.mode}`}
                                 style={{ 
                                   marginTop: '16px', 
                                   paddingTop: '16px', 
                                   borderTop: '1px solid rgba(255,255,255,0.05)',
                                   display: 'flex',
                                   flexDirection: 'column',
-                                  gap: '12px'
+                                  gap: '14px'
                                 }}
                               >
                                 <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--secondary)' }}>
-                                  Параметры авто-демпинга цен
+                                  ⚙️ Стратегия демпинга и Лимиты цен
                                 </h4>
                                 
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+                                  <div>
+                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Режим демпинга</label>
+                                    <select 
+                                      id={`mode-${sku}`}
+                                      className="form-input"
+                                      value={selectedModes[sku] ?? (cfg.mode || 'TOP_1')}
+                                      onChange={(e) => {
+                                        const newMode = e.target.value;
+                                        setSelectedModes(prev => ({ ...prev, [sku]: newMode }));
+                                      }}
+                                      style={{ background: 'var(--input-bg)', color: '#fff', border: '1px solid var(--input-border)', height: '38px', borderRadius: '8px' }}
+                                    >
+                                      <option value="TOP_1">🏆 1-е место (Демпинг с шагом)</option>
+                                      <option value="TOP_2">🥈 2-е место (Демпинг от 2-й цены)</option>
+                                      <option value="MATCH_FIRST">🎯 Прижиматься к 1-му месту (-1 ₸)</option>
+                                      <option value="TARGET_POSITION">📍 N-е место (Целевая позиция)</option>
+                                      <option value="OFF">⏸️ Отключен</option>
+                                    </select>
+                                  </div>
+
+                                  {(selectedModes[sku] ?? (cfg.mode || 'TOP_1')) === 'TARGET_POSITION' && (
+                                    <div>
+                                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Целевая позиция (N)</label>
+                                      <input 
+                                        type="number" 
+                                        id={`target_pos-${sku}`} 
+                                        className="form-input" 
+                                        defaultValue={cfg.target_position || 1}
+                                        placeholder="Позиция 1..N"
+                                      />
+                                    </div>
+                                  )}
+
                                   <div>
                                     <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Минимальная цена (₸)</label>
                                     <input 
@@ -1387,7 +1788,7 @@ export default function App() {
                                       id={`min-${sku}`} 
                                       className="form-input" 
                                       defaultValue={cfg.min_price || ''}
-                                      placeholder="Себестоимость"
+                                      placeholder="Стоп-цена"
                                     />
                                   </div>
                                   <div>
@@ -1397,11 +1798,11 @@ export default function App() {
                                       id={`max-${sku}`} 
                                       className="form-input" 
                                       defaultValue={cfg.max_price || ''}
-                                      placeholder="МРЦ / RRP"
+                                      placeholder="Базовая / RRP"
                                     />
                                   </div>
                                   <div>
-                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Шаг снижения (₸)</label>
+                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Шаг демпинга (₸)</label>
                                     <input 
                                       type="number" 
                                       id={`step-${sku}`} 
@@ -1409,33 +1810,131 @@ export default function App() {
                                       defaultValue={cfg.dump_step ?? 10}
                                     />
                                   </div>
-                                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: '#fff', marginTop: '12px' }}>
-                                      <input 
-                                        type="checkbox" 
-                                        id={`enabled-${sku}`} 
-                                        defaultChecked={cfg.enabled}
-                                        style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                                      />
-                                      Демпинг активен
-                                    </label>
-                                  </div>
                                 </div>
 
-                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+                                {/* Дополнительные фильтры конкурентов (Скрыты под кнопкой "...") */}
+                                <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '10px', marginTop: '4px' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    style={{
+                                      padding: '6px 12px',
+                                      fontSize: '11px',
+                                      borderRadius: '6px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                      background: isFiltersExpanded ? 'rgba(59, 130, 246, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                                      borderColor: isFiltersExpanded ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255, 255, 255, 0.08)',
+                                      color: isFiltersExpanded ? '#60a5fa' : '#ccc'
+                                    }}
+                                    onClick={() => {
+                                      const next = new Set(expandedFilterSkus);
+                                      if (next.has(sku)) {
+                                        next.delete(sku);
+                                      } else {
+                                        next.add(sku);
+                                      }
+                                      setExpandedFilterSkus(next);
+                                    }}
+                                  >
+                                    <span>🛡️ Фильтры конкурентов (доставка, рейтинг, блэклист)</span>
+                                    <span style={{ fontSize: '12px', fontWeight: 'bold' }}>{isFiltersExpanded ? '▲' : '•••'}</span>
+                                  </button>
+
+                                  {isFiltersExpanded && (
+                                    <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' }}>
+                                        <div>
+                                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Макс. дней доставки (предзаказ)</label>
+                                          <input 
+                                            type="number" 
+                                            id={`max_deliv-${sku}`} 
+                                            className="form-input" 
+                                            defaultValue={cfg.max_delivery_days ?? ''}
+                                            placeholder="Например, 5 дней"
+                                          />
+                                        </div>
+
+                                        <div>
+                                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Мин. рейтинг конкурента</label>
+                                          <input 
+                                            type="number" 
+                                            step="0.1"
+                                            id={`min_rating-${sku}`} 
+                                            className="form-input" 
+                                            defaultValue={cfg.min_seller_rating ?? ''}
+                                            placeholder="Например, 4.0"
+                                          />
+                                        </div>
+
+                                        <div style={{ gridColumn: 'span 2' }}>
+                                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Черный список магазинов (через запятую)</label>
+                                          <input 
+                                            type="text" 
+                                            id={`blacklist-${sku}`} 
+                                            className="form-input" 
+                                            defaultValue={(cfg.blacklisted_merchants || []).join(', ')}
+                                            placeholder="ID или имя продавца"
+                                          />
+                                        </div>
+                                      </div>
+
+                                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: '#fff' }}>
+                                        <input 
+                                          type="checkbox" 
+                                          id={`same_city-${sku}`} 
+                                          defaultChecked={cfg.same_city_only || false}
+                                          style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                                        />
+                                        Учитывать только свой город
+                                      </label>
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
+                                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: '#fff' }}>
+                                    <input 
+                                      type="checkbox" 
+                                      id={`enabled-${sku}`} 
+                                      defaultChecked={cfg.enabled ?? true}
+                                      style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                                    />
+                                    <strong>Включить демпинг для этого SKU</strong>
+                                  </label>
+                                </div>
+
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
                                   <button
                                     type="button"
                                     className="btn btn-primary"
-                                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                                    style={{ padding: '8px 16px', fontSize: '12px' }}
                                     onClick={() => {
                                       const minVal = parseFloat((document.getElementById(`min-${sku}`) as HTMLInputElement).value) || 0;
                                       const maxVal = parseFloat((document.getElementById(`max-${sku}`) as HTMLInputElement).value) || 0;
                                       const stepVal = parseFloat((document.getElementById(`step-${sku}`) as HTMLInputElement).value) || 10;
                                       const enabledVal = (document.getElementById(`enabled-${sku}`) as HTMLInputElement).checked;
-                                      saveDumpingConfig(sku, minVal, maxVal, stepVal, enabledVal);
+                                      const modeVal = (document.getElementById(`mode-${sku}`) as HTMLSelectElement)?.value || 'TOP_1';
+                                      const targetPosEl = document.getElementById(`target_pos-${sku}`) as HTMLInputElement | null;
+                                      const targetPosVal = targetPosEl ? (parseInt(targetPosEl.value) || 1) : 1;
+                                      const maxDelivEl = document.getElementById(`max_deliv-${sku}`) as HTMLInputElement | null;
+                                      const maxDelivVal = maxDelivEl?.value ? parseInt(maxDelivEl.value) : null;
+                                      const minRatingEl = document.getElementById(`min_rating-${sku}`) as HTMLInputElement | null;
+                                      const minRatingVal = minRatingEl?.value ? parseFloat(minRatingEl.value) : null;
+                                      const sameCityEl = document.getElementById(`same_city-${sku}`) as HTMLInputElement | null;
+                                      const sameCityVal = sameCityEl ? sameCityEl.checked : false;
+                                      const blacklistEl = document.getElementById(`blacklist-${sku}`) as HTMLInputElement | null;
+                                      const blacklistRaw = blacklistEl ? blacklistEl.value : '';
+                                      const blacklistArr = blacklistRaw ? blacklistRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+                                      saveDumpingConfig(
+                                        sku, minVal, maxVal, stepVal, enabledVal,
+                                        modeVal, targetPosVal, maxDelivVal, minRatingVal, sameCityVal, blacklistArr
+                                      );
                                     }}
                                   >
-                                    Сохранить
+                                    💾 Сохранить параметры демпинга
                                   </button>
                                 </div>
                               </div>
@@ -1884,20 +2383,17 @@ export default function App() {
                 </div>
               </>
             )}
-
-            {/* Dummy statement to reference unused variables for strict TypeScript compliance */}
-            {(() => {
-              if (false as boolean) {
-                console.log(isAuthed, openMenuId, setOpenMenuId, setFetchingTransfers, setFetchingOrders, setPackingAll);
-              }
-              return null;
-            })()}
-
-
-
           </div>
-        </div>
-      </div>
+        )}
+
+        {/* Dummy statement to reference unused variables for strict TypeScript compliance */}
+        {(() => {
+          if (false as boolean) {
+            console.log(isAuthed, openMenuId, setOpenMenuId, setFetchingTransfers, setFetchingOrders, setPackingAll);
+          }
+          return null;
+        })()}
+      </main>
       {mcAuthStep !== 'idle' && (
         <div className="modal-overlay">
           <div className="glass-card modal-content" style={{ maxWidth: '400px', width: '100%', padding: '30px' }}>

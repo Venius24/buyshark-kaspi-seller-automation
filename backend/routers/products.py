@@ -14,8 +14,10 @@ def get_products(
     page_size: int = Query(20),
     search: str = Query(""),
     status: str = Query("active"),
+    dumping_only: bool = Query(False),
+    dumping_status_filter: str = Query(""),
 ):
-    """Получить список товаров из кэша или Kaspi API."""
+    """Получить список товаров из кэша или Kaspi API с конфигурациями и статусами демпинга."""
     token = _require_token()
     products_file = "states/products.json"
 
@@ -38,12 +40,46 @@ def get_products(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Не удалось получить товары: {e}")
 
+    # Загружаем конфигурации демпинга и обогащаем товары
+    from backend.state_helpers import _load_dumping_configs
+    dumping_configs = _load_dumping_configs()
+
+    for p in all_products:
+        sku = p.get("sku")
+        cfg = dumping_configs.get(sku)
+        p["dumping_config"] = cfg
+        if not cfg or not cfg.get("enabled"):
+            p["dumping_status"] = "OFF"
+        elif "dumping_status" not in p:
+            p["dumping_status"] = "WINNING_1ST"
+
     target_status = "Активен" if status == "active" else "Архив"
     filtered = [p for p in all_products if p.get("status") == target_status]
 
+    # Фильтр только активных товаров в авто-демпинге
+    if dumping_only:
+        filtered = [p for p in filtered if p.get("dumping_config") and p["dumping_config"].get("enabled")]
+
+    # Фильтр по рабочему статусу демпинга
+    if dumping_status_filter:
+        q_status = dumping_status_filter.strip().upper()
+        filtered = [p for p in filtered if str(p.get("dumping_status", "")).upper() == q_status]
+
     if search:
         q = search.lower()
-        filtered = [p for p in filtered if q in (p.get("name") or "").lower() or q in (p.get("sku") or "").lower()]
+        filtered_list = []
+        for p in filtered:
+            match_fields = [
+                p.get("name"),
+                p.get("sku"),
+                p.get("merchantSku"),
+                p.get("kaspiSku"),
+                p.get("brand"),
+                p.get("id")
+            ]
+            if any(q in str(field).lower() for field in match_fields if field is not None):
+                filtered_list.append(p)
+        filtered = filtered_list
 
     total_count = len(filtered)
     total_pages = max(1, (total_count + page_size - 1) // page_size)

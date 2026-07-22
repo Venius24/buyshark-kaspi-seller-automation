@@ -81,7 +81,13 @@ def save_dumping_config(req: DumpingConfigRequest):
         "max_price": req.max_price,
         "dump_step": req.dump_step,
         "enabled": req.enabled,
-        "city_code": req.city_code
+        "mode": req.mode or "TOP_1",
+        "target_position": req.target_position or 1,
+        "max_delivery_days": req.max_delivery_days,
+        "min_seller_rating": req.min_seller_rating,
+        "same_city_only": bool(req.same_city_only),
+        "blacklisted_merchants": req.blacklisted_merchants or [],
+        "city_code": req.city_code or "750000000"
     }
     _save_dumping_configs(configs)
     return {"success": True, "message": f"Конфигурация демпинга для {req.sku} сохранена."}
