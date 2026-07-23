@@ -104,3 +104,68 @@ def _save_dumping_configs(configs: dict):
     os.makedirs("states", exist_ok=True)
     with open(DUMPING_CONFIGS_FILE, "w", encoding="utf-8") as f:
         json.dump(configs, f, ensure_ascii=False, indent=2)
+
+MASTER_STOCK_GROUPS_FILE = "states/master_stock_groups.json"
+PROCESSED_ORDERS_FILE = "states/processed_orders.json"
+
+def _load_master_stock_groups() -> dict:
+    if os.path.exists(MASTER_STOCK_GROUPS_FILE):
+        try:
+            with open(MASTER_STOCK_GROUPS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def _save_master_stock_groups(groups: dict):
+    os.makedirs("states", exist_ok=True)
+    with open(MASTER_STOCK_GROUPS_FILE, "w", encoding="utf-8") as f:
+        json.dump(groups, f, ensure_ascii=False, indent=2)
+
+def _load_processed_orders() -> dict:
+    if os.path.exists(PROCESSED_ORDERS_FILE):
+        try:
+            with open(PROCESSED_ORDERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def _save_processed_orders(orders: dict):
+    os.makedirs("states", exist_ok=True)
+    with open(PROCESSED_ORDERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(orders, f, ensure_ascii=False, indent=2)
+
+def _load_mc_cookies() -> dict:
+    """
+    Унифицированная загрузка кук mc-session и mc-sid из государств:
+    проверяются root 'state.json', 'states/session.json', 'states/state.json'.
+    """
+    candidate_paths = ["state.json", "states/session.json", "states/state.json"]
+    for path in candidate_paths:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                
+            cookies = {}
+            if isinstance(data, dict):
+                cookies_list = data.get("cookies", [])
+                if isinstance(cookies_list, list):
+                    for c in cookies_list:
+                        if isinstance(c, dict) and c.get("name") in ["mc-session", "mc-sid"]:
+                            cookies[c["name"]] = c["value"]
+                # Также если куки за сохранены в виде прямого словаря
+                if "mc-session" in data:
+                    cookies["mc-session"] = data["mc-session"]
+                if "mc-sid" in data:
+                    cookies["mc-sid"] = data["mc-sid"]
+
+            if "mc-session" in cookies and "mc-sid" in cookies:
+                return cookies
+        except Exception:
+            pass
+    return {}
+
+

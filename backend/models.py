@@ -37,3 +37,19 @@ class DumpingConfigRequest(BaseModel):
     blacklisted_merchants: Optional[List[str]] = []
     city_code: Optional[str] = "750000000"
 
+class MasterStockGroupCreateRequest(BaseModel):
+    group_name: str
+    shared_stock: int
+    linked_skus: List[str]
+    is_active: Optional[bool] = True
+
+class MasterStockGroupUpdateRequest(BaseModel):
+    group_name: Optional[str] = None
+    shared_stock: Optional[int] = None
+    linked_skus: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+class UpdateStockQtyRequest(BaseModel):
+    shared_stock: int
+
+

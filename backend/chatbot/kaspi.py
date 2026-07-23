@@ -14,34 +14,15 @@ http_session = requests.Session()
 
 def load_cookies() -> dict:
     """
-    Загружает куки mc-session и mc-sid из states/session.json.
-    Совместимо с форматом PlaywrightWorker и state.json.
+    Унифицированная загрузка кук mc-session и mc-sid из государств.
     """
-    if not os.path.exists(SESSION_FILE):
-        # Fallback на states/state.json если session.json отсутствует
-        alt_file = os.path.join(os.path.dirname(SESSION_FILE), "state.json")
-        if os.path.exists(alt_file):
-            target_file = alt_file
-        else:
-            logger.warning(f"⚠️ Файл сессии {SESSION_FILE} не найден.")
-            return {}
-    else:
-        target_file = SESSION_FILE
+    from backend.state_helpers import _load_mc_cookies as _unified_load_mc_cookies
+    cookies = _unified_load_mc_cookies()
+    if not cookies or "mc-session" not in cookies or "mc-sid" not in cookies:
+        logger.warning(f"⚠️ В сохраненных файлах состояния (state.json/session.json) отсутствуют куки 'mc-session' или 'mc-sid'.")
+        return {}
+    return cookies
 
-    try:
-        with open(target_file, "r", encoding="utf-8") as f:
-            state_data = json.load(f)
-            cookies_list = state_data.get("cookies", []) if isinstance(state_data, dict) else []
-            cookies = {c["name"]: c["value"] for c in cookies_list if isinstance(c, dict) and c.get("name") in ["mc-session", "mc-sid"]}
-            
-            if "mc-session" in cookies and "mc-sid" in cookies:
-                return cookies
-            else:
-                logger.warning(f"⚠️ В {target_file} отсутствуют обязательные куки 'mc-session' или 'mc-sid'.")
-    except Exception as e:
-        logger.error(f"⚠️ Ошибка чтения файла кук {target_file}: {e}")
-
-    return {}
 
 def format_time(ts_ms) -> str:
     if not ts_ms:

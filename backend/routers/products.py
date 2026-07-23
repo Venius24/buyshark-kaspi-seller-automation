@@ -53,8 +53,12 @@ def get_products(
         elif "dumping_status" not in p:
             p["dumping_status"] = "WINNING_1ST"
 
-    target_status = "Активен" if status == "active" else "Архив"
-    filtered = [p for p in all_products if p.get("status") == target_status]
+    if status and status != "all":
+        target_status = "Активен" if status == "active" else ("Архив" if status == "archive" else status)
+        filtered = [p for p in all_products if p.get("status") == target_status]
+    else:
+        filtered = list(all_products)
+
 
     # Фильтр только активных товаров в авто-демпинге
     if dumping_only:

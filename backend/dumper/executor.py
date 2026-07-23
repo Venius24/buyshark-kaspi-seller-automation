@@ -9,18 +9,9 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 def _load_mc_cookies() -> dict:
-    if not os.path.exists("state.json"):
-        return {}
-    try:
-        with open("state.json", "r", encoding="utf-8") as f:
-            data = json.load(f)
-        cookies = {}
-        for c in data.get("cookies", []):
-            if c.get("name") in ["mc-session", "mc-sid"]:
-                cookies[c["name"]] = c["value"]
-        return cookies
-    except Exception:
-        return {}
+    from backend.state_helpers import _load_mc_cookies as _unified_load_mc_cookies
+    return _unified_load_mc_cookies()
+
 
 class RateLimitExecutorWorker:
     """

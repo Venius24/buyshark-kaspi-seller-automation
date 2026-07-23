@@ -6,6 +6,8 @@ import { LiveTerminalStream } from './components/LiveTerminalStream';
 import { PriceHistoryChart } from './components/PriceHistoryChart';
 import { PriceRadarWidget } from './components/PriceRadarWidget';
 import { AiChatSentimentWidget } from './components/AiChatSentimentWidget';
+import { MasterStockGroups } from './components/MasterStockGroups';
+
 
 interface Product {
   id: string;
@@ -81,7 +83,8 @@ export default function App() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   // Tabs navigation, packaging and transfer states
-  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'dumping' | 'chatbot' | 'packaging' | 'transfer' | 'logs' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'dumping' | 'chatbot' | 'stock-groups' | 'packaging' | 'transfer' | 'logs' | 'settings'>('overview');
+
   
   // Chatbot states
   const [chatbotConfig, setChatbotConfig] = useState<{
@@ -938,7 +941,19 @@ export default function App() {
                 {chatbotStatus.enabled ? 'ON' : 'OFF'}
               </span>
             </button>
+
+            <button 
+              className={`sidebar-item ${activeTab === 'stock-groups' ? 'active' : ''}`}
+              onClick={() => setActiveTab('stock-groups')}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">🔗</span>
+                <span>Связка остатков</span>
+              </div>
+              <span className="sidebar-pill" style={{ color: '#818cf8' }}>Master</span>
+            </button>
           </div>
+
 
           <div className="sidebar-group">
             <div className="sidebar-group-title">Заказы & Логистика</div>
@@ -1029,6 +1044,7 @@ export default function App() {
               {activeTab === 'products' && '🏷️'}
               {activeTab === 'dumping' && '⚡'}
               {activeTab === 'chatbot' && '🤖'}
+              {activeTab === 'stock-groups' && '🔗'}
               {activeTab === 'packaging' && '📦'}
               {activeTab === 'transfer' && '🚚'}
               {activeTab === 'logs' && '📜'}
@@ -1040,6 +1056,7 @@ export default function App() {
                 {activeTab === 'products' && 'Управление Товарами'}
                 {activeTab === 'dumping' && 'Автоматический Демпинг'}
                 {activeTab === 'chatbot' && 'ИИ-Автоответчик Kaspi'}
+                {activeTab === 'stock-groups' && 'Связка Остатков (Master Stock Sync)'}
                 {activeTab === 'packaging' && 'Упаковка Заказов'}
                 {activeTab === 'transfer' && 'Передача Курьеру'}
                 {activeTab === 'logs' && 'Терминал Системных Событий'}
@@ -1050,6 +1067,9 @@ export default function App() {
                 {activeTab === 'products' && 'Каталог товаров, остатки, цены и статус продажи на Kaspi'}
                 {activeTab === 'dumping' && 'Управление стратегиями демпинга, шагом и фильтрами конкурентов'}
                 {activeTab === 'chatbot' && 'Автоматические умные ответы покупателям, курьерские шаблоны и Telegram эскалация'}
+                {activeTab === 'stock-groups' && 'Объединение карточек товаров Kaspi в единые складские группы с автоматическим веерным списанием остатков'}
+                {activeTab === 'packaging' && 'Формирование и печать упаковочных актов и маркировок'}
+
                 {activeTab === 'dumping' && 'Настройка минимальных цен, шагов снижения и маржинальности'}
                 {activeTab === 'packaging' && 'Формирование и печать упаковочных актов и маркировок'}
                 {activeTab === 'transfer' && 'Управление актами приема-сдачи и курьерскими передачами'}
@@ -2673,6 +2693,12 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* 🔗 TAB: MASTER STOCK GROUPS */}
+        {activeTab === 'stock-groups' && (
+          <MasterStockGroups />
+        )}
+
 
         {/* Dummy statement to reference unused variables for strict TypeScript compliance */}
         {(() => {
