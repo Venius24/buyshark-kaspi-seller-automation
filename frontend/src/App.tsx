@@ -81,7 +81,41 @@ export default function App() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   // Tabs navigation, packaging and transfer states
-  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'dumping' | 'packaging' | 'transfer' | 'logs' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'dumping' | 'chatbot' | 'packaging' | 'transfer' | 'logs' | 'settings'>('overview');
+  
+  // Chatbot states
+  const [chatbotConfig, setChatbotConfig] = useState<{
+    enabled: boolean;
+    deepseek_api_key: string;
+    tg_bot_token: string;
+    admin_ids: string[];
+    use_tg_proxy: boolean;
+    tg_proxy: string;
+    merchant_id: string;
+  }>({
+    enabled: true,
+    deepseek_api_key: '',
+    tg_bot_token: '',
+    admin_ids: [],
+    use_tg_proxy: false,
+    tg_proxy: '',
+    merchant_id: ''
+  });
+  const [chatbotStatus, setChatbotStatus] = useState<{
+    enabled: boolean;
+    has_session: boolean;
+    cookie_alert_sent: boolean;
+    blocked_chats_count: number;
+    blocked_chats: { group_id: string; reason: string }[];
+    processed_chats_count: number;
+  }>({
+    enabled: true,
+    has_session: false,
+    cookie_alert_sent: false,
+    blocked_chats_count: 0,
+    blocked_chats: [],
+    processed_chats_count: 0
+  });
   const [orders, setOrders] = useState<Order[]>([]);
   const [fetchingOrders, setFetchingOrders] = useState(false);
   const [orderStatusFilter, setOrderStatusFilter] = useState<'NEW' | 'ASSEMBLY'>('ASSEMBLY');
@@ -585,6 +619,69 @@ export default function App() {
     }
   };
 
+  const loadChatbotConfig = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/chatbot/config`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setChatbotConfig(data.config);
+      }
+    } catch (err) {
+      console.error("Chatbot config fetch error:", err);
+    }
+  };
+
+  const loadChatbotStatus = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/chatbot/status`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setChatbotStatus(data);
+      }
+    } catch (err) {
+      console.error("Chatbot status fetch error:", err);
+    }
+  };
+
+  const saveChatbotConfig = async (newCfg: Partial<typeof chatbotConfig>) => {
+    addLog('Сохранение конфигурации ИИ-автоответчика...');
+    try {
+      const res = await fetch(`${API_URL}/api/chatbot/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCfg)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addLog(data.message);
+        loadChatbotConfig();
+        loadChatbotStatus();
+      } else {
+        addLog(`Ошибка сохранения конфигурации чат-бота: ${data.detail || 'Ошибка'}`);
+      }
+    } catch {
+      addLog('Сетевая ошибка при сохранении конфига чат-бота.');
+    }
+  };
+
+  const unblockChatbotGroup = async (groupId: string) => {
+    addLog(`Разблокировка чата ${groupId} для ИИ...`);
+    try {
+      const res = await fetch(`${API_URL}/api/chatbot/unblock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group_id: groupId })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addLog(data.message);
+        loadChatbotStatus();
+      }
+    } catch {
+      addLog('Ошибка при разблокировке чата.');
+    }
+  };
+
   // ── Auth handler ───────────────────────────────────────
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -824,6 +921,23 @@ export default function App() {
               </div>
               <span className="sidebar-pill" style={{ color: 'var(--secondary)' }}>Auto</span>
             </button>
+
+            <button 
+              className={`sidebar-item ${activeTab === 'chatbot' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTab('chatbot');
+                loadChatbotConfig();
+                loadChatbotStatus();
+              }}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">🤖</span>
+                <span>ИИ-Автоответчик</span>
+              </div>
+              <span className="sidebar-pill" style={{ color: chatbotStatus.enabled ? '#34d399' : '#888' }}>
+                {chatbotStatus.enabled ? 'ON' : 'OFF'}
+              </span>
+            </button>
           </div>
 
           <div className="sidebar-group">
@@ -914,6 +1028,7 @@ export default function App() {
               {activeTab === 'overview' && '📊'}
               {activeTab === 'products' && '🏷️'}
               {activeTab === 'dumping' && '⚡'}
+              {activeTab === 'chatbot' && '🤖'}
               {activeTab === 'packaging' && '📦'}
               {activeTab === 'transfer' && '🚚'}
               {activeTab === 'logs' && '📜'}
@@ -924,6 +1039,7 @@ export default function App() {
                 {activeTab === 'overview' && 'Аналитический Обзор'}
                 {activeTab === 'products' && 'Управление Товарами'}
                 {activeTab === 'dumping' && 'Автоматический Демпинг'}
+                {activeTab === 'chatbot' && 'ИИ-Автоответчик Kaspi'}
                 {activeTab === 'packaging' && 'Упаковка Заказов'}
                 {activeTab === 'transfer' && 'Передача Курьеру'}
                 {activeTab === 'logs' && 'Терминал Системных Событий'}
@@ -932,6 +1048,8 @@ export default function App() {
               <p>
                 {activeTab === 'overview' && 'Ключевая аналитика доли BuyBox, сохранение маржи и поток активности'}
                 {activeTab === 'products' && 'Каталог товаров, остатки, цены и статус продажи на Kaspi'}
+                {activeTab === 'dumping' && 'Управление стратегиями демпинга, шагом и фильтрами конкурентов'}
+                {activeTab === 'chatbot' && 'Автоматические умные ответы покупателям, курьерские шаблоны и Telegram эскалация'}
                 {activeTab === 'dumping' && 'Настройка минимальных цен, шагов снижения и маржинальности'}
                 {activeTab === 'packaging' && 'Формирование и печать упаковочных актов и маркировок'}
                 {activeTab === 'transfer' && 'Управление актами приема-сдачи и курьерскими передачами'}
@@ -2383,6 +2501,176 @@ export default function App() {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {activeTab === 'chatbot' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {/* Top Header Card */}
+            <div className="glass-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2 style={{ fontSize: '18px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', color: '#fff' }}>
+                  🤖 Kaspi ИИ-Автоответчик (DeepSeek + Telegram)
+                </h2>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  Автоматические умные ответы клиентам Kaspi, курьерские шаблоны логистики и эскалация менеджеру через Telegram.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Статус автоответчика:</span>
+                  <span className={`badge ${chatbotStatus.enabled ? 'badge-success' : 'badge-warning'}`}>
+                    {chatbotStatus.enabled ? '🟢 Автоответчик Активен' : '⏸️ Приостановлен'}
+                  </span>
+                </div>
+
+                <button
+                  className="btn"
+                  style={{
+                    background: chatbotStatus.enabled ? 'linear-gradient(135deg, #ef4444, #dc2626)' : 'linear-gradient(135deg, #10b981, #059669)',
+                    color: '#fff',
+                    padding: '10px 20px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    borderRadius: '8px'
+                  }}
+                  onClick={() => {
+                    saveChatbotConfig({ enabled: !chatbotStatus.enabled });
+                  }}
+                >
+                  {chatbotStatus.enabled ? '⏸️ Приостановить бота' : '▶️ Включить автоответчик'}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+              {/* 🔐 Настройки токенов и Telegram */}
+              <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600 }}>🔑 Ключи доступа & Telegram</h3>
+                  <span className="badge badge-success">DeepSeek AI</span>
+                </div>
+
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  const deepseekKey = (document.getElementById('deepseek-key-input') as HTMLInputElement).value;
+                  const tgToken = (document.getElementById('tg-token-input') as HTMLInputElement).value;
+                  const adminIdsRaw = (document.getElementById('admin-ids-input') as HTMLInputElement).value;
+                  const adminIds = adminIdsRaw.split(',').map(s => s.trim()).filter(Boolean);
+                  const useProxy = (document.getElementById('tg-proxy-chk') as HTMLInputElement).checked;
+                  const proxyUrl = (document.getElementById('tg-proxy-input') as HTMLInputElement).value;
+
+                  saveChatbotConfig({
+                    deepseek_api_key: deepseekKey,
+                    tg_bot_token: tgToken,
+                    admin_ids: adminIds,
+                    use_tg_proxy: useProxy,
+                    tg_proxy: proxyUrl
+                  });
+                }} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                      DeepSeek API Key
+                    </label>
+                    <input
+                      type="password"
+                      id="deepseek-key-input"
+                      className="form-input"
+                      defaultValue={chatbotConfig.deepseek_api_key}
+                      placeholder="sk-..."
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                      Telegram Bot Token
+                    </label>
+                    <input
+                      type="password"
+                      id="tg-token-input"
+                      className="form-input"
+                      defaultValue={chatbotConfig.tg_bot_token}
+                      placeholder="119036852:ABC..."
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                      Telegram Admin IDs (для алертов менеджерам через запятую)
+                    </label>
+                    <input
+                      type="text"
+                      id="admin-ids-input"
+                      className="form-input"
+                      defaultValue={(chatbotConfig.admin_ids || []).join(', ')}
+                      placeholder="7119137844, 8661441552"
+                    />
+                  </div>
+
+                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '10px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: '#fff' }}>
+                      <input
+                        type="checkbox"
+                        id="tg-proxy-chk"
+                        defaultChecked={chatbotConfig.use_tg_proxy}
+                      />
+                      Использовать прокси для Telegram API
+                    </label>
+
+                    <input
+                      type="text"
+                      id="tg-proxy-input"
+                      className="form-input"
+                      defaultValue={chatbotConfig.tg_proxy}
+                      placeholder="http://user:pass@host:port"
+                      style={{ marginTop: '8px' }}
+                    />
+                  </div>
+
+                  <button type="submit" className="btn btn-primary" style={{ padding: '10px', marginTop: '8px' }}>
+                    💾 Сохранить параметры чат-бота
+                  </button>
+                </form>
+              </div>
+
+              {/* 🔒 Передача менеджеру (Human Override) */}
+              <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600 }}>🔒 Заблокированные чаты (Вызов менеджера)</h3>
+                  <span className="badge badge-warning">{chatbotStatus.blocked_chats_count} чатов</span>
+                </div>
+
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Диалоги, в которых покупатель попросил менеджера/возврат/брак. ИИ приостановлен по этим чатам до разблокировки.
+                </p>
+
+                {chatbotStatus.blocked_chats.length === 0 ? (
+                  <div style={{ padding: '24px 0', textAlign: 'center', color: '#888', fontSize: '13px' }}>
+                    🎉 Нет заблокированных диалогов. ИИ отвечает на все входящие!
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '320px', overflowY: 'auto' }}>
+                    {chatbotStatus.blocked_chats.map((item) => (
+                      <div key={item.group_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div>
+                          <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>Чат #{item.group_id}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--warning)', marginTop: '2px' }}>Причина: {item.reason}</div>
+                        </div>
+
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '6px 12px', fontSize: '11px' }}
+                          onClick={() => unblockChatbotGroup(item.group_id)}
+                        >
+                          ✅ Разблокировать для ИИ
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
