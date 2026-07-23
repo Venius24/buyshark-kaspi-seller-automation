@@ -1427,8 +1427,14 @@ export default function App() {
                               <div style={{ maxWidth: '70%' }}>
                                 <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
                                 <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                  Артикул (SKU): <strong>{product.sku}</strong>
+                                  Kaspi SKU: <strong>{product.sku || product.kaspiSku}</strong>
+                                  {product.merchantSku && product.merchantSku !== (product.sku || product.kaspiSku) && (
+                                    <span style={{ marginLeft: '10px' }}>
+                                      • Merchant SKU: <strong style={{ color: '#818cf8' }}>{product.merchantSku}</strong>
+                                    </span>
+                                  )}
                                 </p>
+
                                 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
                                   <span 
@@ -1834,7 +1840,15 @@ export default function App() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <div style={{ maxWidth: '70%' }}>
                                 <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
-                                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Артикул: <strong>{product.sku}</strong></p>
+                                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                  Kaspi SKU: <strong>{product.sku || product.kaspiSku}</strong>
+                                  {product.merchantSku && product.merchantSku !== (product.sku || product.kaspiSku) && (
+                                    <span style={{ marginLeft: '10px' }}>
+                                      • Merchant SKU: <strong style={{ color: '#818cf8' }}>{product.merchantSku}</strong>
+                                    </span>
+                                  )}
+                                </p>
+
                                 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
                                   {getStatusBadge(dStatus)}

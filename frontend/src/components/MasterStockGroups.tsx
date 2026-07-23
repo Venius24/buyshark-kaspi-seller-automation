@@ -643,27 +643,34 @@ export const MasterStockGroups: React.FC = () => {
                       {/* Linked SKU chips */}
                       <td style={{ padding: '18px 24px', maxWidth: '320px' }}>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                          {group.linked_skus.map(sku => (
-                            <span
-                              key={sku}
-                              style={{
-                                padding: '4px 10px',
-                                borderRadius: '20px',
-                                background: '#1e293b',
-                                border: '1px solid #334155',
-                                color: '#cbd5e1',
-                                fontSize: '12px',
-                                fontWeight: 500,
-                                fontFamily: 'monospace',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px'
-                              }}
-                            >
-                              <Package size={12} color="#818cf8" />
-                              {sku}
-                            </span>
-                          ))}
+                          {group.linked_skus.map(sku => {
+                            const pMatch = products.find(p => p.sku === sku || p.merchantSku === sku);
+                            const mSku = pMatch?.merchantSku;
+                            const hasDistinctMSku = mSku && mSku !== sku;
+                            return (
+                              <span
+                                key={sku}
+                                title={pMatch ? `${pMatch.name}${hasDistinctMSku ? ` (Merchant SKU: ${mSku})` : ''}` : sku}
+                                style={{
+                                  padding: '4px 10px',
+                                  borderRadius: '20px',
+                                  background: '#1e293b',
+                                  border: '1px solid #334155',
+                                  color: '#cbd5e1',
+                                  fontSize: '12px',
+                                  fontWeight: 500,
+                                  fontFamily: 'monospace',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                <Package size={12} color="#818cf8" />
+                                {hasDistinctMSku ? `${sku} (${mSku})` : sku}
+                              </span>
+                            );
+                          })}
+
                         </div>
                       </td>
 
@@ -967,9 +974,16 @@ export const MasterStockGroups: React.FC = () => {
                               <div style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc' }}>
                                 {p.name}
                               </div>
-                              <div style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>
-                                SKU: {skuVal} {p.brand ? `• Бренд: ${p.brand}` : ''}
+                              <div style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace', marginTop: '2px' }}>
+                                Kaspi SKU: {skuVal}
+                                {p.merchantSku && p.merchantSku !== skuVal && (
+                                  <span style={{ color: '#818cf8', marginLeft: '8px' }}>
+                                    • Merchant SKU: {p.merchantSku}
+                                  </span>
+                                )}
+                                {p.brand ? ` • Бренд: ${p.brand}` : ''}
                               </div>
+
                             </div>
                           </div>
 
