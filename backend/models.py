@@ -41,15 +41,32 @@ class MasterStockGroupCreateRequest(BaseModel):
     group_name: str
     shared_stock: int
     linked_skus: List[str]
+    external_code: Optional[str] = None
     is_active: Optional[bool] = True
 
 class MasterStockGroupUpdateRequest(BaseModel):
     group_name: Optional[str] = None
     shared_stock: Optional[int] = None
     linked_skus: Optional[List[str]] = None
+    external_code: Optional[str] = None
     is_active: Optional[bool] = None
 
 class UpdateStockQtyRequest(BaseModel):
     shared_stock: int
+
+class PublicStockUpdateRequest(BaseModel):
+    group_id: Optional[str] = None
+    external_code: Optional[str] = None
+    new_stock: int
+    mode: Optional[str] = "SET"  # "SET" (exact stock) or "DELTA" (+/- relative)
+
+class ApiKeyCreateRequest(BaseModel):
+    name: str
+
+class WebhookConfigRequest(BaseModel):
+    url: str
+    secret: Optional[str] = None
+    enabled: Optional[bool] = True
+
 
 

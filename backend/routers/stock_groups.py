@@ -49,6 +49,7 @@ async def create_stock_group(req: MasterStockGroupCreateRequest, background_task
         "group_name": req.group_name.strip(),
         "shared_stock": int(req.shared_stock),
         "linked_skus": [sku.strip() for sku in req.linked_skus if sku.strip()],
+        "external_code": (req.external_code or "").strip() or None,
         "is_active": req.is_active if req.is_active is not None else True,
         "status": "updating",
         "created_at": now_str,
@@ -88,8 +89,11 @@ async def update_stock_group(group_id: str, req: MasterStockGroupUpdateRequest, 
             group["shared_stock"] = int(req.shared_stock)
         if req.linked_skus is not None and req.linked_skus:
             group["linked_skus"] = [sku.strip() for sku in req.linked_skus if sku.strip()]
+        if req.external_code is not None:
+            group["external_code"] = req.external_code.strip() or None
         if req.is_active is not None:
             group["is_active"] = req.is_active
+
 
         group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         group["status"] = "updating"

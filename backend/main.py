@@ -6,7 +6,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.routers import auth, products, orders, dumping, ws, analytics, chatbot, stock_groups
+from backend.routers import auth, products, orders, dumping, ws, analytics, chatbot, stock_groups, api_keys
+from backend.routers.public_api import groups as public_groups
 
 app = FastAPI(title="Kaspi SaaS Wrapper API")
 
@@ -43,6 +44,9 @@ app.include_router(ws.router)
 app.include_router(analytics.router)
 app.include_router(chatbot.router)
 app.include_router(stock_groups.router)
+app.include_router(api_keys.router)
+app.include_router(public_groups.router)
+
 
 
 @app.get("/")

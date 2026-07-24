@@ -22,6 +22,7 @@ interface MasterStockGroup {
   group_name: string;
   shared_stock: number;
   linked_skus: string[];
+  external_code?: string;
   is_active: boolean;
   status: 'synced' | 'updating' | 'error';
   created_at: string;
@@ -30,6 +31,7 @@ interface MasterStockGroup {
   last_synced_at?: string;
   last_sync_log?: string;
 }
+
 
 interface ProductItem {
   sku: string;
@@ -57,6 +59,7 @@ export const MasterStockGroups: React.FC = () => {
   const [formGroupName, setFormGroupName] = useState<string>('');
   const [formSharedStock, setFormSharedStock] = useState<number>(10);
   const [formSelectedSkus, setFormSelectedSkus] = useState<string[]>([]);
+  const [formExternalCode, setFormExternalCode] = useState<string>('');
   const [formIsActive, setFormIsActive] = useState<boolean>(true);
   const [modalProductSearch, setModalProductSearch] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
@@ -97,8 +100,6 @@ export const MasterStockGroups: React.FC = () => {
     }
   };
 
-
-
   const loadData = async () => {
     setLoading(true);
     await Promise.all([fetchGroups(), fetchProducts()]);
@@ -121,6 +122,7 @@ export const MasterStockGroups: React.FC = () => {
     return groups.filter(g =>
       g.group_name.toLowerCase().includes(q) ||
       g.group_id.toLowerCase().includes(q) ||
+      (g.external_code && g.external_code.toLowerCase().includes(q)) ||
       g.linked_skus.some(s => s.toLowerCase().includes(q))
     );
   }, [groups, searchQuery]);
@@ -141,6 +143,7 @@ export const MasterStockGroups: React.FC = () => {
     setFormGroupName('');
     setFormSharedStock(10);
     setFormSelectedSkus([]);
+    setFormExternalCode('');
     setFormIsActive(true);
     setModalProductSearch('');
     setIsModalOpen(true);
@@ -151,6 +154,7 @@ export const MasterStockGroups: React.FC = () => {
     setFormGroupName(group.group_name);
     setFormSharedStock(group.shared_stock);
     setFormSelectedSkus([...group.linked_skus]);
+    setFormExternalCode(group.external_code || '');
     setFormIsActive(group.is_active);
     setModalProductSearch('');
     setIsModalOpen(true);
@@ -186,9 +190,11 @@ export const MasterStockGroups: React.FC = () => {
           group_name: formGroupName.trim(),
           shared_stock: formSharedStock,
           linked_skus: formSelectedSkus,
+          external_code: formExternalCode.trim() || undefined,
           is_active: formIsActive,
         }),
       });
+
 
       const data = await res.json();
       if (data.success) {
@@ -547,8 +553,13 @@ export const MasterStockGroups: React.FC = () => {
                         <div style={{ fontWeight: 600, color: '#f8fafc', fontSize: '15px' }}>
                           {group.group_name}
                         </div>
-                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px', fontFamily: 'monospace' }}>
-                          ID: {group.group_id}
+                        <div style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>ID: {group.group_id}</span>
+                          {group.external_code && (
+                            <span style={{ color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                              1C: {group.external_code}
+                            </span>
+                          )}
                         </div>
                       </td>
 
@@ -850,27 +861,49 @@ export const MasterStockGroups: React.FC = () => {
               </div>
 
               {/* Shared Stock Input */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' }}>
-                    Общий складской остаток (шт) *
+                    Общий физический остаток *
                   </label>
                   <input
                     type="number"
-                    min={0}
-                    required
+                    min="0"
                     value={formSharedStock}
                     onChange={e => setFormSharedStock(parseInt(e.target.value) || 0)}
+                    required
                     style={{
                       width: '100%',
-                      padding: '12px 16px',
+                      padding: '10px 14px',
+                      borderRadius: '10px',
+                      background: '#0f172a',
+                      border: '1px solid #334155',
+                      color: '#f8fafc',
+                      fontSize: '14px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* 1C External Code Input */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' }}>
+                    Код товара в 1С / МойСклад (external_code)
+                  </label>
+                  <input
+                    type="text"
+                    value={formExternalCode}
+                    onChange={e => setFormExternalCode(e.target.value)}
+                    placeholder="Например: 1C_ARTICLE_001"
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
                       borderRadius: '10px',
                       background: '#0f172a',
                       border: '1px solid #334155',
                       color: '#38bdf8',
-                      fontSize: '16px',
-                      fontWeight: 700,
-                      outline: 'none',
+                      fontFamily: 'monospace',
+                      fontSize: '14px',
                       boxSizing: 'border-box'
                     }}
                   />

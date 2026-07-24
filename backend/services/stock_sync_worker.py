@@ -20,6 +20,8 @@ from backend.kaspi_wrapper import KaspiAPI
 from backend.dumper.executor import RateLimitExecutorWorker, _load_mc_cookies
 from backend.dumper.config import discover_merchant_id, _decode_base64_if_needed
 from backend.dumper.telemetry import telemetry_manager
+from backend.services.webhook_dispatcher import dispatch_webhook_event
+
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +280,24 @@ async def master_stock_radar_loop():
                                     f"📦 [Order Sale Detected] Заказ {order_id} (SKU: {sku}, qty: {qty}). "
                                     f"Группа '{grp.get('group_name')}' остаток: {current_stock} -> {new_stock}"
                                 )
+
+                                # Отправка Webhook в 1С/ERP
+                                asyncio.create_task(
+                                    dispatch_webhook_event(
+                                        "order.created",
+                                        {
+                                            "order_id": order_id,
+                                            "purchased_sku": sku,
+                                            "quantity": qty,
+                                            "group_id": gid,
+                                            "group_name": grp.get("group_name"),
+                                            "external_code": grp.get("external_code"),
+                                            "previous_stock": current_stock,
+                                            "remaining_shared_stock": new_stock
+                                        }
+                                    )
+                                )
+
                             order_matched_groups.add(gid)
 
                 # Помечаем заказ как обработанный

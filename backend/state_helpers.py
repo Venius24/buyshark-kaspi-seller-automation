@@ -168,4 +168,36 @@ def _load_mc_cookies() -> dict:
             pass
     return {}
 
+API_KEYS_FILE = "states/api_keys.json"
+WEBHOOK_CONFIG_FILE = "states/webhook_config.json"
+
+def _load_api_keys() -> dict:
+    if os.path.exists(API_KEYS_FILE):
+        try:
+            with open(API_KEYS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def _save_api_keys(keys: dict):
+    os.makedirs("states", exist_ok=True)
+    with open(API_KEYS_FILE, "w", encoding="utf-8") as f:
+        json.dump(keys, f, ensure_ascii=False, indent=2)
+
+def _load_webhook_config() -> dict:
+    if os.path.exists(WEBHOOK_CONFIG_FILE):
+        try:
+            with open(WEBHOOK_CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def _save_webhook_config(cfg: dict):
+    os.makedirs("states", exist_ok=True)
+    with open(WEBHOOK_CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
 
