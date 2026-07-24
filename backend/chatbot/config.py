@@ -96,3 +96,34 @@ def load_admin_ids() -> list:
             logger.error(f"Ошибка чтения {ADMIN_IDS_FILE}: {e}")
             
     return ["7119137844", "8661441552"]
+
+PRINT_SETTINGS_FILE = os.path.join(STATES_DIR, "print_settings.json")
+
+DEFAULT_PRINT_SETTINGS = {
+    "output_layout": "auto",
+    "express_mode": "separate",
+    "sort_preset": "filename",
+    "deduplicate_history": True,
+    "auto_rotate": True
+}
+
+def load_print_settings() -> dict:
+    if os.path.exists(PRINT_SETTINGS_FILE):
+        try:
+            with open(PRINT_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                merged = DEFAULT_PRINT_SETTINGS.copy()
+                merged.update(data)
+                return merged
+        except Exception:
+            pass
+    return DEFAULT_PRINT_SETTINGS.copy()
+
+def save_print_settings(settings: dict) -> dict:
+    os.makedirs(STATES_DIR, exist_ok=True)
+    current = load_print_settings()
+    current.update(settings)
+    with open(PRINT_SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(current, f, ensure_ascii=False, indent=2)
+    return current
+

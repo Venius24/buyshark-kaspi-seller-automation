@@ -8,6 +8,7 @@ import { PriceRadarWidget } from './components/PriceRadarWidget';
 import { AiChatSentimentWidget } from './components/AiChatSentimentWidget';
 import { MasterStockGroups } from './components/MasterStockGroups';
 import { IntegrationsPublicApi } from './components/IntegrationsPublicApi';
+import { PrintBatcher } from './components/PrintBatcher';
 
 
 
@@ -85,7 +86,7 @@ export default function App() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   // Tabs navigation, packaging and transfer states
-  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'dumping' | 'chatbot' | 'stock-groups' | 'public-api' | 'packaging' | 'transfer' | 'logs' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'dumping' | 'chatbot' | 'stock-groups' | 'public-api' | 'print-batcher' | 'packaging' | 'transfer' | 'logs' | 'settings'>('overview');
 
 
   
@@ -975,6 +976,17 @@ export default function App() {
             <div className="sidebar-group-title">Заказы & Логистика</div>
 
             <button 
+              className={`sidebar-item ${activeTab === 'print-batcher' ? 'active' : ''}`}
+              onClick={() => setActiveTab('print-batcher')}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">🖨️</span>
+                <span>Автосборщик печати</span>
+              </div>
+              <span className="sidebar-pill" style={{ color: '#10b981' }}>KSTAT</span>
+            </button>
+
+            <button 
               className={`sidebar-item ${activeTab === 'packaging' ? 'active' : ''}`}
               onClick={() => {
                 setActiveTab('packaging');
@@ -1062,6 +1074,7 @@ export default function App() {
               {activeTab === 'chatbot' && '🤖'}
               {activeTab === 'stock-groups' && '🔗'}
               {activeTab === 'public-api' && '💻'}
+              {activeTab === 'print-batcher' && '🖨️'}
               {activeTab === 'packaging' && '📦'}
               {activeTab === 'transfer' && '🚚'}
               {activeTab === 'logs' && '📜'}
@@ -1075,6 +1088,7 @@ export default function App() {
                 {activeTab === 'chatbot' && 'ИИ-Автоответчик Kaspi'}
                 {activeTab === 'stock-groups' && 'Связка Остатков (Master Stock Sync)'}
                 {activeTab === 'public-api' && 'Раздел для разработчиков (API & Webhooks)'}
+                {activeTab === 'print-batcher' && 'Автосборщик & Сортировщик Печати (Print-Batcher Engine)'}
                 {activeTab === 'packaging' && 'Упаковка Заказов'}
                 {activeTab === 'transfer' && 'Передача Курьеру'}
                 {activeTab === 'logs' && 'Терминал Системных Событий'}
@@ -1087,11 +1101,7 @@ export default function App() {
                 {activeTab === 'chatbot' && 'Автоматические умные ответы покупателям, курьерские шаблоны и Telegram эскалация'}
                 {activeTab === 'stock-groups' && 'Объединение карточек товаров Kaspi в единые складские группы с автоматическим веерным списанием остатков'}
                 {activeTab === 'public-api' && 'Управление API-ключами, настройка исходящих Webhooks и документация для интеграции с 1С/ERP'}
-
-
-                {activeTab === 'packaging' && 'Формирование и печать упаковочных актов и маркировок'}
-
-                {activeTab === 'dumping' && 'Настройка минимальных цен, шагов снижения и маржинальности'}
+                {activeTab === 'print-batcher' && 'Прием ZIP-архивов, распознавание размеров страниц и генерация единых PDF для мгновенной печати по типам принтеров'}
                 {activeTab === 'packaging' && 'Формирование и печать упаковочных актов и маркировок'}
                 {activeTab === 'transfer' && 'Управление актами приема-сдачи и курьерскими передачами'}
                 {activeTab === 'logs' && 'Поток событий системы в реальном времени через WebSocket'}
@@ -2737,6 +2747,11 @@ export default function App() {
         {/* 🔑 TAB: PUBLIC API & WEBHOOKS */}
         {activeTab === 'public-api' && (
           <IntegrationsPublicApi />
+        )}
+
+        {/* 🖨️ TAB: PRINT-BATCHER ENGINE */}
+        {activeTab === 'print-batcher' && (
+          <PrintBatcher />
         )}
 
 
