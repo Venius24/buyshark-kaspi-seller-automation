@@ -220,6 +220,15 @@ class RateLimitExecutorWorker:
                 store_full_id = p.get("storeId") or f"{merchant_id}_001"
                 store_suffix = store_full_id.split("_")[1] if "_" in store_full_id else "001"
                 
+                # Проверяем, привязан ли данный SKU к Мастер-Группе остатка
+                from backend.state_helpers import _load_master_stock_groups
+                master_groups = _load_master_stock_groups()
+                stock_val = int(p.get("stock", 10))
+                for mg in master_groups.values():
+                    if mg.get("is_active", True) and sku_key in mg.get("linked_skus", []):
+                        stock_val = int(mg.get("shared_stock", stock_val))
+                        break
+
                 success, val = RateLimitExecutorWorker._update_kaspi_price_sync(
                     merchant_uid=merchant_id,
                     cookies=cookies,
@@ -227,7 +236,7 @@ class RateLimitExecutorWorker:
                     master_sku=config.master_sku,
                     model_name=p.get("name", "Товар"),
                     new_price=int(new_price),
-                    stock=int(p.get("stock", 75)),
+                    stock=stock_val,
                     store_id_suffix=store_suffix,
                     city_id=config.city_code
                 )

@@ -23,8 +23,26 @@ async def run_price_dumping_job(
         merchant_id = "20186986"
         logger.warning(f"Не удалось получить динамический merchant_id. Используем fallback: {merchant_id}")
 
+    from backend.state_helpers import _load_master_stock_groups
+    master_groups = _load_master_stock_groups()
+    effective_configs = dict(configs)
+    
+    # Обогащаем конфигурации демпинга из настроек Мастер-Групп
+    for gid, group in master_groups.items():
+        if not group.get("is_active", True):
+            continue
+        g_dump_cfg = group.get("dumping_config")
+        if g_dump_cfg and g_dump_cfg.get("enabled"):
+            for sku in group.get("linked_skus", []):
+                indiv_cfg = effective_configs.get(sku)
+                # Если индивидуального конфига нет или он выключен - применяем демпинг группы
+                if not indiv_cfg or not indiv_cfg.get("enabled"):
+                    merged = dict(g_dump_cfg)
+                    merged["sku"] = sku
+                    effective_configs[sku] = merged
+
     # 1. 📡 Воркер-Радар
-    market_snapshot = await RadarWorker.scan_market(products, configs)
+    market_snapshot = await RadarWorker.scan_market(products, effective_configs)
     if not market_snapshot:
         return {
             "success": True,
@@ -34,7 +52,7 @@ async def run_price_dumping_job(
         }
 
     # 2. 🧠 Воркер-Мозг
-    brain_result = BrainWorker.calculate_price_decisions(market_snapshot, configs, merchant_id)
+    brain_result = BrainWorker.calculate_price_decisions(market_snapshot, effective_configs, merchant_id)
     update_queue = brain_result["update_queue"]
     analytics = brain_result["analytics"]
 

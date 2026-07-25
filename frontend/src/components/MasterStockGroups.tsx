@@ -20,6 +20,20 @@ import {
 import { useWebSocket } from '../hooks/useWebSocket';
 import { LiveTerminalStream } from './LiveTerminalStream';
 
+interface GroupDumpingConfig {
+  enabled: boolean;
+  min_price: number;
+  max_price: number;
+  dump_step?: number;
+  mode?: string;
+  target_position?: number;
+  max_delivery_days?: number | null;
+  min_seller_rating?: number | null;
+  same_city_only?: boolean;
+  blacklisted_merchants?: string[];
+  city_code?: string;
+}
+
 interface MasterStockGroup {
   group_id: string;
   group_name: string;
@@ -34,6 +48,7 @@ interface MasterStockGroup {
   last_synced_at?: string;
   last_sync_log?: string;
   sync_logs?: string[];
+  dumping_config?: GroupDumpingConfig | null;
 }
 
 
@@ -68,6 +83,14 @@ export const MasterStockGroups: React.FC = () => {
   const [modalProductSearch, setModalProductSearch] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
 
+  // Group Dumping Modal State
+  const [formDumpingEnabled, setFormDumpingEnabled] = useState<boolean>(false);
+  const [formMinPrice, setFormMinPrice] = useState<number>(1000);
+  const [formMaxPrice, setFormMaxPrice] = useState<number>(5000);
+  const [formDumpStep, setFormDumpStep] = useState<number>(10);
+  const [formDumpingMode, setFormDumpingMode] = useState<string>('TOP_1');
+  const [formTargetPosition, setFormTargetPosition] = useState<number>(1);
+
   // Inline Stock Edit State
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
   const [inlineStockVal, setInlineStockVal] = useState<number>(0);
@@ -79,7 +102,13 @@ export const MasterStockGroups: React.FC = () => {
   useEffect(() => {
     if (wsEvent) {
       if (wsEvent.type === 'log' && typeof wsEvent.data === 'string') {
-        setTerminalLogs(prev => [...prev.slice(-100), wsEvent.data]);
+        const logLine = wsEvent.data;
+        setTerminalLogs(prev => {
+          if (prev.length > 0 && prev[prev.length - 1] === logLine) {
+            return prev;
+          }
+          return [...prev.slice(-100), logLine];
+        });
       } else if (wsEvent.type === 'stock_group_updated') {
         fetchGroups();
       }
@@ -164,6 +193,12 @@ export const MasterStockGroups: React.FC = () => {
     setFormExternalCode('');
     setFormIsActive(true);
     setModalProductSearch('');
+    setFormDumpingEnabled(false);
+    setFormMinPrice(1000);
+    setFormMaxPrice(5000);
+    setFormDumpStep(10);
+    setFormDumpingMode('TOP_1');
+    setFormTargetPosition(1);
     setIsModalOpen(true);
   };
 
@@ -175,6 +210,21 @@ export const MasterStockGroups: React.FC = () => {
     setFormExternalCode(group.external_code || '');
     setFormIsActive(group.is_active);
     setModalProductSearch('');
+    if (group.dumping_config) {
+      setFormDumpingEnabled(group.dumping_config.enabled ?? false);
+      setFormMinPrice(group.dumping_config.min_price || 1000);
+      setFormMaxPrice(group.dumping_config.max_price || 5000);
+      setFormDumpStep(group.dumping_config.dump_step ?? 10);
+      setFormDumpingMode(group.dumping_config.mode || 'TOP_1');
+      setFormTargetPosition(group.dumping_config.target_position || 1);
+    } else {
+      setFormDumpingEnabled(false);
+      setFormMinPrice(1000);
+      setFormMaxPrice(5000);
+      setFormDumpStep(10);
+      setFormDumpingMode('TOP_1');
+      setFormTargetPosition(1);
+    }
     setIsModalOpen(true);
   };
 
@@ -210,6 +260,14 @@ export const MasterStockGroups: React.FC = () => {
           linked_skus: formSelectedSkus,
           external_code: formExternalCode.trim() || undefined,
           is_active: formIsActive,
+          dumping_config: formDumpingEnabled ? {
+            enabled: true,
+            min_price: formMinPrice,
+            max_price: formMaxPrice,
+            dump_step: formDumpStep,
+            mode: formDumpingMode,
+            target_position: formTargetPosition,
+          } : null,
         }),
       });
 
@@ -582,6 +640,24 @@ export const MasterStockGroups: React.FC = () => {
                             </span>
                           )}
                         </div>
+                        {group.dumping_config?.enabled && (
+                          <div style={{ marginTop: '4px' }}>
+                            <span style={{
+                              fontSize: '11px',
+                              color: '#fbbf24',
+                              background: 'rgba(245, 158, 11, 0.12)',
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              border: '1px solid rgba(245, 158, 11, 0.3)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}>
+                              <Zap size={11} />
+                              <span>Демпинг: {group.dumping_config.min_price} – {group.dumping_config.max_price} ₸ ({group.dumping_config.mode || 'TOP_1'})</span>
+                            </span>
+                          </div>
+                        )}
                       </td>
 
                       {/* Shared Stock (Inline Editable) */}
@@ -969,6 +1045,68 @@ export const MasterStockGroups: React.FC = () => {
                     </span>
                   </label>
                 </div>
+              {/* Group Dumping Config Section */}
+              <div style={{ background: '#020617', padding: '16px', borderRadius: '12px', border: '1px solid #1e293b' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontWeight: 600, fontSize: '14px', color: formDumpingEnabled ? '#fbbf24' : '#cbd5e1' }}>
+                    <input
+                      type="checkbox"
+                      checked={formDumpingEnabled}
+                      onChange={e => setFormDumpingEnabled(e.target.checked)}
+                      style={{ width: '18px', height: '18px', accentColor: '#f59e0b', cursor: 'pointer' }}
+                    />
+                    <Zap size={18} color={formDumpingEnabled ? '#f59e0b' : '#64748b'} />
+                    <span>Включить авто-демпинг на уровне группы</span>
+                  </label>
+                </div>
+
+                {formDumpingEnabled && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px', marginTop: '14px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Режим демпинга</label>
+                      <select
+                        value={formDumpingMode}
+                        onChange={e => setFormDumpingMode(e.target.value)}
+                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: '#0f172a', border: '1px solid #334155', color: '#fff', fontSize: '12px' }}
+                      >
+                        <option value="TOP_1">🏆 1-е место</option>
+                        <option value="TOP_2">🥈 2-е место</option>
+                        <option value="MATCH_FIRST">🎯 Прижиматься к 1-му место</option>
+                        <option value="TARGET_POSITION">📍 N-е место</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Мин. цена (₸)</label>
+                      <input
+                        type="number"
+                        value={formMinPrice}
+                        onChange={e => setFormMinPrice(parseFloat(e.target.value) || 0)}
+                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: '#0f172a', border: '1px solid #334155', color: '#fff', fontSize: '12px' }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Макс. цена (₸)</label>
+                      <input
+                        type="number"
+                        value={formMaxPrice}
+                        onChange={e => setFormMaxPrice(parseFloat(e.target.value) || 0)}
+                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: '#0f172a', border: '1px solid #334155', color: '#fff', fontSize: '12px' }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Шаг демпинга (₸)</label>
+                      <input
+                        type="number"
+                        value={formDumpStep}
+                        onChange={e => setFormDumpStep(parseFloat(e.target.value) || 10)}
+                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: '#0f172a', border: '1px solid #334155', color: '#fff', fontSize: '12px' }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Multi-Select SKU Section */}
