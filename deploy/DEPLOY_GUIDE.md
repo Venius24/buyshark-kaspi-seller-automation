@@ -171,3 +171,4 @@ sudo systemctl restart kaspi-saas
 # Ручной деплой
 cd /opt/kaspi-saas && bash deploy.sh
 ```
+
