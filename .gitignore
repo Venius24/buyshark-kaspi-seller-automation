@@ -1,8 +1,35 @@
-EXAMPLE.md
+# ── Secrets & local config ──
 .env
 .env.local
+state.json
+
+# ── Python ──
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+
+# ── Frontend build ──
+frontend/node_modules/
+frontend/dist/
+
+# ── Database ──
+*.db
+*.db-shm
+*.db-wal
+
+# ── Runtime states (generated, not source) ──
+states/processed_packaging_orders.json
+states/session.json
+
+# ── Scratch & legacy ──
+scratch/
+EXAMPLE.md
 SUCCES_FETCH_EXAMPLE.py
 REAL_IMPORTANT/упаковка_fetch/fetch_packaging.py
-REAL_IMPORTANT/упаковка_fetch/fetch_packaging.py
 
-state.json
+# ── PyInstaller / dist packages ──
+ZIPS/

@@ -1,0 +1,35 @@
+name: CI / CD — Kaspi SaaS
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  # ─────────────────────────────────────────────
+  # JOB 1: Тесты при каждом push
+  # ─────────────────────────────────────────────
+  test:
+    name: 🧪 Pytest — Unit & Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt pytest httpx
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+  # ─────────────────────────────────────────────
+  # JOB 2: Деплой на VPS — только при push в main
+  # и только если тесты прошли
+  # ─────────────────────────────────────────────
