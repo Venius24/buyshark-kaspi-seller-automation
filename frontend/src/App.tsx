@@ -9,6 +9,9 @@ import { AiChatSentimentWidget } from './components/AiChatSentimentWidget';
 import { MasterStockGroups } from './components/MasterStockGroups';
 import { IntegrationsPublicApi } from './components/IntegrationsPublicApi';
 import { PrintBatcher } from './components/PrintBatcher';
+import { AuthModal } from './components/AuthModal';
+import { StoreHub } from './components/StoreHub';
+
 
 
 
@@ -67,8 +70,13 @@ interface Transfer {
 
 export default function App() {
   const [isLoaded, setIsLoaded] = useState(false);
-  const [view, setView] = useState<'login' | 'dashboard'>('login');
-  const [isAuthed, setIsAuthed] = useState(false);
+  const [isAuthed, setIsAuthed] = useState<boolean>(() => !!localStorage.getItem('access_token'));
+
+
+  const handleLogout = () => {
+    localStorage.removeItem('access_token');
+    setIsAuthed(false);
+  };
 
   const [products, setProducts] = useState<Product[]>([]);
   const [fetchingProducts, setFetchingProducts] = useState(false);
@@ -86,7 +94,8 @@ export default function App() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   // Tabs navigation, packaging and transfer states
-  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'dumping' | 'chatbot' | 'stock-groups' | 'public-api' | 'print-batcher' | 'packaging' | 'transfer' | 'logs' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'stores' | 'overview' | 'products' | 'dumping' | 'chatbot' | 'stock-groups' | 'public-api' | 'print-batcher' | 'packaging' | 'transfer' | 'logs' | 'settings'>('stores');
+
 
 
   
@@ -138,12 +147,6 @@ export default function App() {
     'Система автоматизации инициализирована.',
     'Ожидание подключения Kaspi API...',
   ]);
-
-  // Token-first auth
-  const [tokenInput, setTokenInput] = useState('');
-  const [loginStep, setLoginStep] = useState<'token' | 'loading' | 'success'>('token');
-  const [errorMsg, setErrorMsg] = useState('');
-  const [loadingMsg, setLoadingMsg] = useState('');
 
   const [phoneInput, setPhoneInput] = useState('+7');
   const [smsInput, setSmsInput] = useState('');
@@ -374,7 +377,6 @@ export default function App() {
         const data = await res.json();
         if (data.valid) {
           setIsAuthed(true);
-          setView('dashboard');
           addLog('Сессия REST API активна, токен подтвержден.');
           loadProducts(1, 'active', '', 10);
           // Проверяем куки MC с валидацией сразу при запуске
@@ -689,56 +691,6 @@ export default function App() {
     }
   };
 
-  // ── Auth handler ───────────────────────────────────────
-
-  const handleAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const token = tokenInput.trim();
-    if (!token) {
-      setErrorMsg('Токен не может быть пустым.');
-      return;
-    }
-
-    setErrorMsg('');
-    setLoginStep('loading');
-    setLoadingMsg('Верификация API токена...');
-    addLog('Проверка API токена...');
-
-    try {
-      const res = await fetch(`${API_URL}/api/auth`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
-      });
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        setLoginStep('success');
-        setIsAuthed(true);
-        addLog(data.verified ? 'Токен верифицирован через Kaspi API.' : `Токен сохранен (оффлайн-режим).`);
-      } else {
-        setLoginStep('token');
-        setErrorMsg(data.detail || 'Неверный токен API.');
-      }
-    } catch {
-      setLoginStep('token');
-      setErrorMsg('Ошибка связи с бэкендом.');
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await fetch(`${API_URL}/api/logout`, { method: 'POST' });
-    } catch { /* ignore */ }
-    setIsAuthed(false);
-    setView('login');
-    setLoginStep('token');
-    setTokenInput('');
-    setProducts([]);
-    setOrders([]);
-    setTransfers([]);
-    addLog('Сессия завершена.');
-  };
 
   // ── UI helpers ─────────────────────────────────────────
 
@@ -782,93 +734,11 @@ export default function App() {
     );
   }
 
-  // ── Token Login Screen ─────────────────────────────────
-  if (view === 'login') {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', padding: '20px' }}>
-        <div className="glass-card" style={{ maxWidth: '480px', width: '100%', padding: '40px', position: 'relative' }}>
-          
-          {/* Header */}
-          <div style={{ textAlign: 'center', marginBottom: '30px' }}>
-            <div style={{ 
-              width: '64px', height: '64px', 
-              background: 'linear-gradient(135deg, var(--primary), #e5394b)', 
-              borderRadius: '18px', display: 'inline-flex', 
-              justifyContent: 'center', alignItems: 'center', 
-              fontWeight: 700, fontSize: '28px', color: '#fff', 
-              boxShadow: '0 8px 16px var(--primary-glow)', marginBottom: '16px' 
-            }}>K</div>
-            <h1 style={{ fontSize: '24px', fontWeight: 700 }}>Kaspi Merchant API</h1>
-            <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginTop: '6px' }}>
-              {loginStep === 'token' && 'Введите ваш API-токен продавца для подключения'}
-              {loginStep === 'loading' && 'Пожалуйста, подождите'}
-              {loginStep === 'success' && 'Авторизация выполнена'}
-            </p>
-          </div>
-
-          {errorMsg && (
-            <div style={{ padding: '14px 16px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#fca5a5', borderRadius: '12px', marginBottom: '20px', fontSize: '14px' }}>
-              {errorMsg}
-            </div>
-          )}
-
-          {loginStep === 'token' && (
-            <form onSubmit={handleAuth}>
-              <div style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)', marginBottom: '8px' }}>API Токен (X-Auth-Token)</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="Вставьте ваш токен из кабинета Kaspi" 
-                  value={tokenInput}
-                  onChange={(e) => setTokenInput(e.target.value)}
-                  required
-                  autoFocus
-                  style={{ fontFamily: 'ui-monospace, Consolas, monospace', fontSize: '13px' }}
-                />
-                <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
-                  Токен можно найти в кабинете продавца Kaspi → Настройки → API
-                </p>
-              </div>
-              <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '16px' }}>
-                <span>Подключить по API</span>
-              </button>
-            </form>
-          )}
-
-          {loginStep === 'loading' && (
-            <div style={{ textAlign: 'center', padding: '40px 0' }}>
-              <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 20px auto' }} />
-              <p style={{ color: 'var(--text-muted)' }}>{loadingMsg}</p>
-            </div>
-          )}
-
-          {loginStep === 'success' && (
-            <div style={{ textAlign: 'center', padding: '20px 0' }}>
-              <div style={{ 
-                width: '80px', height: '80px', 
-                background: 'rgba(16, 185, 129, 0.1)', 
-                border: '2px solid var(--success)', 
-                borderRadius: '50%', display: 'inline-flex', 
-                justifyContent: 'center', alignItems: 'center', 
-                color: 'var(--success)', fontSize: '40px',
-                boxShadow: '0 0 20px var(--success-glow)',
-                margin: '0 auto 20px auto'
-              }}>✓</div>
-              <h2 style={{ fontSize: '22px', fontWeight: 600, marginBottom: '10px' }}>Успешный вход!</h2>
-              <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '24px' }}>
-                API токен подтверждён и сохранён.
-              </p>
-              <button className="btn btn-primary" style={{ width: '100%', padding: '16px' }} onClick={() => { setView('dashboard'); loadProducts(1, 'active', '', 10); }}>
-                Перейти в панель управления
-              </button>
-            </div>
-          )}
-
-        </div>
-      </div>
-    );
+  // ── Auth Modal Screen (Login / Register) ───────────────────
+  if (!isAuthed) {
+    return <AuthModal onSuccess={() => setIsAuthed(true)} />;
   }
+
 
   // ── Dashboard Screen ───────────────────────────────────
   // ── Dashboard Screen ───────────────────────────────────
@@ -888,6 +758,17 @@ export default function App() {
           <div className="sidebar-group">
             <div className="sidebar-group-title">Главное</div>
             
+            <button 
+              className={`sidebar-item ${activeTab === 'stores' ? 'active' : ''}`}
+              onClick={() => setActiveTab('stores')}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">🏪</span>
+                <span>Магазины Kaspi</span>
+              </div>
+              <span className="sidebar-pill" style={{ color: '#34d399' }}>Multi-Store</span>
+            </button>
+
             <button 
               className={`sidebar-item ${activeTab === 'overview' ? 'active' : ''}`}
               onClick={() => setActiveTab('overview')}
@@ -1068,6 +949,7 @@ export default function App() {
         <header className="content-header">
           <div className="content-title-area">
             <span className="content-title-icon">
+              {activeTab === 'stores' && '🏪'}
               {activeTab === 'overview' && '📊'}
               {activeTab === 'products' && '🏷️'}
               {activeTab === 'dumping' && '⚡'}
@@ -1082,6 +964,7 @@ export default function App() {
             </span>
             <div className="content-title-text">
               <h1>
+                {activeTab === 'stores' && 'Управление Магазинами Kaspi'}
                 {activeTab === 'overview' && 'Аналитический Обзор'}
                 {activeTab === 'products' && 'Управление Товарами'}
                 {activeTab === 'dumping' && 'Автоматический Демпинг'}
@@ -1095,6 +978,7 @@ export default function App() {
                 {activeTab === 'settings' && 'Статус Сессии & Настройки'}
               </h1>
               <p>
+                {activeTab === 'stores' && 'Управление магазинами Kaspi, безопасное AES-256 шифрование куков и модальное окно Onboarding Wizard'}
                 {activeTab === 'overview' && 'Ключевая аналитика доли BuyBox, сохранение маржи и поток активности'}
                 {activeTab === 'products' && 'Каталог товаров, остатки, цены и статус продажи на Kaspi'}
                 {activeTab === 'dumping' && 'Управление стратегиями демпинга, шагом и фильтрами конкурентов'}
@@ -1120,6 +1004,9 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        {/* 🏪 TAB: STORES */}
+        {activeTab === 'stores' && <StoreHub />}
 
         {/* 📊 TAB: OVERVIEW */}
         {activeTab === 'overview' && (

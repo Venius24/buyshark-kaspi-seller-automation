@@ -19,9 +19,13 @@ async def start_telegram_bot_polling():
         await notify_startup()
         logger.info("🤖 [Telegram Bot] Polling запущен...")
         try:
-            await dp.start_polling(bot)
+            await dp.start_polling(bot, handle_signals=False)
         except Exception as e:
-            logger.error(f"💥 [Telegram Bot] Ошибка polling: {e}")
+            err_msg = str(e)
+            if "Conflict" in err_msg or "TelegramConflictError" in err_msg:
+                logger.warning("⚠️ [Telegram Bot] Бот уже запущен в параллельном процессе. Polling пропущен.")
+            else:
+                logger.error(f"💥 [Telegram Bot] Ошибка polling: {e}")
 
 async def kaspi_chatbot_loop():
     """

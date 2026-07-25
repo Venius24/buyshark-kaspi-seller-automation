@@ -26,7 +26,11 @@ def get_products(
         try:
             with open(products_file, "r", encoding="utf-8") as f:
                 all_products = json.load(f)
-                all_products = _apply_overrides(all_products)
+                # Если кэш содержит тестовые фейковые товары SKU-001 — отбрасываем
+                if any(p.get("sku") in ["SKU-001", "SKU-002"] for p in all_products):
+                    all_products = []
+                else:
+                    all_products = _apply_overrides(all_products)
         except Exception:
             all_products = []
 

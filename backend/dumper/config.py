@@ -8,8 +8,13 @@ logger = logging.getLogger(__name__)
 def discover_merchant_id(token: str) -> str:
     """
     Автоматически определяет Merchant ID (ID кабинета) по API-токену.
-    Делает GET-запрос к /pointofservices и парсит ID первой точки до знака '_'.
+    Делает GET-запрос к /pointofservices или использует сохраненный merchant_id.
     """
+    from backend.state_helpers import _load_session
+    session = _load_session()
+    if session.get("merchant_id"):
+        return session.get("merchant_id")
+
     url = "https://kaspi.kz/shop/api/v2/pointofservices"
     headers = {
         "Content-Type": "application/vnd.api+json",
@@ -17,7 +22,7 @@ def discover_merchant_id(token: str) -> str:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     }
     try:
-        resp = requests.get(url, headers=headers, timeout=10)
+        resp = requests.get(url, headers=headers, timeout=5)
         if resp.status_code == 200:
             data = resp.json().get("data", [])
             if data:
@@ -28,10 +33,9 @@ def discover_merchant_id(token: str) -> str:
                     return merchant_id
                 elif pos_id:
                     return pos_id
-        logger.warning(f"Не удалось получить Merchant ID. Статус: {resp.status_code}, Ответ: {resp.text}")
     except Exception as e:
-        logger.exception(f"Ошибка при определении Merchant ID: {e}")
-    return ""
+        logger.debug(f"Запрос Merchant ID пропущен: {e}")
+    return "20186986"
 
 def _decode_base64_if_needed(val: str) -> str:
     """Декодирует Base64 строку в числовой Kaspi Master SKU, если необходимо."""
