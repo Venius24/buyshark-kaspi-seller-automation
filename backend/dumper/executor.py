@@ -19,6 +19,40 @@ class RateLimitExecutorWorker:
     Задача: Безопасное обновление цен через приватный 3-шаговый MC API, соблюдение задержек, регистрация оверрайдов.
     """
     @staticmethod
+    def _fetch_kaspi_offer_details(merchant_uid: str, cookies: dict, sku: str) -> dict:
+        """
+        Шаг BFF Details Fetch (GET /bff/offer-view/details?m={merchant_id}&s={sku}).
+        Возвращает dict с masterSku, title (model) и актуальной ценой по городам Kaspi.
+        """
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Origin": "https://kaspi.kz",
+            "Referer": "https://kaspi.kz/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "X-Auth-Version": "3"
+        }
+        url = f"https://mc.shop.kaspi.kz/bff/offer-view/details?m={merchant_uid}&s={sku}"
+        try:
+            r = requests.get(url, headers=headers, cookies=cookies, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                master_sku = data.get("masterSku") or ""
+                title = data.get("title") or data.get("masterName") or ""
+                cities = data.get("cities", [])
+                price = None
+                if cities and isinstance(cities, list) and len(cities) > 0:
+                    price = cities[0].get("price")
+                return {
+                    "master_sku": master_sku,
+                    "title": title,
+                    "price": price,
+                    "cities": cities
+                }
+        except Exception as e:
+            logger.debug(f"BFF offer details fetch error for SKU {sku}: {e}")
+        return {}
+
+    @staticmethod
     def _update_kaspi_price_sync(
         merchant_uid: str,
         cookies: dict,
@@ -31,7 +65,7 @@ class RateLimitExecutorWorker:
         city_id: str = "750000000"
     ) -> tuple:
         """
-        Синхронный запуск трехшагового пайплайна Kaspi MC.
+        Синхронный запуск полных шагов пайплайна Kaspi MC для изменения остатка и цены.
         Возвращает (success: bool, tx_id_or_error_msg_or_code: str)
         """
         headers = {
@@ -42,6 +76,19 @@ class RateLimitExecutorWorker:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "X-Auth-Version": "3"
         }
+
+        # Если цена не передана или равна дефолтному 1000, запрашиваем реальные детали карточки через BFF
+        if not new_price or new_price <= 0 or new_price == 1000:
+            details = RateLimitExecutorWorker._fetch_kaspi_offer_details(merchant_uid, cookies, sku)
+            if details.get("price"):
+                new_price = int(details["price"])
+            if details.get("master_sku") and not master_sku:
+                master_sku = details["master_sku"]
+            if details.get("title") and not model_name:
+                model_name = details["title"]
+
+        if not new_price or new_price <= 0:
+            new_price = 1000
 
         # Шаг 0: Pre-edit Validation (ON_SALE__PRICE_EDIT)
         edit_val_url = "https://mc.shop.kaspi.kz/offer-validation-api/merchant/offer/validate/v2"
