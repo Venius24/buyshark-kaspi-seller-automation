@@ -5,7 +5,7 @@
 # ================================================================
 set -e  # Останавливаемся при любой ошибке
 
-APP_DIR="/opt/kaspi-saas"
+APP_DIR="/root/buyshark"
 SERVICE_NAME="kaspi-saas"
 VENV_DIR="$APP_DIR/venv"
 FRONTEND_DIR="$APP_DIR/frontend"

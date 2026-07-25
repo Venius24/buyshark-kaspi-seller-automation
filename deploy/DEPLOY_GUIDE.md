@@ -24,10 +24,10 @@ source ~/.bashrc
 
 ### 2. Клонируем репозиторий
 ```bash
-sudo mkdir -p /opt/kaspi-saas
-sudo chown $USER:$USER /opt/kaspi-saas
-git clone https://github.com/Venius24/sbx_plwrght.git /opt/kaspi-saas
-cd /opt/kaspi-saas
+sudo mkdir -p /root/buyshark
+sudo chown $USER:$USER /root/buyshark
+git clone https://github.com/Venius24/sbx_plwrght.git /root/buyshark
+cd /root/buyshark
 git checkout main
 ```
 
@@ -40,16 +40,16 @@ python3.13 -m venv venv
 
 ### 4. Создаём файл `.env` с секретами
 ```bash
-cat > /opt/kaspi-saas/.env << 'EOF'
+cat > /root/buyshark/.env << 'EOF'
 API_TOKEN='ВАШ_KASPI_TOKEN'
 TG_BOT_TOKEN='ВАШ_TELEGRAM_BOT_TOKEN'
 EOF
-chmod 600 /opt/kaspi-saas/.env
+chmod 600 /root/buyshark/.env
 ```
 
 ### 5. Собираем фронтенд
 ```bash
-cd /opt/kaspi-saas/frontend
+cd /root/buyshark/frontend
 bun install
 bun run build
 sudo mkdir -p /var/www/kaspi-saas
@@ -58,7 +58,7 @@ sudo cp -r dist/* /var/www/kaspi-saas/
 
 ### 6. Устанавливаем systemd сервис
 ```bash
-sudo cp /opt/kaspi-saas/deploy/kaspi-saas.service /etc/systemd/system/
+sudo cp /root/buyshark/deploy/kaspi-saas.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now kaspi-saas
 sudo systemctl status kaspi-saas
@@ -66,7 +66,7 @@ sudo systemctl status kaspi-saas
 
 ### 7. Настраиваем nginx
 ```bash
-sudo cp /opt/kaspi-saas/deploy/nginx.conf /etc/nginx/sites-available/kaspi-saas
+sudo cp /root/buyshark/deploy/nginx.conf /etc/nginx/sites-available/kaspi-saas
 sudo ln -sf /etc/nginx/sites-available/kaspi-saas /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
@@ -169,6 +169,6 @@ sudo journalctl -u kaspi-saas -f
 sudo systemctl restart kaspi-saas
 
 # Ручной деплой
-cd /opt/kaspi-saas && bash deploy.sh
+cd /root/buyshark && bash deploy.sh
 ```
 
