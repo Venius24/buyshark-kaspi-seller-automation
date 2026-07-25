@@ -12,8 +12,14 @@ def discover_merchant_id(token: str) -> str:
     """
     from backend.state_helpers import _load_session
     session = _load_session()
-    if session.get("merchant_id"):
-        return session.get("merchant_id")
+    raw_m_id = str(session.get("merchant_id") or "").strip()
+    if raw_m_id:
+        if raw_m_id.isdigit():
+            return raw_m_id
+        # Если строка содержит подчёркивание или префикс (например "m_20186986" или "20186986_001")
+        parts = [p for p in raw_m_id.replace("_", " ").replace("-", " ").split() if p.isdigit()]
+        if parts:
+            return parts[0]
 
     url = "https://kaspi.kz/shop/api/v2/pointofservices"
     headers = {
@@ -29,9 +35,10 @@ def discover_merchant_id(token: str) -> str:
                 pos_id = data[0].get("id", "")
                 if "_" in pos_id:
                     merchant_id = pos_id.split("_")[0]
-                    logger.info(f"🎯 Успешно определен Merchant ID: {merchant_id}")
-                    return merchant_id
-                elif pos_id:
+                    if merchant_id.isdigit():
+                        logger.info(f"🎯 Успешно определен Merchant ID: {merchant_id}")
+                        return merchant_id
+                elif pos_id and pos_id.isdigit():
                     return pos_id
     except Exception as e:
         logger.debug(f"Запрос Merchant ID пропущен: {e}")

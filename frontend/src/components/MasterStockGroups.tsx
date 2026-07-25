@@ -14,8 +14,11 @@ import {
   X,
   ShieldAlert,
   Boxes,
-  Zap
+  Zap,
+  FileText
 } from 'lucide-react';
+import { useWebSocket } from '../hooks/useWebSocket';
+import { LiveTerminalStream } from './LiveTerminalStream';
 
 interface MasterStockGroup {
   group_id: string;
@@ -24,12 +27,13 @@ interface MasterStockGroup {
   linked_skus: string[];
   external_code?: string;
   is_active: boolean;
-  status: 'synced' | 'updating' | 'error';
+  status: 'synced' | 'updating' | 'warning' | 'error';
   created_at: string;
   updated_at: string;
 
   last_synced_at?: string;
   last_sync_log?: string;
+  sync_logs?: string[];
 }
 
 
@@ -67,6 +71,20 @@ export const MasterStockGroups: React.FC = () => {
   // Inline Stock Edit State
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
   const [inlineStockVal, setInlineStockVal] = useState<number>(0);
+
+  const { isConnected: isWsConnected, lastEvent: wsEvent } = useWebSocket('ws://localhost:5000/api/ws/telemetry');
+  const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
+  const [viewLogGroup, setViewLogGroup] = useState<MasterStockGroup | null>(null);
+
+  useEffect(() => {
+    if (wsEvent) {
+      if (wsEvent.type === 'log' && typeof wsEvent.data === 'string') {
+        setTerminalLogs(prev => [...prev.slice(-100), wsEvent.data]);
+      } else if (wsEvent.type === 'stock_group_updated') {
+        fetchGroups();
+      }
+    }
+  }, [wsEvent]);
 
   // Toast / Alert State
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
@@ -396,6 +414,9 @@ export const MasterStockGroups: React.FC = () => {
         </div>
       </div>
 
+      {/* Live Telemetry Stream Terminal */}
+      <LiveTerminalStream logs={terminalLogs} isConnected={isWsConnected} />
+
       {/* Summary KPI Cards Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
         
@@ -688,19 +709,24 @@ export const MasterStockGroups: React.FC = () => {
                       {/* Sync Status Badge */}
                       <td style={{ padding: '18px 24px' }}>
                         {group.status === 'updating' ? (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#fbbf24', fontSize: '13px', fontWeight: 600 }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)', color: '#60a5fa', fontSize: '13px', fontWeight: 600 }}>
                             <RefreshCw size={14} className="spin" />
-                            <span>В процессе обновления...</span>
+                            <span>Обновление...</span>
                           </div>
                         ) : group.status === 'synced' ? (
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#34d399', fontSize: '13px', fontWeight: 600 }}>
                             <CheckCircle2 size={15} />
                             <span>Синхронизировано</span>
                           </div>
+                        ) : group.status === 'warning' ? (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#fbbf24', fontSize: '13px', fontWeight: 600 }}>
+                            <AlertTriangle size={15} />
+                            <span>Частично</span>
+                          </div>
                         ) : (
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', fontSize: '13px', fontWeight: 600 }}>
-                            <AlertTriangle size={15} />
-                            <span>Ошибка авторизации</span>
+                            <ShieldAlert size={15} />
+                            <span>Ошибка sync</span>
                           </div>
                         )}
                       </td>
@@ -721,6 +747,23 @@ export const MasterStockGroups: React.FC = () => {
                       {/* Actions */}
                       <td style={{ padding: '18px 24px', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+                          <button
+                            onClick={() => setViewLogGroup(group)}
+                            title="Просмотреть пошаговый лог синхронизации"
+                            style={{
+                              padding: '8px',
+                              borderRadius: '8px',
+                              background: '#1e293b',
+                              border: '1px solid #334155',
+                              color: '#38bdf8',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center'
+                            }}
+                          >
+                            <FileText size={16} />
+                          </button>
+
                           <button
                             onClick={() => handleManualSync(group.group_id)}
                             disabled={syncingGroupId === group.group_id}
@@ -1070,6 +1113,101 @@ export const MasterStockGroups: React.FC = () => {
 
             </form>
 
+          </div>
+        </div>
+      )}
+
+      {/* Detailed Log Modal */}
+      {viewLogGroup && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.75)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backdropFilter: 'blur(8px)',
+          padding: '16px'
+        }}>
+          <div style={{
+            background: '#0f172a',
+            border: '1px solid #334155',
+            borderRadius: '16px',
+            padding: '24px',
+            maxWidth: '680px',
+            width: '100%',
+            color: '#f8fafc',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.5)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #1e293b', paddingBottom: '12px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <FileText size={20} color="#38bdf8" />
+                  <span>Пошаговый лог синхронизации</span>
+                </h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#94a3b8' }}>
+                  Группа: <strong style={{ color: '#f8fafc' }}>{viewLogGroup.group_name}</strong> (ID: <code>{viewLogGroup.group_id}</code>)
+                </p>
+              </div>
+              <button
+                onClick={() => setViewLogGroup(null)}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '20px', cursor: 'pointer', padding: '4px' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '12px', fontSize: '13px', color: '#94a3b8', display: 'flex', justifyContent: 'space-between' }}>
+              <span>Время запуска: <strong>{viewLogGroup.last_synced_at || 'Еще не синхронизировалась'}</strong></span>
+              <span>Итог: <strong style={{ color: viewLogGroup.status === 'synced' ? '#34d399' : '#f87171' }}>{viewLogGroup.last_sync_log || viewLogGroup.status}</strong></span>
+            </div>
+
+            <div style={{
+              height: '320px',
+              overflowY: 'auto',
+              fontFamily: 'Consolas, Monaco, "Andale Mono", monospace',
+              fontSize: '12px',
+              background: '#020617',
+              padding: '14px',
+              borderRadius: '10px',
+              border: '1px solid #1e293b',
+              lineHeight: 1.6
+            }}>
+              {viewLogGroup.sync_logs && viewLogGroup.sync_logs.length > 0 ? (
+                viewLogGroup.sync_logs.map((line, i) => (
+                  <div key={i} style={{
+                    color: line.includes('❌') ? '#f87171' : line.includes('⚠️') ? '#fbbf24' : '#34d399',
+                    marginBottom: '6px',
+                    wordBreak: 'break-word'
+                  }}>
+                    {line}
+                  </div>
+                ))
+              ) : (
+                <div style={{ color: '#94a3b8', fontStyle: 'italic', padding: '12px 0' }}>
+                  {viewLogGroup.last_sync_log || 'Детальный лог пока пуст.'}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+              <button
+                onClick={() => setViewLogGroup(null)}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: '8px',
+                  background: '#334155',
+                  border: 'none',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '13px'
+                }}
+              >
+                Закрыть
+              </button>
+            </div>
           </div>
         </div>
       )}

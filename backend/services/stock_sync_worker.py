@@ -117,8 +117,9 @@ async def execute_broadcast_sync(group_id: str, token: str):
     logs = []
 
     for idx, sku in enumerate(linked_skus):
+        t_now = datetime.datetime.now().strftime("%H:%M:%S")
         # Находим товар в ассортименте
-        target_p = next((p for p in all_products if p.get("sku") == sku or p.get("merchantSku") == sku), None)
+        target_p = next((p for p in all_products if p.get("sku") == sku or p.get("merchantSku") == sku or p.get("kaspiSku") == sku), None)
         if not target_p:
             target_p = {"sku": sku, "merchantSku": sku, "name": f"Товар {sku}", "price_num": 1000}
 
@@ -150,7 +151,6 @@ async def execute_broadcast_sync(group_id: str, token: str):
 
         if has_cookies:
             # Запуск 3-шагового частного API Kaspi
-            # Передаем stock=shared_stock
             success, val = await asyncio.to_thread(
                 RateLimitExecutorWorker._update_kaspi_price_sync,
                 merchant_uid=merchant_id,
@@ -165,13 +165,19 @@ async def execute_broadcast_sync(group_id: str, token: str):
             )
             if success:
                 success_count += 1
-                logs.append(f"✓ SKU {sku}: остаток {shared_stock} отправлен в Kaspi MC (Tx: {val})")
+                msg = f"[{t_now}] ✓ Группа '{group_name}' -> SKU {sku}: остаток {shared_stock} отправлен в Kaspi MC (Tx: {val})"
+                logs.append(msg)
+                await broadcast_ws_event("log", msg)
             else:
-                success_count += 1
-                logs.append(f"✓ SKU {sku}: остаток {shared_stock} обновлен в фиде (MC: {val})")
+                fail_count += 1
+                msg = f"[{t_now}] ❌ Группа '{group_name}' -> SKU {sku}: ошибка Kaspi MC: {val}"
+                logs.append(msg)
+                await broadcast_ws_event("log", msg)
         else:
-            success_count += 1
-            logs.append(f"✓ SKU {sku}: остаток {shared_stock} обновлен в локальном фиде")
+            fail_count += 1
+            msg = f"[{t_now}] ⚠️ Группа '{group_name}' -> SKU {sku}: отсутствуют куки Kaspi MC (требуется SMS-авторизация)"
+            logs.append(msg)
+            await broadcast_ws_event("log", msg)
 
         # Jitter пауза 1.2 – 2.0 секунды перед следующим SKU
         if idx < len(linked_skus) - 1:
@@ -194,13 +200,14 @@ async def execute_broadcast_sync(group_id: str, token: str):
             if fail_count == 0:
                 g["status"] = "synced"
             elif success_count > 0:
-                g["status"] = "synced"
+                g["status"] = "warning"
             else:
                 g["status"] = "error"
 
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             g["last_synced_at"] = now_str
             g["last_sync_log"] = f"Успешно: {success_count}/{len(linked_skus)}. Ошибок: {fail_count}."
+            g["sync_logs"] = logs
             _save_master_stock_groups(groups)
             group_to_broadcast = g
         else:
