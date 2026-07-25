@@ -72,6 +72,45 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
+> [!IMPORTANT]
+> Перед настройкой nginx замените `yourdomain.com` в `deploy/nginx.conf` на ваш реальный домен!
+
+---
+
+## 🌐 Домен + SSL (HTTPS бесплатно через Let's Encrypt)
+
+### Шаг 1: DNS запись
+В панели вашего DNS-регистратора добавьте A-запись:
+```
+yourdomain.com     →  <IP вашего VPS>
+www.yourdomain.com →  <IP вашего VPS>
+```
+Подождите ~5 минут для распространения DNS.
+
+### Шаг 2: Установить Certbot
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+```
+
+### Шаг 3: Получить SSL-сертификат (один раз)
+```bash
+# Сначала задеплойте nginx БЕЗ ssl (http only) и проверьте что домен открывается
+# Затем запустите certbot — он сам добавит SSL в nginx.conf
+sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+```
+Certbot спросит email (для уведомлений об истечении) и автоматически:
+- Получит сертификат от Let's Encrypt
+- Подправит `/etc/nginx/sites-available/kaspi-saas`
+- Настроит автоматическое обновление сертификата раз в 90 дней
+
+### Шаг 4: Проверить автообновление
+```bash
+sudo certbot renew --dry-run
+```
+
+### Шаг 5: Обновить `nginx.conf` в репозитории
+Замените `yourdomain.com` в [`deploy/nginx.conf`](file:///f:/Dev/sbx/deploy/nginx.conf) на свой реальный домен и закоммитьте.
+
 ---
 
 ## 🔑 Настройка GitHub Actions Secrets
