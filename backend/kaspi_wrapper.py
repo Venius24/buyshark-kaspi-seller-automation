@@ -10,6 +10,7 @@ import base64
 import datetime
 import requests
 from typing import Dict, Any, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class KaspiAPI:
@@ -237,11 +238,11 @@ class KaspiAPI:
         state: str = "KASPI_DELIVERY",
         status: str = "ACCEPTED_BY_MERCHANT",
         limit: int = 500,
-        assembled: Optional[bool] = False,  # False = Упаковка (На сборке)
+        assembled: Optional[bool] = False,  # False = На сборке (Упаковка), True = Ожидает курьера, None = Все
     ) -> list:
         """
-        Скачивает заказы со всеми страницами (пагинацией) и локально фильтрует по собранности,
-        так как Kaspi игнорирует query-параметр assembled.
+        Скачивает заказы Kaspi API v2 с включенным параметром `include[orders]=entries` по стандарту JSON:API.
+        Индексирует включенный массив `included` по entry_id для мгновенной сборки состава заказа за O(N).
         """
         ge, le = KaspiAPI._date_range(13)
         page = 0
@@ -251,6 +252,7 @@ class KaspiAPI:
             params = {
                 "page[number]": page,
                 "page[size]": 100,
+                "include[orders]": "entries",
                 "filter[orders][creationDate][$ge]": ge,
                 "filter[orders][creationDate][$le]": le,
                 "filter[orders][state]": state,
@@ -261,29 +263,38 @@ class KaspiAPI:
             if resp.status_code != 200:
                 break
                 
-            data = resp.json()
-            orders_data = data.get("data", [])
+            res_json = resp.json()
+            orders_data = res_json.get("data", [])
+            included_data = res_json.get("included", [])
+            
             if not orders_data:
                 break
 
-            for item in orders_data:
-                attr = item.get("attributes", {})
-                internal_id = item.get("id")
+            # 1. СТРОИМ ИНДЕКС ХЭШ-КАРТЫ ДЛЯ INCLUDED ПО UNIQUE ID (entry_id)
+            included_entries = {}
+            for item in included_data:
+                if item.get("type") == "orderentries":
+                    entry_id = item.get("id")
+                    included_entries[entry_id] = item
+
+            # 2. ПРОХОДИМ ПО ЗАКАЗАМ И СОБИРАЕМ СОСТАВ УПАКОВКИ
+            for order in orders_data:
+                attr = order.get("attributes", {})
+                internal_id = order.get("id")
                 code = attr.get("code")
                 if not internal_id or not code:
                     continue
 
-                kaspi_deliv = attr.get("kaspiDelivery") or {}
                 is_assembled = attr.get("assembled", False)
-                is_transmitted = (
-                    kaspi_deliv.get("courierTransmitted") is True
-                    or kaspi_deliv.get("courierTransmissionDate") is not None
-                )
+                kaspi_deliv = attr.get("kaspiDelivery") or {}
+                transmission_date = kaspi_deliv.get("courierTransmissionDate")
 
-                # Локальный фильтр по assembled и передаче (Kaspi не фильтрует это на бэке)
-                if assembled is False and (is_assembled or is_transmitted):
+                # Раскладка по вкладкам:
+                # assembled is False: 📦 На сборке (Упаковка) -> not is_assembled
+                # assembled is True: 🏷️ Ожидает курьера (Передача) -> is_assembled and transmission_date is None
+                if assembled is False and is_assembled:
                     continue
-                elif assembled is True and not is_assembled:
+                elif assembled is True and (not is_assembled or transmission_date is not None):
                     continue
 
                 delivery_type = KaspiAPI._parse_delivery_type(attr, kaspi_deliv)
@@ -294,46 +305,30 @@ class KaspiAPI:
                     if cd else "N/A"
                 )
 
-                # Fetch entries
+                # Ссылки на товары из relationships
+                entry_refs = order.get("relationships", {}).get("entries", {}).get("data", [])
                 entries_enriched = []
-                try:
-                    entries_data = KaspiAPI.get_order_entries(token, internal_id)
-                    for entry in entries_data:
-                        entry_id = entry.get("id")
-                        e_attr = entry.get("attributes", {})
+
+                for ref in entry_refs:
+                    entry_id = ref.get("id")
+                    entry_data = included_entries.get(entry_id)
+                    if entry_data:
+                        e_attr = entry_data.get("attributes", {})
                         offer = e_attr.get("offer", {})
-                        merchant_sku = offer.get("code", "")
-
-                        # Вытягиваем и декодируем настоящий Kaspi Master SKU (только цифры)
-                        kaspi_sku = ""
-                        try:
-                            master_prod = KaspiAPI.get_entry_product(token, entry_id)
-                            attr_code = master_prod.get("attributes", {}).get("code")
-                            raw_id = master_prod.get("id", "")
-                            kaspi_sku = KaspiAPI._decode_base64_if_needed(attr_code or raw_id)
-                        except Exception:
-                            pass
-
-                        # Ссылка валидна только если kaspi_sku числовой
-                        product_url = (
-                            f"https://kaspi.kz/shop/p/-{kaspi_sku}/?c=750000000#offers"
-                            if kaspi_sku and kaspi_sku.isdigit()
-                            else ""
-                        )
+                        merchant_sku = str(offer.get("code", "")).strip()
+                        product_name = offer.get("name") or offer.get("title") or "Товар без названия"
 
                         entries_enriched.append({
                             "entryId": entry_id,
-                            "productName": offer.get("name", "Товар"),
-                            "sku": kaspi_sku or merchant_sku,  # Обратная совместимость с фронтом
-                            "merchantSku": merchant_sku,        # Внутренний артикул продавца
-                            "kaspiSku": kaspi_sku,              # Мастер SKU Kaspi (числовой)
-                            "productUrl": product_url,
+                            "productName": product_name,
+                            "sku": merchant_sku,
+                            "merchantSku": merchant_sku,
+                            "kaspiSku": merchant_sku,
+                            "productUrl": f"https://kaspi.kz/shop/p/-{merchant_sku}/?c=750000000#offers" if merchant_sku.isdigit() else "",
                             "quantity": e_attr.get("quantity", 1),
                             "basePrice": e_attr.get("basePrice", 0),
                             "totalPrice": e_attr.get("totalPrice") or e_attr.get("entryTotalPrice", 0),
                         })
-                except Exception as e:
-                    print(f"[KaspiAPI] Failed to fetch entries for order {code}: {e}")
 
                 first_product = entries_enriched[0]["productName"] if entries_enriched else "Товар"
                 total_qty = sum(e["quantity"] for e in entries_enriched) if entries_enriched else 1
@@ -354,13 +349,13 @@ class KaspiAPI:
                     "state": attr.get("state", ""),
                     "assembled": is_assembled,
                     "isExpress": (delivery_type == "Express"),
-                    "isTransmitted": is_transmitted,
+                    "isTransmitted": (transmission_date is not None),
                     "waybillNumber": kaspi_deliv.get("waybillNumber"),
                     "waybillUrl": kaspi_deliv.get("waybill"),
-                    "courierTransmissionDate": kaspi_deliv.get("courierTransmissionDate"),
+                    "courierTransmissionDate": transmission_date,
                     "entries": entries_enriched,
                     "customer": {
-                        "name": customer.get("name") or recipient.get("name", ""),
+                        "name": customer.get("name") or customer.get("firstName") or recipient.get("name", "Не указан"),
                         "phone": customer.get("cellPhone", ""),
                     },
                     "address": delivery_addr.get("formattedAddress") or delivery_addr.get("town", ""),
@@ -374,6 +369,166 @@ class KaspiAPI:
             page += 1
 
         return results
+
+    # ── 5.1. packaging orders by SKU prefix ─────────────────────
+
+    @staticmethod
+    def get_packaging_orders_by_sku_prefix(token: str, sku_prefix: str) -> dict:
+        """
+        Запрашивает все заказы со статусом 'Упаковка' (KASPI_DELIVERY/ACCEPTED_BY_MERCHANT),
+        соответствующие артикулу продавца sku_prefix и всем его вариантам с тире (например T219-0005, T219-0005-1, T219-0005-2...).
+        """
+        prefix_pattern = str(sku_prefix).strip().lower()
+
+        all_packaging = KaspiAPI.get_orders_with_products(
+            token=token,
+            state="KASPI_DELIVERY",
+            status="ACCEPTED_BY_MERCHANT",
+            limit=1000,
+            assembled=False
+        )
+
+        matched_orders = []
+        total_items_count = 0
+
+        for order in all_packaging:
+            entries = order.get("entries", [])
+            order_matched = False
+            for entry in entries:
+                m_sku = str(entry.get("merchantSku", "")).strip().lower()
+                k_sku = str(entry.get("kaspiSku", "")).strip().lower()
+                title = str(entry.get("productName", "")).strip().lower()
+
+                # Сопоставление по префиксу с тире (например T219-0005, T219-0005-1...)
+                is_match = (
+                    m_sku.startswith(prefix_pattern)
+                    or k_sku.startswith(prefix_pattern)
+                    or prefix_pattern in m_sku
+                    or prefix_pattern in k_sku
+                    or prefix_pattern in title
+                )
+
+                if is_match:
+                    qty = entry.get("quantity", 1)
+                    total_items_count += qty
+                    order_matched = True
+
+            if order_matched:
+                matched_orders.append(order)
+
+        return {
+            "success": True,
+            "prefix": sku_prefix,
+            "count": len(matched_orders),
+            "total_quantity": total_items_count,
+            "orders": matched_orders
+        }
+
+    # ── 5.2. full 3-tab layout packaging parsing ───────────────
+
+    @staticmethod
+    def get_all_packaging_tabs(token: str) -> dict:
+        """
+        Скачивает заказы и раскладывает их по 3 стандартным вкладкам Kaspi:
+          1. cargo_assembly (📦 На сборке / Упаковка): not is_assembled
+          2. wait_for_courier (🏷️ Ожидает курьера / Передача): is_assembled and transmission_date is None
+          3. transmitted (🚚 Переданы на доставку / Архив): is_assembled and transmission_date is not None
+        """
+        ge, le = KaspiAPI._date_range(13)
+        page = 0
+        cargo_assembly = []
+        wait_for_courier = []
+        transmitted = []
+
+        while True:
+            params = {
+                "page[size]": 100,
+                "page[number]": page,
+                "include[orders]": "entries",
+                "filter[orders][state]": "KASPI_DELIVERY",
+                "filter[orders][status]": "ACCEPTED_BY_MERCHANT",
+                "filter[orders][creationDate][$ge]": ge,
+            }
+
+            resp = KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
+            if resp.status_code != 200:
+                break
+
+            res_json = resp.json()
+            data = res_json.get("data", [])
+            included = res_json.get("included", [])
+
+            if not data:
+                break
+
+            included_entries = {}
+            for item in included:
+                if item.get("type") == "orderentries":
+                    entry_id = item.get("id")
+                    included_entries[entry_id] = item
+
+            for order in data:
+                order_id = order.get("id")
+                attr = order.get("attributes", {})
+                code = attr.get("code")
+                price = attr.get("totalPrice")
+                is_assembled = attr.get("assembled", False)
+
+                customer_node = attr.get("customer") or {}
+                customer_name = customer_node.get("firstName") or customer_node.get("name", "Не указан")
+
+                kd = attr.get("kaspiDelivery") or {}
+                transmission_date = kd.get("courierTransmissionDate")
+
+                entry_refs = order.get("relationships", {}).get("entries", {}).get("data", [])
+
+                order_items = []
+                for ref in entry_refs:
+                    entry_id = ref.get("id")
+                    entry_data = included_entries.get(entry_id)
+                    if entry_data:
+                        e_attrs = entry_data.get("attributes", {})
+                        offer = e_attrs.get("offer", {})
+                        title = offer.get("name") or offer.get("title") or "Товар без названия"
+                        order_items.append({
+                            "title": title,
+                            "merchant_sku": offer.get("code"),
+                            "quantity": e_attrs.get("quantity", 1),
+                            "base_price": e_attrs.get("basePrice")
+                        })
+
+                order_payload = {
+                    "id": order_id,
+                    "code": code,
+                    "price": price,
+                    "customer": customer_name,
+                    "items": order_items,
+                    "assembled": is_assembled,
+                    "waybill": kd.get("waybill")
+                }
+
+                if not is_assembled:
+                    cargo_assembly.append(order_payload)
+                elif is_assembled and transmission_date is None:
+                    wait_for_courier.append(order_payload)
+                elif is_assembled and transmission_date is not None:
+                    transmitted.append(order_payload)
+
+            if len(data) < 100:
+                break
+            page += 1
+
+        return {
+            "success": True,
+            "cargo_assembly": cargo_assembly,
+            "wait_for_courier": wait_for_courier,
+            "transmitted": transmitted,
+            "counts": {
+                "cargo_assembly": len(cargo_assembly),
+                "wait_for_courier": len(wait_for_courier),
+                "transmitted": len(transmitted)
+            }
+        }
 
     # ── 6. update order status ───────────────────────────────
 

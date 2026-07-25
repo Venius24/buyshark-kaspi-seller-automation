@@ -7,6 +7,24 @@ from backend.state_helpers import _require_token
 
 router = APIRouter(prefix="/api", tags=["orders"])
 
+@router.get("/orders/packaging/tabs")
+def get_packaging_tabs():
+    """Разбор заказов по 3 вкладкам: На сборке, Ожидает курьера, Переданы на доставку (JSON:API benchmark)."""
+    token = _require_token()
+    try:
+        return KaspiAPI.get_all_packaging_tabs(token)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/orders/packaging/by-prefix")
+def get_packaging_orders_by_prefix(prefix: str = Query("T219-0005")):
+    """Получить заказы на сборке/в упаковке по префиксу артикула товара (например T219-0005, T219-0005-1,2...)."""
+    token = _require_token()
+    try:
+        return KaspiAPI.get_packaging_orders_by_sku_prefix(token, sku_prefix=prefix)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.get("/orders")
 def get_orders(
     state: str = Query("NEW"),
