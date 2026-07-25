@@ -43,6 +43,20 @@ class RateLimitExecutorWorker:
             "X-Auth-Version": "3"
         }
 
+        # Шаг 0: Pre-edit Validation (ON_SALE__PRICE_EDIT)
+        edit_val_url = "https://mc.shop.kaspi.kz/offer-validation-api/merchant/offer/validate/v2"
+        edit_val_payload = {
+            "merchantUid": str(merchant_uid),
+            "action": "ON_SALE__PRICE_EDIT",
+            "offers": [{"masterSku": str(master_sku)}]
+        }
+        try:
+            r0 = requests.post(edit_val_url, headers=headers, cookies=cookies, json=edit_val_payload, timeout=10)
+            if r0.status_code in [403, 429]:
+                return False, f"{r0.status_code}_BLOCKED"
+        except Exception as e:
+            logger.debug(f"Инициация ON_SALE__PRICE_EDIT пропущена: {e}")
+
         # Шаг 1: Discount Check
         discount_url = "https://mc.shop.kaspi.kz/price/trends/api/v1/mc/discount"
         discount_payload = {
