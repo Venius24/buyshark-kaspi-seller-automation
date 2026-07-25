@@ -1045,6 +1045,8 @@ export const MasterStockGroups: React.FC = () => {
                     </span>
                   </label>
                 </div>
+              </div>
+
               {/* Group Dumping Config Section */}
               <div style={{ background: '#020617', padding: '16px', borderRadius: '12px', border: '1px solid #1e293b' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
