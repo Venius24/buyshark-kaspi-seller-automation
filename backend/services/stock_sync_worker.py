@@ -116,12 +116,18 @@ async def execute_broadcast_sync(group_id: str, token: str):
     fail_count = 0
     logs = []
 
+    processed_physical_skus = set()
     for idx, sku in enumerate(linked_skus):
         t_now = datetime.datetime.now().strftime("%H:%M:%S")
         # Находим товар в ассортименте
         target_p = next((p for p in all_products if p.get("sku") == sku or p.get("merchantSku") == sku or p.get("kaspiSku") == sku), None)
         if not target_p:
             target_p = {"sku": sku, "merchantSku": sku, "name": f"Товар {sku}", "price_num": 1000}
+
+        physical_key = target_p.get("merchantSku") or target_p.get("sku") or sku
+        if physical_key in processed_physical_skus:
+            continue
+        processed_physical_skus.add(physical_key)
 
         raw_price_num = target_p.get("price_num")
         if raw_price_num is not None and isinstance(raw_price_num, (int, float)) and raw_price_num > 0:
@@ -144,7 +150,7 @@ async def execute_broadcast_sync(group_id: str, token: str):
 
         # Обновляем в файле products.json
         for p in all_products:
-            if p.get("sku") == sku:
+            if p.get("sku") == sku or p.get("merchantSku") == sku or p.get("kaspiSku") == sku:
                 p["stock"] = shared_stock
                 p["status"] = status_text
                 break
@@ -192,11 +198,13 @@ async def execute_broadcast_sync(group_id: str, token: str):
         except Exception:
             pass
 
-    # Обновляем состояние группы
+    # Итоговое обновление статуса группы
     async with stock_lock:
         groups = _load_master_stock_groups()
         if group_id in groups:
             g = groups[group_id]
+            g["last_synced_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            g["last_sync_log"] = f"Успешно: {success_count}/{len(linked_skus)}. Ошибок: {fail_count}."
             if fail_count == 0:
                 g["status"] = "synced"
             elif success_count > 0:
@@ -204,17 +212,9 @@ async def execute_broadcast_sync(group_id: str, token: str):
             else:
                 g["status"] = "error"
 
-            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            g["last_synced_at"] = now_str
-            g["last_sync_log"] = f"Успешно: {success_count}/{len(linked_skus)}. Ошибок: {fail_count}."
             g["sync_logs"] = logs
             _save_master_stock_groups(groups)
-            group_to_broadcast = g
-        else:
-            group_to_broadcast = None
-
-    if group_to_broadcast:
-        await broadcast_ws_event("stock_group_updated", group_to_broadcast)
+            await broadcast_ws_event("stock_group_updated", g)
 
     # Обработка Zero Stock Protection
     if shared_stock == 0:
@@ -254,11 +254,21 @@ async def master_stock_radar_loop():
                     limit=50
                 )
             except Exception as req_ex:
-                logger.debug(f"[Master Stock Radar] Ошибка получения заказов: {req_req_ex if 'req_req_ex' in locals() else req_ex}")
+                logger.debug(f"[Master Stock Radar] Ошибка получения заказов: {req_ex}")
                 continue
 
             if not orders_resp:
                 continue
+
+            # Загружаем товары из кэша для резолва алиасов ключей
+            products_file = "states/products.json"
+            all_products_cache = []
+            if os.path.exists(products_file):
+                try:
+                    with open(products_file, "r", encoding="utf-8") as f:
+                        all_products_cache = json.load(f)
+                except Exception:
+                    pass
 
             processed_orders = _load_processed_orders()
             order_dedup_changed = False
@@ -275,16 +285,31 @@ async def master_stock_radar_loop():
                 order_matched_groups = set()
 
                 for entry in entries:
-                    sku = str(entry.get("sku") or entry.get("merchantSku") or "")
-                    qty = int(entry.get("quantity", 1))
+                    raw_sku_candidates = set()
+                    for k in ["sku", "merchantSku", "masterSku", "kaspiSku"]:
+                        val = entry.get(k)
+                        if val:
+                            raw_sku_candidates.add(str(val).strip())
 
-                    if not sku:
+                    qty = int(entry.get("quantity", 1))
+                    if not raw_sku_candidates:
                         continue
 
-                    # Находим группы, в которые входит данный SKU
+                    # Находим товар в кэше и собираем все его возможные алиасы (merchantSku, kaspiSku и т.д.)
+                    all_possible_skus = set(raw_sku_candidates)
+                    for cand in raw_sku_candidates:
+                        p_match = next((p for p in all_products_cache if p.get("sku") == cand or p.get("merchantSku") == cand or p.get("kaspiSku") == cand), None)
+                        if p_match:
+                            for key_field in ["sku", "merchantSku", "kaspiSku"]:
+                                if p_match.get(key_field):
+                                    all_possible_skus.add(str(p_match[key_field]).strip())
+
+                    # Находим группы, в которые входит любой из этих ключей
                     for gid, grp in active_groups.items():
-                        linked = grp.get("linked_skus", [])
-                        if sku in linked:
+                        if gid in order_matched_groups:
+                            continue
+                        linked = [str(s).strip() for s in grp.get("linked_skus", [])]
+                        if any(k in linked for k in all_possible_skus):
                             async with stock_lock:
                                 current_stock = int(grp.get("shared_stock", 0))
                                 new_stock = max(0, current_stock - qty)
@@ -292,7 +317,7 @@ async def master_stock_radar_loop():
                                 groups[gid] = grp
                                 _save_master_stock_groups(groups)
                                 logger.info(
-                                    f"📦 [Order Sale Detected] Заказ {order_id} (SKU: {sku}, qty: {qty}). "
+                                    f"📦 [Order Sale Detected] Заказ {order_id} (Ключи: {list(all_possible_skus)}, qty: {qty}). "
                                     f"Группа '{grp.get('group_name')}' остаток: {current_stock} -> {new_stock}"
                                 )
 
@@ -302,7 +327,8 @@ async def master_stock_radar_loop():
                                         "order.created",
                                         {
                                             "order_id": order_id,
-                                            "purchased_sku": sku,
+                                            "purchased_sku": list(all_possible_skus)[0],
+                                            "all_matched_skus": list(all_possible_skus),
                                             "quantity": qty,
                                             "group_id": gid,
                                             "group_name": grp.get("group_name"),

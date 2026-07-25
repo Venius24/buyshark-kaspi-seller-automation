@@ -18,6 +18,44 @@ from backend.services.stock_sync_worker import execute_broadcast_sync, stock_loc
 
 router = APIRouter(prefix="/api/stock-groups", tags=["stock-groups"])
 
+import os
+import json
+
+def _expand_linked_skus(skus: List[str]) -> List[str]:
+    """
+    Расширяет список привязанных SKU, автоматически добавляя и merchantSku, и kaspiSku для каждого товара.
+    """
+    expanded = set()
+    products = []
+    products_file = "states/products.json"
+    if os.path.exists(products_file):
+        try:
+            with open(products_file, "r", encoding="utf-8") as f:
+                products = json.load(f)
+        except Exception:
+            products = []
+
+    for raw_sku in skus:
+        s = str(raw_sku).strip()
+        if not s:
+            continue
+        expanded.add(s)
+        
+        # Находим товар в кэше по любому совпадению
+        matched_p = next(
+            (p for p in products if p.get("sku") == s or p.get("merchantSku") == s or p.get("kaspiSku") == s),
+            None
+        )
+        if matched_p:
+            if matched_p.get("sku"):
+                expanded.add(str(matched_p["sku"]).strip())
+            if matched_p.get("merchantSku"):
+                expanded.add(str(matched_p["merchantSku"]).strip())
+            if matched_p.get("kaspiSku"):
+                expanded.add(str(matched_p["kaspiSku"]).strip())
+
+    return list(expanded)
+
 @router.get("")
 def get_stock_groups():
     """Получить список всех Мастер-Групп остатка."""
@@ -48,7 +86,7 @@ async def create_stock_group(req: MasterStockGroupCreateRequest, background_task
         "group_id": group_id,
         "group_name": req.group_name.strip(),
         "shared_stock": int(req.shared_stock),
-        "linked_skus": [sku.strip() for sku in req.linked_skus if sku.strip()],
+        "linked_skus": _expand_linked_skus(req.linked_skus),
         "external_code": (req.external_code or "").strip() or None,
         "is_active": req.is_active if req.is_active is not None else True,
         "dumping_config": req.dumping_config.dict() if req.dumping_config else None,
@@ -89,7 +127,7 @@ async def update_stock_group(group_id: str, req: MasterStockGroupUpdateRequest, 
         if req.shared_stock is not None and req.shared_stock >= 0:
             group["shared_stock"] = int(req.shared_stock)
         if req.linked_skus is not None and req.linked_skus:
-            group["linked_skus"] = [sku.strip() for sku in req.linked_skus if sku.strip()]
+            group["linked_skus"] = _expand_linked_skus(req.linked_skus)
         if req.external_code is not None:
             group["external_code"] = req.external_code.strip() or None
         if req.is_active is not None:
