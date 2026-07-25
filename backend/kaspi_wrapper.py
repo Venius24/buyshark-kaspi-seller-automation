@@ -424,6 +424,73 @@ class KaspiAPI:
             "orders": matched_orders
         }
 
+    # ── 5.1b. packaging orders by list of SKUs (Master Group search) ─────────
+
+    @staticmethod
+    def get_packaging_orders_for_skus(token: str, skus: list) -> dict:
+        """
+        Ищет заказы на сборке ('Упаковка') для списка привязанных SKU Мастер-Группы.
+        Автоматически проверяет точные SKU, их вариации с тире (-1, -2...) и вхождения.
+        """
+        if not skus:
+            return {"success": True, "count": 0, "total_quantity": 0, "orders": []}
+
+        # Нормализуем исходные SKU
+        norm_skus = set(str(s).strip().lower() for s in skus if str(s).strip())
+        
+        # Выделяем префиксы с дефисом (например 't219-0005' из 't219-0005-1')
+        base_prefixes = set()
+        for s in norm_skus:
+            if "-" in s:
+                parts = s.split("-")
+                base = "-".join(parts[:2]) if len(parts) >= 2 else parts[0]
+                base_prefixes.add(base)
+            else:
+                base_prefixes.add(s)
+
+        all_packaging = KaspiAPI.get_orders_with_products(
+            token=token,
+            state="KASPI_DELIVERY",
+            status="ACCEPTED_BY_MERCHANT",
+            limit=1000,
+            assembled=False
+        )
+
+        matched_orders = []
+        total_items_count = 0
+
+        for order in all_packaging:
+            entries = order.get("entries", [])
+            order_matched = False
+            for entry in entries:
+                m_sku = str(entry.get("merchantSku", "")).strip().lower()
+                k_sku = str(entry.get("kaspiSku", "")).strip().lower()
+                title = str(entry.get("productName", "")).strip().lower()
+
+                # Проверка совпадения:
+                # 1. Прямое совпадение с точными SKU группы
+                is_exact = (m_sku in norm_skus or k_sku in norm_skus)
+                # 2. Совпадение по базовому префиксу (например T219-0005)
+                is_prefix = any(
+                    m_sku.startswith(p) or k_sku.startswith(p) or p in m_sku or p in title
+                    for p in base_prefixes if len(p) >= 4
+                )
+
+                if is_exact or is_prefix:
+                    qty = entry.get("quantity", 1)
+                    total_items_count += qty
+                    order_matched = True
+
+            if order_matched:
+                matched_orders.append(order)
+
+        return {
+            "success": True,
+            "count": len(matched_orders),
+            "total_quantity": total_items_count,
+            "orders": matched_orders
+        }
+
     # ── 5.2. full 3-tab layout packaging parsing ───────────────
 
     @staticmethod

@@ -199,5 +199,22 @@ def _save_webhook_config(cfg: dict):
     with open(WEBHOOK_CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
+PROCESSED_PACKAGING_ORDERS_FILE = "states/processed_packaging_orders.json"
+
+def _load_processed_packaging_orders() -> dict:
+    if os.path.exists(PROCESSED_PACKAGING_ORDERS_FILE):
+        try:
+            with open(PROCESSED_PACKAGING_ORDERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def _save_processed_packaging_orders(data: dict):
+    os.makedirs("states", exist_ok=True)
+    with open(PROCESSED_PACKAGING_ORDERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
 
 

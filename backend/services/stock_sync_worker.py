@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 # Global lock for thread/async-safe group stock operations
 stock_lock = asyncio.Lock()
 
-async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus: List[str]):
-    """Отправка Push/Telegram уведомления при обнулении остатка группы."""
+async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus: List[str], trigger_order_info: Optional[dict] = None):
+    """Отправка Push/Telegram уведомления при обнулении остатка группы с деталями о заказе-триггере."""
     try:
         from backend.chatbot.config import load_chatbot_config
         cfg = load_chatbot_config()
@@ -41,12 +41,30 @@ async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus
             return
 
         skus_str = ", ".join(linked_skus[:5]) + ("..." if len(linked_skus) > 5 else "")
+        
+        order_section = ""
+        if trigger_order_info:
+            code = trigger_order_info.get("order_code") or trigger_order_info.get("code") or "N/A"
+            sku = trigger_order_info.get("sku") or "N/A"
+            units = trigger_order_info.get("units") or 1
+            title = trigger_order_info.get("title") or "Товар"
+            customer = trigger_order_info.get("customer") or "Покупатель"
+
+            order_section = (
+                f"🛒 <b>ПРИЧИНА СНИЖЕНИЯ ДО 0 (Новый заказ):</b>\n"
+                f"• <b>№ Заказа:</b> <code>#{code}</code>\n"
+                f"• <b>Товар:</b> {title}\n"
+                f"• <b>Артикул списания:</b> <code>{sku}</code> (-{units} шт.)\n"
+                f"• <b>Покупатель:</b> {customer}\n\n"
+            )
+
         text = (
             f"🚨 <b>ВНИМАНИЕ: СНЯТО С ПРОДАЖИ (Zero Stock Protection)</b>\n\n"
             f"📦 <b>Группа:</b> {group_name}\n"
             f"🆔 <b>ID Группы:</b> <code>{group_id}</code>\n"
             f"📉 <b>Доступный остаток:</b> 0 шт.\n"
             f"🔗 <b>Привязанные SKU:</b> {skus_str}\n\n"
+            f"{order_section}"
             f"⚠️ Все карточки товаров группы занулены и временно сняты с продажи на Kaspi!"
         )
 
@@ -76,7 +94,7 @@ async def broadcast_ws_event(event_type: str, data: dict):
         logger.error(f"Error broadcasting WS event {event_type}: {e}")
 
 
-async def execute_broadcast_sync(group_id: str, token: str):
+async def execute_broadcast_sync(group_id: str, token: str, trigger_order_info: Optional[dict] = None):
     """
     Веерная рассылка обновленного остатка по всем SKU группы через 3-шаговый Kaspi MC API.
     """
@@ -219,7 +237,7 @@ async def execute_broadcast_sync(group_id: str, token: str):
     # Обработка Zero Stock Protection
     if shared_stock == 0:
         logger.warning(f"🚨 [Zero Stock Protection] Группа '{group_name}' занулена!")
-        await notify_zero_stock_telegram(group_name, group_id, linked_skus)
+        await notify_zero_stock_telegram(group_name, group_id, linked_skus, trigger_order_info)
         await broadcast_ws_event("zero_stock_alert", {
             "group_id": group_id,
             "group_name": group_name,
@@ -360,3 +378,160 @@ async def master_stock_radar_loop():
             break
         except Exception as e:
             logger.error(f"❌ [Master Stock Radar] Ошибка в цикле радара: {e}")
+
+
+# ── 5. Auto Deduction on Packaging Detection Engine ──────────────────────
+
+def _calculate_physical_units(merchant_sku: str, quantity: int = 1) -> int:
+    """
+    Вычисляет физическое количество штук товара с учетом комплектов и мультипаков (-2, -4, -6...).
+    Например: T219-0005-4 (qty 1) -> 4 шт.
+    """
+    if not merchant_sku:
+        return quantity
+
+    sku_str = str(merchant_sku).strip()
+    multiplier = 1
+    if "-" in sku_str:
+        parts = sku_str.split("-")
+        last_part = parts[-1]
+        if last_part.isdigit() and int(last_part) > 1 and len(last_part) <= 2:
+            multiplier = int(last_part)
+
+    return multiplier * int(quantity)
+
+
+async def process_packaging_auto_deduction(token: str) -> dict:
+    """
+    Фоновая процедура обнаружения новых заказов в Упаковке:
+    1. Запрашивает активные заказы 'На сборке' (cargo_assembly).
+    2. Если заказ новый (нет в processed_packaging_orders.json):
+       - Находит соответствующую Мастер-Группу остатка.
+       - Вычисляет физическое количество списания с учетом комплектов (-2, -4, -6...).
+       - Уменьшает shared_stock группы: max(0, shared_stock - units).
+       - Логирует списание и при 0 активирует Zero-Stock Protection.
+       - Запускает асинхронный broadcast sync (execute_broadcast_sync) на Kaspi!
+    """
+    from backend.state_helpers import _load_processed_packaging_orders, _save_processed_packaging_orders
+
+    processed_orders = _load_processed_packaging_orders()
+
+    try:
+        tabs = KaspiAPI.get_all_packaging_tabs(token)
+    except Exception as e:
+        logger.error(f"[AutoDeduction] Error fetching packaging tabs: {e}")
+        return {"success": False, "error": str(e)}
+
+    cargo_assembly = tabs.get("cargo_assembly", [])
+    if not cargo_assembly:
+        return {"success": True, "deducted_orders_count": 0, "deductions": []}
+
+    new_deductions = []
+
+    async with stock_lock:
+        groups = _load_master_stock_groups()
+        groups_modified = False
+
+        for order in cargo_assembly:
+            order_code = str(order.get("code") or order.get("id")).strip()
+            if not order_code or order_code in processed_orders:
+                continue
+
+            items = order.get("items", [])
+            for item in items:
+                m_sku = str(item.get("merchant_sku", "")).strip()
+                title = str(item.get("title", "")).strip()
+                qty = item.get("quantity", 1)
+
+                matched_group = None
+                for g_id, g in groups.items():
+                    linked = set(str(s).strip().lower() for s in g.get("linked_skus", []))
+                    m_sku_lower = m_sku.lower()
+
+                    if (
+                        m_sku_lower in linked
+                        or any(s in m_sku_lower or m_sku_lower.startswith(s) or s in title.lower() for s in linked if len(s) >= 4)
+                    ):
+                        matched_group = g
+                        break
+
+                if matched_group:
+                    units = _calculate_physical_units(m_sku, qty)
+                    old_stock = int(matched_group.get("shared_stock", 0))
+                    new_stock = max(0, old_stock - units)
+                    matched_group["shared_stock"] = new_stock
+                    matched_group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                    now_time = datetime.datetime.now().strftime("%H:%M:%S")
+                    log_entry = (
+                        f"[{now_time}] 🛒 Авто-списание по заказу #{order_code} ({m_sku}): "
+                        f"-{units} шт. (Было: {old_stock} -> Стало: {new_stock} шт.)"
+                    )
+
+                    logs = matched_group.setdefault("sync_logs", [])
+                    logs.insert(0, log_entry)
+                    if len(logs) > 30:
+                        matched_group["sync_logs"] = logs[:30]
+
+                    matched_group["last_sync_log"] = log_entry
+                    groups_modified = True
+
+                    processed_orders[order_code] = {
+                        "deducted_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "group_id": matched_group["group_id"],
+                        "sku": m_sku,
+                        "units": units,
+                        "old_stock": old_stock,
+                        "new_stock": new_stock
+                    }
+
+                    new_deductions.append({
+                        "order_code": order_code,
+                        "group_id": matched_group["group_id"],
+                        "group_name": matched_group.get("group_name"),
+                        "sku": m_sku,
+                        "units": units,
+                        "new_stock": new_stock
+                    })
+
+                    logger.info(f"⚡ [AutoDeduction] Заказ #{order_code} списал {units} шт. у группы '{matched_group.get('group_name')}'. Остаток: {new_stock}")
+
+                    trigger_info = {
+                        "order_code": order_code,
+                        "sku": m_sku,
+                        "units": units,
+                        "title": title or item.get("title") or "Товар",
+                        "customer": order.get("customer") or "Покупатель"
+                    }
+
+                    # Запускаем веерное списание остатка на Kaspi с информацией о заказе
+                    asyncio.create_task(execute_broadcast_sync(matched_group["group_id"], token, trigger_info))
+                    break
+
+        if groups_modified:
+            _save_master_stock_groups(groups)
+            _save_processed_packaging_orders(processed_orders)
+
+    return {
+        "success": True,
+        "deducted_orders_count": len(new_deductions),
+        "deductions": new_deductions
+    }
+
+
+async def start_packaging_sync_loop(interval_seconds: int = 30):
+    """Фоновый воркер авто-списания остатков при появлении новых заказов в Упаковке."""
+    logger.info("🚀 Запуск фонового воркера авто-списания остатков по Упаковке...")
+    while True:
+        try:
+            token = _get_token()
+            if token and not token.startswith("test_"):
+                await process_packaging_auto_deduction(token)
+        except asyncio.CancelledError:
+            logger.info("⏹ [Packaging Sync Loop] Воркер авто-списания остановлен.")
+            break
+        except Exception as e:
+            logger.error(f"❌ [Packaging Sync Loop] Ошибка: {e}")
+
+        await asyncio.sleep(interval_seconds)
+

@@ -56,16 +56,76 @@ def _expand_linked_skus(skus: List[str]) -> List[str]:
 
     return list(expanded)
 
+from backend.kaspi_wrapper import KaspiAPI
+
 @router.get("")
 def get_stock_groups():
-    """Получить список всех Мастер-Групп остатка."""
-    _require_token()
+    """Получить список всех Мастер-Групп остатка с информацией об активных заказах в 'Упаковке'."""
+    token = _require_token()
     groups_dict = _load_master_stock_groups()
     groups_list = list(groups_dict.values())
-    
+
+    # Выгружаем активную упаковку для вычисления нераспакованных заказов у групп
+    packaging_data = {}
+    try:
+        packaging_data = KaspiAPI.get_all_packaging_tabs(token)
+    except Exception:
+        pass
+
+    cargo_assembly = packaging_data.get("cargo_assembly", [])
+
+    for g in groups_list:
+        skus = set([str(s).strip().lower() for s in g.get("linked_skus", [])])
+        matched_orders = []
+        total_items_qty = 0
+
+        for order in cargo_assembly:
+            items = order.get("items", [])
+            matched = False
+            for it in items:
+                m_sku = str(it.get("merchant_sku", "")).strip().lower()
+                title = str(it.get("title", "")).strip().lower()
+
+                is_match = (
+                    m_sku in skus
+                    or any(s in m_sku or m_sku.startswith(s) or s in title for s in skus if len(s) >= 4)
+                )
+
+                if is_match:
+                    matched = True
+                    total_items_qty += it.get("quantity", 1)
+
+            if matched:
+                matched_orders.append(order)
+
+        g["active_packaging_orders_count"] = len(matched_orders)
+        g["active_packaging_items_qty"] = total_items_qty
+        g["active_packaging_orders"] = matched_orders
+
     # Сортируем по дате обновления/создания
     groups_list.sort(key=lambda g: g.get("updated_at", ""), reverse=True)
     return {"success": True, "groups": groups_list, "count": len(groups_list)}
+
+@router.get("/{group_id}/packaging")
+def get_stock_group_packaging(group_id: str):
+    """Получить детальный список заказов в статусе 'Упаковка / На сборке' для конкретной Мастер-Группы."""
+    token = _require_token()
+    groups_dict = _load_master_stock_groups()
+    if group_id not in groups_dict:
+        raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
+
+    group = groups_dict[group_id]
+    linked_skus = group.get("linked_skus", [])
+    
+    res = KaspiAPI.get_packaging_orders_for_skus(token, linked_skus)
+    return {
+        "success": True,
+        "group_id": group_id,
+        "group_name": group.get("group_name"),
+        "count": res["count"],
+        "total_quantity": res["total_quantity"],
+        "orders": res["orders"]
+    }
 
 @router.post("")
 async def create_stock_group(req: MasterStockGroupCreateRequest, background_tasks: BackgroundTasks):
@@ -201,3 +261,15 @@ async def manual_sync_stock_group(group_id: str, background_tasks: BackgroundTas
 
     background_tasks.add_task(execute_broadcast_sync, group_id, token)
     return {"success": True, "message": "Запущена принудительная синхронизация остатков на Kaspi."}
+
+@router.post("/check-packaging-deduction")
+async def trigger_packaging_deduction():
+    """Принудительный запуск проверки и авто-списания остатков по новым заказам в Упаковке."""
+    token = _require_token()
+    from backend.services.stock_sync_worker import process_packaging_auto_deduction
+    try:
+        res = await process_packaging_auto_deduction(token)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
