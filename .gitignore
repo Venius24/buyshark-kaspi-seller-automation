@@ -22,8 +22,8 @@ frontend/dist/
 *.db-wal
 
 # ── Runtime states (generated, not source) ──
-states/processed_packaging_orders.json
-states/session.json
+states/*.json
+!states/.gitkeep
 
 # ── Scratch & legacy ──
 scratch/

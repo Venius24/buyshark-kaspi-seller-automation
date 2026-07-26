@@ -78,3 +78,51 @@ class UserSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     user: Mapped["User"] = relationship("User", back_populates="sessions")
+
+
+class DumpingConfigDB(Base):
+    __tablename__ = "dumping_configs"
+
+    sku: Mapped[str] = mapped_column(String(100), primary_key=True)
+    min_price: Mapped[float] = mapped_column(Integer, default=0)
+    max_price: Mapped[float] = mapped_column(Integer, default=0)
+    dump_step: Mapped[float] = mapped_column(Integer, default=10)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    mode: Mapped[str] = mapped_column(String(50), default="TOP_1")
+    target_position: Mapped[int] = mapped_column(Integer, default=1)
+    max_delivery_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    min_seller_rating: Mapped[Optional[float]] = mapped_column(Integer, nullable=True)
+    same_city_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    blacklisted_merchants: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-stringified list
+    city_code: Mapped[str] = mapped_column(String(50), default="750000000")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MasterStockGroupDB(Base):
+    __tablename__ = "master_stock_groups"
+
+    group_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    group_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    shared_stock: Mapped[int] = mapped_column(Integer, default=0)
+    linked_skus: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON-stringified list
+    external_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    dumping_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-stringified dict
+    status: Mapped[str] = mapped_column(String(50), default="synced")
+    created_at: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    updated_at: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    last_synced_at: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    last_sync_log: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sync_logs: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-stringified list
+
+
+class ProductOverrideDB(Base):
+    __tablename__ = "product_overrides"
+
+    sku: Mapped[str] = mapped_column(String(100), primary_key=True)
+    price_num: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    stock: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    brand: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
