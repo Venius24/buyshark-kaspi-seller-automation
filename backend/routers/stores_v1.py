@@ -414,7 +414,7 @@ async def sync_store_cookies(
                 created_at=store.created_at.isoformat()
             )
         else:
-            raise HTTPException(status_code=401, detail="Системные куки в state.json истекли (HTTP 401). Требуется повторный вход.")
+            raise HTTPException(status_code=400, detail="Системные куки в state.json истекли (Kaspi MC 401). Пройдите авторизацию заново.")
     except HTTPException:
         raise
     except Exception as e:

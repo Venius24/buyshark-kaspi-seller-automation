@@ -34,9 +34,13 @@ export async function apiFetch(input: string | URL, init: RequestInit = {}): Pro
     const response = await fetch(input, updatedInit);
 
     if (response.status === 401) {
-      localStorage.removeItem('access_token');
-      if (unauthorizedHandler) {
-        unauthorizedHandler();
+      const urlStr = input.toString();
+      const isSaaSAuthEndpoint = urlStr.includes('/api/v1/auth/') || urlStr.includes('/api/verify-session');
+      if (isSaaSAuthEndpoint) {
+        localStorage.removeItem('access_token');
+        if (unauthorizedHandler) {
+          unauthorizedHandler();
+        }
       }
     }
 
