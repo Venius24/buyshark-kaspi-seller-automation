@@ -17,7 +17,7 @@ class TestOrdersRouter(unittest.TestCase):
         self.client = TestClient(app)
         self.fake_token = "REDACTED_KASPI_API_TOKEN"
 
-    @patch("backend.state_helpers._require_token")
+    @patch("backend.routers.orders._require_token")
     @patch("backend.kaspi_wrapper.KaspiAPI.get_all_packaging_tabs")
     def test_get_packaging_tabs_endpoint(self, mock_tabs, mock_token):
         """Проверка GET /api/orders/packaging/tabs."""
@@ -36,7 +36,7 @@ class TestOrdersRouter(unittest.TestCase):
         self.assertTrue(data["success"])
         self.assertEqual(data["counts"]["cargo_assembly"], 1)
 
-    @patch("backend.state_helpers._require_token")
+    @patch("backend.routers.orders._require_token")
     @patch("backend.kaspi_wrapper.KaspiAPI.get_packaging_orders_by_sku_prefix")
     def test_get_packaging_by_prefix_endpoint(self, mock_prefix, mock_token):
         """Проверка GET /api/orders/packaging/by-prefix."""
@@ -57,7 +57,7 @@ class TestOrdersRouter(unittest.TestCase):
         self.assertEqual(data["count"], 2)
         self.assertEqual(data["total_quantity"], 3)
 
-    @patch("backend.state_helpers._require_token")
+    @patch("backend.routers.orders._require_token")
     @patch("backend.kaspi_wrapper.KaspiAPI.get_orders_with_products")
     def test_get_orders_endpoint(self, mock_orders, mock_token):
         """Проверка GET /api/orders."""

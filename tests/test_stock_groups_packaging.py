@@ -49,7 +49,7 @@ class TestStockGroupsPackaging(unittest.TestCase):
         self.assertEqual(res["orders"][0]["entries"][0]["merchantSku"], "T219-0005-2")
 
     @patch("backend.routers.stock_groups._load_master_stock_groups")
-    @patch("backend.state_helpers._require_token")
+    @patch("backend.routers.stock_groups._require_token")
     @patch("backend.kaspi_wrapper.KaspiAPI.get_packaging_orders_for_skus")
     def test_get_stock_group_packaging_endpoint(self, mock_packaging_skus, mock_token, mock_load_groups):
         """Тест GET /api/stock-groups/{group_id}/packaging."""

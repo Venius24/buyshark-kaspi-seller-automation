@@ -76,7 +76,7 @@ class TestAutoDeductionEngine(unittest.TestCase):
         self.assertEqual(res["deductions"][0]["units"], 4)
         self.assertEqual(res["deductions"][0]["new_stock"], 6)
 
-    @patch("backend.state_helpers._require_token")
+    @patch("backend.routers.stock_groups._require_token")
     @patch("backend.services.stock_sync_worker.process_packaging_auto_deduction")
     def test_check_packaging_deduction_endpoint(self, mock_deduction, mock_token):
         """Тест API эндпоинта POST /api/stock-groups/check-packaging-deduction."""
