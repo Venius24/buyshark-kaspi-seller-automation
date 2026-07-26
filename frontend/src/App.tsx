@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { apiFetch, setUnauthorizedHandler } from './api';
+import { apiFetch, setUnauthorizedHandler, API_URL, getWsUrl } from './api';
 import { useWebSocket } from './hooks/useWebSocket';
 import { BuyBoxGauge } from './components/BuyBoxGauge';
 import { SavedMarginCard } from './components/SavedMarginCard';
@@ -190,9 +190,7 @@ export default function App() {
   const [dumpingOnlyFilter, setDumpingOnlyFilter] = useState(false);
   const [dumpingStatusFilter, setDumpingStatusFilter] = useState<string>('');
 
-  const { isConnected: isWsConnected, lastEvent: wsEvent } = useWebSocket('ws://localhost:5000/api/ws/telemetry');
-
-  const API_URL = 'http://localhost:5000';
+  const { isConnected: isWsConnected, lastEvent: wsEvent } = useWebSocket(getWsUrl());
 
   useEffect(() => {
     const fetchWidgets = async () => {

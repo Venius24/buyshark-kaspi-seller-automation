@@ -13,7 +13,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+  const API_BASE = import.meta.env.VITE_API_URL || '';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

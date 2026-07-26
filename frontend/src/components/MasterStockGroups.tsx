@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { LiveTerminalStream } from './LiveTerminalStream';
-import { apiFetch } from '../api';
+import { apiFetch, API_URL, getWsUrl } from '../api';
 
 interface GroupDumpingConfig {
   enabled: boolean;
@@ -64,8 +64,6 @@ interface ProductItem {
   kaspiSku?: string;
 }
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-
 export const MasterStockGroups: React.FC = () => {
   const [groups, setGroups] = useState<MasterStockGroup[]>([]);
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -96,7 +94,7 @@ export const MasterStockGroups: React.FC = () => {
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
   const [inlineStockVal, setInlineStockVal] = useState<number>(0);
 
-  const { isConnected: isWsConnected, lastEvent: wsEvent } = useWebSocket('ws://localhost:5000/api/ws/telemetry');
+  const { isConnected: isWsConnected, lastEvent: wsEvent } = useWebSocket(getWsUrl());
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   const [viewLogGroup, setViewLogGroup] = useState<MasterStockGroup | null>(null);
 

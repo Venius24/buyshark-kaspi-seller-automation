@@ -32,7 +32,7 @@ interface WebhookConfig {
   enabled: boolean;
 }
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const IntegrationsPublicApi: React.FC = () => {
   const [keys, setKeys] = useState<ApiKeyItem[]>([]);

@@ -1,4 +1,14 @@
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+export const API_URL = import.meta.env.VITE_API_URL || '';
+
+export function getWsUrl(path: string = '/api/ws/telemetry'): string {
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host;
+  if (!host || host.includes('localhost:5173')) {
+    return 'ws://localhost:5000' + path;
+  }
+  return `${protocol}//${host}${path}`;
+}
 
 type UnauthorizedHandler = () => void;
 let unauthorizedHandler: UnauthorizedHandler | null = null;
