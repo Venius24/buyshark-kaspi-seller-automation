@@ -56,7 +56,9 @@ echo "✅ Код обновлен."
 echo "🐍 Шаг 2: Обновление Python зависимостей..."
 "$VENV_DIR/bin/pip" install --upgrade pip -q
 "$VENV_DIR/bin/pip" install -r requirements.txt -q
-echo "✅ Python зависимости установлены."
+echo "🎭 Установка бинарных файлов браузера Playwright Chromium..."
+"$VENV_DIR/bin/playwright" install --with-deps chromium
+echo "✅ Python зависимости и Playwright Chromium установлены."
 
 # ── 3. Сборка фронтенда ─────────────────────────────────────────
 echo "💻 Шаг 3: Сборка React Frontend (bun)..."
