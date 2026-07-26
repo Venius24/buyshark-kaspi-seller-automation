@@ -56,7 +56,26 @@ def _expand_linked_skus(skus: List[str]) -> List[str]:
 
     return list(expanded)
 
+import time
 from backend.kaspi_wrapper import KaspiAPI
+
+_packaging_cache = {
+    "data": None,
+    "expires_at": 0.0
+}
+
+def _get_cached_packaging_data(token: str) -> dict:
+    now = time.time()
+    if _packaging_cache["data"] is not None and now < _packaging_cache["expires_at"]:
+        return _packaging_cache["data"]
+
+    try:
+        data = KaspiAPI.get_all_packaging_tabs(token)
+        _packaging_cache["data"] = data
+        _packaging_cache["expires_at"] = now + 45.0
+        return data
+    except Exception:
+        return _packaging_cache["data"] or {}
 
 @router.get("")
 def get_stock_groups():
@@ -65,13 +84,8 @@ def get_stock_groups():
     groups_dict = _load_master_stock_groups()
     groups_list = list(groups_dict.values())
 
-    # Выгружаем активную упаковку для вычисления нераспакованных заказов у групп
-    packaging_data = {}
-    try:
-        packaging_data = KaspiAPI.get_all_packaging_tabs(token)
-    except Exception:
-        pass
-
+    # Выгружаем активную упаковку из кэша (TTL 45c) для предотвращения зависания эндпоинта
+    packaging_data = _get_cached_packaging_data(token)
     cargo_assembly = packaging_data.get("cargo_assembly", [])
 
     for g in groups_list:

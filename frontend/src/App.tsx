@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch, setUnauthorizedHandler } from './api';
 import { useWebSocket } from './hooks/useWebSocket';
 import { BuyBoxGauge } from './components/BuyBoxGauge';
 import { SavedMarginCard } from './components/SavedMarginCard';
@@ -369,26 +370,40 @@ export default function App() {
     setLogs((prev) => [`[${timestamp}] ${message}`, ...prev.slice(0, 49)]);
   };
 
+  // Register global 401 handler
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setIsAuthed(false);
+    });
+  }, []);
+
   // Check initial session on mount
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/api/verify-session`, { method: 'POST' });
-        const data = await res.json();
-        if (data.valid) {
-          setIsAuthed(true);
-          addLog('Сессия REST API активна, токен подтвержден.');
-          loadProducts(1, 'active', '', 10);
-          // Проверяем куки MC с валидацией сразу при запуске
-          checkMcStatus(true).then((valid) => {
-            if (valid) {
-              addLog('Куки Kaspi MC активны ✓');
-            } else {
-              addLog('⚠️ Куки Kaspi MC недействительны или отсутствуют. Требуется SMS-авторизация.');
-            }
-          });
-          loadDumpingConfigs();
-          loadDumpingStatus();
+        const res = await apiFetch(`${API_URL}/api/verify-session`, { method: 'POST' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.valid) {
+            setIsAuthed(true);
+            addLog('Сессия REST API активна, токен подтвержден.');
+            loadProducts(1, 'active', '', 10);
+            checkMcStatus(true).then((valid) => {
+              if (valid) {
+                addLog('Куки Kaspi MC активны ✓');
+              } else {
+                addLog('⚠️ Куки Kaspi MC недействительны или отсутствуют. Требуется SMS-авторизация.');
+              }
+            });
+            loadDumpingConfigs();
+            loadDumpingStatus();
+          } else {
+            localStorage.removeItem('access_token');
+            setIsAuthed(false);
+          }
+        } else {
+          localStorage.removeItem('access_token');
+          setIsAuthed(false);
         }
       } catch {
         // Backend not available

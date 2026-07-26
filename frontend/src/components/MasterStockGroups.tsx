@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { LiveTerminalStream } from './LiveTerminalStream';
+import { apiFetch } from '../api';
 
 interface GroupDumpingConfig {
   enabled: boolean;
@@ -125,7 +126,7 @@ export const MasterStockGroups: React.FC = () => {
 
   const fetchGroups = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/stock-groups`);
+      const res = await apiFetch(`${API_URL}/api/stock-groups`);
       const data = await res.json();
       if (data.success) {
         setGroups(data.groups || []);
@@ -137,7 +138,7 @@ export const MasterStockGroups: React.FC = () => {
 
   const fetchProducts = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/products?page=1&page_size=10000&status=all`);
+      const res = await apiFetch(`${API_URL}/api/products?page=1&page_size=1000&status=all`);
       const data = await res.json();
       if (data.success) {
         setProducts(data.products || []);
