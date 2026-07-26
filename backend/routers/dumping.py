@@ -5,7 +5,7 @@ import asyncio
 import logging
 from fastapi import APIRouter, HTTPException
 from backend.models import DumpingConfigRequest
-from backend.state_helpers import _require_token, _get_token, _load_dumping_configs, _save_dumping_configs, _save_override
+from backend.state_helpers import _require_token, _get_token, _load_dumping_configs, _save_dumping_configs, _save_override, _apply_overrides
 from backend.dumper import run_price_dumping_job
 
 logger = logging.getLogger(__name__)
