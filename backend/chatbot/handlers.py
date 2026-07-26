@@ -114,20 +114,43 @@ def register_handlers():
 
     @dp.message(F.text == "/start")
     async def cmd_start(message: types.Message):
+        admin_ids = config.load_admin_ids()
+        if str(message.from_user.id) not in admin_ids:
+            await message.reply("⛔ У вас нет доступа к управлению этим ботом.")
+            return
+
+        cfg = config.load_chatbot_config()
+        merchant_id = cfg.get("merchant_id", "20186986")
         history_count = len(load_printed_history())
         stg = config.load_print_settings()
         await message.reply(
-            f"🖨️ **Print-Batcher Engine — Автосборщик печати**\n\n"
+            f"👋 Привет! Я бот автоответчик Kaspi.\n"
+            f"🏪 **Merchant ID:** `{merchant_id}`\n\n"
+            f"🖨️ **Print-Batcher Engine — Автосборщик печати**\n"
             f"Отправьте мне любой **ZIP-архив** или **PDF-файл** с накладными Kaspi / 1С.\n"
-            f"Я автоматически:\n"
-            f"• Отфильтрую ранее напечатанные дубликаты за сегодня (уже напечатано: `{history_count}` шт)\n"
-            f"• Обрежу неиспользуемые белые поля A4\n"
-            f"• Подгоню накладные во весь рост стикера (75x120, 100x150, 4 на A4 и т.д.)\n\n"
-            f"⚙️ **Текущий формат по умолчанию:** `{stg.get('output_layout', 'auto')}`\n\n"
+            f"• Уже напечатано сегодня: `{history_count}` шт\n\n"
             f"📋 **Команды бота:**\n"
+            f"• `/status` — Статус автоответчика и куков\n"
             f"• `/settings` — Глобальные настройки печати предприятия\n"
             f"• `/reset` — Сбросить историю печати за сегодня\n"
             f"• `/stats` — Статистика напечатанных заказов за сегодня"
+        )
+
+    @dp.message(F.text == "/status")
+    async def cmd_status(message: types.Message):
+        admin_ids = config.load_admin_ids()
+        if str(message.from_user.id) not in admin_ids:
+            return
+
+        cfg = config.load_chatbot_config()
+        merchant_id = cfg.get("merchant_id", "20186986")
+        blocked_count = sum(1 for v in config.PROCESSED_CHATS.values() if v == "HUMAN_OVERRIDE")
+
+        await message.reply(
+            f"🤖 **Статус автоответчика:** {'🟢 Работает' if cfg.get('enabled', True) else '⏸️ Приостановлен'}\n"
+            f"🏪 **Merchant ID:** `{merchant_id}`\n"
+            f"🔒 **Заблокировано чатов (Human Override):** {blocked_count}\n"
+            f"🔑 **Cookie статус:** {'🚨 Требуется обновление' if config.COOKIE_ALERT_SENT else '✅ Валидны'}"
         )
 
     @dp.message(F.text == "/settings")
@@ -298,13 +321,21 @@ def register_handlers():
     @dp.callback_query(F.data.startswith("unblock_"))
     async def process_unblock_callback(callback_query: types.CallbackQuery):
         group_id = callback_query.data.split("_")[1]
+        
         if config.PROCESSED_CHATS.get(group_id) == "HUMAN_OVERRIDE":
             config.PROCESSED_CHATS.pop(group_id, None)
+            
+            original_text = callback_query.message.text or ""
+            updated_text = original_text + "\n\n✅ **Чат разблокирован менеджером для ИИ.**"
+            
             try:
                 await callback_query.message.edit_text(
-                    text=(callback_query.message.text or "") + "\n\n✅ **Чат разблокирован.**",
+                    text=updated_text,
                     reply_markup=None
                 )
-            except Exception:
-                pass
-            await callback_query.answer("Чат разблокирован.")
+            except Exception as e:
+                logger.error(f"⚠️ Не удалось обновить сообщение в Telegram: {e}")
+                
+            await callback_query.answer("Чат разблокирован для ИИ.")
+        else:
+            await callback_query.answer("Этот чат уже активен или не заблокирован.", show_alert=True)

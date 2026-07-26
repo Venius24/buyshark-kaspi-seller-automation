@@ -46,12 +46,6 @@ export const StoreHub: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const API_BASE = import.meta.env.VITE_API_URL || '';
-  const token = localStorage.getItem('access_token');
-
-  const authHeaders = {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
 
   const fetchStoresAndProfile = async () => {
     setLoading(true);

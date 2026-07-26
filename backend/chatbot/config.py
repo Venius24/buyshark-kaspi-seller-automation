@@ -78,13 +78,19 @@ def load_chatbot_config() -> dict:
     return config_data
 
 def save_chatbot_config(new_config: dict) -> dict:
-    """Сохраняет пользовательские настройки (admin_ids, enabled) в states/chatbot_config.json."""
+    """Сохраняет пользовательские настройки (admin_ids, enabled) в states/chatbot_config.json и states/admin_ids.txt."""
     os.makedirs(STATES_DIR, exist_ok=True)
     current = load_chatbot_config()
     
     to_save = {}
     if "admin_ids" in new_config:
         to_save["admin_ids"] = new_config["admin_ids"]
+        try:
+            with open(ADMIN_IDS_FILE, "w", encoding="utf-8") as f:
+                f.write("\n".join(new_config["admin_ids"]) + "\n")
+        except Exception as e:
+            logger.error(f"Ошибка записи {ADMIN_IDS_FILE}: {e}")
+
     if "enabled" in new_config:
         to_save["enabled"] = new_config["enabled"]
         
@@ -97,10 +103,6 @@ def save_chatbot_config(new_config: dict) -> dict:
 
 def load_admin_ids() -> list:
     """Загружает ID получателей уведомлений Telegram из файла или конфига."""
-    cfg = load_chatbot_config()
-    if cfg.get("admin_ids"):
-        return cfg["admin_ids"]
-
     if os.path.exists(ADMIN_IDS_FILE):
         try:
             with open(ADMIN_IDS_FILE, "r", encoding="utf-8") as f:
@@ -109,6 +111,10 @@ def load_admin_ids() -> list:
                     return ids
         except Exception as e:
             logger.error(f"Ошибка чтения {ADMIN_IDS_FILE}: {e}")
+
+    cfg = load_chatbot_config()
+    if cfg.get("admin_ids"):
+        return cfg["admin_ids"]
             
     return ["7119137844", "8661441552"]
 

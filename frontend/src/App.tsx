@@ -2510,59 +2510,29 @@ export default function App() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
-              {/* 🔐 Настройки токенов и Telegram */}
+              {/* 📢 Настройки рассылки Telegram Admin IDs */}
               <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600 }}>🔑 Ключи доступа & Telegram</h3>
-                  <span className="badge badge-success">DeepSeek AI</span>
+                  <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600 }}>📢 Telegram Админы для рассылки</h3>
+                  <span className="badge badge-success">Telegram CRM</span>
                 </div>
+
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Укажите Telegram ID администраторов, которые будут получать алерты при вызове менеджера и сбоях сессии.
+                </p>
 
                 <form onSubmit={(e) => {
                   e.preventDefault();
-                  const deepseekKey = (document.getElementById('deepseek-key-input') as HTMLInputElement).value;
-                  const tgToken = (document.getElementById('tg-token-input') as HTMLInputElement).value;
                   const adminIdsRaw = (document.getElementById('admin-ids-input') as HTMLInputElement).value;
                   const adminIds = adminIdsRaw.split(',').map(s => s.trim()).filter(Boolean);
-                  const useProxy = (document.getElementById('tg-proxy-chk') as HTMLInputElement).checked;
-                  const proxyUrl = (document.getElementById('tg-proxy-input') as HTMLInputElement).value;
 
                   saveChatbotConfig({
-                    deepseek_api_key: deepseekKey,
-                    tg_bot_token: tgToken,
-                    admin_ids: adminIds,
-                    use_tg_proxy: useProxy,
-                    tg_proxy: proxyUrl
+                    admin_ids: adminIds
                   });
                 }} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <div>
                     <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                      DeepSeek API Key
-                    </label>
-                    <input
-                      type="password"
-                      id="deepseek-key-input"
-                      className="form-input"
-                      defaultValue={chatbotConfig.deepseek_api_key}
-                      placeholder="sk-..."
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                      Telegram Bot Token
-                    </label>
-                    <input
-                      type="password"
-                      id="tg-token-input"
-                      className="form-input"
-                      defaultValue={chatbotConfig.tg_bot_token}
-                      placeholder="119036852:ABC..."
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                      Telegram Admin IDs (для алертов менеджерам через запятую)
+                      Telegram Admin IDs (через запятую)
                     </label>
                     <input
                       type="text"
@@ -2573,28 +2543,8 @@ export default function App() {
                     />
                   </div>
 
-                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '10px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: '#fff' }}>
-                      <input
-                        type="checkbox"
-                        id="tg-proxy-chk"
-                        defaultChecked={chatbotConfig.use_tg_proxy}
-                      />
-                      Использовать прокси для Telegram API
-                    </label>
-
-                    <input
-                      type="text"
-                      id="tg-proxy-input"
-                      className="form-input"
-                      defaultValue={chatbotConfig.tg_proxy}
-                      placeholder="http://user:pass@host:port"
-                      style={{ marginTop: '8px' }}
-                    />
-                  </div>
-
                   <button type="submit" className="btn btn-primary" style={{ padding: '10px', marginTop: '8px' }}>
-                    💾 Сохранить параметры чат-бота
+                    💾 Сохранить параметры рассылки
                   </button>
                 </form>
               </div>

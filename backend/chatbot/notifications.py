@@ -29,14 +29,14 @@ async def notify_cookie_expired(reason: str):
         return
 
     cfg = config.load_chatbot_config()
+    merchant_id = cfg.get("merchant_id", "20186986")
     alert_text = (
         f"🚨 **ВНИМАНИЕ: КУКИ KASPI НЕВАЛИДНЫ / СЕССИЯ ИСТЕКЛА!**\n"
         f"----------------------------------------\n"
         f"⚠️ **Причина:** {reason}\n"
         f"⏰ **Время:** {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
-        f"🏪 **Merchant ID:** `{cfg.get('merchant_id')}`\n"
         f"----------------------------------------\n"
-        f"🛠 **Действие:** Войдите по SMS через дашборд или обновите сессию!"
+        f"🛠 **Действие:** Пожалуйста, обновите `session.json` с актуальными куки `mc-session` и `mc-sid`!"
     )
 
     logger.warning(f"🚨 [COOKIE ALERT] {reason}. Отправка уведомления на Telegram IDs: {admin_ids}")
@@ -61,13 +61,15 @@ async def notify_startup():
         return
 
     cfg = config.load_chatbot_config()
+    merchant_id = cfg.get("merchant_id", "20186986")
     alert_text = (
-        f"🚀 **Kaspi ИИ-Автоответчик запущен и начал работу!**\n"
+        f"🚀 **Бот успешно запущен и начал работу!**\n"
         f"----------------------------------------\n"
         f"⏰ **Время:** {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
-        f"🏪 **Merchant ID:** `{cfg.get('merchant_id')}`"
+        f"🏪 **Merchant ID:** `{merchant_id}`"
     )
 
+    logger.info(f"🚀 Отправка уведомления о запуске бота на Telegram IDs: {admin_ids}")
     for admin_id in admin_ids:
         try:
             await bot_instance.bot.send_message(

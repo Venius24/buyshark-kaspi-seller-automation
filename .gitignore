@@ -32,4 +32,5 @@ SUCCES_FETCH_EXAMPLE.py
 REAL_IMPORTANT/упаковка_fetch/fetch_packaging.py
 
 # ── PyInstaller / dist packages ──
-ZIPS/
+ZIPS/
+bq_bot/

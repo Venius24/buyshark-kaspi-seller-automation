@@ -11,11 +11,7 @@ router = APIRouter(prefix="/api/chatbot", tags=["chatbot"])
 
 class ChatbotConfigRequest(BaseModel):
     enabled: Optional[bool] = True
-    deepseek_api_key: Optional[str] = None
-    tg_bot_token: Optional[str] = None
     admin_ids: Optional[List[str]] = None
-    use_tg_proxy: Optional[bool] = False
-    tg_proxy: Optional[str] = None
 
 class UnblockChatRequest(BaseModel):
     group_id: str
@@ -24,26 +20,13 @@ class UnblockChatRequest(BaseModel):
 def get_chatbot_config():
     """Получить конфигурацию ИИ-автоответчика."""
     cfg = config.load_chatbot_config()
-    raw_deepseek = cfg.get("deepseek_api") or cfg.get("deepseek_api_key") or ""
-    raw_tg_token = cfg.get("tg_bot_token", "")
-    raw_tg_proxy = cfg.get("tg_bot_proxy") or cfg.get("tg_proxy") or ""
-
-    masked_deepseek = (raw_deepseek[:6] + "..." + raw_deepseek[-4:]) if len(raw_deepseek) > 10 else ("Configured in .env" if raw_deepseek else "")
-    masked_tg = (raw_tg_token[:6] + "..." + raw_tg_token[-4:]) if len(raw_tg_token) > 10 else ("Configured in .env" if raw_tg_token else "")
+    admin_ids = config.load_admin_ids()
 
     return {
         "success": True,
         "config": {
             "enabled": cfg.get("enabled", True),
-            "deepseek_api": raw_deepseek,
-            "deepseek_api_key": raw_deepseek,
-            "deepseek_api_key_masked": masked_deepseek,
-            "tg_bot_token": raw_tg_token,
-            "tg_bot_token_masked": masked_tg,
-            "tg_bot_proxy": raw_tg_proxy,
-            "tg_proxy": raw_tg_proxy,
-            "use_tg_proxy": bool(raw_tg_proxy),
-            "admin_ids": cfg.get("admin_ids", []),
+            "admin_ids": admin_ids,
             "merchant_id": cfg.get("merchant_id", "")
         }
     }

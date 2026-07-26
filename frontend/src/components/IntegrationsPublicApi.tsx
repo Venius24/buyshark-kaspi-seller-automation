@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { apiFetch, API_URL } from '../api';
+import { apiFetch } from '../api';
 import {
   Key,
   Webhook,
