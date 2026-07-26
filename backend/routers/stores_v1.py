@@ -302,7 +302,7 @@ async def verify_store_cookies(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Инспекция живой сессии куков магазина (Health Check)"""
+    """Инспекция живой сессии куков магазина (Health Check) с авто-синхронизацией"""
     stmt = (
         select(Store, UserStore.role)
         .join(UserStore, Store.id == UserStore.store_id)
@@ -321,14 +321,37 @@ async def verify_store_cookies(
         "Cookie": decrypted_cookies
     }
 
-    try:
-        r = requests.get("https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=headers, timeout=5)
-        if r.status_code == 200:
-            store.status = "ACTIVE"
-            store.last_sync_at = datetime.utcnow()
-        else:
-            store.status = "COOKIE_EXPIRED"
-    except Exception:
+    is_valid = False
+    if decrypted_cookies:
+        try:
+            r = requests.get("https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=headers, timeout=5)
+            if r.status_code == 200:
+                is_valid = True
+        except Exception:
+            pass
+
+    # Если куки в БД просрочились — пробуем привязать свежие системные куки из state.json
+    if not is_valid:
+        from backend.state_helpers import _load_mc_cookies
+        sys_cookies = _load_mc_cookies()
+        if sys_cookies and "mc-session" in sys_cookies and "mc-sid" in sys_cookies:
+            sys_cookie_str = "; ".join([f"{k}={v}" for k, v in sys_cookies.items()])
+            sys_headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Cookie": sys_cookie_str
+            }
+            try:
+                r_sys = requests.get("https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=sys_headers, timeout=5)
+                if r_sys.status_code == 200:
+                    is_valid = True
+                    store.encrypted_cookies = encrypt_data(sys_cookie_str)
+            except Exception:
+                pass
+
+    if is_valid:
+        store.status = "ACTIVE"
+        store.last_sync_at = datetime.utcnow()
+    else:
         store.status = "COOKIE_EXPIRED"
 
     await db.commit()
@@ -342,6 +365,60 @@ async def verify_store_cookies(
         last_sync_at=store.last_sync_at.isoformat() if store.last_sync_at else None,
         created_at=store.created_at.isoformat()
     )
+
+
+@router.post("/{store_id}/sync-cookies", response_model=StoreResponse)
+async def sync_store_cookies(
+    store_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Принудительная привязка и зашифрованное сохранение системных куков (state.json) к магазину"""
+    stmt = (
+        select(Store, UserStore.role)
+        .join(UserStore, Store.id == UserStore.store_id)
+        .where(Store.id == store_id, UserStore.user_id == user.id)
+    )
+    res = await db.execute(stmt)
+    row = res.first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Магазин не найден или нет прав доступа")
+
+    store, role = row
+    from backend.state_helpers import _load_mc_cookies
+    sys_cookies = _load_mc_cookies()
+    if not sys_cookies or "mc-session" not in sys_cookies or "mc-sid" not in sys_cookies:
+        raise HTTPException(status_code=400, detail="Системные куки в state.json отсутствуют. Пройдите авторизацию заново.")
+
+    sys_cookie_str = "; ".join([f"{k}={v}" for k, v in sys_cookies.items()])
+    sys_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Cookie": sys_cookie_str
+    }
+
+    try:
+        r = requests.get("https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=sys_headers, timeout=5)
+        if r.status_code == 200:
+            store.encrypted_cookies = encrypt_data(sys_cookie_str)
+            store.status = "ACTIVE"
+            store.last_sync_at = datetime.utcnow()
+            await db.commit()
+            return StoreResponse(
+                id=store.id,
+                merchant_id=store.merchant_id,
+                name=store.name,
+                status=store.status,
+                role=role,
+                last_sync_at=store.last_sync_at.isoformat() if store.last_sync_at else None,
+                created_at=store.created_at.isoformat()
+            )
+        else:
+            raise HTTPException(status_code=401, detail="Системные куки в state.json истекли (HTTP 401). Требуется повторный вход.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Ошибка проверки куков: {e}")
 
 
 @router.delete("/{store_id}")

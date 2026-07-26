@@ -187,6 +187,27 @@ export const StoreHub: React.FC = () => {
     }
   };
 
+  const handleSyncCookies = async (storeId: string) => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/v1/stores/${storeId}/sync-cookies`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        alert('✅ Куки успешно синхронизированы с магазином!');
+        fetchStoresAndProfile();
+      } else {
+        const errData = await res.json();
+        alert(`⚠️ ${errData.detail || 'Не удалось привязать куки'}`);
+        resetModalState();
+        setShowAddModal(true);
+      }
+    } catch (err) {
+      console.error('Error syncing store cookies:', err);
+      resetModalState();
+      setShowAddModal(true);
+    }
+  };
+
   const handleDeleteStore = async (storeId: string) => {
     if (!window.confirm('Вы уверены, что хотите удалить этот магазин?')) return;
     try {
@@ -286,6 +307,9 @@ export const StoreHub: React.FC = () => {
                 <div style={styles.cardActions}>
                   <button onClick={() => handleVerifyStore(s.id)} style={styles.verifyBtn}>
                     🔄 Проверить статус
+                  </button>
+                  <button onClick={() => handleSyncCookies(s.id)} style={styles.syncBtn}>
+                    🔑 Обновить куки
                   </button>
                   <button onClick={() => handleDeleteStore(s.id)} style={styles.deleteBtn}>
                     🗑️ Удалить
@@ -517,6 +541,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '12px',
     fontWeight: 600,
     cursor: 'pointer',
+  },
+  syncBtn: {
+    background: '#2563eb',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '8px 12px',
+    fontSize: '12px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
   },
   deleteBtn: {
     background: 'rgba(239, 68, 68, 0.15)',
