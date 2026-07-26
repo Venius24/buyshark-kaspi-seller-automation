@@ -1793,7 +1793,9 @@ export default function App() {
                               <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '16px' }}>
                                 <div>
                                   <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Текущая цена:</div>
-                                  <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>{product.price}</div>
+                                  <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>
+                                    {product.price && product.price !== "0 ₸" ? product.price : (product.price_num ? `${product.price_num} ₸` : '—')}
+                                  </div>
                                 </div>
                                 <button
                                   type="button"

@@ -778,7 +778,27 @@ class KaspiAPI:
                         if availabilities:
                             stock_count = availabilities[0].get("stockCount", 0)
 
-                        price_num = offer.get("price", 0)
+                        price_val = offer.get("price")
+                        price_num = 0
+                        if isinstance(price_val, (int, float)) and price_val > 0:
+                            price_num = int(price_val)
+                        elif isinstance(price_val, dict):
+                            val = price_val.get("value") or price_val.get("amount") or price_val.get("price")
+                            if isinstance(val, (int, float)) and val > 0:
+                                price_num = int(val)
+
+                        if not price_num:
+                            for field in ["basePrice", "currentPrice", "priceValue"]:
+                                val = offer.get(field)
+                                if isinstance(val, (int, float)) and val > 0:
+                                    price_num = int(val)
+                                    break
+
+                        if not price_num and availabilities:
+                            val = availabilities[0].get("price") or availabilities[0].get("value")
+                            if isinstance(val, (int, float)) and val > 0:
+                                price_num = int(val)
+
                         brand_name = offer.get("brandName") or "Без бренда"
                         title = offer.get("title") or f"Товар {merchant_sku}"
 
@@ -788,7 +808,7 @@ class KaspiAPI:
                             "sku": str(master_sku),
                             "merchantSku": str(merchant_sku),
                             "kaspiSku": str(master_sku),
-                            "price": f"{int(price_num)} ₸",
+                            "price": f"{int(price_num)} ₸" if price_num > 0 else "Цена не указана",
                             "status": "Активен" if offer.get("available", True) else "Архив",
                             "url": f"https://kaspi.kz/shop/p/-{master_sku}/?c=750000000#offers",
                             "price_num": int(price_num),

@@ -252,6 +252,7 @@ class BrainWorker:
         Принимает снимок рынка и возвращает задачи на изменение цен и сводную аналитику.
         """
         update_queue = []
+        calculation_logs = []
         total_scanned = len(market_snapshot)
         winning_count = 0
         total_saved_margin = 0.0
@@ -308,6 +309,12 @@ class BrainWorker:
                     "calculation_result": res,
                     "product_ref": p
                 })
+                log_msg = (
+                    f"🧠 [Brain] Товар '{p.get('name', sku_key)}' (SKU {sku_key}): "
+                    f"расчитано изменение цены {int(config.my_current_price)} ₸ -> {int(new_price)} ₸ "
+                    f"(лидер рынка: {res.get('bestCompetitorPrice') or 'Н/Д'} ₸, режим: {config.mode}, действие: {res['action']})."
+                )
+                calculation_logs.append(log_msg)
             else:
                 diag_msg = (
                     f"ℹ️ [Brain] Товар '{p.get('name', sku_key)}' (SKU {sku_key}): "
@@ -315,6 +322,7 @@ class BrainWorker:
                     f"(лучший конкурент: {res.get('bestCompetitorPrice') or 'Н/Д'} ₸, действие: {res['action']}, позиция: {res['currentPos']})."
                 )
                 logger.info(diag_msg)
+                calculation_logs.append(diag_msg)
 
         buy_box_share = round((winning_count / total_scanned * 100.0), 1) if total_scanned > 0 else 0.0
 
@@ -329,5 +337,6 @@ class BrainWorker:
 
         return {
             "update_queue": update_queue,
-            "analytics": analytics
+            "analytics": analytics,
+            "calculation_logs": calculation_logs
         }

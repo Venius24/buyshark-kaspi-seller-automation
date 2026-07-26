@@ -55,6 +55,7 @@ async def run_price_dumping_job(
     brain_result = BrainWorker.calculate_price_decisions(market_snapshot, effective_configs, merchant_id)
     update_queue = brain_result["update_queue"]
     analytics = brain_result["analytics"]
+    calculation_logs = brain_result.get("calculation_logs", [])
 
     # Сохраняем агрегированную аналитику в стейт
     try:
@@ -72,6 +73,10 @@ async def run_price_dumping_job(
     # 3. 🚀 Воркер-Исполнитель
     exec_result = RateLimitExecutorWorker.execute_updates(update_queue, save_override_func, merchant_id=merchant_id)
     exec_result["analytics"] = analytics
+    
+    # Объединяем диагностические логи расчета и выполнения
+    all_logs = list(calculation_logs) + list(exec_result.get("logs", []))
+    exec_result["logs"] = all_logs
     return exec_result
 
 __all__ = [
