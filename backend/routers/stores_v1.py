@@ -155,7 +155,7 @@ async def connect_full_store(
     try:
         valid = KaspiAPI.verify_token(api_token_clean)
         if not valid:
-            raise HTTPException(status_code=401, detail="Kaspi API отклонил ваш токен (X-Auth-Token). Проверьте правильность.")
+            raise HTTPException(status_code=400, detail="Kaspi API отклонил ваш токен (X-Auth-Token). Проверьте правильность.")
     except HTTPException:
         raise
     except Exception as e:

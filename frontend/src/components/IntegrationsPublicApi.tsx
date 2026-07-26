@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch, API_URL } from '../api';
 import {
   Key,
   Webhook,
@@ -59,7 +60,7 @@ export const IntegrationsPublicApi: React.FC = () => {
 
   const fetchKeys = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/integrations/keys`);
+      const res = await apiFetch(`${API_URL}/api/integrations/keys`);
       const data = await res.json();
       if (data.success) {
         setKeys(data.keys || []);
@@ -71,7 +72,7 @@ export const IntegrationsPublicApi: React.FC = () => {
 
   const fetchWebhookConfig = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/integrations/webhook`);
+      const res = await apiFetch(`${API_URL}/api/integrations/webhook`);
       const data = await res.json();
       if (data.success && data.config) {
         setWebhookConfig({
@@ -103,7 +104,7 @@ export const IntegrationsPublicApi: React.FC = () => {
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/integrations/keys`, {
+      const res = await apiFetch(`${API_URL}/api/integrations/keys`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newKeyName.trim() })
@@ -125,7 +126,7 @@ export const IntegrationsPublicApi: React.FC = () => {
   const handleRevokeKey = async (keyId: string, name: string) => {
     if (!window.confirm(`Вы уверены, что хотите отозвать API-ключ "${name}"?`)) return;
     try {
-      const res = await fetch(`${API_URL}/api/integrations/keys/${keyId}`, { method: 'DELETE' });
+      const res = await apiFetch(`${API_URL}/api/integrations/keys/${keyId}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         showToast('success', 'API-ключ отозван.');
@@ -142,7 +143,7 @@ export const IntegrationsPublicApi: React.FC = () => {
     e.preventDefault();
     setSavingWebhook(true);
     try {
-      const res = await fetch(`${API_URL}/api/integrations/webhook`, {
+      const res = await apiFetch(`${API_URL}/api/integrations/webhook`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(webhookConfig)
@@ -164,7 +165,7 @@ export const IntegrationsPublicApi: React.FC = () => {
   const handleTestWebhook = async () => {
     setTestingWebhook(true);
     try {
-      const res = await fetch(`${API_URL}/api/integrations/webhook/test`, { method: 'POST' });
+      const res = await apiFetch(`${API_URL}/api/integrations/webhook/test`, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         showToast('info', data.message || 'Тестовый Webhook отправлен в 1С!');

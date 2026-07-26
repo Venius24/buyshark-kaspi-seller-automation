@@ -195,7 +195,7 @@ export default function App() {
   useEffect(() => {
     const fetchWidgets = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/analytics/widgets`);
+        const res = await apiFetch(`${API_URL}/api/analytics/widgets`);
         const data = await res.json();
         if (res.ok && data.success) {
           setWidgetData(data);
@@ -218,7 +218,7 @@ export default function App() {
 
   const checkMcStatus = async (verify = false) => {
     try {
-      const res = await fetch(`${API_URL}/api/mc-status?verify=${verify}`);
+      const res = await apiFetch(`${API_URL}/api/mc-status?verify=${verify}`);
       const data = await res.json();
       if (res.ok && data.success) {
         setMcHasSession(data.has_session && data.valid);
@@ -232,7 +232,7 @@ export default function App() {
 
   const loadDumpingConfigs = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/dumping/configs`);
+      const res = await apiFetch(`${API_URL}/api/dumping/configs`);
       const data = await res.json();
       if (res.ok && data.success) {
         setDumpingConfigs(data.configs || {});
@@ -244,7 +244,7 @@ export default function App() {
 
   const loadDumpingStatus = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/dumping/status`);
+      const res = await apiFetch(`${API_URL}/api/dumping/status`);
       const data = await res.json();
       if (res.ok && data.success) {
         setNextRunSeconds(data.next_run_seconds);
@@ -277,7 +277,7 @@ export default function App() {
   ) => {
     addLog(`Сохранение настроек демпинга для ${sku} (Режим: ${mode})...`);
     try {
-      const res = await fetch(`${API_URL}/api/dumping/config`, {
+      const res = await apiFetch(`${API_URL}/api/dumping/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -310,7 +310,7 @@ export default function App() {
   const saveProductUpdate = async (sku: string, price: number, stock: number, brand: string | undefined, status: string | undefined) => {
     addLog(`Сохранение параметров товара ${sku}...`);
     try {
-      const res = await fetch(`${API_URL}/api/products/update`, {
+      const res = await apiFetch(`${API_URL}/api/products/update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -343,7 +343,7 @@ export default function App() {
     setIsRunningDumping(true);
     addLog('Запуск автоматического расчета демпинга цен...');
     try {
-      const res = await fetch(`${API_URL}/api/dumping/run`, { method: 'POST' });
+      const res = await apiFetch(`${API_URL}/api/dumping/run`, { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.success) {
         addLog(data.message);
@@ -454,7 +454,7 @@ export default function App() {
     setFetchingProducts(true);
     addLog(`Загрузка товаров (Стр: ${pageNum}, Лимит: ${pSize}, Статус: ${status}, Демпинг: ${dumpingOnly}, Фильтр статуса: ${statusFilterParam || 'Все'})...`);
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `${API_URL}/api/products?page=${pageNum}&status=${status}&search=${encodeURIComponent(search)}&page_size=${pSize}&dumping_only=${dumpingOnly}&dumping_status_filter=${encodeURIComponent(statusFilterParam)}`
       );
       const data = await res.json();
@@ -477,7 +477,7 @@ export default function App() {
     setFetchingProducts(true);
     addLog('Принудительное обновление кэша товаров из Kaspi API...');
     try {
-      const res = await fetch(`${API_URL}/api/products/refresh`, { method: 'POST' });
+      const res = await apiFetch(`${API_URL}/api/products/refresh`, { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.success) {
         addLog(`Кэш обновлен: ${data.count} товаров.`);
@@ -507,7 +507,7 @@ export default function App() {
     try {
       let url = `${API_URL}/api/orders?state=${state}&status=${status}&limit=${limit}`;
       if (assembled !== undefined) url += `&assembled=${assembled}`;
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       const data = await res.json();
       if (res.ok && data.success) {
         setOrders(data.orders);
@@ -539,7 +539,7 @@ export default function App() {
   const packOrder = async (orderId: string, internalId: string) => {
     addLog(`Сборка заказа #${orderId}...`);
     try {
-      const res = await fetch(`${API_URL}/api/orders/pack`, {
+      const res = await apiFetch(`${API_URL}/api/orders/pack`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ order_id: internalId, new_status: 'ACCEPTED_BY_MERCHANT' }),
@@ -560,7 +560,7 @@ export default function App() {
     setPackingAll(true);
     addLog('Массовая сборка всех заказов...');
     try {
-      const res = await fetch(`${API_URL}/api/orders/pack-all`, { method: 'POST' });
+      const res = await apiFetch(`${API_URL}/api/orders/pack-all`, { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.success) {
         addLog(data.message);
@@ -586,7 +586,7 @@ export default function App() {
       if (order) {
         addLog(`Сборка заказа #${order.id}...`);
         try {
-          const res = await fetch(`${API_URL}/api/orders/pack`, {
+          const res = await apiFetch(`${API_URL}/api/orders/pack`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ order_id: order.internalId, new_status: 'ACCEPTED_BY_MERCHANT' }),
@@ -626,7 +626,7 @@ export default function App() {
     setFetchingTransfers(true);
     addLog(`Загрузка передач (Фильтр: ${filter === 'ALL' ? 'Все' : filter === 'EXPRESS' ? 'Экспресс' : 'Сегодня'})...`);
     try {
-      const res = await fetch(`${API_URL}/api/transfers?filter=${filter}`);
+      const res = await apiFetch(`${API_URL}/api/transfers?filter=${filter}`);
       const data = await res.json();
       if (res.ok && data.success) {
         setTransfers(data.transfers);
@@ -643,7 +643,7 @@ export default function App() {
 
   const loadChatbotConfig = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/chatbot/config`);
+      const res = await apiFetch(`${API_URL}/api/chatbot/config`);
       const data = await res.json();
       if (res.ok && data.success) {
         setChatbotConfig(data.config);
@@ -655,7 +655,7 @@ export default function App() {
 
   const loadChatbotStatus = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/chatbot/status`);
+      const res = await apiFetch(`${API_URL}/api/chatbot/status`);
       const data = await res.json();
       if (res.ok && data.success) {
         setChatbotStatus(data);
@@ -668,7 +668,7 @@ export default function App() {
   const saveChatbotConfig = async (newCfg: Partial<typeof chatbotConfig>) => {
     addLog('Сохранение конфигурации ИИ-автоответчика...');
     try {
-      const res = await fetch(`${API_URL}/api/chatbot/config`, {
+      const res = await apiFetch(`${API_URL}/api/chatbot/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newCfg)
@@ -689,7 +689,7 @@ export default function App() {
   const unblockChatbotGroup = async (groupId: string) => {
     addLog(`Разблокировка чата ${groupId} для ИИ...`);
     try {
-      const res = await fetch(`${API_URL}/api/chatbot/unblock`, {
+      const res = await apiFetch(`${API_URL}/api/chatbot/unblock`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ group_id: groupId })
@@ -1066,7 +1066,7 @@ export default function App() {
                   </div>
                   <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => {
                     addLog('Проверка состояния сессии REST API...');
-                    fetch(`${API_URL}/api/verify-session`, { method: 'POST' })
+                    apiFetch(`${API_URL}/api/verify-session`, { method: 'POST' })
                       .then(r => r.json())
                       .then(d => addLog(d.valid ? 'Сессия REST API активна ✓' : 'Сессия REST API невалидна ✗'))
                       .catch(() => addLog('Ошибка проверки сессии REST API'));
@@ -1196,7 +1196,7 @@ export default function App() {
                 </div>
                 <button className="btn btn-secondary" onClick={() => {
                   addLog('Проверка состояния сессии REST API...');
-                  fetch(`${API_URL}/api/verify-session`, { method: 'POST' })
+                  apiFetch(`${API_URL}/api/verify-session`, { method: 'POST' })
                     .then(r => r.json())
                     .then(d => addLog(d.valid ? 'Сессия REST API активна ✓' : 'Сессия REST API невалидна ✗'))
                     .catch(() => addLog('Ошибка проверки сессии REST API'));

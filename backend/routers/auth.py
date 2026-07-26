@@ -17,7 +17,7 @@ def authenticate(req: AuthRequest):
     try:
         valid = KaspiAPI.verify_token(token)
         if not valid:
-            raise HTTPException(status_code=401, detail="Kaspi API отклонил токен. Проверьте правильность.")
+            raise HTTPException(status_code=400, detail="Kaspi API отклонил токен. Проверьте правильность.")
     except HTTPException:
         raise
     except Exception as e:

@@ -250,7 +250,7 @@ export const MasterStockGroups: React.FC = () => {
       const url = isEdit ? `${API_URL}/api/stock-groups/${editingGroupId}` : `${API_URL}/api/stock-groups`;
       const method = isEdit ? 'PUT' : 'POST';
 
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -294,7 +294,7 @@ export const MasterStockGroups: React.FC = () => {
 
   const handleSaveInlineStock = async (groupId: string) => {
     try {
-      const res = await fetch(`${API_URL}/api/stock-groups/${groupId}/stock`, {
+      const res = await apiFetch(`${API_URL}/api/stock-groups/${groupId}/stock`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ shared_stock: inlineStockVal }),
@@ -316,7 +316,7 @@ export const MasterStockGroups: React.FC = () => {
   const handleManualSync = async (groupId: string) => {
     setSyncingGroupId(groupId);
     try {
-      const res = await fetch(`${API_URL}/api/stock-groups/${groupId}/sync`, { method: 'POST' });
+      const res = await apiFetch(`${API_URL}/api/stock-groups/${groupId}/sync`, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         showToast('success', 'Синхронизация запущена на Kaspi.');
@@ -335,7 +335,7 @@ export const MasterStockGroups: React.FC = () => {
   const handleDeleteGroup = async (group: MasterStockGroup) => {
     if (!window.confirm(`Вы уверены, что хотите удалить группу "${group.group_name}"?`)) return;
     try {
-      const res = await fetch(`${API_URL}/api/stock-groups/${group.group_id}`, { method: 'DELETE' });
+      const res = await apiFetch(`${API_URL}/api/stock-groups/${group.group_id}`, { method: 'DELETE' });
 
       const data = await res.json();
       if (data.success) {

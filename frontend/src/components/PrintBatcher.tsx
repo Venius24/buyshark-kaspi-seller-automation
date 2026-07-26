@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { apiFetch } from '../api';
 
 interface GeometryAudit {
   is_valid: boolean;
@@ -56,7 +57,7 @@ export const PrintBatcher: React.FC = () => {
 
   const fetchHistoryStats = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/print-batcher/history-stats`);
+      const res = await apiFetch(`${API_BASE}/api/print-batcher/history-stats`);
       if (res.ok) {
         const data = await res.json();
         setPrintedCount(data.printed_count || 0);
@@ -75,7 +76,7 @@ export const PrintBatcher: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/api/print-batcher/reset-history`, { method: 'POST' });
+      const res = await apiFetch(`${API_BASE}/api/print-batcher/reset-history`, { method: 'POST' });
       if (res.ok) {
         setPrintedCount(0);
         alert('История печати за сегодня сброшена');
@@ -126,7 +127,7 @@ export const PrintBatcher: React.FC = () => {
     formData.append('force_reprint', String(forceReprint));
 
     try {
-      const response = await fetch(`${API_BASE}/api/print-batcher/process`, {
+      const response = await apiFetch(`${API_BASE}/api/print-batcher/process`, {
         method: 'POST',
         body: formData,
       });
