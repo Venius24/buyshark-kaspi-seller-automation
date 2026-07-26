@@ -1,21 +1,19 @@
-import asyncio
 import logging
-import requests
+import httpx
 from backend.chatbot.config import load_chatbot_config
 
 logger = logging.getLogger(__name__)
-http_session = requests.Session()
 
 async def generate_ai_reply(client_name: str, item_title: str, history: list) -> tuple[str, bool]:
     """
-    Асинхронно генерирует ответ клиенту через DeepSeek API.
+    Асинхронно генерирует ответ клиенту через DeepSeek API с помощью httpx.AsyncClient.
     Возвращает (reply_text, is_human_override).
     """
     cfg = load_chatbot_config()
-    api_key = cfg.get("deepseek_api_key", "").strip()
+    api_key = (cfg.get("deepseek_api") or cfg.get("deepseek_api_key") or "").strip()
 
     if not api_key:
-        logger.warning("⚠️ DEEPSEEK_API_KEY не установлен. Автоматический вызов менеджера.")
+        logger.warning("⚠️ DEEPSEEK_API не установлен в .env. Автоматический вызов менеджера.")
         return "Здравствуйте! Приняли ваше обращение. Сейчас менеджер проверит детали заказа и ответит вам.", True
 
     url = "https://api.deepseek.com/chat/completions"
@@ -78,18 +76,17 @@ async def generate_ai_reply(client_name: str, item_title: str, history: list) ->
     }
 
     try:
-        def call_deepseek():
-            return http_session.post(url, headers=headers, json=payload, timeout=(4, 10), verify=False)
-        resp = await asyncio.to_thread(call_deepseek)
-        if resp.status_code == 200:
-            content = resp.json()["choices"][0]["message"]["content"].strip()
-            if "[HUMAN_OVERRIDE]" in content:
-                content = content.replace("[HUMAN_OVERRIDE]", "").strip()
-                return content, True
-            return content, False
-        else:
-            logger.error(f"💥 Ошибка DeepSeek API: HTTP {resp.status_code} - {resp.text}")
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            if resp.status_code == 200:
+                content = resp.json()["choices"][0]["message"]["content"].strip()
+                if "[HUMAN_OVERRIDE]" in content:
+                    content = content.replace("[HUMAN_OVERRIDE]", "").strip()
+                    return content, True
+                return content, False
+            else:
+                logger.error(f"💥 Ошибка DeepSeek API: HTTP {resp.status_code} - {resp.text}")
     except Exception as e:
-        logger.error(f"💥 Сбой при вызове DeepSeek API: {e}")
+        logger.error(f"💥 Сбой при асинхронном вызове DeepSeek API: {e}")
 
     return "Здравствуйте! Приняли ваше обращение. Сейчас менеджер проверит детали заказа и ответит вам.", True

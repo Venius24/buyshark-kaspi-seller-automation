@@ -68,9 +68,8 @@ async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus
             f"⚠️ Все карточки товаров группы занулены и временно сняты с продажи на Kaspi!"
         )
 
-        use_proxy = cfg.get("use_tg_proxy")
-        tg_proxy = cfg.get("tg_proxy")
-        proxies = {"https": tg_proxy} if (use_proxy and tg_proxy) else None
+        tg_proxy = cfg.get("tg_bot_proxy") or cfg.get("tg_proxy")
+        proxies = {"https": tg_proxy, "http": tg_proxy} if tg_proxy else None
 
         for admin_id in admin_ids:
             url = f"https://api.telegram.org/bot{tg_token}/sendMessage"

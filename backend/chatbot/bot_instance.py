@@ -36,8 +36,9 @@ def init_bot():
 
     try:
         session = None
-        if cfg.get("use_tg_proxy") and cfg.get("tg_proxy"):
-            proxy_url = cfg["tg_proxy"]
+        proxy_url = cfg.get("tg_bot_proxy") or cfg.get("tg_proxy")
+        if proxy_url:
+            logger.info(f"🌐 Использование TG_BOT_PROXY для Telegram-бота: {proxy_url}")
             session = AiohttpSession(proxy=proxy_url)
 
         bot = Bot(

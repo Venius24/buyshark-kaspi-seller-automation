@@ -24,46 +24,43 @@ class UnblockChatRequest(BaseModel):
 def get_chatbot_config():
     """Получить конфигурацию ИИ-автоответчика."""
     cfg = config.load_chatbot_config()
-    # Маскируем API ключи для безопасности на клиенте (показываем перфикс)
-    masked_deepseek = (cfg.get("deepseek_api_key", "")[:6] + "..." + cfg.get("deepseek_api_key", "")[-4:]) if len(cfg.get("deepseek_api_key", "")) > 10 else cfg.get("deepseek_api_key", "")
-    masked_tg = (cfg.get("tg_bot_token", "")[:6] + "..." + cfg.get("tg_bot_token", "")[-4:]) if len(cfg.get("tg_bot_token", "")) > 10 else cfg.get("tg_bot_token", "")
+    raw_deepseek = cfg.get("deepseek_api") or cfg.get("deepseek_api_key") or ""
+    raw_tg_token = cfg.get("tg_bot_token", "")
+    raw_tg_proxy = cfg.get("tg_bot_proxy") or cfg.get("tg_proxy") or ""
+
+    masked_deepseek = (raw_deepseek[:6] + "..." + raw_deepseek[-4:]) if len(raw_deepseek) > 10 else ("Configured in .env" if raw_deepseek else "")
+    masked_tg = (raw_tg_token[:6] + "..." + raw_tg_token[-4:]) if len(raw_tg_token) > 10 else ("Configured in .env" if raw_tg_token else "")
 
     return {
         "success": True,
         "config": {
             "enabled": cfg.get("enabled", True),
-            "deepseek_api_key": cfg.get("deepseek_api_key", ""),
+            "deepseek_api": raw_deepseek,
+            "deepseek_api_key": raw_deepseek,
             "deepseek_api_key_masked": masked_deepseek,
-            "tg_bot_token": cfg.get("tg_bot_token", ""),
+            "tg_bot_token": raw_tg_token,
             "tg_bot_token_masked": masked_tg,
+            "tg_bot_proxy": raw_tg_proxy,
+            "tg_proxy": raw_tg_proxy,
+            "use_tg_proxy": bool(raw_tg_proxy),
             "admin_ids": cfg.get("admin_ids", []),
-            "use_tg_proxy": cfg.get("use_tg_proxy", False),
-            "tg_proxy": cfg.get("tg_proxy", ""),
             "merchant_id": cfg.get("merchant_id", "")
         }
     }
 
 @router.post("/config")
 def save_chatbot_config(req: ChatbotConfigRequest):
-    """Сохранить или обновить конфигурацию чат-бота."""
+    """Сохранить пользовательские настройки чат-бота (admin_ids, enabled)."""
     update_data = {}
     if req.enabled is not None:
         update_data["enabled"] = req.enabled
-    if req.deepseek_api_key is not None:
-        update_data["deepseek_api_key"] = req.deepseek_api_key.strip()
-    if req.tg_bot_token is not None:
-        update_data["tg_bot_token"] = req.tg_bot_token.strip()
     if req.admin_ids is not None:
         update_data["admin_ids"] = req.admin_ids
-    if req.use_tg_proxy is not None:
-        update_data["use_tg_proxy"] = req.use_tg_proxy
-    if req.tg_proxy is not None:
-        update_data["tg_proxy"] = req.tg_proxy.strip()
 
     updated = config.save_chatbot_config(update_data)
     return {
         "success": True,
-        "message": "Конфигурация ИИ-автоответчика успешно сохранена.",
+        "message": "Настройки уведомлений чат-бота сохранены.",
         "config": updated
     }
 
