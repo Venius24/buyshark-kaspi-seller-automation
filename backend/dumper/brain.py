@@ -308,6 +308,13 @@ class BrainWorker:
                     "calculation_result": res,
                     "product_ref": p
                 })
+            else:
+                diag_msg = (
+                    f"ℹ️ [Brain] Товар '{p.get('name', sku_key)}' (SKU {sku_key}): "
+                    f"текущая цена {int(config.my_current_price)} ₸ равна оптимальной {int(new_price)} ₸ "
+                    f"(лучший конкурент: {res.get('bestCompetitorPrice') or 'Н/Д'} ₸, действие: {res['action']}, позиция: {res['currentPos']})."
+                )
+                logger.info(diag_msg)
 
         buy_box_share = round((winning_count / total_scanned * 100.0), 1) if total_scanned > 0 else 0.0
 

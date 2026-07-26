@@ -40,6 +40,7 @@ async def background_dumping_loop():
                 try:
                     with open(products_file, "r", encoding="utf-8") as f:
                         products = json.load(f)
+                    products = _apply_overrides(products)
                     
                     configs = _load_dumping_configs()
                     logger.info("🤖 [Scheduler] Running automated 5-minute price dumper cycle...")
@@ -116,6 +117,7 @@ async def run_price_dumping():
     try:
         with open(products_file, "r", encoding="utf-8") as f:
             products = json.load(f)
+        products = _apply_overrides(products)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ошибка чтения товаров: {e}")
         

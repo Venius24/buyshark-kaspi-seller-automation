@@ -84,14 +84,14 @@ class DumpingConfigDB(Base):
     __tablename__ = "dumping_configs"
 
     sku: Mapped[str] = mapped_column(String(100), primary_key=True)
-    min_price: Mapped[float] = mapped_column(Integer, default=0)
-    max_price: Mapped[float] = mapped_column(Integer, default=0)
-    dump_step: Mapped[float] = mapped_column(Integer, default=10)
+    min_price: Mapped[float] = mapped_column(Float, default=0.0)
+    max_price: Mapped[float] = mapped_column(Float, default=0.0)
+    dump_step: Mapped[float] = mapped_column(Float, default=10.0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     mode: Mapped[str] = mapped_column(String(50), default="TOP_1")
     target_position: Mapped[int] = mapped_column(Integer, default=1)
     max_delivery_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    min_seller_rating: Mapped[Optional[float]] = mapped_column(Integer, nullable=True)
+    min_seller_rating: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     same_city_only: Mapped[bool] = mapped_column(Boolean, default=False)
     blacklisted_merchants: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-stringified list
     city_code: Mapped[str] = mapped_column(String(50), default="750000000")
