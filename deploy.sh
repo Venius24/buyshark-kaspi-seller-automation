@@ -44,7 +44,10 @@ sudo cp -r "$FRONTEND_DIR/dist" /var/www/kaspi-saas
 echo "✅ Фронтенд скопирован."
 
 # ── 5. Перезапуск бекэнда через systemd ────────────────────────
-echo "⚙️  Шаг 5: Перезапуск systemd сервиса $SERVICE_NAME..."
+echo "⚙️  Шаг 5: Настройка и перезапуск systemd сервиса $SERVICE_NAME..."
+sudo cp "$APP_DIR/deploy/kaspi-saas.service" /etc/systemd/system/kaspi-saas.service
+sudo systemctl daemon-reload
+sudo systemctl enable "$SERVICE_NAME"
 sudo systemctl restart "$SERVICE_NAME"
 sleep 2
 
