@@ -187,9 +187,9 @@ export const StoreHub: React.FC = () => {
     }
   };
 
-  const handleSyncCookies = async (storeId: string) => {
+  const handleSyncCookies = async (store: StoreItem) => {
     try {
-      const res = await apiFetch(`${API_BASE}/api/v1/stores/${storeId}/sync-cookies`, {
+      const res = await apiFetch(`${API_BASE}/api/v1/stores/${store.id}/sync-cookies`, {
         method: 'POST',
       });
       if (res.ok) {
@@ -197,13 +197,19 @@ export const StoreHub: React.FC = () => {
         fetchStoresAndProfile();
       } else {
         const errData = await res.json();
-        alert(`⚠️ ${errData.detail || 'Не удалось привязать куки'}`);
+        // Предзаполняем форму для быстрого SMS-входа без повторного ввода API Токена
         resetModalState();
+        setStoreName(store.name);
+        setApiToken('PRESERVE_EXISTING');
+        setErrorMsg(`⚠️ ${errData.detail || 'Требуется SMS-авторизация'}. Введите номер телефона и нажмите «Отправить СМС».`);
         setShowAddModal(true);
       }
     } catch (err) {
       console.error('Error syncing store cookies:', err);
       resetModalState();
+      setStoreName(store.name);
+      setApiToken('PRESERVE_EXISTING');
+      setErrorMsg('⚠️ Ошибка синхронизации. Введите номер телефона и нажмите «Отправить СМС» для входа.');
       setShowAddModal(true);
     }
   };
@@ -308,7 +314,7 @@ export const StoreHub: React.FC = () => {
                   <button onClick={() => handleVerifyStore(s.id)} style={styles.verifyBtn}>
                     🔄 Проверить статус
                   </button>
-                  <button onClick={() => handleSyncCookies(s.id)} style={styles.syncBtn}>
+                  <button onClick={() => handleSyncCookies(s)} style={styles.syncBtn}>
                     🔑 Обновить куки
                   </button>
                   <button onClick={() => handleDeleteStore(s.id)} style={styles.deleteBtn}>

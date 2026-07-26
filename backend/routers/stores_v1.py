@@ -9,7 +9,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from backend.db.database import get_db
 from backend.db.models import User, Subscription, Store, UserStore
 from backend.security.crypto import encrypt_data, decrypt_data
@@ -191,17 +191,18 @@ async def connect_full_store(
                 logger.error(f"Ошибка чтения state.json: {e}")
 
     # 4. Проверяем существование магазина в базе
-    existing_stmt = select(Store).where(Store.merchant_id == merchant_id)
+    existing_stmt = select(Store).where(or_(Store.merchant_id == merchant_id, Store.name == name_clean))
     ex_res = await db.execute(existing_stmt)
     existing_store = ex_res.scalar_one_or_none()
 
-    encrypted_api_key = encrypt_data(api_token_clean)
     encrypted_cookies = encrypt_data(cookies_str) if cookies_str else None
 
     if existing_store:
         # Обновляем существующий магазин
         existing_store.name = name_clean
-        existing_store.encrypted_api_key = encrypted_api_key
+        if api_token_clean and not api_token_clean.startswith("PRESERVE"):
+            existing_store.encrypted_api_key = encrypt_data(api_token_clean)
+            
         if encrypted_cookies:
             existing_store.encrypted_cookies = encrypted_cookies
             existing_store.status = "ACTIVE"
@@ -215,8 +216,8 @@ async def connect_full_store(
 
         await db.commit()
 
-        # Сохраняем сессию активного токена и merchant_id для REST подсистем
-        _save_session({"token": api_token_clean, "merchant_id": existing_store.merchant_id})
+        active_token = decrypt_data(existing_store.encrypted_api_key) if existing_store.encrypted_api_key else api_token_clean
+        _save_session({"token": active_token, "merchant_id": existing_store.merchant_id})
 
         return StoreResponse(
             id=existing_store.id,
@@ -227,6 +228,8 @@ async def connect_full_store(
             last_sync_at=existing_store.last_sync_at.isoformat() if existing_store.last_sync_at else None,
             created_at=existing_store.created_at.isoformat()
         )
+
+    encrypted_api_key = encrypt_data(api_token_clean)
 
     # 5. Создаем новый магазин
     new_store = Store(
