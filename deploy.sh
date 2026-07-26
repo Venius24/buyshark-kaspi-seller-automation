@@ -25,6 +25,26 @@ if [ $(swapon --show | wc -l) -eq 0 ]; then
   echo "✅ SWAP 2GB успешно подключен."
 fi
 
+# ── 0.2. Автоматическая настройка PostgreSQL 16 ────────────────
+if ! command -v psql &> /dev/null; then
+  echo "🐘 PostgreSQL не найден. Устанавливаем PostgreSQL 16..."
+  sudo apt-get update -q
+  sudo apt-get install -y -q postgresql postgresql-contrib
+  sudo systemctl enable --now postgresql
+fi
+
+if ! sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw kaspi_saas; then
+  echo "🐘 Создание базы данных PostgreSQL kaspi_saas..."
+  sudo -u postgres psql -c "CREATE USER kaspi_user WITH PASSWORD 'kaspi_pass_2026';" || true
+  sudo -u postgres psql -c "CREATE DATABASE kaspi_saas OWNER kaspi_user;" || true
+  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE kaspi_saas TO kaspi_user;" || true
+  echo "✅ База данных kaspi_saas создана."
+fi
+
+if ! grep -q "DATABASE_URL" "$APP_DIR/.env" 2>/dev/null; then
+  echo "DATABASE_URL=postgresql+asyncpg://kaspi_user:kaspi_pass_2026@localhost:5432/kaspi_saas" >> "$APP_DIR/.env"
+fi
+
 # ── 1. Обновление кода ──────────────────────────────────────────
 BRANCH="${1:-$(git rev-parse --abbrev-ref HEAD)}"
 echo "📦 Шаг 1: Получение последнего кода (ветка: $BRANCH)..."
