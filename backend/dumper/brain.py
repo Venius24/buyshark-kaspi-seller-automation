@@ -59,8 +59,8 @@ class DumpingEngine:
 
             # 5. Фильтр по городу
             if config.same_city_only:
-                offer_city = str(offer.get("cityCode") or offer.get("city") or "")
-                if offer_city and offer_city != str(config.city_code):
+                offer_city = str(offer.get("cityCode") or offer.get("cityId") or offer.get("city") or "")
+                if offer_city and offer_city.isdigit() and offer_city != str(config.city_code):
                     continue
 
             cleaned.append({
@@ -108,8 +108,20 @@ class DumpingEngine:
         # Список чисто конкурентов (без нас)
         competitors = [o for o in sorted_offers if o.get("merchantId") != str(my_merchant_id)]
 
-        # Случай 0: Конкурентов нет вовсе
+        # Случай 0: Конкурентов нет
         if not competitors:
+            # Если предложения не удалось загрузить (ошибка API / пустой ответ) — сохраняем текущую цену
+            if not sellers_offers:
+                return {
+                    "targetPrice": config.my_current_price,
+                    "currentPos": 1,
+                    "bestCompetitorPrice": None,
+                    "firstPrice": config.my_current_price,
+                    "action": "HOLD_POSITION_NO_DATA",
+                    "dumping_status": "WINNING_1ST"
+                }
+
+            # Если предложения загрузились успешно, но в них действительно 0 конкурентов (мы единственные)
             target_price = config.max_price if config.max_price > 0 else config.my_current_price
             return {
                 "targetPrice": target_price,
