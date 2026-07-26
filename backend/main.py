@@ -19,6 +19,7 @@ from backend.routers.public_api import groups as public_groups
 from backend.routers.dumping import background_dumping_loop
 from backend.chatbot.worker import kaspi_chatbot_loop, start_telegram_bot_polling
 from backend.services.stock_sync_worker import master_stock_radar_loop, start_packaging_sync_loop
+from backend.services.products_sync_worker import start_products_sync_loop
 from backend.workers.health_check_worker import start_health_check_loop
 
 app = FastAPI(title="Kaspi SaaS Wrapper API")
@@ -37,6 +38,7 @@ async def startup_event():
     asyncio.create_task(master_stock_radar_loop())
     asyncio.create_task(start_packaging_sync_loop(30))
     asyncio.create_task(start_health_check_loop(3600))
+    asyncio.create_task(start_products_sync_loop(1800))
 
 # CORS — разрешаем Vite dev server
 app.add_middleware(
