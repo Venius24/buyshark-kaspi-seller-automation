@@ -33,11 +33,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
       });
 
       if (!res.ok) {
-        const errJson = await res.json();
-        throw new Error(errJson.detail || 'Ошибка авторизации');
+        let msg = `Ошибка сервера (${res.status})`;
+        try {
+          const errJson = await res.json();
+          msg = errJson.detail || errJson.message || msg;
+        } catch {
+          if (res.status === 502) msg = 'Сервер недоступен (502 Bad Gateway). Проверьте статус бэкенда!';
+          else if (res.status === 500) msg = 'Ошибка на бэкенде (500 Internal Server Error)';
+          else if (res.status === 404) msg = 'Маршрут API не найден (404 Not Found)';
+        }
+        throw new Error(msg);
       }
 
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('Некорректный ответ от сервера (не JSON)');
+      }
       if (data.access_token) {
         localStorage.setItem('access_token', data.access_token);
         onSuccess();
