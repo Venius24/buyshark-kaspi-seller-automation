@@ -129,29 +129,26 @@ sudo certbot renew --dry-run
 
 ---
 
-## 🔄 Как работает CI/CD
+## 🔄 Как работает CI/CD (Вариант 2 — Сверхбыстрый облачный деплой)
 
 ```
 git push (любая ветка)
         │
         ▼
-  🧪 Job: test
-  pytest tests/ -v
+  🧪 Job 1: test (Pytest в облаке GitHub)
         │
-  ❌ Fail → pipeline stop, deploy отменяется
-  ✅ Pass ↓
+        ├── ❌ Fail → pipeline stop, deploy отменяется (сервер НЕ затронут)
+        └── ✅ Pass ↓
         │
-  (только при push в main)
+  💻 Job 2: build-frontend (Сборка React через Bun в облаке GitHub)
         │
-        ▼
-  🚀 Job: deploy
-  SSH → сервер → bash deploy.sh
+        └── 📦 Создается артефакт frontend-dist (dist/)
         │
-        ├── git pull origin main
-        ├── pip install -r requirements.txt
-        ├── bun install && bun run build
-        ├── cp dist/ → /var/www/kaspi-saas
-        └── systemctl restart kaspi-saas
+  🚀 Job 3: deploy (Деплой за секунды)
+        │
+        ├── 📦 scp: передача готового dist/ в /var/www/kaspi-saas (без нагрузки VPS)
+        ├── 🐍 SSH: git pull бэкенда + pip install
+        └── ⚙️  SSH: systemctl restart kaspi-saas & reload nginx
 ```
 
 ---

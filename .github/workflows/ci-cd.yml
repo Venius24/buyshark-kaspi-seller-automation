@@ -1,4 +1,4 @@
-name: CI / CD — Kaspi SaaS (Full Auto Deploy)
+name: CI / CD — Kaspi SaaS (Fast Pre-built Deploy)
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────────────────────
-  # JOB 1: Запуск тестов при каждом push
+  # JOB 1: Запуск тестов Pytest
   # ─────────────────────────────────────────────────────────────
   test:
     name: 🧪 Pytest — Unit & Integration Tests
@@ -30,5 +30,35 @@ jobs:
         run: pytest tests/ -v --tb=short
 
   # ─────────────────────────────────────────────────────────────
-  # JOB 2: Полный автодеплой на VPS (если тесты прошли)
+  # JOB 2: Сборка React Frontend в облаке GitHub (Bun)
+  # ─────────────────────────────────────────────────────────────
+  build-frontend:
+    name: 💻 Build React Frontend (Cloud Bun)
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install & Build Frontend
+        run: |
+          cd frontend
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 3: Быстрый автодеплой на VPS (передача dist + git sync)
   # ─────────────────────────────────────────────────────────────
