@@ -47,9 +47,8 @@ fi
 
 # ── 1. Обновление кода ──────────────────────────────────────────
 BRANCH="${1:-$(git rev-parse --abbrev-ref HEAD)}"
-echo "📦 Шаг 1: Получение последнего кода (ветка: $BRANCH)..."
-git fetch origin
-git pull origin "$BRANCH"
+git fetch origin "$BRANCH"
+git reset --hard "origin/$BRANCH"
 echo "✅ Код обновлен."
 
 # ── 2. Обновление Python зависимостей ───────────────────────────
