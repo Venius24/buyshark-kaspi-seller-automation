@@ -1,11 +1,13 @@
 import os
 import json
+import logging
 from fastapi import APIRouter, HTTPException, Query, Response
 from backend.kaspi_wrapper import KaspiAPI
 from backend.models import UpdateProductRequest
 from backend.state_helpers import _require_token, _load_session, _save_override, _apply_overrides
 from backend.dumper import generate_xml_feed
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["products"])
 
 @router.get("/products")
@@ -32,6 +34,7 @@ def get_products(
                 else:
                     all_products = _apply_overrides(all_products)
         except Exception:
+            logger.exception("Failed to load/parse %s", products_file)
             all_products = []
 
     if not all_products:

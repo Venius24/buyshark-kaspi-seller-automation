@@ -3,9 +3,31 @@ FastAPI backend — token-first architecture (Модульная сборка + 
 """
 
 import asyncio
+import os
+import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
+# Локальный .env не подхватывается системой автоматически (на VPS это делает
+# systemd EnvironmentFile) — читаем его вручную, как в backend/chatbot/config.py
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+if os.path.exists(_env_path):
+    with open(_env_path, "r", encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if not _line or _line.startswith("#") or "=" not in _line:
+                continue
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
+
+SENTRY_DSN = os.getenv("SENTRY_DSN_BACKEND")
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+    )
 
 from backend.db.database import init_db
 from backend.db.seed import seed_default_admin

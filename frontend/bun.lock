@@ -5,6 +5,7 @@
     "": {
       "name": "frontend",
       "dependencies": {
+        "@sentry/react": "^10.68.0",
         "lucide-react": "^1.25.0",
         "react": "^19.2.7",
         "react-dom": "^19.2.7",
@@ -103,6 +104,22 @@
     "@rolldown/binding-win32-x64-msvc": ["@rolldown/binding-win32-x64-msvc@1.1.4", "", { "os": "win32", "cpu": "x64" }, "sha512-M1lpniBePobTfsa7Ks9a199e1akxsXn+GYBUKsEzv3YFzOm1HJAMNwKI3qr0Zq+mxwx9gOZoTdP1yXRYsZUocQ=="],
 
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.1", "", {}, "sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw=="],
+
+    "@sentry/browser": ["@sentry/browser@10.68.0", "", { "dependencies": { "@sentry/browser-utils": "10.68.0", "@sentry/conventions": "^0.16.0", "@sentry/core": "10.68.0", "@sentry/feedback": "10.68.0", "@sentry/replay": "10.68.0", "@sentry/replay-canvas": "10.68.0" } }, "sha512-8xVgk7oG2lajXnbXF6a7H1xMZ/U6icqSldHGzQu1+bajfrK8Gan9ULG/Xsj1VM1LlNeK6/7znDJ3u1jgvIwznw=="],
+
+    "@sentry/browser-utils": ["@sentry/browser-utils@10.68.0", "", { "dependencies": { "@sentry/conventions": "^0.16.0", "@sentry/core": "10.68.0" } }, "sha512-be8VtdjCngKc77cstJeV+gO15iH+blyXpBDk8yOehmtX4BkFO33mfTMNCWVR2LA0oOxjIHWRAhf77fIUEhzxPg=="],
+
+    "@sentry/conventions": ["@sentry/conventions@0.16.0", "", {}, "sha512-fO9PLmHdVURcSPUpWCItWAtgKiMwGdJHbovoSEyLplX5sxs2ugvI4CBPTrkkgqhObnZOD0CnWBKDzSVQYBKEyQ=="],
+
+    "@sentry/core": ["@sentry/core@10.68.0", "", { "dependencies": { "@sentry/conventions": "^0.16.0" } }, "sha512-5Amhx8ltVz7vb1bRGyf3c4J69/iHW8R/H+SJxTRILHlsSOBrnVVc/IQEYDC6PTRdRdZ3x2u7RVjxZi2Mhe525g=="],
+
+    "@sentry/feedback": ["@sentry/feedback@10.68.0", "", { "dependencies": { "@sentry/core": "10.68.0" } }, "sha512-XbdcXiBnpC3vgw46eHOPeD/ZQ+XzluP75ubdUcaPDW02hCh2nsdXiwjZ2DBImbpvIpTbJgjHf/sIlHWvcZJ2Mg=="],
+
+    "@sentry/react": ["@sentry/react@10.68.0", "", { "dependencies": { "@sentry/browser": "10.68.0", "@sentry/conventions": "^0.16.0", "@sentry/core": "10.68.0" }, "peerDependencies": { "react": "^16.14.0 || 17.x || 18.x || 19.x" } }, "sha512-rIq4QR4ScMHHx9JJZv7Jgw31bMdUVJMx+ykHIJb7htjY6mj78sjKs+KpCsMDnvJxDhSmvftGM1KfKD4BggL7OQ=="],
+
+    "@sentry/replay": ["@sentry/replay@10.68.0", "", { "dependencies": { "@sentry/browser-utils": "10.68.0", "@sentry/core": "10.68.0" } }, "sha512-ZoG2n16vbkx4GWSCnLIqUUN9xlUmccQFbQ2US2rhruQeHTUnHl/ukr8NHOQXZaEbwKyMkX9bEMwfmZHJm+wSTQ=="],
+
+    "@sentry/replay-canvas": ["@sentry/replay-canvas@10.68.0", "", { "dependencies": { "@sentry/core": "10.68.0", "@sentry/replay": "10.68.0" } }, "sha512-HusYcr+He+ohnUDHunYrc5St6vdDnBXpUAndnT5ReyUMVSCiWKfY3paXowU/0787HwYfxdcpZgwC5u79+XbEIg=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 

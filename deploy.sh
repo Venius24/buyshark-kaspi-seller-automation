@@ -34,15 +34,23 @@ if ! command -v psql &> /dev/null; then
 fi
 
 if ! sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw kaspi_saas; then
+  if [ -z "$DB_PASSWORD" ]; then
+    echo "❌ DB_PASSWORD env var is required to bootstrap a fresh kaspi_saas database. Aborting." >&2
+    exit 1
+  fi
   echo "🐘 Создание базы данных PostgreSQL kaspi_saas..."
-  sudo -u postgres psql -c "CREATE USER kaspi_user WITH PASSWORD 'kaspi_pass_2026';" || true
+  sudo -u postgres psql -c "CREATE USER kaspi_user WITH PASSWORD '${DB_PASSWORD}';" || true
   sudo -u postgres psql -c "CREATE DATABASE kaspi_saas OWNER kaspi_user;" || true
   sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE kaspi_saas TO kaspi_user;" || true
   echo "✅ База данных kaspi_saas создана."
 fi
 
 if ! grep -q "DATABASE_URL" "$APP_DIR/.env" 2>/dev/null; then
-  echo "DATABASE_URL=postgresql+asyncpg://kaspi_user:kaspi_pass_2026@localhost:5432/kaspi_saas" >> "$APP_DIR/.env"
+  if [ -z "$DB_PASSWORD" ]; then
+    echo "❌ DB_PASSWORD env var is required to write DATABASE_URL. Aborting." >&2
+    exit 1
+  fi
+  echo "DATABASE_URL=postgresql+asyncpg://kaspi_user:${DB_PASSWORD}@localhost:5432/kaspi_saas" >> "$APP_DIR/.env"
 fi
 
 # ── 1. Обновление кода ──────────────────────────────────────────

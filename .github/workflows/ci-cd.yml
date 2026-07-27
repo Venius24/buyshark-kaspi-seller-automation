@@ -3,7 +3,7 @@ name: CI / CD — Kaspi SaaS (Fast Pre-built Deploy)
 on:
   push:
     branches:
-      - '**'
+      - main
 
 jobs:
   # ─────────────────────────────────────────────────────────────
@@ -47,6 +47,8 @@ jobs:
           bun-version: latest
 
       - name: Install & Build Frontend
+        env:
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
         run: |
           cd frontend
           bun install --frozen-lockfile

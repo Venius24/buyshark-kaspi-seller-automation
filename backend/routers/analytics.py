@@ -7,10 +7,12 @@ from datetime import datetime, timedelta
 import random
 import os
 import json
+import logging
 from backend.state_helpers import _load_dumping_configs, _load_session
 from backend.dumper.config import discover_merchant_id, _decode_base64_if_needed
 from backend.dumper.radar import _fetch_offers_sync
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
 @router.get("/widgets")
@@ -31,7 +33,7 @@ def get_dashboard_widgets():
             with open("states/products.json", "r", encoding="utf-8") as f:
                 products = json.load(f)
         except Exception:
-            pass
+            logger.exception("Failed to load states/products.json")
             
     configs = _load_dumping_configs()
     
@@ -42,7 +44,7 @@ def get_dashboard_widgets():
             with open("states/analytics.json", "r", encoding="utf-8") as f:
                 analytics_data = json.load(f)
         except Exception:
-            pass
+            logger.exception("Failed to load states/analytics.json")
             
     # Calculate fallback counts if states/analytics.json does not exist
     total_scanned = analytics_data.get("total_scanned", 0)
@@ -150,7 +152,7 @@ def get_dashboard_widgets():
             with open("states/dumper_logs.json", "r", encoding="utf-8") as f:
                 radar_events = json.load(f)[:5]
         except Exception:
-            pass
+            logger.exception("Failed to load states/dumper_logs.json")
             
     # Default fallback events if list is empty
     if not radar_events:

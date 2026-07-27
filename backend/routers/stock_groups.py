@@ -1,8 +1,11 @@
 import uuid
 import datetime
 import asyncio
+import logging
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, BackgroundTasks
+
+logger = logging.getLogger(__name__)
 
 from backend.models import (
     MasterStockGroupCreateRequest,
@@ -33,6 +36,7 @@ def _expand_linked_skus(skus: List[str]) -> List[str]:
             with open(products_file, "r", encoding="utf-8") as f:
                 products = json.load(f)
         except Exception:
+            logger.exception("Failed to load %s", products_file)
             products = []
 
     for raw_sku in skus:
