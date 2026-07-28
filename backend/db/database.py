@@ -5,8 +5,6 @@ from sqlalchemy.orm import DeclarativeBase
 
 logger = logging.getLogger(__name__)
 
-# Production default PostgreSQL URI
-DEFAULT_PG_URL = "postgresql+asyncpg://kaspi_user:kaspi_pass_2026@localhost:5432/kaspi_saas"
 RAW_DB_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./kaspi_saas.db")
 
 # Format dialect for SQLAlchemy Async
