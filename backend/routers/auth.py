@@ -1,8 +1,8 @@
 import os
 from fastapi import APIRouter, HTTPException
 from backend.kaspi_wrapper import KaspiAPI
-from backend.models import AuthRequest, PhoneRequest, SmsRequest
-from backend.state_helpers import _get_token, _save_session, SESSION_FILE
+from backend.models import AuthRequest, LoginCredentialsRequest
+from backend.state_helpers import _get_token, _save_session, SESSION_FILE, _save_mc_credentials, _refresh_mc_session
 from backend.services.playwright_worker import worker, Command
 
 router = APIRouter(prefix="/api", tags=["auth"])
@@ -58,26 +58,18 @@ def logout():
         os.remove(SESSION_FILE)
     return {"success": True, "message": "Сессия удалена."}
 
-@router.post("/start-login")
-def start_login(req: PhoneRequest):
-    phone = req.phone.strip()
-    if not phone:
-        raise HTTPException(status_code=400, detail="Не передан номер телефона")
-    
-    success, msg = worker.send_cmd(Command.START_LOGIN, phone)
-    if success:
-        return {"success": True, "message": msg}
-    else:
-        raise HTTPException(status_code=400, detail=msg)
+@router.post("/login")
+def login(req: LoginCredentialsRequest):
+    email = req.email.strip()
+    password = req.password
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email и пароль обязательны")
 
-@router.post("/submit-sms")
-def submit_sms(req: SmsRequest):
-    sms = req.sms.strip()
-    if not sms:
-        raise HTTPException(status_code=400, detail="Не передан SMS-код")
-        
-    success, msg = worker.send_cmd(Command.SUBMIT_SMS, sms)
+    success, msg = worker.send_cmd(Command.LOGIN, {"email": email, "password": password})
     if success:
+        # Сохраняем креды (в зашифрованном виде), чтобы при истечении сессионных
+        # куков backend мог автоматически перелогиниться без участия пользователя.
+        _save_mc_credentials(email, password)
         return {"success": True, "message": msg}
     else:
         raise HTTPException(status_code=400, detail=msg)
@@ -87,14 +79,18 @@ def get_mc_status(verify: bool = False):
     has_session = os.path.exists("state.json")
     if not has_session:
         return {"success": True, "has_session": False, "valid": False}
-        
+
     if verify:
         success, valid = worker.send_cmd(Command.VERIFY_SESSION)
+        if success and not valid:
+            # Куки истекли — пробуем автоматически обновить их сохранёнными кредами.
+            if _refresh_mc_session():
+                success, valid = worker.send_cmd(Command.VERIFY_SESSION)
         if success:
             return {"success": True, "has_session": True, "valid": valid}
         else:
             return {"success": False, "detail": valid}
-            
+
     return {"success": True, "has_session": True, "valid": True}
 
 @router.post("/close")

@@ -13,13 +13,18 @@ def _load_mc_cookies() -> dict:
     return _unified_load_mc_cookies()
 
 
+def _mc_request(method: str, url: str, **kwargs):
+    from backend.state_helpers import _mc_api_request
+    return _mc_api_request(method, url, **kwargs)
+
+
 class RateLimitExecutorWorker:
     """
     3. 🚀 Воркер-Исполнитель (API Updater / Rate-Limit Worker)
     Задача: Безопасное обновление цен через приватный 3-шаговый MC API, соблюдение задержек, регистрация оверрайдов.
     """
     @staticmethod
-    def _fetch_kaspi_offer_details(merchant_uid: str, cookies: dict, sku: str) -> dict:
+    def _fetch_kaspi_offer_details(merchant_uid: str, sku: str) -> dict:
         """
         Шаг BFF Details Fetch (GET /bff/offer-view/details?m={merchant_id}&s={sku}).
         Возвращает dict с masterSku, title (model) и актуальной ценой по городам Kaspi.
@@ -33,7 +38,7 @@ class RateLimitExecutorWorker:
         }
         url = f"https://mc.shop.kaspi.kz/bff/offer-view/details?m={merchant_uid}&s={sku}"
         try:
-            r = requests.get(url, headers=headers, cookies=cookies, timeout=10)
+            r = _mc_request("GET", url, headers=headers, timeout=10)
             if r.status_code == 200:
                 data = r.json()
                 master_sku = data.get("masterSku") or ""
@@ -55,7 +60,6 @@ class RateLimitExecutorWorker:
     @staticmethod
     def _update_kaspi_price_sync(
         merchant_uid: str,
-        cookies: dict,
         sku: str,
         master_sku: str,
         model_name: str,
@@ -79,7 +83,7 @@ class RateLimitExecutorWorker:
 
         # Если цена не передана или равна дефолтному 1000, запрашиваем реальные детали карточки через BFF
         if not new_price or new_price <= 0 or new_price == 1000:
-            details = RateLimitExecutorWorker._fetch_kaspi_offer_details(merchant_uid, cookies, sku)
+            details = RateLimitExecutorWorker._fetch_kaspi_offer_details(merchant_uid, sku)
             if details.get("price"):
                 new_price = int(details["price"])
             if details.get("master_sku") and not master_sku:
@@ -98,7 +102,7 @@ class RateLimitExecutorWorker:
             "offers": [{"masterSku": str(master_sku)}]
         }
         try:
-            r0 = requests.post(edit_val_url, headers=headers, cookies=cookies, json=edit_val_payload, timeout=10)
+            r0 = _mc_request("POST", edit_val_url, headers=headers, json=edit_val_payload, timeout=10)
             if r0.status_code in [403, 429]:
                 return False, f"{r0.status_code}_BLOCKED"
         except Exception as e:
@@ -112,7 +116,7 @@ class RateLimitExecutorWorker:
             "entries": [{"city": str(city_id), "price": int(new_price)}]
         }
         try:
-            r1 = requests.post(discount_url, headers=headers, cookies=cookies, json=discount_payload, timeout=10)
+            r1 = _mc_request("POST", discount_url, headers=headers, json=discount_payload, timeout=10)
             if r1.status_code in [403, 429]:
                 return False, f"{r1.status_code}_BLOCKED"
             if r1.status_code != 200:
@@ -137,7 +141,7 @@ class RateLimitExecutorWorker:
             }]
         }
         try:
-            r2 = requests.post(val_url, headers=headers, cookies=cookies, json=val_payload, timeout=10)
+            r2 = _mc_request("POST", val_url, headers=headers, json=val_payload, timeout=10)
             if r2.status_code in [403, 429]:
                 return False, f"{r2.status_code}_BLOCKED"
             if r2.status_code != 200:
@@ -159,7 +163,7 @@ class RateLimitExecutorWorker:
             "cityPrices": [{"cityId": str(city_id), "value": int(new_price)}]
         }
         try:
-            r3 = requests.post(process_url, headers=headers, cookies=cookies, json=process_payload, timeout=10)
+            r3 = _mc_request("POST", process_url, headers=headers, json=process_payload, timeout=10)
             if r3.status_code in [403, 429]:
                 return False, f"{r3.status_code}_BLOCKED"
             if r3.status_code == 200:
@@ -194,7 +198,14 @@ class RateLimitExecutorWorker:
 
         cookies = _load_mc_cookies()
         if not cookies or "mc-session" not in cookies or "mc-sid" not in cookies:
-            warn_msg = "⚠️ [Executor] Внимание: Отсутствуют или недействительны mc-session / mc-sid куки. Обновление цен в Kaspi MC пропущено (запись только в локальный фид). Требуется SMS-вход."
+            # Кук нет вообще (не только истекли) — пробуем автообновить сессию сохранёнными
+            # email/паролем ещё до начала очереди, чтобы не пропускать весь батч зря.
+            from backend.state_helpers import _refresh_mc_session
+            if _refresh_mc_session():
+                cookies = _load_mc_cookies()
+
+        if not cookies or "mc-session" not in cookies or "mc-sid" not in cookies:
+            warn_msg = "⚠️ [Executor] Внимание: Отсутствуют или недействительны mc-session / mc-sid куки, автообновление сессии не удалось. Обновление цен в Kaspi MC пропущено (запись только в локальный фид). Требуется повторный вход в Kaspi MC."
             logger.warning(warn_msg)
             log_messages.append(warn_msg)
             has_mc_auth = False
@@ -231,7 +242,6 @@ class RateLimitExecutorWorker:
 
                 success, val = RateLimitExecutorWorker._update_kaspi_price_sync(
                     merchant_uid=merchant_id,
-                    cookies=cookies,
                     sku=p.get("merchantSku") or sku_key,
                     master_sku=config.master_sku,
                     model_name=p.get("name", "Товар"),
@@ -253,7 +263,6 @@ class RateLimitExecutorWorker:
                     # Повторная одиночная попытка после паузы
                     success, val = RateLimitExecutorWorker._update_kaspi_price_sync(
                         merchant_uid=merchant_id,
-                        cookies=cookies,
                         sku=p.get("merchantSku") or sku_key,
                         master_sku=config.master_sku,
                         model_name=p.get("name", "Товар"),

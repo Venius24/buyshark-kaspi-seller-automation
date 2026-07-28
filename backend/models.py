@@ -17,11 +17,9 @@ class UpdateProductRequest(BaseModel):
     brand: Optional[str] = None
     status: Optional[str] = None
 
-class PhoneRequest(BaseModel):
-    phone: str
-
-class SmsRequest(BaseModel):
-    sms: str
+class LoginCredentialsRequest(BaseModel):
+    email: str
+    password: str
 
 class DumpingConfigRequest(BaseModel):
     sku: str

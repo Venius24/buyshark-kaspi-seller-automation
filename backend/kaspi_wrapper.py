@@ -635,6 +635,25 @@ class KaspiAPI:
         return cookies
 
     @staticmethod
+    def _request_with_mc_refresh(method: str, url: str, cookies: dict, **kwargs):
+        """
+        Выполняет запрос к mc.shop.kaspi.kz с переданными куками. При ответе 401
+        (истёкшая сессия) один раз пробует автообновить куки сохранёнными
+        email/паролем (state_helpers._refresh_mc_session) и повторяет запрос
+        со свежими куками, загруженными тем же способом, что и исходные (KaspiAPI._load_mc_cookies).
+        """
+        resp = requests.request(method, url, cookies=cookies, **kwargs)
+        if resp.status_code == 401:
+            from backend.state_helpers import _refresh_mc_session
+            if _refresh_mc_session():
+                try:
+                    fresh_cookies = KaspiAPI._load_mc_cookies()
+                    resp = requests.request(method, url, cookies=fresh_cookies, **kwargs)
+                except Exception:
+                    pass
+        return resp
+
+    @staticmethod
     def assemble_cargo(token: str, order_code: str, quantity: int) -> bool:
         merchant_id = KaspiAPI.get_merchant_id(token)
         cookies = KaspiAPI._load_mc_cookies()
@@ -654,7 +673,7 @@ class KaspiAPI:
             }]
         }
         url = f"https://mc.shop.kaspi.kz/mc/api/order/cargo/assembled?_m={merchant_id}"
-        resp = requests.post(url, headers=headers, cookies=cookies, json=payload, timeout=15)
+        resp = KaspiAPI._request_with_mc_refresh("POST", url, cookies, headers=headers, json=payload, timeout=15)
 
         if resp.status_code == 200:
             return True
@@ -682,7 +701,7 @@ class KaspiAPI:
             for item in cargo_items
         ]
         url = f"https://mc.shop.kaspi.kz/mc/api/order/cargo/assembled?_m={merchant_id}"
-        resp = requests.post(url, headers=headers, cookies=cookies, json={"cargos": cargos_payload}, timeout=15)
+        resp = KaspiAPI._request_with_mc_refresh("POST", url, cookies, headers=headers, json={"cargos": cargos_payload}, timeout=15)
 
         if resp.status_code == 200:
             return len(cargo_items)
@@ -749,8 +768,8 @@ class KaspiAPI:
                 }
 
                 try:
-                    resp = requests.get(
-                        url, headers=headers, cookies=cookies, params=params, timeout=15
+                    resp = KaspiAPI._request_with_mc_refresh(
+                        "GET", url, cookies, headers=headers, params=params, timeout=15
                     )
 
                     if resp.status_code != 200:

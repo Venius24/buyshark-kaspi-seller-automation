@@ -505,6 +505,67 @@ def _load_mc_cookies() -> dict:
             pass
     return {}
 
+def _save_mc_credentials(email: str, password: str):
+    """Сохраняет email/пароль от кабинета Kaspi MC (в зашифрованном виде) в states/session.json,
+    чтобы при истечении сессионных куков можно было автоматически перелогиниться."""
+    from backend.security.crypto import encrypt_data
+    session = _load_session()
+    session["mc_email_enc"] = encrypt_data(email)
+    session["mc_password_enc"] = encrypt_data(password)
+    _save_session(session)
+
+def _load_mc_credentials() -> Optional[tuple]:
+    """Возвращает (email, password) сохранённых кред Kaspi MC, либо None, если не сохранены/не расшифровались."""
+    from backend.security.crypto import decrypt_data
+    session = _load_session()
+    email_enc = session.get("mc_email_enc")
+    password_enc = session.get("mc_password_enc")
+    if not email_enc or not password_enc:
+        return None
+    email = decrypt_data(email_enc)
+    password = decrypt_data(password_enc)
+    if not email or not password:
+        return None
+    return email, password
+
+def _refresh_mc_session() -> bool:
+    """
+    Автоматически обновляет сессионные куки Kaspi MC (mc-session/mc-sid) через сохранённые
+    email/пароль — вызывается, когда куки истекли (401) или отсутствуют. Возвращает True при успехе.
+    """
+    creds = _load_mc_credentials()
+    if not creds:
+        logger.warning("Автообновление сессии Kaspi MC невозможно: email/пароль не сохранены (пользователь ещё не логинился через /api/login).")
+        return False
+    email, password = creds
+    try:
+        from backend.services.playwright_worker import worker, Command
+        success, msg = worker.send_cmd(Command.LOGIN, {"email": email, "password": password})
+        if success:
+            logger.info("Сессия Kaspi MC автоматически обновлена (истёкшие куки перевыпущены).")
+        else:
+            logger.error(f"Автообновление сессии Kaspi MC не удалось: {msg}")
+        return bool(success)
+    except Exception as e:
+        logger.error(f"Автообновление сессии Kaspi MC вызвало исключение: {e}")
+        return False
+
+def _mc_api_request(method: str, url: str, retry_on_401: bool = True, **kwargs):
+    """
+    Единая точка HTTP-запросов к mc.shop.kaspi.kz с текущими сессионными куками.
+    При ответе 401 (истёкшая сессия) один раз пробует автообновить куки через
+    _refresh_mc_session() (сохранённые email/пароль) и повторяет запрос.
+    """
+    import requests
+    cookies = _load_mc_cookies()
+    resp = requests.request(method, url, cookies=cookies, **kwargs)
+    if resp.status_code == 401 and retry_on_401:
+        logger.warning(f"Kaspi MC вернул 401 для {url} — пробуем автообновить сессию...")
+        if _refresh_mc_session():
+            fresh_cookies = _load_mc_cookies()
+            resp = requests.request(method, url, cookies=fresh_cookies, **kwargs)
+    return resp
+
 API_KEYS_FILE = "states/api_keys.json"
 WEBHOOK_CONFIG_FILE = "states/webhook_config.json"
 

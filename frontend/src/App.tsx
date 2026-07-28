@@ -149,9 +149,9 @@ export default function App() {
     'Ожидание подключения Kaspi API...',
   ]);
 
-  const [phoneInput, setPhoneInput] = useState('+7');
-  const [smsInput, setSmsInput] = useState('');
-  const [mcAuthStep, setMcAuthStep] = useState<'idle' | 'phone' | 'sms' | 'loading' | 'success'>('idle');
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [mcAuthStep, setMcAuthStep] = useState<'idle' | 'credentials' | 'loading' | 'success'>('idle');
   const [mcHasSession, setMcHasSession] = useState(false);
   const [mcAuthError, setMcAuthError] = useState('');
 
@@ -390,7 +390,7 @@ export default function App() {
               if (valid) {
                 addLog('Куки Kaspi MC активны ✓');
               } else {
-                addLog('⚠️ Куки Kaspi MC недействительны или отсутствуют. Требуется SMS-авторизация.');
+                addLog('⚠️ Куки Kaspi MC недействительны или отсутствуют. Требуется повторный вход.');
               }
             });
             loadDumpingConfigs();
@@ -1002,7 +1002,7 @@ export default function App() {
                 {activeTab === 'packaging' && 'Формирование и печать упаковочных актов и маркировок'}
                 {activeTab === 'transfer' && 'Управление актами приема-сдачи и курьерскими передачами'}
                 {activeTab === 'logs' && 'Поток событий системы в реальном времени через WebSocket'}
-                {activeTab === 'settings' && 'Состояние авторизации Kaspi REST API и SMS-сессии Kaspi MC'}
+                {activeTab === 'settings' && 'Состояние авторизации Kaspi REST API и сессии Kaspi MC'}
               </p>
             </div>
           </div>
@@ -1077,7 +1077,7 @@ export default function App() {
 
                 <div className="status-widget">
                   <div>
-                    <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi MC (SMS куки)</h3>
+                    <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi MC (сессионные куки)</h3>
                     <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
                       <span className={`glow-dot ${mcHasSession ? 'glow-dot-success' : 'glow-dot-warning'}`}></span>
                       {mcHasSession ? (
@@ -1088,7 +1088,7 @@ export default function App() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => setMcAuthStep('phone')}>
+                    <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => setMcAuthStep('credentials')}>
                       🔑 {mcHasSession ? 'Войти заново' : 'Войти'}
                     </button>
                   </div>
@@ -1207,7 +1207,7 @@ export default function App() {
 
               <div className="status-widget">
                 <div>
-                  <h3 style={{ fontSize: '15px', fontWeight: 600 }}>Kaspi MC (SMS куки браузера)</h3>
+                  <h3 style={{ fontSize: '15px', fontWeight: 600 }}>Kaspi MC (сессионные куки браузера)</h3>
                   <p style={{ marginTop: '4px', fontSize: '12px' }}>Используется для получения цен конкурентов и управления демпингом.</p>
                   <div style={{ display: 'flex', alignItems: 'center', marginTop: '8px' }}>
                     <span className={`glow-dot ${mcHasSession ? 'glow-dot-success' : 'glow-dot-warning'}`}></span>
@@ -1219,8 +1219,8 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '10px' }}>
-                  <button className="btn btn-primary" onClick={() => setMcAuthStep('phone')}>
-                    🔑 {mcHasSession ? 'Авторизоваться заново' : 'Войти через SMS'}
+                  <button className="btn btn-primary" onClick={() => setMcAuthStep('credentials')}>
+                    🔑 {mcHasSession ? 'Авторизоваться заново' : 'Войти в Kaspi MC'}
                   </button>
                   <button className="btn btn-secondary" onClick={() => {
                     addLog('Проверка кук Kaspi MC...');
@@ -2635,80 +2635,43 @@ export default function App() {
               </div>
             )}
 
-            {mcAuthStep === 'phone' && (
+            {mcAuthStep === 'credentials' && (
               <div>
                 <p style={{ fontSize: '13px', marginBottom: '16px', color: 'var(--text-muted)' }}>
-                  Введите номер телефона, привязанный к вашему кабинету Kaspi Merchant. Мы запустим браузер для входа.
+                  Введите email и пароль от вашего кабинета Kaspi Merchant. Мы запустим браузер для входа.
                 </p>
                 <div style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>Номер телефона</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    placeholder="+77771234567" 
-                    value={phoneInput}
-                    onChange={(e) => setPhoneInput(e.target.value)}
+                  <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>Email</label>
+                  <input
+                    type="email"
+                    className="form-input"
+                    placeholder="you@example.com"
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
                   />
                 </div>
-                <button 
-                  className="btn btn-primary" 
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>Пароль</label>
+                  <input
+                    type="password"
+                    className="form-input"
+                    placeholder="••••••••"
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                  />
+                </div>
+                <button
+                  className="btn btn-primary"
                   style={{ width: '100%' }}
                   onClick={async () => {
                     setMcAuthError('');
                     setMcAuthStep('loading');
-                    addLog('Запуск SMS авторизации для ' + phoneInput);
+                    addLog('Запуск авторизации Kaspi MC для ' + emailInput);
                     try {
-                      const res = await fetch(`${API_URL}/api/start-login`, {
+                      const res = await fetch(`${API_URL}/api/login`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ phone: phoneInput })
-                      });
-                      const data = await res.json();
-                      if (res.ok && data.success) {
-                        setMcAuthStep('sms');
-                        addLog('SMS код отправлен на ' + phoneInput);
-                      } else {
-                        setMcAuthError(data.detail || 'Не удалось начать авторизацию.');
-                        setMcAuthStep('phone');
-                      }
-                    } catch {
-                      setMcAuthError('Ошибка сети.');
-                      setMcAuthStep('phone');
-                    }
-                  }}
-                >
-                  Отправить SMS-код
-                </button>
-              </div>
-            )}
-
-            {mcAuthStep === 'sms' && (
-              <div>
-                <p style={{ fontSize: '13px', marginBottom: '16px', color: 'var(--text-muted)' }}>
-                  На ваш номер телефона отправлен код подтверждения. Введите его ниже.
-                </p>
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>Код из SMS</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    placeholder="123456" 
-                    value={smsInput}
-                    onChange={(e) => setSmsInput(e.target.value)}
-                  />
-                </div>
-                <button 
-                  className="btn btn-primary" 
-                  style={{ width: '100%' }}
-                  onClick={async () => {
-                    setMcAuthError('');
-                    setMcAuthStep('loading');
-                    addLog('Отправка SMS-кода...');
-                    try {
-                      const res = await fetch(`${API_URL}/api/submit-sms`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ sms: smsInput })
+                        body: JSON.stringify({ email: emailInput, password: passwordInput })
                       });
                       const data = await res.json();
                       if (res.ok && data.success) {
@@ -2716,16 +2679,16 @@ export default function App() {
                         setMcHasSession(true);
                         addLog('Авторизация Kaspi MC успешна! Сессионные куки сохранены.');
                       } else {
-                        setMcAuthError(data.detail || 'Неверный код.');
-                        setMcAuthStep('sms');
+                        setMcAuthError(data.detail || 'Не удалось войти. Проверьте email и пароль.');
+                        setMcAuthStep('credentials');
                       }
                     } catch {
                       setMcAuthError('Ошибка сети.');
-                      setMcAuthStep('sms');
+                      setMcAuthStep('credentials');
                     }
                   }}
                 >
-                  Подтвердить код
+                  Войти
                 </button>
               </div>
             )}

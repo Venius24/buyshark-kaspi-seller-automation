@@ -65,7 +65,7 @@ class TestExecuteUpdatesNoAuth(ExecutorTestBase):
             [task], self.save_override, rate_limit_delay=0, merchant_id="999"
         )
         self.assertEqual(result["updated_count"], 1)
-        self.assertTrue(any("SMS-вход" in m for m in result["logs"]))
+        self.assertTrue(any("повторный вход" in m for m in result["logs"]))
         self.save_override.assert_called_once()
 
     @patch("backend.dumper.executor._load_mc_cookies")
@@ -75,7 +75,7 @@ class TestExecuteUpdatesNoAuth(ExecutorTestBase):
         result = RateLimitExecutorWorker.execute_updates(
             [task], self.save_override, rate_limit_delay=0, merchant_id="999"
         )
-        self.assertTrue(any("SMS-вход" in m for m in result["logs"]))
+        self.assertTrue(any("повторный вход" in m for m in result["logs"]))
 
 
 class TestExecuteUpdatesWithAuth(ExecutorTestBase):
