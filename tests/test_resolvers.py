@@ -235,13 +235,16 @@ class TestCookieLoaderKaspiWrapper(unittest.TestCase):
             KaspiAPI._load_mc_cookies()
 
 
-class TestVerifyTokenSwallowsExceptions(unittest.TestCase):
+class TestVerifyTokenPropagatesExceptions(unittest.TestCase):
     """
-    kaspi_wrapper.py::KaspiAPI.verify_token — characterizes a known bug
-    flagged in the refactor plan (Phase 4e): ANY exception during the
-    verification request (network down, DNS failure, timeout, etc.) is
-    silently swallowed and treated as "token is valid". A genuinely invalid
-    token during an outage is indistinguishable from a valid one today.
+    kaspi_wrapper.py::KaspiAPI.verify_token — fixed 2026-07-28 (part of
+    Phase 4e). Previously ANY exception during the verification request
+    (network down, DNS failure, timeout) was silently swallowed and treated
+    as "token is valid", making a genuinely invalid token indistinguishable
+    from a valid one during an outage. Callers (auth.py's /auth endpoint,
+    stores_v1.py's connect_full_store) already had exception handling built
+    around this call expecting it to raise — that handling was dead code
+    until now. The fix simply removes the swallow; no caller changes needed.
     """
 
     def test_test_prefixed_token_short_circuits_true(self):
@@ -263,9 +266,10 @@ class TestVerifyTokenSwallowsExceptions(unittest.TestCase):
         self.assertTrue(KaspiAPI.verify_token("realtoken"))
 
     @patch("backend.kaspi_wrapper.KaspiAPI._get")
-    def test_network_exception_is_swallowed_and_returns_true(self, mock_get):
+    def test_network_exception_now_propagates_instead_of_swallowed(self, mock_get):
         mock_get.side_effect = Exception("connection refused")
-        self.assertTrue(KaspiAPI.verify_token("realtoken"))
+        with self.assertRaises(Exception):
+            KaspiAPI.verify_token("realtoken")
 
 
 if __name__ == "__main__":

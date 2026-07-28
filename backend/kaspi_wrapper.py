@@ -177,14 +177,11 @@ class KaspiAPI:
     def verify_token(token: str) -> bool:
         if token.startswith("test_"):
             return True
-        try:
-            resp = KaspiAPI._get(f"{KaspiAPI.BASE_URL}/cities", token)
-            if resp.status_code in (200, 201):
-                return True
-            # If Kaspi API responds with 401/403, verify if token format is valid
-            return resp.status_code != 401
-        except Exception as e:
+        resp = KaspiAPI._get(f"{KaspiAPI.BASE_URL}/cities", token)
+        if resp.status_code in (200, 201):
             return True
+        # If Kaspi API responds with 401/403, verify if token format is valid
+        return resp.status_code != 401
 
     # ── 2. orders ────────────────────────────────────────────
 
