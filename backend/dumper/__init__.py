@@ -12,11 +12,16 @@ async def run_price_dumping_job(
     token: str,
     configs: dict,
     products: List[dict],
-    save_override_func
+    save_override_func,
+    store_id=None
 ) -> dict:
     """
     Оркестратор трех воркеров (Radar -> Brain -> Executor).
     Сохраняет 100% обратную совместимость с API бэкенда.
+
+    store_id=None (по умолчанию) — легаси-поведение, нескоуп-чтение мастер-групп
+    остатка (как было всегда). store_id задан (Phase 7 per-store вызовы) —
+    мастер-группы остатка фильтруются по стору, чтобы не подмешивать чужие.
     """
     merchant_id = discover_merchant_id(token)
     if not merchant_id:
@@ -24,7 +29,7 @@ async def run_price_dumping_job(
         logger.warning(f"Не удалось получить динамический merchant_id. Используем fallback: {merchant_id}")
 
     from backend.state_helpers import _load_master_stock_groups
-    master_groups = _load_master_stock_groups()
+    master_groups = _load_master_stock_groups(store_id=store_id)
     effective_configs = dict(configs)
     
     # Обогащаем конфигурации демпинга из настроек Мастер-Групп

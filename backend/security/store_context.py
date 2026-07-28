@@ -85,3 +85,33 @@ async def get_store_context(
     legacy_token = _require_token()
     legacy_merchant_id = discover_merchant_id(legacy_token)
     return StoreContext(token=legacy_token, merchant_id=legacy_merchant_id, store_id=None)
+
+
+async def list_active_stores() -> list[StoreContext]:
+    """
+    Резолвит список сторов для фоновых воркеров (Phase 7) — system-internal вызов,
+    без HTTP-запроса/JWT (в отличие от get_store_context, которому нужен Request).
+
+    'Активный' = status != 'PAUSED' и есть расшифровываемый API-токен. Сторы со
+    статусом COOKIE_EXPIRED всё равно включаются — это только про MC-куки
+    (приватный API), REST-токен для чтения каталога/заказов у них обычно рабочий.
+
+    Возвращает [] если в БД ещё нет ни одного Store (чистый dev-стенд без миграции,
+    или прод до первого /connect-full-store) — вызывающий код сам решает, падать
+    ли в этом случае на legacy глобальную сессию (states/session.json).
+    """
+    from backend.db.database import AsyncSessionLocal
+
+    contexts: list[StoreContext] = []
+    async with AsyncSessionLocal() as session:
+        stmt = select(Store).where(Store.status != "PAUSED")
+        res = await session.execute(stmt)
+        stores = res.scalars().all()
+        for store in stores:
+            if not store.encrypted_api_key:
+                continue
+            token = decrypt_data(store.encrypted_api_key)
+            if not token:
+                continue
+            contexts.append(StoreContext(token=token, merchant_id=store.merchant_id, store_id=store.id))
+    return contexts

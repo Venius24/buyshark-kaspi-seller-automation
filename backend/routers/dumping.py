@@ -3,66 +3,103 @@ import json
 import time
 import asyncio
 import logging
+import functools
 from fastapi import APIRouter, Depends, HTTPException
 from backend.models import DumpingConfigRequest
 from backend.state_helpers import _get_token, _load_dumping_configs, _save_dumping_configs, _save_override, _apply_overrides
 from backend.dumper import run_price_dumping_job
-from backend.security.store_context import StoreContext, get_store_context
+from backend.security.store_context import StoreContext, get_store_context, list_active_stores
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dumping", tags=["dumping"])
+
+PRODUCTS_FILE = "states/products.json"
 
 class DumpingSchedulerState:
     last_run_timestamp: float = 0.0
     next_run_timestamp: float = time.time() + 300.0
     is_running: bool = False
 
+async def _run_dumping_cycle(token: str, store_id) -> dict:
+    """
+    Один проход демпинга для одного магазина: локальный кэш товаров общий на всех
+    сторов (products.json пока не разделён по сторам — известное ограничение,
+    актуально только пока в проде больше одного стора), а конфиги/оверрайды/
+    мастер-группы остатка — per-store через store_id.
+    """
+    if not os.path.exists(PRODUCTS_FILE):
+        return {"updated_count": 0}
+
+    with open(PRODUCTS_FILE, "r", encoding="utf-8") as f:
+        products = json.load(f)
+    products = _apply_overrides(products, store_id=store_id)
+
+    configs = _load_dumping_configs(store_id=store_id)
+    save_override_func = functools.partial(_save_override, store_id=store_id)
+
+    res = await run_price_dumping_job(
+        token=token,
+        configs=configs,
+        products=products,
+        save_override_func=save_override_func,
+        store_id=store_id
+    )
+
+    if res.get("updated_count", 0) > 0:
+        with open(PRODUCTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(products, f, ensure_ascii=False, indent=2)
+
+    return res
+
+async def run_scheduled_dumping_cycle() -> dict:
+    """
+    Один запланированный проход демпинга по всем активным сторам (Phase 7).
+    Если в БД ещё нет ни одного Store (dev-стенд без миграции) — падает на
+    legacy глобальную сессию, ровно то же поведение, что было до Phase 7.
+    Вынесено из background_dumping_loop отдельной функцией для юнит-тестов
+    (без бесконечного цикла/sleep вокруг).
+    """
+    total_updated = 0
+    stores = await list_active_stores()
+
+    if stores:
+        logger.info(f"🤖 [Scheduler] Running automated 5-minute price dumper cycle for {len(stores)} store(s)...")
+        for store in stores:
+            try:
+                res = await _run_dumping_cycle(store.token, store.store_id)
+                total_updated += res.get("updated_count", 0)
+            except Exception as e:
+                logger.error(f"Scheduled dumper run failed for store {store.store_id}: {e}")
+    else:
+        token = _get_token()
+        if token:
+            logger.info("🤖 [Scheduler] Running automated 5-minute price dumper cycle (legacy single-tenant session)...")
+            res = await _run_dumping_cycle(token, None)
+            total_updated += res.get("updated_count", 0)
+
+    DumpingSchedulerState.last_run_timestamp = time.time()
+    logger.info(f"🤖 [Scheduler] Automated cycle finished. Applied changes: {total_updated}.")
+    return {"updated_count": total_updated, "stores_processed": len(stores)}
+
 async def background_dumping_loop():
     logger.info("Background price dumping loop initialized (5-minute interval).")
     # При запуске ставим первую авто-проверку через 5 минут
     DumpingSchedulerState.next_run_timestamp = time.time() + 300.0
-    
+
     while True:
         try:
             now = time.time()
             if now >= DumpingSchedulerState.next_run_timestamp:
                 # Планируем следующий запуск
                 DumpingSchedulerState.next_run_timestamp = now + 300.0
-                
-                token = _get_token()
-                if not token:
-                    continue
-                    
-                products_file = "states/products.json"
-                if not os.path.exists(products_file):
-                    continue
-                    
                 DumpingSchedulerState.is_running = True
                 try:
-                    with open(products_file, "r", encoding="utf-8") as f:
-                        products = json.load(f)
-                    products = _apply_overrides(products)
-                    
-                    configs = _load_dumping_configs()
-                    logger.info("🤖 [Scheduler] Running automated 5-minute price dumper cycle...")
-                    res = await run_price_dumping_job(
-                        token=token,
-                        configs=configs,
-                        products=products,
-                        save_override_func=_save_override
-                    )
-                    
-                    if res.get("updated_count", 0) > 0:
-                        with open(products_file, "w", encoding="utf-8") as f:
-                            json.dump(products, f, ensure_ascii=False, indent=2)
-                    
-                    DumpingSchedulerState.last_run_timestamp = time.time()
-                    logger.info(f"🤖 [Scheduler] Automated cycle finished. Applied changes: {res.get('updated_count', 0)}.")
+                    await run_scheduled_dumping_cycle()
                 except Exception as e:
                     logger.error(f"Error during scheduled dumper run: {e}")
                 finally:
                     DumpingSchedulerState.is_running = False
-            
+
             await asyncio.sleep(1)
         except Exception as e:
             logger.error(f"Error in background scheduler loop: {e}")
@@ -108,38 +145,17 @@ def get_dumping_status():
 
 @router.post("/run")
 async def run_price_dumping(ctx: StoreContext = Depends(get_store_context)):
-    """Запустить расчет авто-демпинга вручную."""
-    configs = _load_dumping_configs(store_id=ctx.store_id)
-    products_file = "states/products.json"
-
-    if not os.path.exists(products_file):
+    """Запустить расчет авто-демпинга вручную для стора текущего пользователя."""
+    if not os.path.exists(PRODUCTS_FILE):
         raise HTTPException(status_code=404, detail="Список товаров пуст. Загрузите товары.")
-
-    try:
-        with open(products_file, "r", encoding="utf-8") as f:
-            products = json.load(f)
-        products = _apply_overrides(products)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Ошибка чтения товаров: {e}")
-
-    token = ctx.token
 
     DumpingSchedulerState.is_running = True
     try:
-        res = await run_price_dumping_job(
-            token=token,
-            configs=configs,
-            products=products,
-            save_override_func=_save_override
-        )
-        
-        if res.get("updated_count", 0) > 0:
-            try:
-                with open(products_file, "w", encoding="utf-8") as f:
-                    json.dump(products, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Ошибка сохранения товаров: {e}")
-        
+        try:
+            res = await _run_dumping_cycle(ctx.token, ctx.store_id)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Ошибка выполнения демпинга: {e}")
+
         # Сбрасываем таймер следующего запуска, так как только что выполнили
         DumpingSchedulerState.next_run_timestamp = time.time() + 300.0
         DumpingSchedulerState.last_run_timestamp = time.time()
