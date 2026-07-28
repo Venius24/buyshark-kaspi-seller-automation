@@ -17,9 +17,10 @@ class TestOrdersRouter(unittest.TestCase):
         self.client = TestClient(app)
         self.fake_token = "REDACTED_KASPI_API_TOKEN"
 
-    @patch("backend.routers.orders._require_token")
+    @patch("backend.security.store_context.discover_merchant_id")
+    @patch("backend.security.store_context._require_token")
     @patch("backend.kaspi_wrapper.KaspiAPI.get_all_packaging_tabs")
-    def test_get_packaging_tabs_endpoint(self, mock_tabs, mock_token):
+    def test_get_packaging_tabs_endpoint(self, mock_tabs, mock_token, mock_merchant_id):
         """Проверка GET /api/orders/packaging/tabs."""
         mock_token.return_value = self.fake_token
         mock_tabs.return_value = {
@@ -36,9 +37,10 @@ class TestOrdersRouter(unittest.TestCase):
         self.assertTrue(data["success"])
         self.assertEqual(data["counts"]["cargo_assembly"], 1)
 
-    @patch("backend.routers.orders._require_token")
+    @patch("backend.security.store_context.discover_merchant_id")
+    @patch("backend.security.store_context._require_token")
     @patch("backend.kaspi_wrapper.KaspiAPI.get_packaging_orders_by_sku_prefix")
-    def test_get_packaging_by_prefix_endpoint(self, mock_prefix, mock_token):
+    def test_get_packaging_by_prefix_endpoint(self, mock_prefix, mock_token, mock_merchant_id):
         """Проверка GET /api/orders/packaging/by-prefix."""
         mock_token.return_value = self.fake_token
         mock_prefix.return_value = {
@@ -57,9 +59,10 @@ class TestOrdersRouter(unittest.TestCase):
         self.assertEqual(data["count"], 2)
         self.assertEqual(data["total_quantity"], 3)
 
-    @patch("backend.routers.orders._require_token")
+    @patch("backend.security.store_context.discover_merchant_id")
+    @patch("backend.security.store_context._require_token")
     @patch("backend.kaspi_wrapper.KaspiAPI.get_orders_with_products")
-    def test_get_orders_endpoint(self, mock_orders, mock_token):
+    def test_get_orders_endpoint(self, mock_orders, mock_token, mock_merchant_id):
         """Проверка GET /api/orders."""
         mock_token.return_value = self.fake_token
         mock_orders.return_value = [
