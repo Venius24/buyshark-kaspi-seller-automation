@@ -9,7 +9,7 @@ from backend.state_helpers import (
     _save_master_stock_groups
 )
 from backend.routers.public_api.auth import get_api_key_user
-from backend.services.stock_sync_worker import execute_broadcast_sync, stock_lock
+from backend.services.stock_sync_worker import execute_broadcast_sync, get_stock_lock
 from backend.services.webhook_dispatcher import dispatch_webhook_event
 
 router = APIRouter(prefix="/api/v1/public", tags=["public-api"])
@@ -55,7 +55,7 @@ async def update_public_stock(
 
     token = _get_token() or "offline_token"
 
-    async with stock_lock:
+    async with get_stock_lock():
         groups = _load_master_stock_groups()
 
         matched_gid = None

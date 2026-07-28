@@ -21,12 +21,21 @@ from backend.dumper.executor import RateLimitExecutorWorker, _load_mc_cookies
 from backend.dumper.config import discover_merchant_id, _decode_base64_if_needed
 from backend.dumper.telemetry import telemetry_manager
 from backend.services.webhook_dispatcher import dispatch_webhook_event
+from backend.security.store_context import list_active_stores
 
 
 logger = logging.getLogger(__name__)
 
-# Global lock for thread/async-safe group stock operations
-stock_lock = asyncio.Lock()
+# Per-store locks for thread/async-safe group stock operations (Phase 7) —
+# store A's sync no longer blocks on store B's lock. store_id=None keeps the
+# legacy single-tenant key, so pre-migration callers behave exactly as before
+# (one shared lock, same as when this was a single global asyncio.Lock()).
+_stock_locks: dict = {}
+
+def get_stock_lock(store_id=None) -> asyncio.Lock:
+    if store_id not in _stock_locks:
+        _stock_locks[store_id] = asyncio.Lock()
+    return _stock_locks[store_id]
 
 async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus: List[str], trigger_order_info: Optional[dict] = None):
     """Отправка Push/Telegram уведомления при обнулении остатка группы с деталями о заказе-триггере."""
@@ -93,20 +102,23 @@ async def broadcast_ws_event(event_type: str, data: dict):
         logger.error(f"Error broadcasting WS event {event_type}: {e}")
 
 
-async def execute_broadcast_sync(group_id: str, token: str, trigger_order_info: Optional[dict] = None):
+async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[str] = None, trigger_order_info: Optional[dict] = None):
     """
     Веерная рассылка обновленного остатка по всем SKU группы через 3-шаговый Kaspi MC API.
+
+    store_id=None (легаси) — нескоуп-чтение/запись группы, как было всегда.
+    store_id задан (Phase 7) — группа читается/сохраняется в рамках конкретного стора.
     """
-    async with stock_lock:
-        groups = _load_master_stock_groups()
+    async with get_stock_lock(store_id):
+        groups = _load_master_stock_groups(store_id=store_id)
         group = groups.get(group_id)
         if not group or not group.get("is_active", True):
             return
 
         group["status"] = "updating"
         group["last_sync_log"] = "Запуск веерной синхронизации..."
-        _save_master_stock_groups(groups)
-        
+        _save_master_stock_groups(groups, store_id=store_id)
+
     await broadcast_ws_event("stock_group_updated", group)
 
     linked_skus = group.get("linked_skus", [])
@@ -163,7 +175,7 @@ async def execute_broadcast_sync(group_id: str, token: str, trigger_order_info: 
         status_text = "Активен" if shared_stock > 0 else "Архив"
 
         # Сохраняем локальный оверрайд
-        _save_override(sku, price, shared_stock, target_p.get("brand"), status_text)
+        _save_override(sku, price, shared_stock, target_p.get("brand"), status_text, store_id=store_id)
 
         # Обновляем в файле products.json
         for p in all_products:
@@ -216,8 +228,8 @@ async def execute_broadcast_sync(group_id: str, token: str, trigger_order_info: 
             pass
 
     # Итоговое обновление статуса группы
-    async with stock_lock:
-        groups = _load_master_stock_groups()
+    async with get_stock_lock(store_id):
+        groups = _load_master_stock_groups(store_id=store_id)
         if group_id in groups:
             g = groups[group_id]
             g["last_synced_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -230,7 +242,7 @@ async def execute_broadcast_sync(group_id: str, token: str, trigger_order_info: 
                 g["status"] = "error"
 
             g["sync_logs"] = logs
-            _save_master_stock_groups(groups)
+            _save_master_stock_groups(groups, store_id=store_id)
             await broadcast_ws_event("stock_group_updated", g)
 
     # Обработка Zero Stock Protection
@@ -243,134 +255,161 @@ async def execute_broadcast_sync(group_id: str, token: str, trigger_order_info: 
             "message": f"Группа [{group_name}] занулена и снята с продажи на Kaspi!"
         })
 
+async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
+    """
+    Один проход радара для одного магазина: находит новые заказы, списывает
+    остаток у совпавших Мастер-Групп, запускает веерную синхронизацию.
+
+    store_id=None (легаси) — нескоуп-чтение групп, как было всегда.
+    Дедупликация заказов (_load_processed_orders/_save_processed_orders) и
+    кэш товаров (products.json) остаются общими на все сторы — известное
+    ограничение, актуально только когда сторов в проде станет больше одного.
+    """
+    groups = _load_master_stock_groups(store_id=store_id)
+    active_groups = {gid: g for gid, g in groups.items() if g.get("is_active", True)}
+    if not active_groups:
+        return
+
+    # Получаем свежие новые заказы через Kaspi API
+    try:
+        orders_resp = await asyncio.to_thread(
+            KaspiAPI.get_orders_with_products,
+            token,
+            state="NEW",
+            status="APPROVED_BY_BANK",
+            limit=50
+        )
+    except Exception as req_ex:
+        logger.debug(f"[Master Stock Radar] Ошибка получения заказов: {req_ex}")
+        return
+
+    if not orders_resp:
+        return
+
+    # Загружаем товары из кэша для резолва алиасов ключей
+    products_file = "states/products.json"
+    all_products_cache = []
+    if os.path.exists(products_file):
+        try:
+            with open(products_file, "r", encoding="utf-8") as f:
+                all_products_cache = json.load(f)
+        except Exception:
+            pass
+
+    processed_orders = _load_processed_orders()
+    order_dedup_changed = False
+
+    for order in orders_resp:
+        order_id = str(order.get("id") or order.get("internalId") or "")
+        if not order_id or order_id in processed_orders:
+            continue
+
+        entries = order.get("entries", [])
+        if not entries and "sku" in order:
+            entries = [{"sku": order.get("sku"), "quantity": order.get("quantity", 1)}]
+
+        order_matched_groups = set()
+
+        for entry in entries:
+            raw_sku_candidates = set()
+            for k in ["sku", "merchantSku", "masterSku", "kaspiSku"]:
+                val = entry.get(k)
+                if val:
+                    raw_sku_candidates.add(str(val).strip())
+
+            qty = int(entry.get("quantity", 1))
+            if not raw_sku_candidates:
+                continue
+
+            # Находим товар в кэше и собираем все его возможные алиасы (merchantSku, kaspiSku и т.д.)
+            all_possible_skus = set(raw_sku_candidates)
+            for cand in raw_sku_candidates:
+                p_match = next((p for p in all_products_cache if p.get("sku") == cand or p.get("merchantSku") == cand or p.get("kaspiSku") == cand), None)
+                if p_match:
+                    for key_field in ["sku", "merchantSku", "kaspiSku"]:
+                        if p_match.get(key_field):
+                            all_possible_skus.add(str(p_match[key_field]).strip())
+
+            # Находим группы, в которые входит любой из этих ключей
+            for gid, grp in active_groups.items():
+                if gid in order_matched_groups:
+                    continue
+                linked = [str(s).strip() for s in grp.get("linked_skus", [])]
+                if any(k in linked for k in all_possible_skus):
+                    async with get_stock_lock(store_id):
+                        current_stock = int(grp.get("shared_stock", 0))
+                        new_stock = max(0, current_stock - qty)
+                        grp["shared_stock"] = new_stock
+                        groups[gid] = grp
+                        _save_master_stock_groups(groups, store_id=store_id)
+                        logger.info(
+                            f"📦 [Order Sale Detected] Заказ {order_id} (Ключи: {list(all_possible_skus)}, qty: {qty}). "
+                            f"Группа '{grp.get('group_name')}' остаток: {current_stock} -> {new_stock}"
+                        )
+
+                        # Отправка Webhook в 1С/ERP
+                        asyncio.create_task(
+                            dispatch_webhook_event(
+                                "order.created",
+                                {
+                                    "order_id": order_id,
+                                    "purchased_sku": list(all_possible_skus)[0],
+                                    "all_matched_skus": list(all_possible_skus),
+                                    "quantity": qty,
+                                    "group_id": gid,
+                                    "group_name": grp.get("group_name"),
+                                    "external_code": grp.get("external_code"),
+                                    "previous_stock": current_stock,
+                                    "remaining_shared_stock": new_stock
+                                }
+                            )
+                        )
+
+                    order_matched_groups.add(gid)
+
+        # Помечаем заказ как обработанный
+        processed_orders[order_id] = {
+            "processed_at": datetime.datetime.now().isoformat(),
+            "matched_groups": list(order_matched_groups)
+        }
+        order_dedup_changed = True
+
+        # Запускаем веерное обновление для затронутых групп
+        for gid in order_matched_groups:
+            asyncio.create_task(execute_broadcast_sync(gid, token, store_id=store_id))
+
+    if order_dedup_changed:
+        _save_processed_orders(processed_orders)
+
+async def run_stock_radar_cycle():
+    """
+    Один цикл радара по всем активным сторам (Phase 7). Падает на legacy
+    глобальную сессию, только если в БД ещё нет ни одного Store (dev-стенд
+    без миграции). Вынесено из master_stock_radar_loop отдельной функцией
+    для юнит-тестов (без бесконечного цикла/sleep вокруг).
+    """
+    stores = await list_active_stores()
+    if stores:
+        for store in stores:
+            try:
+                await _run_stock_radar_pass(store.token, store.store_id)
+            except Exception as e:
+                logger.error(f"[Master Stock Radar] Store {store.store_id} pass failed: {e}")
+    else:
+        token = _get_token()
+        if token:
+            await _run_stock_radar_pass(token, None)
+
 async def master_stock_radar_loop():
     """
-    Фоновый радар фиксации продаж заказов и веерной синхронизации остатков.
+    Фоновый радар фиксации продаж заказов и веерной синхронизации остатков —
+    по всем активным сторам (Phase 7).
     """
     logger.info("🟢 [Master Stock Radar] Запущен фоновый радар списания остатков.")
     while True:
         try:
             await asyncio.sleep(20)
-
-            token = _get_token()
-            if not token:
-                continue
-
-            groups = _load_master_stock_groups()
-            active_groups = {gid: g for gid, g in groups.items() if g.get("is_active", True)}
-            if not active_groups:
-                continue
-
-            # Получаем свежие новые заказы через Kaspi API
-            try:
-                orders_resp = await asyncio.to_thread(
-                    KaspiAPI.get_orders_with_products,
-                    token,
-                    state="NEW",
-                    status="APPROVED_BY_BANK",
-                    limit=50
-                )
-            except Exception as req_ex:
-                logger.debug(f"[Master Stock Radar] Ошибка получения заказов: {req_ex}")
-                continue
-
-            if not orders_resp:
-                continue
-
-            # Загружаем товары из кэша для резолва алиасов ключей
-            products_file = "states/products.json"
-            all_products_cache = []
-            if os.path.exists(products_file):
-                try:
-                    with open(products_file, "r", encoding="utf-8") as f:
-                        all_products_cache = json.load(f)
-                except Exception:
-                    pass
-
-            processed_orders = _load_processed_orders()
-            order_dedup_changed = False
-
-            for order in orders_resp:
-                order_id = str(order.get("id") or order.get("internalId") or "")
-                if not order_id or order_id in processed_orders:
-                    continue
-
-                entries = order.get("entries", [])
-                if not entries and "sku" in order:
-                    entries = [{"sku": order.get("sku"), "quantity": order.get("quantity", 1)}]
-
-                order_matched_groups = set()
-
-                for entry in entries:
-                    raw_sku_candidates = set()
-                    for k in ["sku", "merchantSku", "masterSku", "kaspiSku"]:
-                        val = entry.get(k)
-                        if val:
-                            raw_sku_candidates.add(str(val).strip())
-
-                    qty = int(entry.get("quantity", 1))
-                    if not raw_sku_candidates:
-                        continue
-
-                    # Находим товар в кэше и собираем все его возможные алиасы (merchantSku, kaspiSku и т.д.)
-                    all_possible_skus = set(raw_sku_candidates)
-                    for cand in raw_sku_candidates:
-                        p_match = next((p for p in all_products_cache if p.get("sku") == cand or p.get("merchantSku") == cand or p.get("kaspiSku") == cand), None)
-                        if p_match:
-                            for key_field in ["sku", "merchantSku", "kaspiSku"]:
-                                if p_match.get(key_field):
-                                    all_possible_skus.add(str(p_match[key_field]).strip())
-
-                    # Находим группы, в которые входит любой из этих ключей
-                    for gid, grp in active_groups.items():
-                        if gid in order_matched_groups:
-                            continue
-                        linked = [str(s).strip() for s in grp.get("linked_skus", [])]
-                        if any(k in linked for k in all_possible_skus):
-                            async with stock_lock:
-                                current_stock = int(grp.get("shared_stock", 0))
-                                new_stock = max(0, current_stock - qty)
-                                grp["shared_stock"] = new_stock
-                                groups[gid] = grp
-                                _save_master_stock_groups(groups)
-                                logger.info(
-                                    f"📦 [Order Sale Detected] Заказ {order_id} (Ключи: {list(all_possible_skus)}, qty: {qty}). "
-                                    f"Группа '{grp.get('group_name')}' остаток: {current_stock} -> {new_stock}"
-                                )
-
-                                # Отправка Webhook в 1С/ERP
-                                asyncio.create_task(
-                                    dispatch_webhook_event(
-                                        "order.created",
-                                        {
-                                            "order_id": order_id,
-                                            "purchased_sku": list(all_possible_skus)[0],
-                                            "all_matched_skus": list(all_possible_skus),
-                                            "quantity": qty,
-                                            "group_id": gid,
-                                            "group_name": grp.get("group_name"),
-                                            "external_code": grp.get("external_code"),
-                                            "previous_stock": current_stock,
-                                            "remaining_shared_stock": new_stock
-                                        }
-                                    )
-                                )
-
-                            order_matched_groups.add(gid)
-
-                # Помечаем заказ как обработанный
-                processed_orders[order_id] = {
-                    "processed_at": datetime.datetime.now().isoformat(),
-                    "matched_groups": list(order_matched_groups)
-                }
-                order_dedup_changed = True
-
-                # Запускаем веерное обновление для затронутых групп
-                for gid in order_matched_groups:
-                    asyncio.create_task(execute_broadcast_sync(gid, token))
-
-            if order_dedup_changed:
-                _save_processed_orders(processed_orders)
+            await run_stock_radar_cycle()
 
         except asyncio.CancelledError:
             logger.info("⏹ [Master Stock Radar] Радар остановлен.")
@@ -400,7 +439,7 @@ def _calculate_physical_units(merchant_sku: str, quantity: int = 1) -> int:
     return multiplier * int(quantity)
 
 
-async def process_packaging_auto_deduction(token: str) -> dict:
+async def process_packaging_auto_deduction(token: str, store_id: Optional[str] = None) -> dict:
     """
     Фоновая процедура обнаружения новых заказов в Упаковке:
     1. Запрашивает активные заказы 'На сборке' (cargo_assembly).
@@ -427,8 +466,8 @@ async def process_packaging_auto_deduction(token: str) -> dict:
 
     new_deductions = []
 
-    async with stock_lock:
-        groups = _load_master_stock_groups()
+    async with get_stock_lock(store_id):
+        groups = _load_master_stock_groups(store_id=store_id)
         groups_modified = False
 
         for order in cargo_assembly:
@@ -504,11 +543,11 @@ async def process_packaging_auto_deduction(token: str) -> dict:
                     }
 
                     # Запускаем веерное списание остатка на Kaspi с информацией о заказе
-                    asyncio.create_task(execute_broadcast_sync(matched_group["group_id"], token, trigger_info))
+                    asyncio.create_task(execute_broadcast_sync(matched_group["group_id"], token, store_id=store_id, trigger_order_info=trigger_info))
                     break
 
         if groups_modified:
-            _save_master_stock_groups(groups)
+            _save_master_stock_groups(groups, store_id=store_id)
             _save_processed_packaging_orders(processed_orders)
 
     return {
@@ -518,14 +557,29 @@ async def process_packaging_auto_deduction(token: str) -> dict:
     }
 
 
+async def run_packaging_sync_cycle():
+    """
+    Один цикл авто-списания по всем активным сторам (Phase 7), с legacy-
+    фоллбеком если в БД нет Store. Вынесено отдельной функцией для юнит-тестов.
+    """
+    stores = await list_active_stores()
+    if stores:
+        for store in stores:
+            try:
+                await process_packaging_auto_deduction(store.token, store.store_id)
+            except Exception as e:
+                logger.error(f"[Packaging Sync Loop] Store {store.store_id} failed: {e}")
+    else:
+        token = _get_token()
+        if token and not token.startswith("test_"):
+            await process_packaging_auto_deduction(token)
+
 async def start_packaging_sync_loop(interval_seconds: int = 30):
-    """Фоновый воркер авто-списания остатков при появлении новых заказов в Упаковке."""
+    """Фоновый воркер авто-списания остатков при появлении новых заказов в Упаковке — по всем активным сторам (Phase 7)."""
     logger.info("🚀 Запуск фонового воркера авто-списания остатков по Упаковке...")
     while True:
         try:
-            token = _get_token()
-            if token and not token.startswith("test_"):
-                await process_packaging_auto_deduction(token)
+            await run_packaging_sync_cycle()
         except asyncio.CancelledError:
             logger.info("⏹ [Packaging Sync Loop] Воркер авто-списания остановлен.")
             break
