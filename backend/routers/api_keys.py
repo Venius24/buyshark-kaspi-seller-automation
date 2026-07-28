@@ -2,24 +2,30 @@ import uuid
 import secrets
 import hashlib
 import datetime
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 
 from backend.models import ApiKeyCreateRequest, WebhookConfigRequest
 from backend.state_helpers import (
-    _require_token,
     _load_api_keys,
     _save_api_keys,
     _load_webhook_config,
     _save_webhook_config
 )
+from backend.security.store_context import StoreContext, get_store_context
 from backend.services.webhook_dispatcher import dispatch_webhook_event
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
+# NOTE: unlike dumping_configs/master_stock_groups/product_overrides,
+# api_keys.json and webhook_config.json have no store_id column at all —
+# Phase 4a's schema migration didn't cover them (no DB-backed model exists
+# for either). These endpoints are migrated to the dual-auth dependency for
+# consistent auth, but the underlying storage stays a single shared file
+# until a real per-store schema exists for it — not silently pretended here.
+
 @router.get("/keys")
-def get_api_keys():
+def get_api_keys(ctx: StoreContext = Depends(get_store_context)):
     """[Dashboard UI] Список активных API-ключей."""
-    _require_token()
     keys_dict = _load_api_keys()
     
     result = []
@@ -37,9 +43,8 @@ def get_api_keys():
     return {"success": True, "keys": result, "count": len(result)}
 
 @router.post("/keys")
-def create_api_key(req: ApiKeyCreateRequest):
+def create_api_key(req: ApiKeyCreateRequest, ctx: StoreContext = Depends(get_store_context)):
     """[Dashboard UI] Сгенерировать новый API-ключ для 1С/ERP (Секрет показывается один раз!)."""
-    _require_token()
     if not req.name.strip():
         raise HTTPException(status_code=400, detail="Укажите название ключа (например, Интеграция 1С:УНФ).")
 
@@ -69,9 +74,8 @@ def create_api_key(req: ApiKeyCreateRequest):
     }
 
 @router.delete("/keys/{key_id}")
-def revoke_api_key(key_id: str):
+def revoke_api_key(key_id: str, ctx: StoreContext = Depends(get_store_context)):
     """[Dashboard UI] Отозвать/удалить API-ключ."""
-    _require_token()
     keys = _load_api_keys()
     if key_id not in keys:
         raise HTTPException(status_code=404, detail="API-ключ не найден.")
@@ -81,9 +85,8 @@ def revoke_api_key(key_id: str):
     return {"success": True, "message": f"API-ключ '{deleted.get('name')}' успешно отозван."}
 
 @router.get("/webhook")
-def get_webhook_config():
+def get_webhook_config(ctx: StoreContext = Depends(get_store_context)):
     """[Dashboard UI] Получить настройки Webhook."""
-    _require_token()
     cfg = _load_webhook_config()
     secret = cfg.get("secret", "")
     masked_secret = (secret[:4] + "..." + secret[-4:]) if len(secret) > 8 else secret
@@ -99,9 +102,8 @@ def get_webhook_config():
     }
 
 @router.post("/webhook")
-def save_webhook_config(req: WebhookConfigRequest):
+def save_webhook_config(req: WebhookConfigRequest, ctx: StoreContext = Depends(get_store_context)):
     """[Dashboard UI] Сохранить настройки Webhook."""
-    _require_token()
     cfg = {
         "url": req.url.strip(),
         "secret": (req.secret or "").strip(),
@@ -112,9 +114,8 @@ def save_webhook_config(req: WebhookConfigRequest):
     return {"success": True, "message": "Настройки Webhook успешно сохранены.", "config": cfg}
 
 @router.post("/webhook/test")
-async def test_webhook_dispatch(background_tasks: BackgroundTasks):
+async def test_webhook_dispatch(background_tasks: BackgroundTasks, ctx: StoreContext = Depends(get_store_context)):
     """[Dashboard UI] Отправить тестовое событие Webhook в 1С."""
-    _require_token()
     cfg = _load_webhook_config()
     if not cfg.get("url"):
         raise HTTPException(status_code=400, detail="Укажите и сохраните Webhook URL перед отправкой теста.")
