@@ -1,10 +1,11 @@
 import logging
 from typing import Optional, List
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from backend.chatbot import config
 from backend.chatbot.kaspi import load_cookies
+from backend.security.store_context import StoreContext, get_store_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chatbot", tags=["chatbot"])
@@ -17,7 +18,7 @@ class UnblockChatRequest(BaseModel):
     group_id: str
 
 @router.get("/config")
-def get_chatbot_config():
+def get_chatbot_config(ctx: StoreContext = Depends(get_store_context)):
     """Получить конфигурацию ИИ-автоответчика."""
     cfg = config.load_chatbot_config()
     admin_ids = config.load_admin_ids()
@@ -32,7 +33,7 @@ def get_chatbot_config():
     }
 
 @router.post("/config")
-def save_chatbot_config(req: ChatbotConfigRequest):
+def save_chatbot_config(req: ChatbotConfigRequest, ctx: StoreContext = Depends(get_store_context)):
     """Сохранить пользовательские настройки чат-бота (admin_ids, enabled)."""
     update_data = {}
     if req.enabled is not None:
@@ -48,7 +49,7 @@ def save_chatbot_config(req: ChatbotConfigRequest):
     }
 
 @router.get("/status")
-def get_chatbot_status():
+def get_chatbot_status(ctx: StoreContext = Depends(get_store_context)):
     """Получить статус сессии, блокировки и активных диалогов чат-бота."""
     cfg = config.load_chatbot_config()
     cookies = load_cookies()
@@ -71,7 +72,7 @@ def get_chatbot_status():
     }
 
 @router.post("/unblock")
-def unblock_chat(req: UnblockChatRequest):
+def unblock_chat(req: UnblockChatRequest, ctx: StoreContext = Depends(get_store_context)):
     """Разблокировать чат (HUMAN_OVERRIDE) из дашборда UI."""
     gid = req.group_id.strip()
     if config.PROCESSED_CHATS.get(gid) == "HUMAN_OVERRIDE":

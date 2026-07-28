@@ -2,21 +2,22 @@
 FastAPI router for Dashboard Analytics and Widget stats.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from datetime import datetime, timedelta
 import random
 import os
 import json
 import logging
-from backend.state_helpers import _load_dumping_configs, _load_session
-from backend.dumper.config import discover_merchant_id, _decode_base64_if_needed
+from backend.state_helpers import _load_dumping_configs
+from backend.dumper.config import _decode_base64_if_needed
 from backend.dumper.radar import _fetch_offers_sync
+from backend.security.store_context import StoreContext, get_store_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
 @router.get("/widgets")
-def get_dashboard_widgets():
+def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
     """
     Returns live metrics for dashboard widgets including:
     - Buy Box share & saved margin
@@ -25,7 +26,7 @@ def get_dashboard_widgets():
     - Store Pulse status
     """
     now = datetime.now()
-    
+
     # 1. Load actual products & dumping configs
     products = []
     if os.path.exists("states/products.json"):
@@ -34,8 +35,8 @@ def get_dashboard_widgets():
                 products = json.load(f)
         except Exception:
             logger.exception("Failed to load states/products.json")
-            
-    configs = _load_dumping_configs()
+
+    configs = _load_dumping_configs(store_id=ctx.store_id)
     
     # 2. Load or compute analytics summary
     analytics_data = {}
@@ -105,12 +106,7 @@ def get_dashboard_widgets():
             # Live fetch competitor offers from Kaspi
             raw_offers = _fetch_offers_sync(kaspi_master_sku, city_code)
             if raw_offers:
-                # Find own merchant id
-                session = _load_session()
-                token = session.get("token")
-                my_merchant_id = discover_merchant_id(token) if token else "20186986"
-                if not my_merchant_id:
-                    my_merchant_id = "20186986"
+                my_merchant_id = ctx.merchant_id or "20186986"
                 
                 sorted_offers = []
                 for offer in raw_offers:
