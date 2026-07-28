@@ -3,10 +3,11 @@ import json
 import time
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from backend.models import DumpingConfigRequest
-from backend.state_helpers import _require_token, _get_token, _load_dumping_configs, _save_dumping_configs, _save_override, _apply_overrides
+from backend.state_helpers import _get_token, _load_dumping_configs, _save_dumping_configs, _save_override, _apply_overrides
 from backend.dumper import run_price_dumping_job
+from backend.security.store_context import StoreContext, get_store_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dumping", tags=["dumping"])
@@ -68,15 +69,15 @@ async def background_dumping_loop():
             await asyncio.sleep(5)
 
 @router.get("/configs")
-def get_dumping_configs():
+def get_dumping_configs(ctx: StoreContext = Depends(get_store_context)):
     """Получить все конфигурации авто-демпинга."""
-    configs = _load_dumping_configs()
+    configs = _load_dumping_configs(store_id=ctx.store_id)
     return {"success": True, "configs": configs}
 
 @router.post("/config")
-def save_dumping_config(req: DumpingConfigRequest):
+def save_dumping_config(req: DumpingConfigRequest, ctx: StoreContext = Depends(get_store_context)):
     """Сохранить или обновить конфигурацию демпинга для SKU."""
-    configs = _load_dumping_configs()
+    configs = _load_dumping_configs(store_id=ctx.store_id)
     configs[req.sku] = {
         "min_price": req.min_price,
         "max_price": req.max_price,
@@ -90,7 +91,7 @@ def save_dumping_config(req: DumpingConfigRequest):
         "blacklisted_merchants": req.blacklisted_merchants or [],
         "city_code": req.city_code or "750000000"
     }
-    _save_dumping_configs(configs)
+    _save_dumping_configs(configs, store_id=ctx.store_id)
     return {"success": True, "message": f"Конфигурация демпинга для {req.sku} сохранена."}
 
 @router.get("/status")
@@ -106,23 +107,23 @@ def get_dumping_status():
     }
 
 @router.post("/run")
-async def run_price_dumping():
+async def run_price_dumping(ctx: StoreContext = Depends(get_store_context)):
     """Запустить расчет авто-демпинга вручную."""
-    configs = _load_dumping_configs()
+    configs = _load_dumping_configs(store_id=ctx.store_id)
     products_file = "states/products.json"
-    
+
     if not os.path.exists(products_file):
         raise HTTPException(status_code=404, detail="Список товаров пуст. Загрузите товары.")
-        
+
     try:
         with open(products_file, "r", encoding="utf-8") as f:
             products = json.load(f)
         products = _apply_overrides(products)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ошибка чтения товаров: {e}")
-        
-    token = _require_token()
-    
+
+    token = ctx.token
+
     DumpingSchedulerState.is_running = True
     try:
         res = await run_price_dumping_job(

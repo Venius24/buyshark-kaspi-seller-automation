@@ -179,14 +179,27 @@ def _apply_overrides(products: list) -> list:
                 p["status"] = ov["status"]
     return products
 
-def _load_dumping_configs() -> dict:
+def _load_dumping_configs(store_id: Optional[str] = None) -> dict:
+    """
+    store_id=None (legacy, pre-Phase-4d callers): unscoped load, exact
+    current behavior — including the JSON-file fallback below.
+
+    store_id given (Phase 4d-migrated callers): DB rows are filtered to that
+    store. An empty result is treated as "this store has no configs yet",
+    NOT as a signal to fall back to the shared legacy JSON file — that file
+    mixes every store's data together, so using it as a fallback for a
+    scoped read would leak other stores' configs into this one's response.
+    """
     # 1. Загрузка из базы данных
     session = _get_sync_db_session()
     configs = {}
     if session:
         try:
             from backend.db.models import DumpingConfigDB
-            rows = session.scalars(select(DumpingConfigDB)).all()
+            stmt = select(DumpingConfigDB)
+            if store_id is not None:
+                stmt = stmt.where(DumpingConfigDB.store_id == store_id)
+            rows = session.scalars(stmt).all()
             if rows:
                 for r in rows:
                     blacklisted = []
@@ -217,7 +230,13 @@ def _load_dumping_configs() -> dict:
             if session:
                 session.close()
 
-    # 2. Фоллбек из файла с авто-миграцией в БД
+    if store_id is not None:
+        # Scoped callers never fall back to the shared legacy file — it mixes
+        # every store's data, so treat "no DB rows" / "no DB session" as
+        # "this store has no configs yet", not as a cue to read someone else's.
+        return {}
+
+    # 2. Фоллбек из файла с авто-миграцией в БД (только для legacy-вызовов)
     if os.path.exists(DUMPING_CONFIGS_FILE):
         try:
             with open(DUMPING_CONFIGS_FILE, "r", encoding="utf-8") as f:
@@ -229,7 +248,12 @@ def _load_dumping_configs() -> dict:
             pass
     return {}
 
-def _save_dumping_configs(configs: dict):
+def _save_dumping_configs(configs: dict, store_id: Optional[str] = None):
+    """
+    store_id given (Phase 4d-migrated callers): tags every created/updated
+    row with store_id, so subsequent scoped loads pick it up correctly even
+    if the row previously existed unscoped (store_id=None, legacy data).
+    """
     # Зеркалирование в локальный JSON
     os.makedirs("states", exist_ok=True)
     try:
@@ -250,6 +274,7 @@ def _save_dumping_configs(configs: dict):
             if not db_obj:
                 db_obj = DumpingConfigDB(
                     sku=sku,
+                    store_id=store_id,
                     min_price=float(cfg.get("min_price", 0.0)),
                     max_price=float(cfg.get("max_price", 0.0)),
                     dump_step=float(cfg.get("dump_step", 10.0)),
@@ -264,6 +289,8 @@ def _save_dumping_configs(configs: dict):
                 )
                 session.add(db_obj)
             else:
+                if store_id is not None:
+                    db_obj.store_id = store_id
                 db_obj.min_price = float(cfg.get("min_price", 0.0))
                 db_obj.max_price = float(cfg.get("max_price", 0.0))
                 db_obj.dump_step = float(cfg.get("dump_step", 10.0))
