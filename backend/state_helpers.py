@@ -335,14 +335,26 @@ def _save_dumping_configs(configs: dict, store_id: Optional[str] = None):
             session.rollback()
             session.close()
 
-def _load_master_stock_groups() -> dict:
+def _load_master_stock_groups(store_id: Optional[str] = None) -> dict:
+    """
+    store_id=None (legacy, pre-Phase-4d callers): unscoped load, exact
+    current behavior — including the JSON-file fallback below.
+
+    store_id given (Phase 4d-migrated callers): DB rows are filtered to that
+    store. An empty result means "no groups yet for this store", not a cue
+    to fall back to the shared legacy JSON file (which mixes every store's
+    groups together).
+    """
     # 1. Загрузка из базы данных
     session = _get_sync_db_session()
     groups = {}
     if session:
         try:
             from backend.db.models import MasterStockGroupDB
-            rows = session.scalars(select(MasterStockGroupDB)).all()
+            stmt = select(MasterStockGroupDB)
+            if store_id is not None:
+                stmt = stmt.where(MasterStockGroupDB.store_id == store_id)
+            rows = session.scalars(stmt).all()
             if rows:
                 for r in rows:
                     linked_skus = json.loads(r.linked_skus) if r.linked_skus else []
@@ -371,7 +383,10 @@ def _load_master_stock_groups() -> dict:
             if session:
                 session.close()
 
-    # 2. Фоллбек из файла с авто-миграцией в БД
+    if store_id is not None:
+        return {}
+
+    # 2. Фоллбек из файла с авто-миграцией в БД (только для legacy-вызовов)
     if os.path.exists(MASTER_STOCK_GROUPS_FILE):
         try:
             with open(MASTER_STOCK_GROUPS_FILE, "r", encoding="utf-8") as f:
@@ -383,7 +398,7 @@ def _load_master_stock_groups() -> dict:
             pass
     return {}
 
-def _save_master_stock_groups(groups: dict):
+def _save_master_stock_groups(groups: dict, store_id: Optional[str] = None):
     # Зеркалирование в локальный JSON
     os.makedirs("states", exist_ok=True)
     try:
@@ -406,6 +421,7 @@ def _save_master_stock_groups(groups: dict):
             if not db_obj:
                 db_obj = MasterStockGroupDB(
                     group_id=gid,
+                    store_id=store_id,
                     group_name=g.get("group_name", "Группа"),
                     shared_stock=int(g.get("shared_stock", 0)),
                     linked_skus=linked_str,
@@ -421,6 +437,8 @@ def _save_master_stock_groups(groups: dict):
                 )
                 session.add(db_obj)
             else:
+                if store_id is not None:
+                    db_obj.store_id = store_id
                 db_obj.group_name = g.get("group_name", "Группа")
                 db_obj.shared_stock = int(g.get("shared_stock", 0))
                 db_obj.linked_skus = linked_str

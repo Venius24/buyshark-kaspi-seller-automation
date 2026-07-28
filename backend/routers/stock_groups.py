@@ -3,7 +3,7 @@ import datetime
 import asyncio
 import logging
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +13,10 @@ from backend.models import (
     UpdateStockQtyRequest
 )
 from backend.state_helpers import (
-    _require_token,
     _load_master_stock_groups,
     _save_master_stock_groups
 )
+from backend.security.store_context import StoreContext, get_store_context
 from backend.services.stock_sync_worker import execute_broadcast_sync, stock_lock
 
 router = APIRouter(prefix="/api/stock-groups", tags=["stock-groups"])
@@ -82,10 +82,10 @@ def _get_cached_packaging_data(token: str) -> dict:
         return _packaging_cache["data"] or {}
 
 @router.get("")
-def get_stock_groups():
+def get_stock_groups(ctx: StoreContext = Depends(get_store_context)):
     """Получить список всех Мастер-Групп остатка с информацией об активных заказах в 'Упаковке'."""
-    token = _require_token()
-    groups_dict = _load_master_stock_groups()
+    token = ctx.token
+    groups_dict = _load_master_stock_groups(store_id=ctx.store_id)
     groups_list = list(groups_dict.values())
 
     # Выгружаем активную упаковку из кэша (TTL 45c) для предотвращения зависания эндпоинта
@@ -125,10 +125,10 @@ def get_stock_groups():
     return {"success": True, "groups": groups_list, "count": len(groups_list)}
 
 @router.get("/{group_id}/packaging")
-def get_stock_group_packaging(group_id: str):
+def get_stock_group_packaging(group_id: str, ctx: StoreContext = Depends(get_store_context)):
     """Получить детальный список заказов в статусе 'Упаковка / На сборке' для конкретной Мастер-Группы."""
-    token = _require_token()
-    groups_dict = _load_master_stock_groups()
+    token = ctx.token
+    groups_dict = _load_master_stock_groups(store_id=ctx.store_id)
     if group_id not in groups_dict:
         raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
 
@@ -146,10 +146,14 @@ def get_stock_group_packaging(group_id: str):
     }
 
 @router.post("")
-async def create_stock_group(req: MasterStockGroupCreateRequest, background_tasks: BackgroundTasks):
+async def create_stock_group(
+    req: MasterStockGroupCreateRequest,
+    background_tasks: BackgroundTasks,
+    ctx: StoreContext = Depends(get_store_context),
+):
     """Создать новую Мастер-Группу остатка."""
-    token = _require_token()
-    
+    token = ctx.token
+
     if not req.group_name.strip():
         raise HTTPException(status_code=400, detail="Название группы не может быть пустым.")
     if req.shared_stock < 0:
@@ -176,9 +180,9 @@ async def create_stock_group(req: MasterStockGroupCreateRequest, background_task
     }
 
     async with stock_lock:
-        groups = _load_master_stock_groups()
+        groups = _load_master_stock_groups(store_id=ctx.store_id)
         groups[group_id] = new_group
-        _save_master_stock_groups(groups)
+        _save_master_stock_groups(groups, store_id=ctx.store_id)
 
     # Запускаем фоновую асинхронную веерную синхронизацию
     background_tasks.add_task(execute_broadcast_sync, group_id, token)
@@ -190,12 +194,17 @@ async def create_stock_group(req: MasterStockGroupCreateRequest, background_task
     }
 
 @router.put("/{group_id}")
-async def update_stock_group(group_id: str, req: MasterStockGroupUpdateRequest, background_tasks: BackgroundTasks):
+async def update_stock_group(
+    group_id: str,
+    req: MasterStockGroupUpdateRequest,
+    background_tasks: BackgroundTasks,
+    ctx: StoreContext = Depends(get_store_context),
+):
     """Обновить конфигурацию Мастер-Группы."""
-    token = _require_token()
-    
+    token = ctx.token
+
     async with stock_lock:
-        groups = _load_master_stock_groups()
+        groups = _load_master_stock_groups(store_id=ctx.store_id)
         if group_id not in groups:
             raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
 
@@ -215,7 +224,7 @@ async def update_stock_group(group_id: str, req: MasterStockGroupUpdateRequest, 
 
         group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         group["status"] = "updating"
-        _save_master_stock_groups(groups)
+        _save_master_stock_groups(groups, store_id=ctx.store_id)
 
     background_tasks.add_task(execute_broadcast_sync, group_id, token)
 
@@ -226,14 +235,19 @@ async def update_stock_group(group_id: str, req: MasterStockGroupUpdateRequest, 
     }
 
 @router.patch("/{group_id}/stock")
-async def update_stock_qty(group_id: str, req: UpdateStockQtyRequest, background_tasks: BackgroundTasks):
+async def update_stock_qty(
+    group_id: str,
+    req: UpdateStockQtyRequest,
+    background_tasks: BackgroundTasks,
+    ctx: StoreContext = Depends(get_store_context),
+):
     """Быстрое изменение остатка у группы."""
-    token = _require_token()
+    token = ctx.token
     if req.shared_stock < 0:
         raise HTTPException(status_code=400, detail="Остаток не может быть отрицательным.")
 
     async with stock_lock:
-        groups = _load_master_stock_groups()
+        groups = _load_master_stock_groups(store_id=ctx.store_id)
         if group_id not in groups:
             raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
 
@@ -242,7 +256,7 @@ async def update_stock_qty(group_id: str, req: UpdateStockQtyRequest, background
         group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         group["status"] = "updating"
         group["last_sync_log"] = f"Ручной ввод остатка: {req.shared_stock} шт."
-        _save_master_stock_groups(groups)
+        _save_master_stock_groups(groups, store_id=ctx.store_id)
 
     background_tasks.add_task(execute_broadcast_sync, group_id, token)
 
@@ -253,16 +267,15 @@ async def update_stock_qty(group_id: str, req: UpdateStockQtyRequest, background
     }
 
 @router.delete("/{group_id}")
-async def delete_stock_group(group_id: str):
+async def delete_stock_group(group_id: str, ctx: StoreContext = Depends(get_store_context)):
     """Удалить Мастер-Группу."""
-    _require_token()
     async with stock_lock:
-        groups = _load_master_stock_groups()
+        groups = _load_master_stock_groups(store_id=ctx.store_id)
         if group_id not in groups:
             raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
 
         deleted_group = groups.pop(group_id)
-        _save_master_stock_groups(groups)
+        _save_master_stock_groups(groups, store_id=ctx.store_id)
 
     return {
         "success": True,
@@ -270,10 +283,14 @@ async def delete_stock_group(group_id: str):
     }
 
 @router.post("/{group_id}/sync")
-async def manual_sync_stock_group(group_id: str, background_tasks: BackgroundTasks):
+async def manual_sync_stock_group(
+    group_id: str,
+    background_tasks: BackgroundTasks,
+    ctx: StoreContext = Depends(get_store_context),
+):
     """Принудительный запуск синхронизации группы."""
-    token = _require_token()
-    groups = _load_master_stock_groups()
+    token = ctx.token
+    groups = _load_master_stock_groups(store_id=ctx.store_id)
     if group_id not in groups:
         raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
 
@@ -281,9 +298,9 @@ async def manual_sync_stock_group(group_id: str, background_tasks: BackgroundTas
     return {"success": True, "message": "Запущена принудительная синхронизация остатков на Kaspi."}
 
 @router.post("/check-packaging-deduction")
-async def trigger_packaging_deduction():
+async def trigger_packaging_deduction(ctx: StoreContext = Depends(get_store_context)):
     """Принудительный запуск проверки и авто-списания остатков по новым заказам в Упаковке."""
-    token = _require_token()
+    token = ctx.token
     from backend.services.stock_sync_worker import process_packaging_auto_deduction
     try:
         res = await process_packaging_auto_deduction(token)
