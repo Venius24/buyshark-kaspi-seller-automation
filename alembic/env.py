@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 from backend.db.database import Base, ASYNC_DB_URL
-from backend import models
+from backend.db import models
 
 config = context.config
 

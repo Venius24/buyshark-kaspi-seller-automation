@@ -84,6 +84,7 @@ class DumpingConfigDB(Base):
     __tablename__ = "dumping_configs"
 
     sku: Mapped[str] = mapped_column(String(100), primary_key=True)
+    store_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=True, index=True)
     min_price: Mapped[float] = mapped_column(Float, default=0.0)
     max_price: Mapped[float] = mapped_column(Float, default=0.0)
     dump_step: Mapped[float] = mapped_column(Float, default=10.0)
@@ -102,6 +103,7 @@ class MasterStockGroupDB(Base):
     __tablename__ = "master_stock_groups"
 
     group_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    store_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=True, index=True)
     group_name: Mapped[str] = mapped_column(String(255), nullable=False)
     shared_stock: Mapped[int] = mapped_column(Integer, default=0)
     linked_skus: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON-stringified list
@@ -120,6 +122,7 @@ class ProductOverrideDB(Base):
     __tablename__ = "product_overrides"
 
     sku: Mapped[str] = mapped_column(String(100), primary_key=True)
+    store_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=True, index=True)
     price_num: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     stock: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     brand: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
