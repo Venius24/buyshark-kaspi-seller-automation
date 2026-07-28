@@ -94,10 +94,10 @@ async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus
     except Exception as e:
         logger.error(f"Failed to execute notify_zero_stock_telegram: {e}")
 
-async def broadcast_ws_event(event_type: str, data: dict):
-    """Вещание WebSocket события на клиентские UI-подключения."""
+async def broadcast_ws_event(event_type: str, data: dict, store_id: Optional[str] = None):
+    """Вещание WebSocket события на клиентские UI-подключения того же стора."""
     try:
-        await telemetry_manager.broadcast(event_type, data)
+        await telemetry_manager.broadcast(event_type, data, store_id=store_id)
     except Exception as e:
         logger.error(f"Error broadcasting WS event {event_type}: {e}")
 
@@ -119,7 +119,7 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
         group["last_sync_log"] = "Запуск веерной синхронизации..."
         _save_master_stock_groups(groups, store_id=store_id)
 
-    await broadcast_ws_event("stock_group_updated", group)
+    await broadcast_ws_event("stock_group_updated", group, store_id=store_id)
 
     linked_skus = group.get("linked_skus", [])
     shared_stock = int(group.get("shared_stock", 0))
@@ -202,17 +202,17 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
                 success_count += 1
                 msg = f"[{t_now}] ✓ Группа '{group_name}' -> SKU {sku}: остаток {shared_stock} отправлен в Kaspi MC (Tx: {val})"
                 logs.append(msg)
-                await broadcast_ws_event("log", msg)
+                await broadcast_ws_event("log", msg, store_id=store_id)
             else:
                 fail_count += 1
                 msg = f"[{t_now}] ❌ Группа '{group_name}' -> SKU {sku}: ошибка Kaspi MC: {val}"
                 logs.append(msg)
-                await broadcast_ws_event("log", msg)
+                await broadcast_ws_event("log", msg, store_id=store_id)
         else:
             fail_count += 1
             msg = f"[{t_now}] ⚠️ Группа '{group_name}' -> SKU {sku}: отсутствуют куки Kaspi MC (требуется SMS-авторизация)"
             logs.append(msg)
-            await broadcast_ws_event("log", msg)
+            await broadcast_ws_event("log", msg, store_id=store_id)
 
         # Jitter пауза 1.2 – 2.0 секунды перед следующим SKU
         if idx < len(linked_skus) - 1:
@@ -243,7 +243,7 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
 
             g["sync_logs"] = logs
             _save_master_stock_groups(groups, store_id=store_id)
-            await broadcast_ws_event("stock_group_updated", g)
+            await broadcast_ws_event("stock_group_updated", g, store_id=store_id)
 
     # Обработка Zero Stock Protection
     if shared_stock == 0:
@@ -253,7 +253,7 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
             "group_id": group_id,
             "group_name": group_name,
             "message": f"Группа [{group_name}] занулена и снята с продажи на Kaspi!"
-        })
+        }, store_id=store_id)
 
 async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
     """

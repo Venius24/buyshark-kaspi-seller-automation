@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
@@ -10,25 +10,37 @@ logger = logging.getLogger(__name__)
 class ConnectionManager:
     """
     Менеджер WebSocket-подключений для бродкаста событий в реальном времени.
+
+    Phase 6: подключения сгруппированы по store_id — клиент стора A не видит
+    события стора B. store_id=None — legacy/общий канал (клиент без JWT или
+    без резолвящегося стора, либо событие от кода, ещё не мигрировавшего на
+    per-store вызовы), сохраняет поведение "один канал на всех", как было
+    до Phase 6.
     """
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: Dict[Optional[str], List[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, store_id: Optional[str] = None):
         await websocket.accept()
-        self.active_connections.append(websocket)
-        logger.info(f"📡 [WebSocket] Новое подключение клиентской панели. Всего клиентов: {len(self.active_connections)}")
+        self.active_connections.setdefault(store_id, []).append(websocket)
+        total = sum(len(v) for v in self.active_connections.values())
+        logger.info(f"📡 [WebSocket] Новое подключение клиентской панели (store={store_id}). Всего клиентов: {total}")
 
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-            logger.info(f"📡 [WebSocket] Отключение клиента. Осталось клиентов: {len(self.active_connections)}")
+    def disconnect(self, websocket: WebSocket, store_id: Optional[str] = None):
+        connections = self.active_connections.get(store_id)
+        if connections and websocket in connections:
+            connections.remove(websocket)
+            if not connections:
+                del self.active_connections[store_id]
+            total = sum(len(v) for v in self.active_connections.values())
+            logger.info(f"📡 [WebSocket] Отключение клиента (store={store_id}). Осталось клиентов: {total}")
 
-    async def broadcast(self, event_type: str, payload: Dict[str, Any]):
+    async def broadcast(self, event_type: str, payload: Dict[str, Any], store_id: Optional[str] = None):
         """
-        Бродкастит JSON-сообщение всем подключенным клиентам.
+        Бродкастит JSON-сообщение клиентам, подключенным под тем же store_id.
         """
-        if not self.active_connections:
+        connections = self.active_connections.get(store_id)
+        if not connections:
             return
 
         message = {
@@ -36,9 +48,9 @@ class ConnectionManager:
             "timestamp": time.time(),
             "data": payload
         }
-        
+
         dead_connections = []
-        for connection in self.active_connections:
+        for connection in connections:
             try:
                 await connection.send_json(message)
             except Exception as e:
@@ -46,18 +58,18 @@ class ConnectionManager:
                 dead_connections.append(connection)
 
         for dead in dead_connections:
-            self.disconnect(dead)
+            self.disconnect(dead, store_id)
 
 # Глобальный экземпляр менеджера
 telemetry_manager = ConnectionManager()
 
-def emit_telemetry_sync(event_type: str, payload: Dict[str, Any]):
+def emit_telemetry_sync(event_type: str, payload: Dict[str, Any], store_id: Optional[str] = None):
     """
     Синхронный помощник для отправки событий из обычных потоков/функций.
     """
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.run_coroutine_threadsafe(telemetry_manager.broadcast(event_type, payload), loop)
+            asyncio.run_coroutine_threadsafe(telemetry_manager.broadcast(event_type, payload, store_id), loop)
     except Exception:
         pass

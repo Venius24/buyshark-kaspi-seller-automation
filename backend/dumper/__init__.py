@@ -73,10 +73,10 @@ async def run_price_dumping_job(
 
     # Бродкаст аналитики в WebSocket
     from backend.dumper.telemetry import telemetry_manager
-    await telemetry_manager.broadcast("analytics_update", analytics)
+    await telemetry_manager.broadcast("analytics_update", analytics, store_id=store_id)
 
     # 3. 🚀 Воркер-Исполнитель
-    exec_result = RateLimitExecutorWorker.execute_updates(update_queue, save_override_func, merchant_id=merchant_id)
+    exec_result = RateLimitExecutorWorker.execute_updates(update_queue, save_override_func, merchant_id=merchant_id, store_id=store_id)
     exec_result["analytics"] = analytics
     
     # Объединяем диагностические логи расчета и выполнения

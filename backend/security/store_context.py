@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from typing import Optional
-from fastapi import Request, Depends
+from fastapi import Request, WebSocket, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -115,3 +115,37 @@ async def list_active_stores() -> list[StoreContext]:
                 continue
             contexts.append(StoreContext(token=token, merchant_id=store.merchant_id, store_id=store.id))
     return contexts
+
+
+async def resolve_ws_store_id(websocket: WebSocket, db: AsyncSession) -> Optional[str]:
+    """
+    Резолвит store_id для WS-подключения (Phase 6). Браузерный WebSocket API не
+    может слать кастомные заголовки (Authorization), поэтому JWT передаётся
+    через query-параметр `?token=` при подключении, а не в заголовке — отсюда
+    отдельная функция, а не переиспользование get_store_context (которой нужен
+    HTTP Request с Authorization header).
+
+    При отсутствии/невалидности токена или нерезолвящемся сторе — возвращает
+    None (legacy/общий телеметрийный канал, то же поведение, что было до
+    Phase 6 для всех клиентов).
+    """
+    token_str = websocket.query_params.get("token")
+    if not token_str:
+        return None
+
+    payload = decode_token(token_str)
+    if not payload or payload.get("type") != "access":
+        return None
+
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+
+    stmt = select(User).where(User.id == user_id)
+    res = await db.execute(stmt)
+    user = res.scalar_one_or_none()
+    if not user or not user.is_active:
+        return None
+
+    store = await _resolve_store_for_user(websocket, db, user.id)
+    return store.id if store else None

@@ -1,13 +1,19 @@
 export const API_URL = import.meta.env.VITE_API_URL || '';
 
 export function getWsUrl(path: string = '/api/ws/telemetry'): string {
-  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+  // Браузерный WebSocket API не может слать кастомные заголовки (Authorization),
+  // поэтому JWT передаётся через query-параметр — backend читает его в
+  // resolve_ws_store_id() (Phase 6), чтобы телеметрия шла только своему стору.
+  const token = localStorage.getItem('access_token');
+  const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
+
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL + suffix;
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host;
   if (!host || host.includes('localhost:5173')) {
-    return 'ws://localhost:5000' + path;
+    return 'ws://localhost:5000' + path + suffix;
   }
-  return `${protocol}//${host}${path}`;
+  return `${protocol}//${host}${path}${suffix}`;
 }
 
 type UnauthorizedHandler = () => void;

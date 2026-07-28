@@ -179,7 +179,8 @@ class RateLimitExecutorWorker:
         update_queue: List[dict],
         save_override_func,
         rate_limit_delay: float = 0.5,
-        merchant_id: str = "20186986"
+        merchant_id: str = "20186986",
+        store_id=None
     ) -> dict:
         """
         Разбирает очередь задач с удержанием паузы между обновлениями и шлет запросы на Kaspi MC API.
@@ -295,7 +296,7 @@ class RateLimitExecutorWorker:
             
             try:
                 from backend.dumper.telemetry import emit_telemetry_sync
-                emit_telemetry_sync("terminal_log", {"message": msg, "sku": sku_key, "price": new_price})
+                emit_telemetry_sync("terminal_log", {"message": msg, "sku": sku_key, "price": new_price}, store_id=store_id)
             except Exception:
                 pass
 
