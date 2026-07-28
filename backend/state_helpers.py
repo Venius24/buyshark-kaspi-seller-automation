@@ -69,14 +69,26 @@ def extract_brand(name: Optional[str]) -> str:
             return b.capitalize()
     return "Barkhan"
 
-def _load_overrides() -> dict:
+def _load_overrides(store_id: Optional[str] = None) -> dict:
+    """
+    store_id=None (legacy, pre-Phase-4d callers): unscoped load, exact
+    current behavior — including the JSON-file fallback below.
+
+    store_id given (Phase 4d-migrated callers): DB rows are filtered to that
+    store. An empty result means "no overrides yet for this store", not a
+    cue to fall back to the shared legacy JSON file (which mixes every
+    store's overrides together).
+    """
     # 1. Загрузка из базы данных
     session = _get_sync_db_session()
     overrides = {}
     if session:
         try:
             from backend.db.models import ProductOverrideDB
-            rows = session.scalars(select(ProductOverrideDB)).all()
+            stmt = select(ProductOverrideDB)
+            if store_id is not None:
+                stmt = stmt.where(ProductOverrideDB.store_id == store_id)
+            rows = session.scalars(stmt).all()
             if rows:
                 for r in rows:
                     overrides[r.sku] = {
@@ -93,7 +105,10 @@ def _load_overrides() -> dict:
             if session:
                 session.close()
 
-    # 2. Фоллбек из локального JSON файла
+    if store_id is not None:
+        return {}
+
+    # 2. Фоллбек из локального JSON файла (только для legacy-вызовов)
     if os.path.exists(OVERRIDES_FILE):
         try:
             with open(OVERRIDES_FILE, "r", encoding="utf-8") as f:
@@ -102,8 +117,15 @@ def _load_overrides() -> dict:
             pass
     return {}
 
-def _save_override(sku: str, price: int, stock: int, brand: Optional[str] = None, status: Optional[str] = None):
-    overrides = _load_overrides()
+def _save_override(
+    sku: str,
+    price: int,
+    stock: int,
+    brand: Optional[str] = None,
+    status: Optional[str] = None,
+    store_id: Optional[str] = None,
+):
+    overrides = _load_overrides(store_id=store_id)
     ov_data = {
         "price_num": price,
         "stock": stock,
@@ -130,6 +152,7 @@ def _save_override(sku: str, price: int, stock: int, brand: Optional[str] = None
         if not db_obj:
             db_obj = ProductOverrideDB(
                 sku=sku,
+                store_id=store_id,
                 price_num=price,
                 stock=stock,
                 brand=brand,
@@ -137,6 +160,8 @@ def _save_override(sku: str, price: int, stock: int, brand: Optional[str] = None
             )
             session.add(db_obj)
         else:
+            if store_id is not None:
+                db_obj.store_id = store_id
             db_obj.price_num = price
             db_obj.stock = stock
             if brand:
@@ -151,8 +176,8 @@ def _save_override(sku: str, price: int, stock: int, brand: Optional[str] = None
             session.rollback()
             session.close()
 
-def _apply_overrides(products: list) -> list:
-    overrides = _load_overrides()
+def _apply_overrides(products: list, store_id: Optional[str] = None) -> list:
+    overrides = _load_overrides(store_id=store_id)
     for p in products:
         sku = p.get("sku")
         if "price_num" not in p:
