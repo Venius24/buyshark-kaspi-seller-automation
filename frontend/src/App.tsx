@@ -12,6 +12,9 @@ import { IntegrationsPublicApi } from './components/IntegrationsPublicApi';
 import { PrintBatcher } from './components/PrintBatcher';
 import { AuthModal } from './components/AuthModal';
 import { StoreHub } from './components/StoreHub';
+import { Sidebar } from './components/Sidebar';
+import { ContentHeader } from './components/ContentHeader';
+import type { ActiveTab } from './types';
 
 
 
@@ -95,7 +98,7 @@ export default function App() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   // Tabs navigation, packaging and transfer states
-  const [activeTab, setActiveTab] = useState<'stores' | 'overview' | 'products' | 'dumping' | 'chatbot' | 'stock-groups' | 'public-api' | 'print-batcher' | 'packaging' | 'transfer' | 'logs' | 'settings'>('stores');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('stores');
 
 
 
@@ -659,6 +662,24 @@ export default function App() {
   };
 
 
+  const handleTabClick = (tab: ActiveTab) => {
+    setActiveTab(tab);
+    if (tab === 'products') {
+      loadProducts(1, statusFilter, searchQuery, pageSize, false);
+      loadDumpingConfigs();
+    } else if (tab === 'dumping') {
+      loadProducts(1, statusFilter, searchQuery, pageSize, dumpingOnlyFilter);
+      loadDumpingConfigs();
+    } else if (tab === 'chatbot') {
+      loadChatbotConfig();
+      loadChatbotStatus();
+    } else if (tab === 'packaging') {
+      loadOrders(orderStatusFilter, orderLimit);
+    } else if (tab === 'transfer') {
+      loadTransfers(transferFilter);
+    }
+  };
+
   // ── UI helpers ─────────────────────────────────────────
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -712,265 +733,21 @@ export default function App() {
   return (
     <div className="app-shell">
       {/* ── STITCH MCP SIDEBAR ─────────────────────────────────── */}
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <div className="sidebar-logo-icon">K</div>
-          <div>
-            <div className="sidebar-brand-title">Kaspi SaaS</div>
-            <div className="sidebar-brand-subtitle">Lumina Automation</div>
-          </div>
-        </div>
-
-        <div className="sidebar-nav">
-          <div className="sidebar-group">
-            <div className="sidebar-group-title">Главное</div>
-            
-            <button 
-              className={`sidebar-item ${activeTab === 'stores' ? 'active' : ''}`}
-              onClick={() => setActiveTab('stores')}
-            >
-              <div className="sidebar-item-left">
-                <span className="sidebar-icon">🏪</span>
-                <span>Магазины Kaspi</span>
-              </div>
-              <span className="sidebar-pill" style={{ color: '#34d399' }}>Multi-Store</span>
-            </button>
-
-            <button 
-              className={`sidebar-item ${activeTab === 'overview' ? 'active' : ''}`}
-              onClick={() => setActiveTab('overview')}
-            >
-              <div className="sidebar-item-left">
-                <span className="sidebar-icon">📊</span>
-                <span>Обзор</span>
-              </div>
-              <span className="sidebar-pill">Dashboard</span>
-            </button>
-
-            <button 
-              className={`sidebar-item ${activeTab === 'products' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveTab('products');
-                loadProducts(1, statusFilter, searchQuery, pageSize, false);
-                loadDumpingConfigs();
-              }}
-            >
-              <div className="sidebar-item-left">
-                <span className="sidebar-icon">🏷️</span>
-                <span>Товары</span>
-              </div>
-              {totalCount > 0 && <span className="sidebar-pill">{totalCount}</span>}
-            </button>
-
-            <button 
-              className={`sidebar-item ${activeTab === 'dumping' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveTab('dumping');
-                loadProducts(1, statusFilter, searchQuery, pageSize, dumpingOnlyFilter);
-                loadDumpingConfigs();
-              }}
-            >
-              <div className="sidebar-item-left">
-                <span className="sidebar-icon">⚡</span>
-                <span>Авто-Демпинг</span>
-              </div>
-              <span className="sidebar-pill" style={{ color: 'var(--secondary)' }}>Auto</span>
-            </button>
-
-            <button 
-              className={`sidebar-item ${activeTab === 'chatbot' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveTab('chatbot');
-                loadChatbotConfig();
-                loadChatbotStatus();
-              }}
-            >
-              <div className="sidebar-item-left">
-                <span className="sidebar-icon">🤖</span>
-                <span>ИИ-Автоответчик</span>
-              </div>
-              <span className="sidebar-pill" style={{ color: chatbotStatus.enabled ? '#34d399' : '#888' }}>
-                {chatbotStatus.enabled ? 'ON' : 'OFF'}
-              </span>
-            </button>
-
-            <button 
-              className={`sidebar-item ${activeTab === 'stock-groups' ? 'active' : ''}`}
-              onClick={() => setActiveTab('stock-groups')}
-            >
-              <div className="sidebar-item-left">
-                <span className="sidebar-icon">🔗</span>
-                <span>Связка остатков</span>
-              </div>
-              <span className="sidebar-pill" style={{ color: '#818cf8' }}>Master</span>
-            </button>
-
-            <button 
-              className={`sidebar-item ${activeTab === 'public-api' ? 'active' : ''}`}
-              onClick={() => setActiveTab('public-api')}
-            >
-              <div className="sidebar-item-left">
-                <span className="sidebar-icon">💻</span>
-                <span>Для разработчиков</span>
-              </div>
-              <span className="sidebar-pill" style={{ color: '#38bdf8' }}>API</span>
-            </button>
-          </div>
-
-
-
-
-          <div className="sidebar-group">
-            <div className="sidebar-group-title">Заказы & Логистика</div>
-
-            <button 
-              className={`sidebar-item ${activeTab === 'print-batcher' ? 'active' : ''}`}
-              onClick={() => setActiveTab('print-batcher')}
-            >
-              <div className="sidebar-item-left">
-                <span className="sidebar-icon">🖨️</span>
-                <span>Автосборщик печати</span>
-              </div>
-              <span className="sidebar-pill" style={{ color: '#10b981' }}>KSTAT</span>
-            </button>
-
-            <button 
-              className={`sidebar-item ${activeTab === 'packaging' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveTab('packaging');
-                loadOrders(orderStatusFilter, orderLimit);
-              }}
-            >
-              <div className="sidebar-item-left">
-                <span className="sidebar-icon">📦</span>
-                <span>Упаковка</span>
-              </div>
-              {orders.length > 0 && <span className="sidebar-pill">{orders.length}</span>}
-            </button>
-
-            <button 
-              className={`sidebar-item ${activeTab === 'transfer' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveTab('transfer');
-                loadTransfers(transferFilter);
-              }}
-            >
-              <div className="sidebar-item-left">
-                <span className="sidebar-icon">🚚</span>
-                <span>Передача</span>
-              </div>
-              {transfers.length > 0 && <span className="sidebar-pill">{transfers.length}</span>}
-            </button>
-          </div>
-
-          <div className="sidebar-group">
-            <div className="sidebar-group-title">Система</div>
-
-            <button 
-              className={`sidebar-item ${activeTab === 'logs' ? 'active' : ''}`}
-              onClick={() => setActiveTab('logs')}
-            >
-              <div className="sidebar-item-left">
-                <span className="sidebar-icon">📜</span>
-                <span>Терминал логов</span>
-              </div>
-              <span className="sidebar-pill" style={{ background: isWsConnected ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', color: isWsConnected ? '#34d399' : '#f87171' }}>
-                {isWsConnected ? 'LIVE' : 'OFF'}
-              </span>
-            </button>
-
-            <button 
-              className={`sidebar-item ${activeTab === 'settings' ? 'active' : ''}`}
-              onClick={() => setActiveTab('settings')}
-            >
-              <div className="sidebar-item-left">
-                <span className="sidebar-icon">⚙️</span>
-                <span>Подключения & Сессия</span>
-              </div>
-              <span className="sidebar-pill">API</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="sidebar-footer">
-          <div className="sidebar-user-card">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span className="glow-dot glow-dot-success"></span>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: '#e5e7eb' }}>Kaspi API Online</span>
-            </div>
-            <button 
-              className="btn btn-secondary"
-              style={{ padding: '4px 8px', fontSize: '11px', color: 'var(--error)' }}
-              onClick={handleLogout}
-              title="Выйти из аккаунта"
-            >
-              🚪
-            </button>
-          </div>
-        </div>
-      </aside>
+      <Sidebar
+        activeTab={activeTab}
+        onSelectTab={handleTabClick}
+        onLogout={handleLogout}
+        totalCount={totalCount}
+        chatbotEnabled={chatbotStatus.enabled}
+        ordersCount={orders.length}
+        transfersCount={transfers.length}
+        isWsConnected={isWsConnected}
+      />
 
       {/* ── MAIN CONTENT AREA ─────────────────────────────────── */}
       <main className="main-content">
         {/* TOP CONTENT HEADER */}
-        <header className="content-header">
-          <div className="content-title-area">
-            <span className="content-title-icon">
-              {activeTab === 'stores' && '🏪'}
-              {activeTab === 'overview' && '📊'}
-              {activeTab === 'products' && '🏷️'}
-              {activeTab === 'dumping' && '⚡'}
-              {activeTab === 'chatbot' && '🤖'}
-              {activeTab === 'stock-groups' && '🔗'}
-              {activeTab === 'public-api' && '💻'}
-              {activeTab === 'print-batcher' && '🖨️'}
-              {activeTab === 'packaging' && '📦'}
-              {activeTab === 'transfer' && '🚚'}
-              {activeTab === 'logs' && '📜'}
-              {activeTab === 'settings' && '⚙️'}
-            </span>
-            <div className="content-title-text">
-              <h1>
-                {activeTab === 'stores' && 'Управление Магазинами Kaspi'}
-                {activeTab === 'overview' && 'Аналитический Обзор'}
-                {activeTab === 'products' && 'Управление Товарами'}
-                {activeTab === 'dumping' && 'Автоматический Демпинг'}
-                {activeTab === 'chatbot' && 'ИИ-Автоответчик Kaspi'}
-                {activeTab === 'stock-groups' && 'Связка Остатков (Master Stock Sync)'}
-                {activeTab === 'public-api' && 'Раздел для разработчиков (API & Webhooks)'}
-                {activeTab === 'print-batcher' && 'Автосборщик & Сортировщик Печати (Print-Batcher Engine)'}
-                {activeTab === 'packaging' && 'Упаковка Заказов'}
-                {activeTab === 'transfer' && 'Передача Курьеру'}
-                {activeTab === 'logs' && 'Терминал Системных Событий'}
-                {activeTab === 'settings' && 'Статус Сессии & Настройки'}
-              </h1>
-              <p>
-                {activeTab === 'stores' && 'Управление магазинами Kaspi, безопасное AES-256 шифрование куков и модальное окно Onboarding Wizard'}
-                {activeTab === 'overview' && 'Ключевая аналитика доли BuyBox, сохранение маржи и поток активности'}
-                {activeTab === 'products' && 'Каталог товаров, остатки, цены и статус продажи на Kaspi'}
-                {activeTab === 'dumping' && 'Управление стратегиями демпинга, шагом и фильтрами конкурентов'}
-                {activeTab === 'chatbot' && 'Автоматические умные ответы покупателям, курьерские шаблоны и Telegram эскалация'}
-                {activeTab === 'stock-groups' && 'Объединение карточек товаров Kaspi в единые складские группы с автоматическим веерным списанием остатков'}
-                {activeTab === 'public-api' && 'Управление API-ключами, настройка исходящих Webhooks и документация для интеграции с 1С/ERP'}
-                {activeTab === 'print-batcher' && 'Прием ZIP-архивов, распознавание размеров страниц и генерация единых PDF для мгновенной печати по типам принтеров'}
-                {activeTab === 'packaging' && 'Формирование и печать упаковочных актов и маркировок'}
-                {activeTab === 'transfer' && 'Управление актами приема-сдачи и курьерскими передачами'}
-                {activeTab === 'logs' && 'Поток событий системы в реальном времени через WebSocket'}
-                {activeTab === 'settings' && 'Состояние авторизации Kaspi REST API и сессии Kaspi MC'}
-              </p>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div className="status-widget" style={{ padding: '6px 14px', borderRadius: '20px' }}>
-              <span className="glow-dot glow-dot-success"></span>
-              <span style={{ fontSize: '12px', fontWeight: 600 }}>REST API Active</span>
-            </div>
-            <button className="btn btn-secondary" style={{ padding: '8px 14px' }} onClick={handleLogout}>
-              🚪 Выйти
-            </button>
-          </div>
-        </header>
+        <ContentHeader activeTab={activeTab} onLogout={handleLogout} />
 
         {/* 🏪 TAB: STORES */}
         {activeTab === 'stores' && <StoreHub />}
