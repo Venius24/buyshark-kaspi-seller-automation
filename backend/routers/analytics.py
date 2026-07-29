@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import random
 import os
 import json
+import time
 import logging
 from backend.state_helpers import _load_dumping_configs
 from backend.dumper.config import _decode_base64_if_needed
@@ -15,6 +16,26 @@ from backend.security.store_context import StoreContext, get_store_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+
+# Фронтенд поллит /api/analytics/widgets каждые 10 секунд, пока открыта вкладка
+# Overview (useAnalyticsWidgets.ts). Без кэша это означало живой синхронный
+# запрос к публичному API конкурентов Kaspi на каждый poll — до 360 запросов/час
+# на один и тот же SKU, что похоже и стало причиной бана/рейт-лимита IP VPS
+# Kaspi'ем (2026-07-29, подтверждено: 429 даже на kaspi.kz/shop/ с того же IP).
+# Реальный демпинг-цикл (radar.py через background_dumping_loop) и так сканирует
+# рынок раз в 5 минут — виджету дашборда не нужны данные свежее этого.
+_WIDGET_OFFERS_CACHE_TTL_SECONDS = 120
+_widget_offers_cache: dict = {}
+
+def _get_cached_offers(master_sku: str, city_code: str) -> list:
+    cache_key = (master_sku, city_code)
+    cached = _widget_offers_cache.get(cache_key)
+    now = time.time()
+    if cached and (now - cached[0]) < _WIDGET_OFFERS_CACHE_TTL_SECONDS:
+        return cached[1]
+    offers = _fetch_offers_sync(master_sku, city_code)
+    _widget_offers_cache[cache_key] = (now, offers)
+    return offers
 
 @router.get("/widgets")
 def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
@@ -103,8 +124,8 @@ def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
         city_code = active_cfg.get("city_code") or active_cfg.get("cityCode") or "750000000"
         
         if kaspi_master_sku:
-            # Live fetch competitor offers from Kaspi
-            raw_offers = _fetch_offers_sync(kaspi_master_sku, city_code)
+            # Кэшируем на _WIDGET_OFFERS_CACHE_TTL_SECONDS — см. комментарий у кэша выше
+            raw_offers = _get_cached_offers(kaspi_master_sku, city_code)
             if raw_offers:
                 my_merchant_id = ctx.merchant_id or "20186986"
                 
