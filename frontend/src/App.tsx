@@ -5,6 +5,7 @@ import { useLogs } from './hooks/useLogs';
 import { useAnalyticsWidgets } from './hooks/useAnalyticsWidgets';
 import { LogsTab } from './components/tabs/LogsTab';
 import { OverviewTab } from './components/tabs/OverviewTab';
+import { SettingsTab } from './components/tabs/SettingsTab';
 import { PriceHistoryChart } from './components/PriceHistoryChart';
 import { MasterStockGroups } from './components/MasterStockGroups';
 import { IntegrationsPublicApi } from './components/IntegrationsPublicApi';
@@ -1007,57 +1008,12 @@ export default function App() {
 
         {/* ⚙️ TAB: SETTINGS & SESSION */}
         {activeTab === 'settings' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '800px' }}>
-            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <h2>Статус авторизации и сессии</h2>
-
-              <div className="status-widget">
-                <div>
-                  <h3 style={{ fontSize: '15px', fontWeight: 600 }}>Kaspi Merchant API (REST)</h3>
-                  <p style={{ marginTop: '4px', fontSize: '12px' }}>Токен X-Auth-Token проверен и сохранен.</p>
-                  <div style={{ display: 'flex', alignItems: 'center', marginTop: '8px' }}>
-                    <span className="glow-dot glow-dot-success"></span>
-                    <span className="badge badge-success">Сессия активна</span>
-                  </div>
-                </div>
-                <button className="btn btn-secondary" onClick={() => {
-                  addLog('Проверка состояния сессии REST API...');
-                  apiFetch(`${API_URL}/api/verify-session`, { method: 'POST' })
-                    .then(r => r.json())
-                    .then(d => addLog(d.valid ? 'Сессия REST API активна ✓' : 'Сессия REST API невалидна ✗'))
-                    .catch(() => addLog('Ошибка проверки сессии REST API'));
-                }}>
-                  🔄 Проверить
-                </button>
-              </div>
-
-              <div className="status-widget">
-                <div>
-                  <h3 style={{ fontSize: '15px', fontWeight: 600 }}>Kaspi MC (сессионные куки браузера)</h3>
-                  <p style={{ marginTop: '4px', fontSize: '12px' }}>Используется для получения цен конкурентов и управления демпингом.</p>
-                  <div style={{ display: 'flex', alignItems: 'center', marginTop: '8px' }}>
-                    <span className={`glow-dot ${mcHasSession ? 'glow-dot-success' : 'glow-dot-warning'}`}></span>
-                    {mcHasSession ? (
-                      <span className="badge badge-success">Сессионные куки активны</span>
-                    ) : (
-                      <span className="badge badge-warning">Требуется повторный вход</span>
-                    )}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button className="btn btn-primary" onClick={() => setMcAuthStep('credentials')}>
-                    🔑 {mcHasSession ? 'Авторизоваться заново' : 'Войти в Kaspi MC'}
-                  </button>
-                  <button className="btn btn-secondary" onClick={() => {
-                    addLog('Проверка кук Kaspi MC...');
-                    checkMcStatus(true).then(() => addLog('Проверка завершена.'));
-                  }}>
-                    🔄 Проверить
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <SettingsTab
+            mcHasSession={mcHasSession}
+            addLog={addLog}
+            onOpenMcAuth={() => setMcAuthStep('credentials')}
+            onCheckMcStatus={() => checkMcStatus(true)}
+          />
         )}
 
         {/* 🏷️ TAB 1, ⚡ TAB 2, 📦 TAB 3, 🚚 TAB 4: RENDER IN GLASS CARD */}
