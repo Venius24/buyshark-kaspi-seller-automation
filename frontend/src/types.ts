@@ -51,6 +51,25 @@ export interface Transfer {
   waybillUrl?: string;
 }
 
+export interface ChatbotConfig {
+  enabled: boolean;
+  deepseek_api_key: string;
+  tg_bot_token: string;
+  admin_ids: string[];
+  use_tg_proxy: boolean;
+  tg_proxy: string;
+  merchant_id: string;
+}
+
+export interface ChatbotStatus {
+  enabled: boolean;
+  has_session: boolean;
+  cookie_alert_sent: boolean;
+  blocked_chats_count: number;
+  blocked_chats: { group_id: string; reason: string }[];
+  processed_chats_count: number;
+}
+
 export type ActiveTab =
   | 'stores'
   | 'overview'
