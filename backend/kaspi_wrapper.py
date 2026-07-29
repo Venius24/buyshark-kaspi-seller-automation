@@ -800,26 +800,47 @@ class KaspiAPI:
                         if availabilities:
                             stock_count = availabilities[0].get("stockCount", 0)
 
+                        # ВАЖНО: плоское поле offer["price"] у Kaspi BFF — денормализованный кэш,
+                        # который у части офферов (~35% на реальном каталоге, подтверждено вживую
+                        # 2026-07-29) отдаёт 0 даже когда цена реально назначена — судя по всему,
+                        # не переиндексируется сразу после ON_SALE/ручной реактивации оффера в
+                        # кабинете Kaspi. Реальная цена в этом случае лежит в cityPrices/minPrice/
+                        # rangePrice — их и нужно читать первыми, а не после плоского поля, иначе
+                        # такие товары ошибочно помечаются "Цена не указана" (ломает демпинг, т.к.
+                        # price_num=0 попадает в brain.py как my_current_price).
                         price_val = offer.get("price")
                         price_num = 0
                         if isinstance(price_val, (int, float)) and price_val > 0:
                             price_num = int(price_val)
-                        elif isinstance(price_val, dict):
-                            val = price_val.get("value") or price_val.get("amount") or price_val.get("price")
+
+                        if not price_num:
+                            city_prices = offer.get("cityPrices")
+                            if isinstance(city_prices, list) and city_prices:
+                                val = city_prices[0].get("value")
+                                if isinstance(val, (int, float)) and val > 0:
+                                    price_num = int(val)
+
+                        if not price_num:
+                            val = offer.get("minPrice")
                             if isinstance(val, (int, float)) and val > 0:
                                 price_num = int(val)
 
                         if not price_num:
-                            for field in ["basePrice", "currentPrice", "priceValue"]:
-                                val = offer.get(field)
+                            range_price = offer.get("rangePrice")
+                            if isinstance(range_price, dict):
+                                val = range_price.get("MIN")
                                 if isinstance(val, (int, float)) and val > 0:
                                     price_num = int(val)
-                                    break
 
-                        if not price_num and availabilities:
-                            val = availabilities[0].get("price") or availabilities[0].get("value")
-                            if isinstance(val, (int, float)) and val > 0:
-                                price_num = int(val)
+                        if not price_num:
+                            all_city_prices = offer.get("allCityPrices")
+                            if isinstance(all_city_prices, dict):
+                                for entry in all_city_prices.values():
+                                    if isinstance(entry, dict):
+                                        val = entry.get("price")
+                                        if isinstance(val, (int, float)) and val > 0:
+                                            price_num = int(val)
+                                            break
 
                         brand_name = offer.get("brandName") or "Без бренда"
                         title = offer.get("title") or f"Товар {merchant_sku}"
