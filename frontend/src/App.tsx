@@ -2,13 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { apiFetch, setUnauthorizedHandler, API_URL, getWsUrl } from './api';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useLogs } from './hooks/useLogs';
+import { useAnalyticsWidgets } from './hooks/useAnalyticsWidgets';
 import { LogsTab } from './components/tabs/LogsTab';
-import { BuyBoxGauge } from './components/BuyBoxGauge';
-import { SavedMarginCard } from './components/SavedMarginCard';
-import { LiveTerminalStream } from './components/LiveTerminalStream';
+import { OverviewTab } from './components/tabs/OverviewTab';
 import { PriceHistoryChart } from './components/PriceHistoryChart';
-import { PriceRadarWidget } from './components/PriceRadarWidget';
-import { AiChatSentimentWidget } from './components/AiChatSentimentWidget';
 import { MasterStockGroups } from './components/MasterStockGroups';
 import { IntegrationsPublicApi } from './components/IntegrationsPublicApi';
 import { PrintBatcher } from './components/PrintBatcher';
@@ -173,47 +170,11 @@ export default function App() {
   const [selectedModes, setSelectedModes] = useState<Record<string, string>>({});
   const [isRunningDumping, setIsRunningDumping] = useState(false);
   const [nextRunSeconds, setNextRunSeconds] = useState<number | null>(null);
-  const [analytics, setAnalytics] = useState<{
-    buy_box_share: number;
-    winning_count: number;
-    total_scanned: number;
-    total_saved_margin: number;
-  }>({
-    buy_box_share: 80.0,
-    winning_count: 8,
-    total_scanned: 10,
-    total_saved_margin: 145000
-  });
-
-  const [widgetData, setWidgetData] = useState<any>(null);
   const [dumpingOnlyFilter, setDumpingOnlyFilter] = useState(false);
   const [dumpingStatusFilter, setDumpingStatusFilter] = useState<string>('');
 
   const { isConnected: isWsConnected, lastEvent: wsEvent } = useWebSocket(getWsUrl());
-
-  useEffect(() => {
-    const fetchWidgets = async () => {
-      try {
-        const res = await apiFetch(`${API_URL}/api/analytics/widgets`);
-        const data = await res.json();
-        if (res.ok && data.success) {
-          setWidgetData(data);
-          if (data.analytics) {
-            setAnalytics(prev => ({
-              ...prev,
-              buy_box_share: data.analytics.buy_box_share ?? prev.buy_box_share,
-              winning_count: data.analytics.winning_count ?? prev.winning_count,
-              total_scanned: data.analytics.total_scanned ?? prev.total_scanned,
-              total_saved_margin: data.analytics.total_saved_margin ?? prev.total_saved_margin,
-            }));
-          }
-        }
-      } catch { /* ignore */ }
-    };
-    fetchWidgets();
-    const interval = setInterval(fetchWidgets, 10000);
-    return () => clearInterval(interval);
-  }, []);
+  const { analytics, widgetData } = useAnalyticsWidgets(wsEvent);
 
   const checkMcStatus = async (verify = false) => {
     try {
@@ -430,8 +391,6 @@ export default function App() {
     if (!wsEvent) return;
     if (wsEvent.type === 'terminal_log' && wsEvent.data?.message) {
       addLog(wsEvent.data.message);
-    } else if (wsEvent.type === 'analytics_update' && wsEvent.data) {
-      setAnalytics(wsEvent.data);
     }
   }, [wsEvent]);
 
@@ -1017,111 +976,28 @@ export default function App() {
 
         {/* 📊 TAB: OVERVIEW */}
         {activeTab === 'overview' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
-              <BuyBoxGauge
-                percentage={analytics.buy_box_share}
-                winningCount={analytics.winning_count}
-                totalScanned={analytics.total_scanned}
-              />
-              <SavedMarginCard
-                totalSavedMargin={analytics.total_saved_margin}
-              />
-              <LiveTerminalStream
-                logs={logs}
-                isConnected={isWsConnected}
-              />
-            </div>
-
-            {/* ⚔️ LIVE PRICE RADAR (REAL-TIME PRICE WAR MONITOR) */}
-            <PriceRadarWidget
-              topProduct={widgetData?.price_radar?.top_product}
-              events={widgetData?.price_radar?.recent_events}
-            />
-
-            {/* 🧠 AI CHAT SENTIMENT & STORE PULSE SHELL */}
-            <AiChatSentimentWidget
-              statusLabel={widgetData?.ai_sentiment_shell?.status_label}
-              categories={widgetData?.ai_sentiment_shell?.categories}
-              hourlyHeatmap={widgetData?.ai_sentiment_shell?.hourly_heatmap}
-              pulseStatus={widgetData?.ai_sentiment_shell?.store_pulse}
-            />
-
-            <div className="grid-2">
-              <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <h2>Статус системы</h2>
-                <div className="status-widget">
-                  <div>
-                    <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi Merchant API (REST)</h3>
-                    <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
-                      <span className="glow-dot glow-dot-success"></span>
-                      <span className="badge badge-success">Сессия активна</span>
-                    </div>
-                  </div>
-                  <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => {
-                    addLog('Проверка состояния сессии REST API...');
-                    apiFetch(`${API_URL}/api/verify-session`, { method: 'POST' })
-                      .then(r => r.json())
-                      .then(d => addLog(d.valid ? 'Сессия REST API активна ✓' : 'Сессия REST API невалидна ✗'))
-                      .catch(() => addLog('Ошибка проверки сессии REST API'));
-                  }}>
-                    🔄
-                  </button>
-                </div>
-
-                <div className="status-widget">
-                  <div>
-                    <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi MC (сессионные куки)</h3>
-                    <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
-                      <span className={`glow-dot ${mcHasSession ? 'glow-dot-success' : 'glow-dot-warning'}`}></span>
-                      {mcHasSession ? (
-                        <span className="badge badge-success">Активны</span>
-                      ) : (
-                        <span className="badge badge-warning">Требуется вход</span>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => setMcAuthStep('credentials')}>
-                      🔑 {mcHasSession ? 'Войти заново' : 'Войти'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h2>Быстрые действия</h2>
-                  <span className="badge badge-success">Lumina Engine</span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '8px' }}>
-                  <button className="btn btn-primary" style={{ padding: '14px' }} onClick={() => {
-                    setActiveTab('products');
-                    loadProducts(1, statusFilter, searchQuery, pageSize);
-                  }}>
-                    🏷️ Открыть каталог
-                  </button>
-                  <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={() => {
-                    setActiveTab('dumping');
-                    loadDumpingConfigs();
-                  }}>
-                    ⚡ Настроить демпинг
-                  </button>
-                  <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={() => {
-                    setActiveTab('packaging');
-                    loadOrders('ASSEMBLY', 10);
-                  }}>
-                    📦 Сборка заказов
-                  </button>
-                  <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={() => {
-                    setActiveTab('logs');
-                  }}>
-                    📜 Открыть консоль
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <OverviewTab
+            analytics={analytics}
+            widgetData={widgetData}
+            logs={logs}
+            isWsConnected={isWsConnected}
+            addLog={addLog}
+            mcHasSession={mcHasSession}
+            onOpenMcAuth={() => setMcAuthStep('credentials')}
+            onOpenProducts={() => {
+              setActiveTab('products');
+              loadProducts(1, statusFilter, searchQuery, pageSize);
+            }}
+            onOpenDumping={() => {
+              setActiveTab('dumping');
+              loadDumpingConfigs();
+            }}
+            onOpenPackaging={() => {
+              setActiveTab('packaging');
+              loadOrders('ASSEMBLY', 10);
+            }}
+            onOpenLogs={() => setActiveTab('logs')}
+          />
         )}
 
         {/* 📜 TAB: LOGS / TERMINAL */}

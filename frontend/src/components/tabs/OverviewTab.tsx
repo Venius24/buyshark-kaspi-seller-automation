@@ -1,0 +1,136 @@
+import { apiFetch, API_URL } from '../../api';
+import { BuyBoxGauge } from '../BuyBoxGauge';
+import { SavedMarginCard } from '../SavedMarginCard';
+import { LiveTerminalStream } from '../LiveTerminalStream';
+import { PriceRadarWidget } from '../PriceRadarWidget';
+import { AiChatSentimentWidget } from '../AiChatSentimentWidget';
+
+interface OverviewTabProps {
+  analytics: {
+    buy_box_share: number;
+    winning_count: number;
+    total_scanned: number;
+    total_saved_margin: number;
+  };
+  widgetData: any;
+  logs: string[];
+  isWsConnected: boolean;
+  addLog: (message: string) => void;
+  mcHasSession: boolean;
+  onOpenMcAuth: () => void;
+  onOpenProducts: () => void;
+  onOpenDumping: () => void;
+  onOpenPackaging: () => void;
+  onOpenLogs: () => void;
+}
+
+export function OverviewTab({
+  analytics,
+  widgetData,
+  logs,
+  isWsConnected,
+  addLog,
+  mcHasSession,
+  onOpenMcAuth,
+  onOpenProducts,
+  onOpenDumping,
+  onOpenPackaging,
+  onOpenLogs,
+}: OverviewTabProps) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+        <BuyBoxGauge
+          percentage={analytics.buy_box_share}
+          winningCount={analytics.winning_count}
+          totalScanned={analytics.total_scanned}
+        />
+        <SavedMarginCard
+          totalSavedMargin={analytics.total_saved_margin}
+        />
+        <LiveTerminalStream
+          logs={logs}
+          isConnected={isWsConnected}
+        />
+      </div>
+
+      {/* ⚔️ LIVE PRICE RADAR (REAL-TIME PRICE WAR MONITOR) */}
+      <PriceRadarWidget
+        topProduct={widgetData?.price_radar?.top_product}
+        events={widgetData?.price_radar?.recent_events}
+      />
+
+      {/* 🧠 AI CHAT SENTIMENT & STORE PULSE SHELL */}
+      <AiChatSentimentWidget
+        statusLabel={widgetData?.ai_sentiment_shell?.status_label}
+        categories={widgetData?.ai_sentiment_shell?.categories}
+        hourlyHeatmap={widgetData?.ai_sentiment_shell?.hourly_heatmap}
+        pulseStatus={widgetData?.ai_sentiment_shell?.store_pulse}
+      />
+
+      <div className="grid-2">
+        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <h2>Статус системы</h2>
+          <div className="status-widget">
+            <div>
+              <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi Merchant API (REST)</h3>
+              <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
+                <span className="glow-dot glow-dot-success"></span>
+                <span className="badge badge-success">Сессия активна</span>
+              </div>
+            </div>
+            <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => {
+              addLog('Проверка состояния сессии REST API...');
+              apiFetch(`${API_URL}/api/verify-session`, { method: 'POST' })
+                .then(r => r.json())
+                .then(d => addLog(d.valid ? 'Сессия REST API активна ✓' : 'Сессия REST API невалидна ✗'))
+                .catch(() => addLog('Ошибка проверки сессии REST API'));
+            }}>
+              🔄
+            </button>
+          </div>
+
+          <div className="status-widget">
+            <div>
+              <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi MC (сессионные куки)</h3>
+              <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
+                <span className={`glow-dot ${mcHasSession ? 'glow-dot-success' : 'glow-dot-warning'}`}></span>
+                {mcHasSession ? (
+                  <span className="badge badge-success">Активны</span>
+                ) : (
+                  <span className="badge badge-warning">Требуется вход</span>
+                )}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={onOpenMcAuth}>
+                🔑 {mcHasSession ? 'Войти заново' : 'Войти'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2>Быстрые действия</h2>
+            <span className="badge badge-success">Lumina Engine</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '8px' }}>
+            <button className="btn btn-primary" style={{ padding: '14px' }} onClick={onOpenProducts}>
+              🏷️ Открыть каталог
+            </button>
+            <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={onOpenDumping}>
+              ⚡ Настроить демпинг
+            </button>
+            <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={onOpenPackaging}>
+              📦 Сборка заказов
+            </button>
+            <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={onOpenLogs}>
+              📜 Открыть консоль
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
