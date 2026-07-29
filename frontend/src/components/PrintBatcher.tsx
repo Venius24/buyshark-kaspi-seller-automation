@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { apiFetch } from '../api';
+import { apiFetch, API_URL } from '../api';
 
 interface GeometryAudit {
   is_valid: boolean;
@@ -53,11 +53,10 @@ export const PrintBatcher: React.FC = () => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const API_BASE = import.meta.env.VITE_API_URL || '';
 
   const fetchHistoryStats = async () => {
     try {
-      const res = await apiFetch(`${API_BASE}/api/print-batcher/history-stats`);
+      const res = await apiFetch(`${API_URL}/api/print-batcher/history-stats`);
       if (res.ok) {
         const data = await res.json();
         setPrintedCount(data.printed_count || 0);
@@ -76,7 +75,7 @@ export const PrintBatcher: React.FC = () => {
       return;
     }
     try {
-      const res = await apiFetch(`${API_BASE}/api/print-batcher/reset-history`, { method: 'POST' });
+      const res = await apiFetch(`${API_URL}/api/print-batcher/reset-history`, { method: 'POST' });
       if (res.ok) {
         setPrintedCount(0);
         alert('История печати за сегодня сброшена');
@@ -127,7 +126,7 @@ export const PrintBatcher: React.FC = () => {
     formData.append('force_reprint', String(forceReprint));
 
     try {
-      const response = await apiFetch(`${API_BASE}/api/print-batcher/process`, {
+      const response = await apiFetch(`${API_URL}/api/print-batcher/process`, {
         method: 'POST',
         body: formData,
       });
@@ -148,7 +147,7 @@ export const PrintBatcher: React.FC = () => {
   };
 
   const handlePrint = (previewEndpoint: string) => {
-    const fullUrl = `${API_BASE}${previewEndpoint}`;
+    const fullUrl = `${API_URL}${previewEndpoint}`;
     const win = window.open(fullUrl, '_blank');
     if (win) {
       win.focus();
@@ -498,7 +497,7 @@ export const PrintBatcher: React.FC = () => {
                         </button>
 
                         <a
-                          href={`${API_BASE}${batch.download_url}`}
+                          href={`${API_URL}${batch.download_url}`}
                           target="_blank"
                           rel="noreferrer"
                           style={styles.downloadBtn}

@@ -43,9 +43,6 @@ export default function App() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
-  // Dropdown menu state
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-
   // Tabs navigation, packaging and transfer states
   const [activeTab, setActiveTab] = useState<ActiveTab>('stores');
 
@@ -882,16 +879,6 @@ export default function App() {
         {activeTab === 'print-batcher' && (
           <PrintBatcher />
         )}
-
-
-
-        {/* Dummy statement to reference unused variables for strict TypeScript compliance */}
-        {(() => {
-          if (false as boolean) {
-            console.log(isAuthed, openMenuId, setOpenMenuId, setFetchingTransfers, setFetchingOrders, setPackingAll);
-          }
-          return null;
-        })()}
       </main>
       <McAuthModal
         mcAuthStep={mcAuthStep}

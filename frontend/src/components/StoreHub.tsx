@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { apiFetch } from '../api';
+import { apiFetch, API_URL } from '../api';
 
 interface StoreItem {
   id: string;
@@ -45,20 +45,18 @@ export const StoreHub: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const API_BASE = import.meta.env.VITE_API_URL || '';
-
   const fetchStoresAndProfile = async () => {
     setLoading(true);
     try {
       // Profile
-      const pRes = await apiFetch(`${API_BASE}/api/v1/auth/me`);
+      const pRes = await apiFetch(`${API_URL}/api/v1/auth/me`);
       if (pRes.ok) {
         const pData = await pRes.json();
         setProfile(pData);
       }
 
       // Stores
-      const sRes = await apiFetch(`${API_BASE}/api/v1/stores`);
+      const sRes = await apiFetch(`${API_URL}/api/v1/stores`);
       if (sRes.ok) {
         const sData: StoreItem[] = await sRes.json();
         setStores(sData);
@@ -77,7 +75,7 @@ export const StoreHub: React.FC = () => {
     setActiveStoreId(storeId);
     if (!storeId) return;
     try {
-      await apiFetch(`${API_BASE}/api/v1/stores/${storeId}/select`, {
+      await apiFetch(`${API_URL}/api/v1/stores/${storeId}/select`, {
         method: 'POST',
       });
     } catch (err) {
@@ -101,7 +99,7 @@ export const StoreHub: React.FC = () => {
     setSuccessMsg(null);
 
     try {
-      const res = await apiFetch(`${API_BASE}/api/v1/stores/start-sms-login`, {
+      const res = await apiFetch(`${API_URL}/api/v1/stores/start-sms-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: phone.trim() }),
@@ -138,7 +136,7 @@ export const StoreHub: React.FC = () => {
     setSuccessMsg(null);
 
     try {
-      const res = await apiFetch(`${API_BASE}/api/v1/stores/connect-full-store`, {
+      const res = await apiFetch(`${API_URL}/api/v1/stores/connect-full-store`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -176,7 +174,7 @@ export const StoreHub: React.FC = () => {
 
   const handleVerifyStore = async (storeId: string) => {
     try {
-      const res = await apiFetch(`${API_BASE}/api/v1/stores/${storeId}/verify`, {
+      const res = await apiFetch(`${API_URL}/api/v1/stores/${storeId}/verify`, {
         method: 'POST',
       });
       if (res.ok) {
@@ -189,7 +187,7 @@ export const StoreHub: React.FC = () => {
 
   const handleSyncCookies = async (store: StoreItem) => {
     try {
-      const res = await apiFetch(`${API_BASE}/api/v1/stores/${store.id}/sync-cookies`, {
+      const res = await apiFetch(`${API_URL}/api/v1/stores/${store.id}/sync-cookies`, {
         method: 'POST',
       });
       if (res.ok) {
@@ -217,7 +215,7 @@ export const StoreHub: React.FC = () => {
   const handleDeleteStore = async (storeId: string) => {
     if (!window.confirm('Вы уверены, что хотите удалить этот магазин?')) return;
     try {
-      const res = await apiFetch(`${API_BASE}/api/v1/stores/${storeId}`, {
+      const res = await apiFetch(`${API_URL}/api/v1/stores/${storeId}`, {
         method: 'DELETE',
       });
       if (res.ok) {

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_URL } from '../api';
 
 interface AuthModalProps {
   onSuccess: () => void;
@@ -13,14 +14,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const API_BASE = import.meta.env.VITE_API_URL || '';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
-    const endpoint = isRegister ? `${API_BASE}/api/v1/auth/register` : `${API_BASE}/api/v1/auth/login`;
+    const endpoint = isRegister ? `${API_URL}/api/v1/auth/register` : `${API_URL}/api/v1/auth/login`;
     const payload = isRegister
       ? { email, password, full_name: fullName, phone }
       : { email, password };

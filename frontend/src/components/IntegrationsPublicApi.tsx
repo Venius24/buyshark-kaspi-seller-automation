@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { apiFetch } from '../api';
+import { apiFetch, API_URL } from '../api';
 import {
   Key,
   Webhook,
@@ -32,8 +32,6 @@ interface WebhookConfig {
   secret_masked?: string;
   enabled: boolean;
 }
-
-const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const IntegrationsPublicApi: React.FC = () => {
   const [keys, setKeys] = useState<ApiKeyItem[]>([]);
