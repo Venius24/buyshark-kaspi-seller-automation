@@ -14,6 +14,8 @@ import { AuthModal } from './components/AuthModal';
 import { StoreHub } from './components/StoreHub';
 import { Sidebar } from './components/Sidebar';
 import { ContentHeader } from './components/ContentHeader';
+import { Pagination } from './components/shared/Pagination';
+import { ProductCardHeader } from './components/shared/ProductCardHeader';
 import type { ActiveTab } from './types';
 
 
@@ -92,7 +94,6 @@ export default function App() {
   const [pageSize, setPageSize] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  const [pageInputText, setPageInputText] = useState('1');
 
   // Dropdown menu state
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -685,21 +686,18 @@ export default function App() {
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setCurrentPage(1);
-    setPageInputText('1');
     loadProducts(1, statusFilter, searchQuery, pageSize, activeTab === 'dumping' ? dumpingOnlyFilter : false);
   };
 
   const handleStatusFilterChange = (status: 'active' | 'archive') => {
     setStatusFilter(status);
     setCurrentPage(1);
-    setPageInputText('1');
     loadProducts(1, status, searchQuery, pageSize, activeTab === 'dumping' ? dumpingOnlyFilter : false);
   };
 
   const handlePageChange = (page: number) => {
     if (page < 1 || page > totalPages) return;
     setCurrentPage(page);
-    setPageInputText(String(page));
     loadProducts(page, statusFilter, searchQuery, pageSize, activeTab === 'dumping' ? dumpingOnlyFilter : false);
   };
 
@@ -816,7 +814,6 @@ export default function App() {
                             const pSize = parseInt(e.target.value);
                             setPageSize(pSize);
                             setCurrentPage(1);
-                            setPageInputText('1');
                             loadProducts(1, statusFilter, searchQuery, pSize);
                           }}
                           className="form-input"
@@ -915,21 +912,12 @@ export default function App() {
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <div style={{ maxWidth: '70%' }}>
-                                <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
-                                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                  Kaspi SKU: <strong>{product.sku || product.kaspiSku}</strong>
-                                  {product.merchantSku && product.merchantSku !== (product.sku || product.kaspiSku) && (
-                                    <span style={{ marginLeft: '10px' }}>
-                                      • Merchant SKU: <strong style={{ color: '#818cf8' }}>{product.merchantSku}</strong>
-                                    </span>
-                                  )}
-                                </p>
+                                <ProductCardHeader name={product.name} sku={product.sku} kaspiSku={product.kaspiSku} merchantSku={product.merchantSku} />
 
-                                
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
-                                  <span 
-                                    className="badge" 
-                                    style={{ 
+                                  <span
+                                    className="badge"
+                                    style={{
                                       background: product.status === 'Активен' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
                                       color: product.status === 'Активен' ? 'var(--success)' : '#aaa',
                                       border: '1px solid rgba(255,255,255,0.08)'
@@ -1074,55 +1062,12 @@ export default function App() {
                 </div>
 
                 {/* Pagination Controls */}
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px', marginTop: '20px' }}>
-                  <button 
-                    className="btn btn-secondary" 
-                    style={{ padding: '6px 12px', fontSize: '12px' }}
-                    onClick={() => handlePageChange(currentPage - 1)}
-                    disabled={currentPage === 1 || fetchingProducts}
-                  >
-                    ◀ Назад
-                  </button>
-                  
-                  <span style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    Страница 
-                    <input 
-                      type="text" 
-                      value={pageInputText}
-                      onChange={(e) => setPageInputText(e.target.value.replace(/\D/g, ''))}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          const pageNum = parseInt(pageInputText);
-                          if (pageNum >= 1 && pageNum <= totalPages) {
-                            handlePageChange(pageNum);
-                          } else {
-                            setPageInputText(String(currentPage));
-                          }
-                        }
-                      }}
-                      onBlur={() => {
-                        const pageNum = parseInt(pageInputText);
-                        if (pageNum >= 1 && pageNum <= totalPages) {
-                          handlePageChange(pageNum);
-                        } else {
-                          setPageInputText(String(currentPage));
-                        }
-                      }}
-                      className="form-input"
-                      style={{ width: '45px', padding: '4px 8px', textAlign: 'center', display: 'inline-block' }}
-                    />
-                    из <strong>{totalPages}</strong>
-                  </span>
-
-                  <button 
-                    className="btn btn-secondary" 
-                    style={{ padding: '6px 12px', fontSize: '12px' }}
-                    onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={currentPage === totalPages || fetchingProducts}
-                  >
-                    Вперед ▶
-                  </button>
-                </div>
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  disabled={fetchingProducts}
+                  onPageChange={handlePageChange}
+                />
               </>
             )}
 
@@ -1210,7 +1155,6 @@ export default function App() {
                         onClick={() => {
                           setDumpingOnlyFilter(false);
                           setCurrentPage(1);
-                          setPageInputText('1');
                           loadProducts(1, statusFilter, searchQuery, pageSize, false, dumpingStatusFilter);
                         }}
                       >
@@ -1227,7 +1171,6 @@ export default function App() {
                         onClick={() => {
                           setDumpingOnlyFilter(true);
                           setCurrentPage(1);
-                          setPageInputText('1');
                           loadProducts(1, statusFilter, searchQuery, pageSize, true, dumpingStatusFilter);
                         }}
                       >
@@ -1242,7 +1185,6 @@ export default function App() {
                         const val = e.target.value;
                         setDumpingStatusFilter(val);
                         setCurrentPage(1);
-                        setPageInputText('1');
                         loadProducts(1, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, val);
                       }}
                       className="form-input"
@@ -1329,17 +1271,8 @@ export default function App() {
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <div style={{ maxWidth: '70%' }}>
-                                <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{product.name}</h3>
-                                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                  Kaspi SKU: <strong>{product.sku || product.kaspiSku}</strong>
-                                  {product.merchantSku && product.merchantSku !== (product.sku || product.kaspiSku) && (
-                                    <span style={{ marginLeft: '10px' }}>
-                                      • Merchant SKU: <strong style={{ color: '#818cf8' }}>{product.merchantSku}</strong>
-                                    </span>
-                                  )}
-                                </p>
+                                <ProductCardHeader name={product.name} sku={product.sku} kaspiSku={product.kaspiSku} merchantSku={product.merchantSku} />
 
-                                
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
                                   {getStatusBadge(dStatus)}
                                   
@@ -1591,55 +1524,12 @@ export default function App() {
                 </div>
 
                 {/* Pagination Controls */}
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px', marginTop: '20px' }}>
-                  <button 
-                    className="btn btn-secondary" 
-                    style={{ padding: '6px 12px', fontSize: '12px' }}
-                    onClick={() => handlePageChange(currentPage - 1)}
-                    disabled={currentPage === 1 || fetchingProducts}
-                  >
-                    ◀ Назад
-                  </button>
-                  
-                  <span style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    Страница 
-                    <input 
-                      type="text" 
-                      value={pageInputText}
-                      onChange={(e) => setPageInputText(e.target.value.replace(/\D/g, ''))}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          const pageNum = parseInt(pageInputText);
-                          if (pageNum >= 1 && pageNum <= totalPages) {
-                            handlePageChange(pageNum);
-                          } else {
-                            setPageInputText(String(currentPage));
-                          }
-                        }
-                      }}
-                      onBlur={() => {
-                        const pageNum = parseInt(pageInputText);
-                        if (pageNum >= 1 && pageNum <= totalPages) {
-                          handlePageChange(pageNum);
-                        } else {
-                          setPageInputText(String(currentPage));
-                        }
-                      }}
-                      className="form-input"
-                      style={{ width: '45px', padding: '4px 8px', textAlign: 'center', display: 'inline-block' }}
-                    />
-                    из <strong>{totalPages}</strong>
-                  </span>
-
-                  <button 
-                    className="btn btn-secondary" 
-                    style={{ padding: '6px 12px', fontSize: '12px' }}
-                    onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={currentPage === totalPages || fetchingProducts}
-                  >
-                    Вперед ▶
-                  </button>
-                </div>
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  disabled={fetchingProducts}
+                  onPageChange={handlePageChange}
+                />
               </>
             )}
 
