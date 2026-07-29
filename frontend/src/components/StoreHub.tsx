@@ -37,13 +37,11 @@ export const StoreHub: React.FC = () => {
   // Unified Single Form States
   const [storeName, setStoreName] = useState<string>('');
   const [apiToken, setApiToken] = useState<string>('');
-  const [phone, setPhone] = useState<string>('+7');
-  const [smsCode, setSmsCode] = useState<string>('');
-  const [smsSent, setSmsSent] = useState<boolean>(false);
+  const [mcEmail, setMcEmail] = useState<string>('');
+  const [mcPassword, setMcPassword] = useState<string>('');
 
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const fetchStoresAndProfile = async () => {
     setLoading(true);
@@ -87,39 +85,7 @@ export const StoreHub: React.FC = () => {
     fetchStoresAndProfile();
   }, []);
 
-  // Step 1: Request SMS Code
-  const handleStartSms = async () => {
-    if (!phone.trim() || phone.trim().length < 6) {
-      setErrorMsg('Укажите корректный номер телефона (+7...)');
-      return;
-    }
-
-    setSubmitting(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    try {
-      const res = await apiFetch(`${API_URL}/api/v1/stores/start-sms-login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: phone.trim() }),
-      });
-
-      if (!res.ok) {
-        const errJson = await res.json();
-        throw new Error(errJson.detail || 'Ошибка отправки SMS');
-      }
-
-      setSmsSent(true);
-      setSuccessMsg('SMS-код успешно отправлен на ваш номер телефона!');
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Ошибка связи с бэкендом');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // Step 2: Unified Form Submit (API Token + SMS Code)
+  // Unified Form Submit: API Token (Public REST) + Email/Password (Kaspi MC login)
   const handleConnectFullStore = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!storeName.trim()) {
@@ -133,7 +99,6 @@ export const StoreHub: React.FC = () => {
 
     setSubmitting(true);
     setErrorMsg(null);
-    setSuccessMsg(null);
 
     try {
       const res = await apiFetch(`${API_URL}/api/v1/stores/connect-full-store`, {
@@ -142,8 +107,8 @@ export const StoreHub: React.FC = () => {
         body: JSON.stringify({
           name: storeName.trim(),
           api_token: apiToken.trim(),
-          phone: phone.trim(),
-          sms: smsCode.trim(),
+          email: mcEmail.trim() || undefined,
+          password: mcPassword || undefined,
         }),
       });
 
@@ -165,11 +130,9 @@ export const StoreHub: React.FC = () => {
   const resetModalState = () => {
     setStoreName('');
     setApiToken('');
-    setPhone('+7');
-    setSmsCode('');
-    setSmsSent(false);
+    setMcEmail('');
+    setMcPassword('');
     setErrorMsg(null);
-    setSuccessMsg(null);
   };
 
   const handleVerifyStore = async (storeId: string) => {
@@ -195,20 +158,11 @@ export const StoreHub: React.FC = () => {
         fetchStoresAndProfile();
       } else {
         const errData = await res.json();
-        // Предзаполняем форму для быстрого SMS-входа без повторного ввода API Токена
-        resetModalState();
-        setStoreName(store.name);
-        setApiToken('PRESERVE_EXISTING');
-        setErrorMsg(`⚠️ ${errData.detail || 'Требуется SMS-авторизация'}. Введите номер телефона и нажмите «Отправить СМС».`);
-        setShowAddModal(true);
+        alert(`⚠️ ${errData.detail || 'Требуется повторный вход в Kaspi MC'}. Перейдите во вкладку «Подключения & Сессия» и нажмите «Войти в Kaspi MC».`);
       }
     } catch (err) {
       console.error('Error syncing store cookies:', err);
-      resetModalState();
-      setStoreName(store.name);
-      setApiToken('PRESERVE_EXISTING');
-      setErrorMsg('⚠️ Ошибка синхронизации. Введите номер телефона и нажмите «Отправить СМС» для входа.');
-      setShowAddModal(true);
+      alert('⚠️ Ошибка синхронизации кук. Перейдите во вкладку «Подключения & Сессия» и войдите в Kaspi MC заново.');
     }
   };
 
@@ -270,7 +224,7 @@ export const StoreHub: React.FC = () => {
           <div style={styles.emptyState}>
             <div style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc' }}>🛍️ У вас пока нет подключенных магазинов Kaspi.</div>
             <p style={{ fontSize: '13px', color: '#94a3b8', margin: '8px 0 16px 0' }}>
-              Подключите ваш магазин Kaspi по API-току и СМС для автопечати, демпинга и заказов.
+              Подключите ваш магазин Kaspi по API-токену и email/паролю для автопечати, демпинга и заказов.
             </p>
             <button onClick={() => { resetModalState(); setShowAddModal(true); }} style={styles.addStoreBtn}>
               🚀 Подключить первый магазин Kaspi
@@ -338,7 +292,6 @@ export const StoreHub: React.FC = () => {
 
             <form onSubmit={handleConnectFullStore} style={{ padding: '20px' }}>
               {errorMsg && <div style={styles.errorBox}>⚠️ {errorMsg}</div>}
-              {successMsg && <div style={styles.successBox}>✅ {successMsg}</div>}
 
               {/* Field 1: Store Name */}
               <div style={styles.formGroup}>
@@ -366,39 +319,27 @@ export const StoreHub: React.FC = () => {
                 />
               </div>
 
-              {/* Field 3: SMS Phone Number */}
+              {/* Field 3: Kaspi MC Email (optional — needed for pricing/stock/orders/chat) */}
               <div style={styles.formGroup}>
-                <label style={styles.label}>3. Номер телефона личного кабинета Kaspi Pay / Merchant:</label>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <input
-                    type="text"
-                    placeholder="+7 (707) 000-0000"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    style={{ ...styles.input, flex: 1 }}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleStartSms}
-                    disabled={submitting}
-                    style={styles.smsBtn}
-                  >
-                    {submitting ? '⏳...' : '📲 Отправить СМС'}
-                  </button>
-                </div>
+                <label style={styles.label}>3. Email от личного кабинета Kaspi Merchant (для демпинга, остатков и заказов):</label>
+                <input
+                  type="email"
+                  placeholder="you@example.com"
+                  value={mcEmail}
+                  onChange={(e) => setMcEmail(e.target.value)}
+                  style={styles.input}
+                />
               </div>
 
-              {/* Field 4: SMS Code (if sent or optional) */}
+              {/* Field 4: Kaspi MC Password */}
               <div style={styles.formGroup}>
-                <label style={styles.label}>
-                  4. СМС-код от Kaspi {smsSent ? <span style={{ color: '#34d399', fontWeight: 600 }}> (🟢 СМС отправлен на номер)</span> : ''}:
-                </label>
+                <label style={styles.label}>4. Пароль от личного кабинета Kaspi Merchant:</label>
                 <input
-                  type="text"
-                  placeholder="1234"
-                  value={smsCode}
-                  onChange={(e) => setSmsCode(e.target.value)}
-                  style={{ ...styles.input, fontSize: '18px', letterSpacing: '4px', textAlign: 'center' }}
+                  type="password"
+                  placeholder="••••••••"
+                  value={mcPassword}
+                  onChange={(e) => setMcPassword(e.target.value)}
+                  style={styles.input}
                 />
               </div>
 
@@ -622,30 +563,10 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '14px',
     outline: 'none',
   },
-  smsBtn: {
-    background: '#3b82f6',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '10px 16px',
-    fontSize: '13px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  },
   errorBox: {
     background: '#451a1a',
     border: '1px solid #991b1b',
     color: '#fca5a5',
-    padding: '10px 14px',
-    borderRadius: '8px',
-    fontSize: '13px',
-    marginBottom: '16px',
-  },
-  successBox: {
-    background: '#064e3b',
-    border: '1px solid #059669',
-    color: '#6ee7b7',
     padding: '10px 14px',
     borderRadius: '8px',
     fontSize: '13px',
