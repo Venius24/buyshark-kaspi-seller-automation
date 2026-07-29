@@ -3,6 +3,7 @@ import { apiFetch, setUnauthorizedHandler, API_URL, getWsUrl } from './api';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useLogs } from './hooks/useLogs';
 import { useAnalyticsWidgets } from './hooks/useAnalyticsWidgets';
+import { useMcAuth } from './hooks/useMcAuth';
 import { LogsTab } from './components/tabs/LogsTab';
 import { OverviewTab } from './components/tabs/OverviewTab';
 import { SettingsTab } from './components/tabs/SettingsTab';
@@ -11,6 +12,7 @@ import { IntegrationsPublicApi } from './components/IntegrationsPublicApi';
 import { PrintBatcher } from './components/PrintBatcher';
 import { AuthModal } from './components/AuthModal';
 import { StoreHub } from './components/StoreHub';
+import { McAuthModal } from './components/McAuthModal';
 import { Sidebar } from './components/Sidebar';
 import { ContentHeader } from './components/ContentHeader';
 import { PackagingTab } from './components/tabs/PackagingTab';
@@ -81,11 +83,15 @@ export default function App() {
 
   const { logs, addLog, clearLogs } = useLogs();
 
-  const [emailInput, setEmailInput] = useState('');
-  const [passwordInput, setPasswordInput] = useState('');
-  const [mcAuthStep, setMcAuthStep] = useState<'idle' | 'credentials' | 'loading' | 'success'>('idle');
   const [mcHasSession, setMcHasSession] = useState(false);
-  const [mcAuthError, setMcAuthError] = useState('');
+  const {
+    emailInput, setEmailInput,
+    passwordInput, setPasswordInput,
+    mcAuthStep, mcAuthError,
+    openModal: openMcAuthModal,
+    closeModal: closeMcAuthModal,
+    submitLogin: submitMcAuthLogin,
+  } = useMcAuth(addLog, () => setMcHasSession(true));
 
   // Dumping & Analytics States
   const [dumpingConfigs, setDumpingConfigs] = useState<Record<string, DumpingConfig>>({});
@@ -679,7 +685,7 @@ export default function App() {
             isWsConnected={isWsConnected}
             addLog={addLog}
             mcHasSession={mcHasSession}
-            onOpenMcAuth={() => setMcAuthStep('credentials')}
+            onOpenMcAuth={() => openMcAuthModal()}
             onOpenProducts={() => {
               setActiveTab('products');
               loadProducts(1, statusFilter, searchQuery, pageSize);
@@ -706,7 +712,7 @@ export default function App() {
           <SettingsTab
             mcHasSession={mcHasSession}
             addLog={addLog}
-            onOpenMcAuth={() => setMcAuthStep('credentials')}
+            onOpenMcAuth={() => openMcAuthModal()}
             onCheckMcStatus={() => checkMcStatus(true)}
           />
         )}
@@ -887,113 +893,16 @@ export default function App() {
           return null;
         })()}
       </main>
-      {mcAuthStep !== 'idle' && (
-        <div className="modal-overlay">
-          <div className="glass-card modal-content" style={{ maxWidth: '400px', width: '100%', padding: '30px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 style={{ fontSize: '18px', fontWeight: 700 }}>Авторизация Kaspi MC</h3>
-              <button 
-                onClick={() => setMcAuthStep('idle')} 
-                style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer' }}
-              >
-                ✕
-              </button>
-            </div>
-
-            {mcAuthError && (
-              <div style={{ padding: '10px 12px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#fca5a5', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
-                {mcAuthError}
-              </div>
-            )}
-
-            {mcAuthStep === 'credentials' && (
-              <div>
-                <p style={{ fontSize: '13px', marginBottom: '16px', color: 'var(--text-muted)' }}>
-                  Введите email и пароль от вашего кабинета Kaspi Merchant. Мы запустим браузер для входа.
-                </p>
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>Email</label>
-                  <input
-                    type="email"
-                    className="form-input"
-                    placeholder="you@example.com"
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                  />
-                </div>
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>Пароль</label>
-                  <input
-                    type="password"
-                    className="form-input"
-                    placeholder="••••••••"
-                    value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
-                  />
-                </div>
-                <button
-                  className="btn btn-primary"
-                  style={{ width: '100%' }}
-                  onClick={async () => {
-                    setMcAuthError('');
-                    setMcAuthStep('loading');
-                    addLog('Запуск авторизации Kaspi MC для ' + emailInput);
-                    try {
-                      const res = await fetch(`${API_URL}/api/login`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email: emailInput, password: passwordInput })
-                      });
-                      const data = await res.json();
-                      if (res.ok && data.success) {
-                        setMcAuthStep('success');
-                        setMcHasSession(true);
-                        addLog('Авторизация Kaspi MC успешна! Сессионные куки сохранены.');
-                      } else {
-                        setMcAuthError(data.detail || 'Не удалось войти. Проверьте email и пароль.');
-                        setMcAuthStep('credentials');
-                      }
-                    } catch {
-                      setMcAuthError('Ошибка сети.');
-                      setMcAuthStep('credentials');
-                    }
-                  }}
-                >
-                  Войти
-                </button>
-              </div>
-            )}
-
-            {mcAuthStep === 'loading' && (
-              <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-                <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Выполняется действие в браузере...</p>
-              </div>
-            )}
-
-            {mcAuthStep === 'success' && (
-              <div style={{ textAlign: 'center', padding: '10px 0' }}>
-                <div style={{ 
-                  width: '48px', height: '48px', 
-                  background: 'rgba(16, 185, 129, 0.1)', 
-                  border: '2px solid var(--success)', 
-                  borderRadius: '50%', display: 'inline-flex', 
-                  justifyContent: 'center', alignItems: 'center', 
-                  color: 'var(--success)', fontSize: '24px',
-                  margin: '0 auto 16px auto'
-                }}>✓</div>
-                <h4 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>Авторизовано!</h4>
-                <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px' }}>
-                  Сессия Kaspi MC успешно настроена.
-                </p>
-                <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => setMcAuthStep('idle')}>
-                  Закрыть
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <McAuthModal
+        mcAuthStep={mcAuthStep}
+        mcAuthError={mcAuthError}
+        emailInput={emailInput}
+        onEmailChange={setEmailInput}
+        passwordInput={passwordInput}
+        onPasswordChange={setPasswordInput}
+        onClose={closeMcAuthModal}
+        onSubmit={submitMcAuthLogin}
+      />
     </div>
   );
 }
