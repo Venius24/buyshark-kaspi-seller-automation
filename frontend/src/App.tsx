@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch, setUnauthorizedHandler, API_URL, getWsUrl } from './api';
 import { useWebSocket } from './hooks/useWebSocket';
+import { useLogs } from './hooks/useLogs';
+import { LogsTab } from './components/tabs/LogsTab';
 import { BuyBoxGauge } from './components/BuyBoxGauge';
 import { SavedMarginCard } from './components/SavedMarginCard';
 import { LiveTerminalStream } from './components/LiveTerminalStream';
@@ -144,10 +146,7 @@ export default function App() {
   const [fetchingTransfers, setFetchingTransfers] = useState(false);
   const [transferFilter, setTransferFilter] = useState<'ALL' | 'EXPRESS' | 'TODAY'>('ALL');
 
-  const [logs, setLogs] = useState<string[]>([
-    'Система автоматизации инициализирована.',
-    'Ожидание подключения Kaspi API...',
-  ]);
+  const { logs, addLog, clearLogs } = useLogs();
 
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
@@ -361,11 +360,6 @@ export default function App() {
     } finally {
       setIsRunningDumping(false);
     }
-  };
-
-  const addLog = (message: string) => {
-    const timestamp = new Date().toLocaleTimeString();
-    setLogs((prev) => [`[${timestamp}] ${message}`, ...prev.slice(0, 49)]);
   };
 
   // Register global 401 handler
@@ -1132,51 +1126,7 @@ export default function App() {
 
         {/* 📜 TAB: LOGS / TERMINAL */}
         {activeTab === 'logs' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <LiveTerminalStream
-              logs={logs}
-              isConnected={isWsConnected}
-            />
-            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <h2>Подробный системный журнал</h2>
-                <button 
-                  className="btn btn-secondary" 
-                  style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '6px' }}
-                  onClick={() => setLogs(['Журнал событий очищен.'])}
-                >
-                  Очистить
-                </button>
-              </div>
-              <div className="console-box" style={{ height: '420px' }}>
-                {logs.map((log, index) => {
-                  const timeMatch = log.match(/^\[([0-9:]+)\]\s*(.*)$/);
-                  const isError = log.includes('Ошибка') || log.includes('✗');
-                  const isWarning = log.includes('Предупреждение') || log.includes('WARN');
-                  const isSuccess = log.includes('успешно') || log.includes('✓') || log.includes('активна') || log.includes('обработан');
-                  
-                  let textColor = '#e5e7eb';
-                  if (isError) textColor = 'var(--error)';
-                  else if (isWarning) textColor = 'var(--warning)';
-                  else if (isSuccess) textColor = '#34d399';
-
-                  if (timeMatch) {
-                    return (
-                      <div key={index} className="console-line" style={{ color: textColor }}>
-                        <span className="console-timestamp">[{timeMatch[1]}]</span>
-                        <span>{timeMatch[2]}</span>
-                      </div>
-                    );
-                  }
-                  return (
-                    <div key={index} className="console-line" style={{ color: textColor }}>
-                      {log}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+          <LogsTab logs={logs} isConnected={isWsConnected} onClear={clearLogs} />
         )}
 
         {/* ⚙️ TAB: SETTINGS & SESSION */}
