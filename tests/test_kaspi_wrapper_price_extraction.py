@@ -6,7 +6,11 @@ BFF bff/offer-view/list — денормализованный кэш, кото�
 minPrice/rangePrice/allCityPrices — sync_merchant_assortment обязана их проверять,
 иначе price_num=0 попадает в brain.py как my_current_price и ломает демпинг.
 """
+import os
+import sys
 from unittest.mock import patch, MagicMock
+
+sys.path.append(os.getcwd())
 
 from backend.kaspi_wrapper import KaspiAPI
 

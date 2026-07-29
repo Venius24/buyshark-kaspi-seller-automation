@@ -7,7 +7,11 @@
 на kaspi.kz/shop/ с забаненного IP). _get_cached_offers должен отдавать
 закэшированный результат в пределах TTL, чтобы не долбить Kaspi на каждый poll.
 """
+import os
+import sys
 from unittest.mock import patch
+
+sys.path.append(os.getcwd())
 
 from backend.routers import analytics
 
