@@ -19,6 +19,7 @@ import { ProductCardHeader } from './components/shared/ProductCardHeader';
 import { PackagingTab } from './components/tabs/PackagingTab';
 import { TransferTab } from './components/tabs/TransferTab';
 import { ChatbotTab } from './components/tabs/ChatbotTab';
+import { ProductsTab } from './components/tabs/ProductsTab';
 import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus } from './types';
 
 export default function App() {
@@ -728,279 +729,39 @@ export default function App() {
           <div className="glass-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
             {/* TAB 1: PRODUCT MANAGEMENT */}
             {activeTab === 'products' && (
-              <>
-                {/* Header with Search, Filter & Page Size */}
-                <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                    <h2 style={{ fontSize: '16px' }}>
-                      🏷️ Управление товарами ({totalCount ? `${totalCount} поз.` : '0 поз.'})
-                    </h2>
-                    
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                      {/* Page Size Selector */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Показывать по:</span>
-                        <select 
-                          value={pageSize} 
-                          onChange={(e) => {
-                            const pSize = parseInt(e.target.value);
-                            setPageSize(pSize);
-                            setCurrentPage(1);
-                            loadProducts(1, statusFilter, searchQuery, pSize);
-                          }}
-                          className="form-input"
-                          style={{ width: '70px', padding: '6px 10px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: '#fff', borderRadius: '8px', cursor: 'pointer' }}
-                        >
-                          <option value="5">5</option>
-                          <option value="10">10</option>
-                          <option value="20">20</option>
-                          <option value="50">50</option>
-                        </select>
-                      </div>
-
-                      {/* Status Toggle */}
-                      <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', padding: '3px', borderRadius: '8px' }}>
-                        <button 
-                          className="btn" 
-                          style={{ 
-                            background: statusFilter === 'active' ? 'var(--primary)' : 'transparent', 
-                            padding: '5px 12px', fontSize: '11px', borderRadius: '6px'
-                          }}
-                          onClick={() => handleStatusFilterChange('active')}
-                        >
-                          В продаже
-                        </button>
-                        <button 
-                          className="btn" 
-                          style={{ 
-                            background: statusFilter === 'archive' ? 'var(--primary)' : 'transparent', 
-                            padding: '5px 12px', fontSize: '11px', borderRadius: '6px'
-                          }}
-                          onClick={() => handleStatusFilterChange('archive')}
-                        >
-                          Сняты
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Search Bar */}
-                  <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '12px' }}>
-                    <input 
-                      type="text" 
-                      className="form-input" 
-                      placeholder="Поиск по артикулу / названию..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      style={{ flexGrow: 1 }}
-                    />
-                    <button type="submit" className="btn btn-primary" style={{ padding: '10px 16px' }}>
-                      Найти
-                    </button>
-                    <button 
-                      type="button" 
-                      className="btn btn-secondary" 
-                      style={{ padding: '10px 14px' }}
-                      onClick={refreshProducts}
-                      disabled={fetchingProducts}
-                    >
-                      {fetchingProducts ? '🔄' : '♻️ Обновить'}
-                    </button>
-                  </form>
-                </div>
-
-                {/* Products List */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flexGrow: 1 }}>
-                  {fetchingProducts && products.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-                      <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-                      <p>Загрузка товаров через Kaspi API...</p>
-                    </div>
-                  ) : products.length === 0 && !fetchingProducts ? (
-                    <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-                      <p>Товары не найдены. Нажмите «♻️ Обновить» для загрузки из Kaspi API.</p>
-                    </div>
-                  ) : (
-                    <div style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '16px',
-                      opacity: fetchingProducts ? 0.6 : 1,
-                      pointerEvents: fetchingProducts ? 'none' : 'auto',
-                      transition: 'opacity 0.2s ease-in-out'
-                    }}>
-                      {products.map((product) => {
-                        const isEditing = expandedEditSkus.has(product.sku);
-                        return (
-                          <div 
-                            key={product.id} 
-                            className="order-card"
-                            style={{ 
-                              padding: '16px', 
-                              display: 'flex',
-                              flexDirection: 'column',
-                              margin: 0
-                            }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <div style={{ maxWidth: '70%' }}>
-                                <ProductCardHeader name={product.name} sku={product.sku} kaspiSku={product.kaspiSku} merchantSku={product.merchantSku} />
-
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
-                                  <span
-                                    className="badge"
-                                    style={{
-                                      background: product.status === 'Активен' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
-                                      color: product.status === 'Активен' ? 'var(--success)' : '#aaa',
-                                      border: '1px solid rgba(255,255,255,0.08)'
-                                    }}
-                                  >
-                                    {product.status === 'Активен' ? 'В продаже' : 'Снят с продажи'}
-                                  </span>
-
-                                  <span 
-                                    className="badge" 
-                                    style={{ 
-                                      background: 'rgba(255,255,255,0.05)',
-                                      color: '#eee',
-                                      border: '1px solid rgba(255,255,255,0.08)'
-                                    }}
-                                  >
-                                    Остаток: {product.stock ?? 0} шт.
-                                  </span>
-                                  
-                                  {product.url && (
-                                    <a 
-                                      href={product.url} 
-                                      target="_blank" 
-                                      rel="noreferrer" 
-                                      style={{ fontSize: '12px', color: '#3b82f6', textDecoration: 'none' }}
-                                    >
-                                      🔗 Карточка товара
-                                    </a>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                <div>
-                                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Цена:</div>
-                                  <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary)' }}>{product.price}</div>
-                                </div>
-                                <button
-                                  type="button"
-                                  className="btn btn-secondary"
-                                  style={{ padding: '8px 12px', fontSize: '12px', borderColor: isEditing ? 'var(--secondary)' : 'transparent' }}
-                                  onClick={() => {
-                                    setExpandedEditSkus(prev => {
-                                      const next = new Set(prev);
-                                      if (next.has(product.sku)) {
-                                        next.delete(product.sku);
-                                      } else {
-                                        next.add(product.sku);
-                                      }
-                                      return next;
-                                    });
-                                  }}
-                                >
-                                  ✏️ {isEditing ? 'Закрыть' : 'Изменить'}
-                                </button>
-                              </div>
-                            </div>
-
-                            {isEditing && (
-                              <div 
-                                style={{ 
-                                  marginTop: '16px', 
-                                  paddingTop: '16px', 
-                                  borderTop: '1px solid rgba(255,255,255,0.05)',
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                  gap: '12px'
-                                }}
-                              >
-                                <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--secondary)' }}>
-                                  Параметры товара на Kaspi
-                                </h4>
-                                
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px' }}>
-                                  <div>
-                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Цена (₸)</label>
-                                    <input 
-                                      type="number" 
-                                      id={`edit-price-${product.sku}`} 
-                                      className="form-input" 
-                                      defaultValue={product.price_num || ''}
-                                      placeholder="Цена товара"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Остаток на складе (шт)</label>
-                                    <input 
-                                      type="number" 
-                                      id={`edit-stock-${product.sku}`} 
-                                      className="form-input" 
-                                      defaultValue={product.stock ?? 10}
-                                      placeholder="Остаток"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Бренд</label>
-                                    <input 
-                                      type="text" 
-                                      id={`edit-brand-${product.sku}`} 
-                                      className="form-input" 
-                                      defaultValue={product.brand || ''}
-                                      placeholder="Бренд"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Статус</label>
-                                    <select 
-                                      id={`edit-status-${product.sku}`} 
-                                      className="form-input"
-                                      defaultValue={product.status || 'Активен'}
-                                      style={{ background: 'var(--input-bg)', color: '#fff', border: '1px solid var(--input-border)', height: '38px', borderRadius: '8px' }}
-                                    >
-                                      <option value="Активен">В продаже (Активен)</option>
-                                      <option value="Архив">Снят с продажи (Архив)</option>
-                                    </select>
-                                  </div>
-                                </div>
-
-                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
-                                  <button
-                                    type="button"
-                                    className="btn btn-primary"
-                                    style={{ padding: '6px 12px', fontSize: '12px' }}
-                                    onClick={() => {
-                                      const priceVal = parseFloat((document.getElementById(`edit-price-${product.sku}`) as HTMLInputElement).value) || 0;
-                                      const stockVal = parseInt((document.getElementById(`edit-stock-${product.sku}`) as HTMLInputElement).value) || 0;
-                                      const brandVal = (document.getElementById(`edit-brand-${product.sku}`) as HTMLInputElement).value || undefined;
-                                      const statusVal = (document.getElementById(`edit-status-${product.sku}`) as HTMLSelectElement).value || undefined;
-                                      saveProductUpdate(product.sku, priceVal, stockVal, brandVal, statusVal);
-                                    }}
-                                  >
-                                    Сохранить изменения
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Pagination Controls */}
-                <Pagination
-                  currentPage={currentPage}
-                  totalPages={totalPages}
-                  disabled={fetchingProducts}
-                  onPageChange={handlePageChange}
-                />
-              </>
+              <ProductsTab
+                totalCount={totalCount}
+                pageSize={pageSize}
+                onPageSizeChange={(pSize) => {
+                  setPageSize(pSize);
+                  setCurrentPage(1);
+                  loadProducts(1, statusFilter, searchQuery, pSize);
+                }}
+                statusFilter={statusFilter}
+                onStatusFilterChange={handleStatusFilterChange}
+                searchQuery={searchQuery}
+                onSearchQueryChange={setSearchQuery}
+                onSearchSubmit={handleSearchSubmit}
+                onRefresh={refreshProducts}
+                fetchingProducts={fetchingProducts}
+                products={products}
+                expandedEditSkus={expandedEditSkus}
+                onToggleEdit={(sku) => {
+                  setExpandedEditSkus(prev => {
+                    const next = new Set(prev);
+                    if (next.has(sku)) {
+                      next.delete(sku);
+                    } else {
+                      next.add(sku);
+                    }
+                    return next;
+                  });
+                }}
+                onSaveProductUpdate={saveProductUpdate}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={handlePageChange}
+              />
             )}
 
             {/* TAB 4: AUTOMATIC PRICE DUMPING */}
