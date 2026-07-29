@@ -52,7 +52,7 @@ def save_chatbot_config(req: ChatbotConfigRequest, ctx: StoreContext = Depends(g
 def get_chatbot_status(ctx: StoreContext = Depends(get_store_context)):
     """Получить статус сессии, блокировки и активных диалогов чат-бота."""
     cfg = config.load_chatbot_config()
-    cookies = load_cookies()
+    cookies = load_cookies(store_id=ctx.store_id)
     has_valid_cookies = bool("mc-session" in cookies and "mc-sid" in cookies)
 
     blocked_chats = [

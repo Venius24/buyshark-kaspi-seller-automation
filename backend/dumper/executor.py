@@ -4,18 +4,18 @@ import os
 import requests
 import time
 import random
-from typing import List
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-def _load_mc_cookies() -> dict:
+def _load_mc_cookies(store_id: Optional[str] = None) -> dict:
     from backend.state_helpers import _load_mc_cookies as _unified_load_mc_cookies
-    return _unified_load_mc_cookies()
+    return _unified_load_mc_cookies(store_id=store_id)
 
 
-def _mc_request(method: str, url: str, **kwargs):
+def _mc_request(method: str, url: str, store_id: Optional[str] = None, **kwargs):
     from backend.state_helpers import _mc_api_request
-    return _mc_api_request(method, url, **kwargs)
+    return _mc_api_request(method, url, store_id=store_id, **kwargs)
 
 
 class RateLimitExecutorWorker:
@@ -24,7 +24,7 @@ class RateLimitExecutorWorker:
     Задача: Безопасное обновление цен через приватный 3-шаговый MC API, соблюдение задержек, регистрация оверрайдов.
     """
     @staticmethod
-    def _fetch_kaspi_offer_details(merchant_uid: str, sku: str) -> dict:
+    def _fetch_kaspi_offer_details(merchant_uid: str, sku: str, internal_store_id: Optional[str] = None) -> dict:
         """
         Шаг BFF Details Fetch (GET /bff/offer-view/details?m={merchant_id}&s={sku}).
         Возвращает dict с masterSku, title (model) и актуальной ценой по городам Kaspi.
@@ -38,7 +38,7 @@ class RateLimitExecutorWorker:
         }
         url = f"https://mc.shop.kaspi.kz/bff/offer-view/details?m={merchant_uid}&s={sku}"
         try:
-            r = _mc_request("GET", url, headers=headers, timeout=10)
+            r = _mc_request("GET", url, store_id=internal_store_id, headers=headers, timeout=10)
             if r.status_code == 200:
                 data = r.json()
                 master_sku = data.get("masterSku") or ""
@@ -66,11 +66,16 @@ class RateLimitExecutorWorker:
         new_price: int,
         stock: int = 10,
         store_id_suffix: str = "001",
-        city_id: str = "750000000"
+        city_id: str = "750000000",
+        internal_store_id: Optional[str] = None
     ) -> tuple:
         """
         Синхронный запуск полных шагов пайплайна Kaspi MC для изменения остатка и цены.
         Возвращает (success: bool, tx_id_or_error_msg_or_code: str)
+
+        internal_store_id — наш store_id (БД), для скоупинга MC-кук через
+        state_helpers. НЕ путать с store_id_suffix — это номер точки продаж
+        (POS) в терминах самого Kaspi (например "001"), другая сущность.
         """
         headers = {
             "Accept": "application/json, text/plain, */*",
@@ -83,7 +88,7 @@ class RateLimitExecutorWorker:
 
         # Если цена не передана или равна дефолтному 1000, запрашиваем реальные детали карточки через BFF
         if not new_price or new_price <= 0 or new_price == 1000:
-            details = RateLimitExecutorWorker._fetch_kaspi_offer_details(merchant_uid, sku)
+            details = RateLimitExecutorWorker._fetch_kaspi_offer_details(merchant_uid, sku, internal_store_id=internal_store_id)
             if details.get("price"):
                 new_price = int(details["price"])
             if details.get("master_sku") and not master_sku:
@@ -102,7 +107,7 @@ class RateLimitExecutorWorker:
             "offers": [{"masterSku": str(master_sku)}]
         }
         try:
-            r0 = _mc_request("POST", edit_val_url, headers=headers, json=edit_val_payload, timeout=10)
+            r0 = _mc_request("POST", edit_val_url, store_id=internal_store_id, headers=headers, json=edit_val_payload, timeout=10)
             if r0.status_code in [403, 429]:
                 return False, f"{r0.status_code}_BLOCKED"
         except Exception as e:
@@ -116,7 +121,7 @@ class RateLimitExecutorWorker:
             "entries": [{"city": str(city_id), "price": int(new_price)}]
         }
         try:
-            r1 = _mc_request("POST", discount_url, headers=headers, json=discount_payload, timeout=10)
+            r1 = _mc_request("POST", discount_url, store_id=internal_store_id, headers=headers, json=discount_payload, timeout=10)
             if r1.status_code in [403, 429]:
                 return False, f"{r1.status_code}_BLOCKED"
             if r1.status_code != 200:
@@ -141,7 +146,7 @@ class RateLimitExecutorWorker:
             }]
         }
         try:
-            r2 = _mc_request("POST", val_url, headers=headers, json=val_payload, timeout=10)
+            r2 = _mc_request("POST", val_url, store_id=internal_store_id, headers=headers, json=val_payload, timeout=10)
             if r2.status_code in [403, 429]:
                 return False, f"{r2.status_code}_BLOCKED"
             if r2.status_code != 200:
@@ -163,7 +168,7 @@ class RateLimitExecutorWorker:
             "cityPrices": [{"cityId": str(city_id), "value": int(new_price)}]
         }
         try:
-            r3 = _mc_request("POST", process_url, headers=headers, json=process_payload, timeout=10)
+            r3 = _mc_request("POST", process_url, store_id=internal_store_id, headers=headers, json=process_payload, timeout=10)
             if r3.status_code in [403, 429]:
                 return False, f"{r3.status_code}_BLOCKED"
             if r3.status_code == 200:
@@ -197,13 +202,13 @@ class RateLimitExecutorWorker:
         updated_count = 0
         log_messages = []
 
-        cookies = _load_mc_cookies()
+        cookies = _load_mc_cookies(store_id=store_id)
         if not cookies or "mc-session" not in cookies or "mc-sid" not in cookies:
             # Кук нет вообще (не только истекли) — пробуем автообновить сессию сохранёнными
             # email/паролем ещё до начала очереди, чтобы не пропускать весь батч зря.
             from backend.state_helpers import _refresh_mc_session
-            if _refresh_mc_session():
-                cookies = _load_mc_cookies()
+            if _refresh_mc_session(store_id=store_id):
+                cookies = _load_mc_cookies(store_id=store_id)
 
         if not cookies or "mc-session" not in cookies or "mc-sid" not in cookies:
             warn_msg = "⚠️ [Executor] Внимание: Отсутствуют или недействительны mc-session / mc-sid куки, автообновление сессии не удалось. Обновление цен в Kaspi MC пропущено (запись только в локальный фид). Требуется повторный вход в Kaspi MC."
@@ -234,7 +239,7 @@ class RateLimitExecutorWorker:
                 
                 # Проверяем, привязан ли данный SKU к Мастер-Группе остатка
                 from backend.state_helpers import _load_master_stock_groups
-                master_groups = _load_master_stock_groups()
+                master_groups = _load_master_stock_groups(store_id=store_id)
                 stock_val = int(p.get("stock", 10))
                 for mg in master_groups.values():
                     if mg.get("is_active", True) and sku_key in mg.get("linked_skus", []):
@@ -249,18 +254,19 @@ class RateLimitExecutorWorker:
                     new_price=int(new_price),
                     stock=stock_val,
                     store_id_suffix=store_suffix,
-                    city_id=config.city_code
+                    city_id=config.city_code,
+                    internal_store_id=store_id
                 )
-                
+
                 # 2. Backoff при 429 (Too Many Requests) / 403 (Forbidden/Rate limit)
                 if not success and val in ["429_BLOCKED", "403_BLOCKED"]:
                     block_code = val.split("_")[0]
                     cooldown_msg = f"⚠️ [Executor] Обнаружен блок {block_code} от Kaspi. Включаем Backoff: пауза 60 секунд для защиты от флуда..."
                     logger.warning(cooldown_msg)
                     log_messages.append(cooldown_msg)
-                    
+
                     time.sleep(60) # Cooldown pause
-                    
+
                     # Повторная одиночная попытка после паузы
                     success, val = RateLimitExecutorWorker._update_kaspi_price_sync(
                         merchant_uid=merchant_id,
@@ -270,7 +276,8 @@ class RateLimitExecutorWorker:
                         new_price=int(new_price),
                         stock=int(p.get("stock", 75)),
                         store_id_suffix=store_suffix,
-                        city_id=config.city_code
+                        city_id=config.city_code,
+                        internal_store_id=store_id
                     )
                     
                     if not success:

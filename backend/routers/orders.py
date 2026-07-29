@@ -59,7 +59,7 @@ def pack_order(req: PackOrderRequest, ctx: StoreContext = Depends(get_store_cont
         if order_item:
             code = order_item["id"]
             qty = order_item["quantity"]
-            KaspiAPI.assemble_cargo(token, code, qty)
+            KaspiAPI.assemble_cargo(token, code, qty, store_id=ctx.store_id)
             return {"success": True, "message": f"Заказ {code} успешно упакован и готов к передаче."}
             
         raise Exception("Заказ не найден в статусах NEW или ACCEPTED_BY_MERCHANT.")
@@ -87,7 +87,7 @@ def pack_all_orders(ctx: StoreContext = Depends(get_store_context)):
         if non_assembled:
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                 futures = {
-                    executor.submit(KaspiAPI.assemble_cargo, token, o["id"], o["quantity"]): o
+                    executor.submit(KaspiAPI.assemble_cargo, token, o["id"], o["quantity"], ctx.store_id): o
                     for o in non_assembled
                 }
                 for future in concurrent.futures.as_completed(futures):

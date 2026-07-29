@@ -12,14 +12,16 @@ logger = logging.getLogger(__name__)
 # Отдельная HTTP сессия для Kaspi API без глобальных прокси
 http_session = requests.Session()
 
-def load_cookies() -> dict:
+def load_cookies(store_id: str | None = None) -> dict:
     """
-    Унифицированная загрузка кук mc-session и mc-sid из государств.
+    Унифицированная загрузка кук mc-session и mc-sid. store_id=None (легаси)
+    читает общие state.json/session.json; store_id given — исключительно
+    куки этого стора из БД, без фоллбека.
     """
     from backend.state_helpers import _load_mc_cookies as _unified_load_mc_cookies
-    cookies = _unified_load_mc_cookies()
+    cookies = _unified_load_mc_cookies(store_id=store_id)
     if not cookies or "mc-session" not in cookies or "mc-sid" not in cookies:
-        logger.warning(f"⚠️ В сохраненных файлах состояния (state.json/session.json) отсутствуют куки 'mc-session' или 'mc-sid'.")
+        logger.warning(f"⚠️ Куки 'mc-session'/'mc-sid' отсутствуют для стора {store_id!r}.")
         return {}
     return cookies
 

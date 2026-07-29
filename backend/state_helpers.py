@@ -473,11 +473,42 @@ def _save_processed_orders(orders: dict):
     with open(PROCESSED_ORDERS_FILE, "w", encoding="utf-8") as f:
         json.dump(orders, f, ensure_ascii=False, indent=2)
 
-def _load_mc_cookies() -> dict:
+def _load_mc_cookies(store_id: Optional[str] = None) -> dict:
     """
-    Унифицированная загрузка кук mc-session и mc-sid из государств:
-    проверяются root 'state.json', 'states/session.json', 'states/state.json'.
+    store_id=None (легаси, дев-стенд без Store в БД): нескоуп-чтение —
+    ровно текущее поведение, проверяются root 'state.json',
+    'states/session.json', 'states/state.json'.
+
+    store_id given: читает ИСКЛЮЧИТЕЛЬНО Store.encrypted_cookies этого
+    стора из БД. Без фоллбека на общий файл — если куки этого стора нет
+    или они не расшифровались, возвращается {} (значит "нужен повторный
+    вход"), а не чужая/устаревшая глобальная сессия.
     """
+    if store_id is not None:
+        session = _get_sync_db_session()
+        if not session:
+            return {}
+        try:
+            from backend.db.models import Store
+            from backend.security.crypto import decrypt_data
+            store = session.get(Store, store_id)
+            if not store or not store.encrypted_cookies:
+                return {}
+            cookie_str = decrypt_data(store.encrypted_cookies)
+            if not cookie_str:
+                return {}
+            cookies = {}
+            for part in cookie_str.split(";"):
+                part = part.strip()
+                if "=" not in part:
+                    continue
+                name, _, value = part.partition("=")
+                if name.strip() in ("mc-session", "mc-sid"):
+                    cookies[name.strip()] = value.strip()
+            return cookies if "mc-session" in cookies and "mc-sid" in cookies else {}
+        finally:
+            session.close()
+
     candidate_paths = ["state.json", "states/session.json", "states/state.json"]
     for path in candidate_paths:
         if not os.path.exists(path):
@@ -485,7 +516,7 @@ def _load_mc_cookies() -> dict:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                
+
             cookies = {}
             if isinstance(data, dict):
                 cookies_list = data.get("cookies", [])
@@ -505,18 +536,97 @@ def _load_mc_cookies() -> dict:
             pass
     return {}
 
-def _save_mc_credentials(email: str, password: str):
-    """Сохраняет email/пароль от кабинета Kaspi MC (в зашифрованном виде) в states/session.json,
-    чтобы при истечении сессионных куков можно было автоматически перелогиниться."""
+def _save_mc_cookies_for_store(store_id: str, cookies: dict) -> bool:
+    """
+    Сохраняет куки mc-session/mc-sid (dict) в Store.encrypted_cookies для
+    этого стора и помечает store.status='ACTIVE'. Используется сразу после
+    успешного логина/автообновления сессии, чтобы источником правды при
+    чтении (_load_mc_cookies(store_id=...)) была БД, а не общий файл.
+    """
+    if not cookies or "mc-session" not in cookies or "mc-sid" not in cookies:
+        return False
+    session = _get_sync_db_session()
+    if not session:
+        return False
+    try:
+        from backend.db.models import Store
+        from backend.security.crypto import encrypt_data
+        import datetime
+        store = session.get(Store, store_id)
+        if not store:
+            return False
+        cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        store.encrypted_cookies = encrypt_data(cookie_str)
+        store.status = "ACTIVE"
+        store.last_sync_at = datetime.datetime.utcnow()
+        session.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения кук Kaspi MC для стора {store_id}: {e}")
+        session.rollback()
+        return False
+    finally:
+        session.close()
+
+def _save_mc_credentials(email: str, password: str, store_id: Optional[str] = None):
+    """
+    Сохраняет email/пароль от кабинета Kaspi MC (в зашифрованном виде), чтобы
+    при истечении сессионных куков можно было автоматически перелогиниться.
+
+    store_id=None (легаси): в states/session.json, как было всегда.
+    store_id given: в Store.encrypted_mc_email/encrypted_mc_password этого
+    стора — креды разных сторов не перезаписывают друг друга.
+    """
     from backend.security.crypto import encrypt_data
+    if store_id is not None:
+        session = _get_sync_db_session()
+        if not session:
+            return
+        try:
+            from backend.db.models import Store
+            store = session.get(Store, store_id)
+            if store:
+                store.encrypted_mc_email = encrypt_data(email)
+                store.encrypted_mc_password = encrypt_data(password)
+                session.commit()
+        except Exception as e:
+            logger.error(f"Ошибка сохранения кред Kaspi MC для стора {store_id}: {e}")
+            session.rollback()
+        finally:
+            session.close()
+        return
+
     session = _load_session()
     session["mc_email_enc"] = encrypt_data(email)
     session["mc_password_enc"] = encrypt_data(password)
     _save_session(session)
 
-def _load_mc_credentials() -> Optional[tuple]:
-    """Возвращает (email, password) сохранённых кред Kaspi MC, либо None, если не сохранены/не расшифровались."""
+def _load_mc_credentials(store_id: Optional[str] = None) -> Optional[tuple]:
+    """Возвращает (email, password) сохранённых кред Kaspi MC, либо None, если не сохранены/не расшифровались.
+
+    store_id=None (легаси): читает states/session.json, как было всегда.
+    store_id given: читает Store.encrypted_mc_email/encrypted_mc_password
+    этого стора из БД — без фоллбека на общий файл.
+    """
     from backend.security.crypto import decrypt_data
+
+    if store_id is not None:
+        db_session = _get_sync_db_session()
+        if not db_session:
+            return None
+        try:
+            from backend.db.models import Store
+            store = db_session.get(Store, store_id)
+            if not store or not store.encrypted_mc_email or not store.encrypted_mc_password:
+                return None
+            email = decrypt_data(store.encrypted_mc_email)
+            password = decrypt_data(store.encrypted_mc_password)
+            if not email or not password:
+                return None
+            return email, password
+        finally:
+            db_session.close()
+
     session = _load_session()
     email_enc = session.get("mc_email_enc")
     password_enc = session.get("mc_password_enc")
@@ -528,21 +638,31 @@ def _load_mc_credentials() -> Optional[tuple]:
         return None
     return email, password
 
-def _refresh_mc_session() -> bool:
+def _refresh_mc_session(store_id: Optional[str] = None) -> bool:
     """
     Автоматически обновляет сессионные куки Kaspi MC (mc-session/mc-sid) через сохранённые
     email/пароль — вызывается, когда куки истекли (401) или отсутствуют. Возвращает True при успехе.
+
+    store_id=None (легаси): точно текущее поведение (глобальные креды/куки).
+    store_id given: креды берутся из этого стора (без фоллбека — нет кред,
+    значит нужен явный повторный вход, а не угадывание чужих кред). После
+    успешного логина (пишет в state.json — единственный канал вывода
+    Playwright-воркера, общий на все сторы, см. Phase 5) свежие куки сразу
+    копируются в Store.encrypted_cookies ИМЕННО этого стора.
     """
-    creds = _load_mc_credentials()
+    creds = _load_mc_credentials(store_id=store_id)
     if not creds:
-        logger.warning("Автообновление сессии Kaspi MC невозможно: email/пароль не сохранены (пользователь ещё не логинился через /api/login).")
+        logger.warning(f"Автообновление сессии Kaspi MC невозможно: email/пароль не сохранены для стора {store_id!r} (нужен повторный вход).")
         return False
     email, password = creds
     try:
         from backend.services.playwright_worker import worker, Command
         success, msg = worker.send_cmd(Command.LOGIN, {"email": email, "password": password})
         if success:
-            logger.info("Сессия Kaspi MC автоматически обновлена (истёкшие куки перевыпущены).")
+            logger.info(f"Сессия Kaspi MC автоматически обновлена (истёкшие куки перевыпущены) для стора {store_id!r}.")
+            if store_id is not None:
+                fresh_cookies = _load_mc_cookies(store_id=None)
+                _save_mc_cookies_for_store(store_id, fresh_cookies)
         else:
             logger.error(f"Автообновление сессии Kaspi MC не удалось: {msg}")
         return bool(success)
@@ -550,19 +670,22 @@ def _refresh_mc_session() -> bool:
         logger.error(f"Автообновление сессии Kaspi MC вызвало исключение: {e}")
         return False
 
-def _mc_api_request(method: str, url: str, retry_on_401: bool = True, **kwargs):
+def _mc_api_request(method: str, url: str, store_id: Optional[str] = None, retry_on_401: bool = True, **kwargs):
     """
     Единая точка HTTP-запросов к mc.shop.kaspi.kz с текущими сессионными куками.
     При ответе 401 (истёкшая сессия) один раз пробует автообновить куки через
     _refresh_mc_session() (сохранённые email/пароль) и повторяет запрос.
+
+    store_id=None (легаси) — нескоуп-куки, как было всегда. store_id given —
+    куки читаются/обновляются исключительно для этого стора.
     """
     import requests
-    cookies = _load_mc_cookies()
+    cookies = _load_mc_cookies(store_id=store_id)
     resp = requests.request(method, url, cookies=cookies, **kwargs)
     if resp.status_code == 401 and retry_on_401:
         logger.warning(f"Kaspi MC вернул 401 для {url} — пробуем автообновить сессию...")
-        if _refresh_mc_session():
-            fresh_cookies = _load_mc_cookies()
+        if _refresh_mc_session(store_id=store_id):
+            fresh_cookies = _load_mc_cookies(store_id=store_id)
             resp = requests.request(method, url, cookies=fresh_cookies, **kwargs)
     return resp
 

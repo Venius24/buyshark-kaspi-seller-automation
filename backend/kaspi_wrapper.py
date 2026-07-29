@@ -618,24 +618,25 @@ class KaspiAPI:
     # ── 6.1. cargo assembly ──────────────────────────────────
 
     @staticmethod
-    def _load_mc_cookies() -> dict:
-        cookies = {}
-        if os.path.exists("state.json"):
-            try:
-                with open("state.json", "r", encoding="utf-8") as f:
-                    state_data = json.load(f)
-                    for c in state_data.get("cookies", []):
-                        if c.get("name") in ["mc-session", "mc-sid"] and "kaspi.kz" in c.get("domain", ""):
-                            cookies[c["name"]] = c["value"]
-            except Exception as e:
-                print(f"[KaspiAPI] Error parsing state.json: {e}")
+    def _load_mc_cookies(store_id: Optional[str] = None) -> dict:
+        """
+        Делегирует в единую реализацию state_helpers._load_mc_cookies.
 
+        РАНЬШЕ здесь была отдельная, более узкая реализация (проверяла только
+        корневой state.json и требовала домен "kaspi.kz" в куке) — расхождение
+        с канонической версией в state_helpers.py было задокументировано как
+        известный техдолг (см. test_resolvers.py). Объединено при добавлении
+        store_id-скоупинга (закрытие 3.1): теперь обе точки входа читают
+        куки одинаково.
+        """
+        from backend.state_helpers import _load_mc_cookies as _unified_load_mc_cookies
+        cookies = _unified_load_mc_cookies(store_id=store_id)
         if not cookies.get("mc-session") or not cookies.get("mc-sid"):
-            raise Exception("Cookies mc-session or mc-sid are missing in state.json.")
+            raise Exception("Cookies mc-session or mc-sid are missing.")
         return cookies
 
     @staticmethod
-    def _request_with_mc_refresh(method: str, url: str, cookies: dict, **kwargs):
+    def _request_with_mc_refresh(method: str, url: str, cookies: dict, store_id: Optional[str] = None, **kwargs):
         """
         Выполняет запрос к mc.shop.kaspi.kz с переданными куками. При ответе 401
         (истёкшая сессия) один раз пробует автообновить куки сохранёнными
@@ -645,18 +646,18 @@ class KaspiAPI:
         resp = requests.request(method, url, cookies=cookies, **kwargs)
         if resp.status_code == 401:
             from backend.state_helpers import _refresh_mc_session
-            if _refresh_mc_session():
+            if _refresh_mc_session(store_id=store_id):
                 try:
-                    fresh_cookies = KaspiAPI._load_mc_cookies()
+                    fresh_cookies = KaspiAPI._load_mc_cookies(store_id=store_id)
                     resp = requests.request(method, url, cookies=fresh_cookies, **kwargs)
                 except Exception:
                     pass
         return resp
 
     @staticmethod
-    def assemble_cargo(token: str, order_code: str, quantity: int) -> bool:
+    def assemble_cargo(token: str, order_code: str, quantity: int, store_id: Optional[str] = None) -> bool:
         merchant_id = KaspiAPI.get_merchant_id(token)
-        cookies = KaspiAPI._load_mc_cookies()
+        cookies = KaspiAPI._load_mc_cookies(store_id=store_id)
 
         headers = {
             "Content-Type": "application/json",
@@ -673,14 +674,14 @@ class KaspiAPI:
             }]
         }
         url = f"https://mc.shop.kaspi.kz/mc/api/order/cargo/assembled?_m={merchant_id}"
-        resp = KaspiAPI._request_with_mc_refresh("POST", url, cookies, headers=headers, json=payload, timeout=15)
+        resp = KaspiAPI._request_with_mc_refresh("POST", url, cookies, store_id=store_id, headers=headers, json=payload, timeout=15)
 
         if resp.status_code == 200:
             return True
         raise Exception(f"Kaspi MC API returned {resp.status_code}: {resp.text}")
 
     @staticmethod
-    def assemble_cargos(token: str, cargo_items: list) -> int:
+    def assemble_cargos(token: str, cargo_items: list, store_id: Optional[str] = None) -> int:
         # Перепроверено вживую 2026-07-29: batch-запрос на 2 реальных заказа отработал
         # (200 OK, оба ушли в "Передача") с той же формой payload, что и здесь. Старая
         # пометка "не работает, Kaspi возвращает 500" не воспроизвелась — возможно, была
@@ -692,7 +693,7 @@ class KaspiAPI:
             return 0
 
         merchant_id = KaspiAPI.get_merchant_id(token)
-        cookies = KaspiAPI._load_mc_cookies()
+        cookies = KaspiAPI._load_mc_cookies(store_id=store_id)
 
         headers = {
             "Content-Type": "application/json",
@@ -706,7 +707,7 @@ class KaspiAPI:
             for item in cargo_items
         ]
         url = f"https://mc.shop.kaspi.kz/mc/api/order/cargo/assembled?_m={merchant_id}"
-        resp = KaspiAPI._request_with_mc_refresh("POST", url, cookies, headers=headers, json={"cargos": cargos_payload}, timeout=15)
+        resp = KaspiAPI._request_with_mc_refresh("POST", url, cookies, store_id=store_id, headers=headers, json={"cargos": cargos_payload}, timeout=15)
 
         if resp.status_code == 200:
             return len(cargo_items)
@@ -731,7 +732,7 @@ class KaspiAPI:
     # ── 9. sync merchant assortment (BFF offer-view) ─────────
 
     @staticmethod
-    def sync_merchant_assortment(token: str) -> list:
+    def sync_merchant_assortment(token: str, store_id: Optional[str] = None) -> list:
         """Выкачивает ВСЕ товары из кабинета Kaspi (ассортимент) через BFF эндпоинт или фоллбеки."""
         from backend.state_helpers import _load_session
         session = _load_session()
@@ -745,7 +746,7 @@ class KaspiAPI:
                 m_id = "20186986"
         merchant_id = str(m_id)
 
-        cookies = KaspiAPI._load_mc_cookies()
+        cookies = KaspiAPI._load_mc_cookies(store_id=store_id)
 
         url = "https://mc.shop.kaspi.kz/bff/offer-view/list"
         headers = {
@@ -774,7 +775,7 @@ class KaspiAPI:
 
                 try:
                     resp = KaspiAPI._request_with_mc_refresh(
-                        "GET", url, cookies, headers=headers, params=params, timeout=15
+                        "GET", url, cookies, store_id=store_id, headers=headers, params=params, timeout=15
                     )
 
                     if resp.status_code != 200:

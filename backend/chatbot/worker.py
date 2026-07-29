@@ -218,22 +218,30 @@ async def run_chatbot_cycle():
     if not cfg.get("enabled", True):
         return 5
 
-    cookies = load_cookies()
-    if not cookies:
-        await notify_cookie_expired("Куки отсутствуют или истекли в states/session.json")
-        return 10
-
     stores = await list_active_stores()
     if stores:
+        any_cookies = False
         for store in stores:
             try:
+                cookies = load_cookies(store_id=store.store_id)
+                if not cookies:
+                    logger.warning(f"[Chatbot] Store {store.store_id}: куки Kaspi MC отсутствуют/истекли, пропускаем проход.")
+                    continue
+                any_cookies = True
                 merchant_id = discover_merchant_id(store.token) or cfg.get("merchant_id", "20186986")
                 ok = await _run_chatbot_pass(cookies, merchant_id, store.store_id)
                 if not ok:
                     return 10
             except Exception as e:
                 logger.error(f"[Chatbot] Store {store.store_id} pass failed: {e}")
+        if not any_cookies:
+            await notify_cookie_expired("Куки Kaspi MC отсутствуют/истекли ни у одного активного стора")
+            return 10
     else:
+        cookies = load_cookies(store_id=None)
+        if not cookies:
+            await notify_cookie_expired("Куки отсутствуют или истекли в states/session.json")
+            return 10
         merchant_id = cfg.get("merchant_id", "20186986")
         ok = await _run_chatbot_pass(cookies, merchant_id, None)
         if not ok:

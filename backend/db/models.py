@@ -48,6 +48,8 @@ class Store(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     encrypted_cookies: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     encrypted_api_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    encrypted_mc_email: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    encrypted_mc_password: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="ACTIVE")  # 'ACTIVE', 'COOKIE_EXPIRED', 'PAUSED'
     last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

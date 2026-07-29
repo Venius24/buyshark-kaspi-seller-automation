@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { API_URL } from '../api';
+import { apiFetch, API_URL } from '../api';
 
 type McAuthStep = 'idle' | 'credentials' | 'loading' | 'success';
 
@@ -17,7 +17,7 @@ export function useMcAuth(addLog: (message: string) => void, onLoginSuccess: () 
     setMcAuthStep('loading');
     addLog('Запуск авторизации Kaspi MC для ' + emailInput);
     try {
-      const res = await fetch(`${API_URL}/api/login`, {
+      const res = await apiFetch(`${API_URL}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: emailInput, password: passwordInput })

@@ -137,7 +137,7 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
         except Exception:
             all_products = []
 
-    cookies = _load_mc_cookies()
+    cookies = _load_mc_cookies(store_id=store_id)
     has_cookies = bool(cookies and "mc-session" in cookies and "mc-sid" in cookies)
     merchant_id = discover_merchant_id(token) or "20186986"
 
@@ -189,14 +189,14 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
             success, val = await asyncio.to_thread(
                 RateLimitExecutorWorker._update_kaspi_price_sync,
                 merchant_uid=merchant_id,
-                cookies=cookies,
                 sku=target_p.get("merchantSku") or sku,
                 master_sku=decoded_master,
                 model_name=target_p.get("name", "Товар"),
                 new_price=price,
                 stock=shared_stock,
                 store_id_suffix=store_suffix,
-                city_id="750000000"
+                city_id="750000000",
+                internal_store_id=store_id
             )
             if success:
                 success_count += 1

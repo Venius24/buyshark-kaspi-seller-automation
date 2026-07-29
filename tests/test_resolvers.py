@@ -174,10 +174,13 @@ class TestCookieLoaderStateHelpers(unittest.TestCase):
         self.assertEqual(cookies, {})
 
 
-class TestCookieLoaderKaspiWrapper(unittest.TestCase):
+class TestCookieLoaderStateHelpersStoreScoped(unittest.TestCase):
     """
-    kaspi_wrapper.py::KaspiAPI._load_mc_cookies — a SEPARATE, narrower
-    implementation with a different failure mode.
+    state_helpers.py::_load_mc_cookies(store_id=...) — closing HANDOFF 3.1.
+    store_id given must read EXCLUSIVELY from Store.encrypted_cookies in the
+    DB, with NO fallback to the shared state.json/session.json files (by
+    explicit user decision — a store with no/expired DB cookies must show
+    "please log in again", never silently reuse another store's session).
     """
 
     def setUp(self):
@@ -189,50 +192,231 @@ class TestCookieLoaderKaspiWrapper(unittest.TestCase):
         os.chdir(self._orig_cwd)
         shutil.rmtree(self._tmp_dir, ignore_errors=True)
 
-    def test_requires_kaspi_domain_on_cookie(self):
+    def _write_global_state_json(self):
         import json
         with open("state.json", "w", encoding="utf-8") as f:
             json.dump({"cookies": [
-                {"name": "mc-session", "value": "s", "domain": ".kaspi.kz"},
-                {"name": "mc-sid", "value": "sid", "domain": ".kaspi.kz"},
+                {"name": "mc-session", "value": "global-sess"},
+                {"name": "mc-sid", "value": "global-sid"},
             ]}, f)
-        cookies = KaspiAPI._load_mc_cookies()
-        self.assertEqual(cookies, {"mc-session": "s", "mc-sid": "sid"})
 
-    def test_cookie_without_kaspi_domain_is_ignored(self):
+    @patch("backend.state_helpers._get_sync_db_session")
+    def test_reads_cookies_from_store_row_when_present(self, mock_db_session):
+        from backend.security.crypto import encrypt_data
+        mock_session = MagicMock()
+        mock_store = MagicMock()
+        mock_store.encrypted_cookies = encrypt_data("mc-session=s1; mc-sid=sid1")
+        mock_session.get.return_value = mock_store
+        mock_db_session.return_value = mock_session
+
+        cookies = state_helpers._load_mc_cookies(store_id="store-a")
+        self.assertEqual(cookies, {"mc-session": "s1", "mc-sid": "sid1"})
+
+    @patch("backend.state_helpers._get_sync_db_session")
+    def test_no_fallback_to_global_file_when_store_has_no_cookies(self, mock_db_session):
+        self._write_global_state_json()
+        mock_session = MagicMock()
+        mock_store = MagicMock()
+        mock_store.encrypted_cookies = None
+        mock_session.get.return_value = mock_store
+        mock_db_session.return_value = mock_session
+
+        cookies = state_helpers._load_mc_cookies(store_id="store-a")
+        self.assertEqual(cookies, {}, "must not fall back to state.json even though it has valid cookies")
+
+    @patch("backend.state_helpers._get_sync_db_session")
+    def test_store_not_found_returns_empty_dict(self, mock_db_session):
+        self._write_global_state_json()
+        mock_session = MagicMock()
+        mock_session.get.return_value = None
+        mock_db_session.return_value = mock_session
+
+        cookies = state_helpers._load_mc_cookies(store_id="ghost-store")
+        self.assertEqual(cookies, {})
+
+    @patch("backend.state_helpers._get_sync_db_session")
+    def test_unscoped_call_still_reads_global_file_unchanged(self, mock_db_session):
+        """store_id=None must be byte-for-byte the pre-3.1 behavior — no DB touched at all."""
+        self._write_global_state_json()
+        cookies = state_helpers._load_mc_cookies(store_id=None)
+        self.assertEqual(cookies, {"mc-session": "global-sess", "mc-sid": "global-sid"})
+        mock_db_session.assert_not_called()
+
+
+class TestMcCredentialsAndCookiesStoreScoped(unittest.TestCase):
+    """
+    state_helpers.py::_save_mc_credentials/_load_mc_credentials/
+    _save_mc_cookies_for_store — per-store DB persistence (HANDOFF 3.1).
+    """
+
+    def setUp(self):
+        self._orig_cwd = os.getcwd()
+        self._tmp_dir = tempfile.mkdtemp()
+        os.chdir(self._tmp_dir)
+
+    def tearDown(self):
+        os.chdir(self._orig_cwd)
+        shutil.rmtree(self._tmp_dir, ignore_errors=True)
+
+    @patch("backend.state_helpers._get_sync_db_session")
+    def test_save_and_load_credentials_round_trip_per_store(self, mock_db_session):
+        mock_session = MagicMock()
+        mock_store = MagicMock()
+        mock_store.encrypted_mc_email = None
+        mock_store.encrypted_mc_password = None
+        mock_session.get.return_value = mock_store
+        mock_db_session.return_value = mock_session
+
+        state_helpers._save_mc_credentials("a@b.kz", "hunter2", store_id="store-a")
+        # Capture what got assigned onto the mock store object.
+        self.assertIsNotNone(mock_store.encrypted_mc_email)
+        self.assertIsNotNone(mock_store.encrypted_mc_password)
+
+        creds = state_helpers._load_mc_credentials(store_id="store-a")
+        self.assertEqual(creds, ("a@b.kz", "hunter2"))
+
+    @patch("backend.state_helpers._get_sync_db_session")
+    def test_load_credentials_no_store_row_returns_none_no_fallback(self, mock_db_session):
+        mock_session = MagicMock()
+        mock_session.get.return_value = None
+        mock_db_session.return_value = mock_session
+
+        creds = state_helpers._load_mc_credentials(store_id="ghost")
+        self.assertIsNone(creds)
+
+    @patch("backend.state_helpers._get_sync_db_session")
+    def test_save_cookies_for_store_requires_both_cookies_present(self, mock_db_session):
+        mock_session = MagicMock()
+        mock_db_session.return_value = mock_session
+        ok = state_helpers._save_mc_cookies_for_store("store-a", {"mc-session": "only-one"})
+        self.assertFalse(ok)
+        mock_session.get.assert_not_called()
+
+    @patch("backend.state_helpers._get_sync_db_session")
+    def test_save_cookies_for_store_persists_and_activates(self, mock_db_session):
+        mock_session = MagicMock()
+        mock_store = MagicMock()
+        mock_session.get.return_value = mock_store
+        mock_db_session.return_value = mock_session
+
+        ok = state_helpers._save_mc_cookies_for_store("store-a", {"mc-session": "s", "mc-sid": "sid"})
+        self.assertTrue(ok)
+        self.assertEqual(mock_store.status, "ACTIVE")
+        mock_session.commit.assert_called_once()
+
+
+class TestRefreshMcSessionStoreScoped(unittest.TestCase):
+    """state_helpers.py::_refresh_mc_session(store_id=...) — no guessing, no fallback creds."""
+
+    def setUp(self):
+        self._orig_cwd = os.getcwd()
+        self._tmp_dir = tempfile.mkdtemp()
+        os.chdir(self._tmp_dir)
+
+    def tearDown(self):
+        os.chdir(self._orig_cwd)
+        shutil.rmtree(self._tmp_dir, ignore_errors=True)
+
+    @patch("backend.state_helpers._load_mc_credentials")
+    def test_no_saved_creds_for_store_returns_false_immediately(self, mock_load_creds):
+        mock_load_creds.return_value = None
+        result = state_helpers._refresh_mc_session(store_id="store-a")
+        self.assertFalse(result)
+        mock_load_creds.assert_called_once_with(store_id="store-a")
+
+    @patch("backend.services.playwright_worker.worker")
+    @patch("backend.state_helpers._save_mc_cookies_for_store")
+    @patch("backend.state_helpers._load_mc_cookies")
+    @patch("backend.state_helpers._load_mc_credentials")
+    def test_successful_relogin_syncs_fresh_cookies_into_store_row(self, mock_load_creds, mock_load_cookies, mock_save_for_store, mock_worker):
+        mock_load_creds.return_value = ("a@b.kz", "hunter2")
+        mock_load_cookies.return_value = {"mc-session": "fresh", "mc-sid": "fresh-sid"}
+        mock_worker.send_cmd.return_value = (True, "Success")
+
+        result = state_helpers._refresh_mc_session(store_id="store-a")
+
+        self.assertTrue(result)
+        mock_load_cookies.assert_called_once_with(store_id=None)
+        mock_save_for_store.assert_called_once_with("store-a", {"mc-session": "fresh", "mc-sid": "fresh-sid"})
+
+
+class TestCookieLoaderKaspiWrapper(unittest.TestCase):
+    """
+    kaspi_wrapper.py::KaspiAPI._load_mc_cookies — UNIFIED (2026-07-29, closing
+    HANDOFF 3.1) to delegate to state_helpers._load_mc_cookies instead of
+    duplicating its own narrower state.json parsing. The divergences this
+    class used to document (domain-check requirement, no states/ fallback,
+    raise-vs-{}) are gone: the only remaining difference is that the
+    KaspiAPI wrapper still raises when cookies are missing (callers like
+    assemble_cargo rely on that), while state_helpers._load_mc_cookies
+    itself returns {} and lets the caller decide.
+    """
+
+    def setUp(self):
+        self._orig_cwd = os.getcwd()
+        self._tmp_dir = tempfile.mkdtemp()
+        os.chdir(self._tmp_dir)
+
+    def tearDown(self):
+        os.chdir(self._orig_cwd)
+        shutil.rmtree(self._tmp_dir, ignore_errors=True)
+
+    def test_domain_on_cookie_is_no_longer_required(self):
+        """Unified implementation doesn't look at the cookie's domain field at all."""
         import json
         with open("state.json", "w", encoding="utf-8") as f:
             json.dump({"cookies": [
                 {"name": "mc-session", "value": "s", "domain": "example.com"},
                 {"name": "mc-sid", "value": "sid", "domain": "example.com"},
             ]}, f)
-        with self.assertRaises(Exception):
-            KaspiAPI._load_mc_cookies()
+        cookies = KaspiAPI._load_mc_cookies()
+        self.assertEqual(cookies, {"mc-session": "s", "mc-sid": "sid"})
 
-    def test_does_not_check_states_subdirectory_fallback(self):
-        """
-        РАСХОЖДЕНИЕ: в отличие от state_helpers._load_mc_cookies, эта версия
-        проверяет ТОЛЬКО корневой state.json — states/session.json игнорируется.
-        """
+    def test_now_checks_states_subdirectory_fallback(self):
+        """Unified implementation shares state_helpers' states/session.json fallback."""
         import json
         os.makedirs("states", exist_ok=True)
         with open("states/session.json", "w", encoding="utf-8") as f:
             json.dump({"cookies": [
-                {"name": "mc-session", "value": "s", "domain": ".kaspi.kz"},
-                {"name": "mc-sid", "value": "sid", "domain": ".kaspi.kz"},
+                {"name": "mc-session", "value": "s"},
+                {"name": "mc-sid", "value": "sid"},
             ]}, f)
+        cookies = KaspiAPI._load_mc_cookies()
+        self.assertEqual(cookies, {"mc-session": "s", "mc-sid": "sid"})
+
+    def test_missing_cookies_still_raises(self):
+        """
+        KaspiAPI._load_mc_cookies keeps its raise-on-missing contract (callers
+        like assemble_cargo depend on it), even though the shared
+        state_helpers._load_mc_cookies it delegates to returns {} instead.
+        """
         with self.assertRaises(Exception):
             KaspiAPI._load_mc_cookies()
 
-    def test_missing_cookies_raises_instead_of_returning_empty_dict(self):
+    @patch("backend.state_helpers._get_sync_db_session")
+    def test_store_scoped_read_with_no_db_cookies_raises_not_falls_back(self, mock_db_session):
         """
-        КЛЮЧЕВОЕ РАСХОЖДЕНИЕ: state_helpers-версия при отсутствии кук молча
-        возвращает {} (вызывающий код сам решает, что делать), а эта версия
-        бросает Exception — разные контракты для одного и того же случая
-        "куки не найдены", которые Phase 4c должен унифицировать.
+        store_id given: even if a perfectly valid global state.json sits right
+        next to it, a store with no encrypted_cookies in the DB must NOT fall
+        back to it — per 3.1's closure, per-store reads never touch the
+        legacy shared file. KaspiAPI's wrapper still raises on "no cookies"
+        (its existing contract), same as the unscoped case above.
         """
+        import json
+        with open("state.json", "w", encoding="utf-8") as f:
+            json.dump({"cookies": [
+                {"name": "mc-session", "value": "s"},
+                {"name": "mc-sid", "value": "sid"},
+            ]}, f)
+
+        mock_session = MagicMock()
+        mock_store = MagicMock()
+        mock_store.encrypted_cookies = None
+        mock_session.get.return_value = mock_store
+        mock_db_session.return_value = mock_session
+
         with self.assertRaises(Exception):
-            KaspiAPI._load_mc_cookies()
+            KaspiAPI._load_mc_cookies(store_id="store-a")
 
 
 class TestVerifyTokenPropagatesExceptions(unittest.TestCase):

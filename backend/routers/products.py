@@ -41,7 +41,7 @@ def get_products(
 
     if not all_products:
         try:
-            all_products = KaspiAPI.sync_merchant_assortment(token)
+            all_products = KaspiAPI.sync_merchant_assortment(token, store_id=ctx.store_id)
             all_products = _apply_overrides(all_products, store_id=ctx.store_id)
             os.makedirs("states", exist_ok=True)
             with open(products_file, "w", encoding="utf-8") as f:
@@ -143,27 +143,27 @@ def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(get_st
         # Моментальный push в Kaspi MC
         from backend.dumper.executor import _load_mc_cookies, RateLimitExecutorWorker
         from backend.dumper.config import discover_merchant_id, _decode_base64_if_needed
-        
-        cookies = _load_mc_cookies()
+
+        cookies = _load_mc_cookies(store_id=ctx.store_id)
         mc_info = ""
         if cookies and "mc-session" in cookies and "mc-sid" in cookies:
             merchant_id = discover_merchant_id(token) or "20186986"
             master_sku = target_p.get("kaspiSku") or target_p.get("sku")
             decoded_master = _decode_base64_if_needed(master_sku)
-            
+
             store_full_id = target_p.get("storeId") or f"{merchant_id}_001"
             store_suffix = store_full_id.split("_")[1] if "_" in store_full_id else "001"
-            
+
             success, val = RateLimitExecutorWorker._update_kaspi_price_sync(
                 merchant_uid=merchant_id,
-                cookies=cookies,
                 sku=target_p.get("merchantSku") or req.sku,
                 master_sku=decoded_master,
                 model_name=target_p.get("name", "Товар"),
                 new_price=int(req.price),
                 stock=int(req.stock),
                 store_id_suffix=store_suffix,
-                city_id="750000000"
+                city_id="750000000",
+                internal_store_id=ctx.store_id
             )
             if success:
                 mc_info = f" и успешно отправлен в Kaspi MC (ID: {val})"
@@ -184,7 +184,7 @@ def refresh_products(ctx: StoreContext = Depends(get_store_context)):
     token = ctx.token
     products_file = "states/products.json"
     try:
-        products = KaspiAPI.sync_merchant_assortment(token)
+        products = KaspiAPI.sync_merchant_assortment(token, store_id=ctx.store_id)
         products = _apply_overrides(products, store_id=ctx.store_id)
         os.makedirs("states", exist_ok=True)
         with open(products_file, "w", encoding="utf-8") as f:

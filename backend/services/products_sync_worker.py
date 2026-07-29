@@ -18,7 +18,7 @@ async def _sync_store_products(token: str, store_id=None) -> int:
     store_id=None (легаси) — нескоуп-применение оверрайдов, как было всегда.
     store_id задан (Phase 7) — оверрайды применяются в рамках стора.
     """
-    products = await asyncio.to_thread(KaspiAPI.sync_merchant_assortment, token)
+    products = await asyncio.to_thread(KaspiAPI.sync_merchant_assortment, token, store_id)
 
     if not products:
         logger.warning(f"⚠️ [Products Sync Worker] Получен пустой список товаров из Kaspi API (store {store_id}).")
