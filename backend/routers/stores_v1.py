@@ -150,15 +150,19 @@ async def connect_full_store(
 
     # 3. Если переданы email+пароль — выполняем вход и вытягиваем куки
     cookies_str = req.cookies_raw or ""
+    email_clean = None
+    password_plain = None
     if req.email and req.password:
         email_clean = req.email.strip()
-        success, msg = worker.send_cmd(Command.LOGIN, {"email": email_clean, "password": req.password})
+        password_plain = req.password
+        success, msg = worker.send_cmd(Command.LOGIN, {"email": email_clean, "password": password_plain})
         if not success:
             raise HTTPException(status_code=400, detail=f"Ошибка входа в Kaspi MC: {msg}")
 
-        # Сохраняем креды (в зашифрованном виде), чтобы при истечении сессионных
-        # куков backend мог автоматически перелогиниться без участия пользователя.
-        _save_mc_credentials(email_clean, req.password)
+        # Креды сохраняем НИЖЕ, когда известен store_id — либо существующего,
+        # либо только что созданного магазина. Никакого сохранения в общий
+        # session.json: иначе автообновление одного магазина будет читать
+        # креды другого.
 
         if os.path.exists("state.json"):
             try:
@@ -196,6 +200,12 @@ async def connect_full_store(
 
         await db.commit()
 
+        # Креды на автообновление сессии сохраняем ИСКЛЮЧИТЕЛЬНО в строку
+        # этого магазина — никакого общего session.json (см. HANDOFF 3.1,
+        # "no fallback": чужой store_id не должен пользоваться этой сессией).
+        if email_clean:
+            _save_mc_credentials(email_clean, password_plain, store_id=existing_store.id)
+
         active_token = decrypt_data(existing_store.encrypted_api_key) if existing_store.encrypted_api_key else api_token_clean
         _save_session({"token": active_token, "merchant_id": existing_store.merchant_id})
 
@@ -230,6 +240,10 @@ async def connect_full_store(
     )
     db.add(user_store)
     await db.commit()
+
+    # Аналогично — креды привязываются к id только что созданного магазина.
+    if email_clean:
+        _save_mc_credentials(email_clean, password_plain, store_id=new_store.id)
 
     # Сохраняем сессию активного токена и merchant_id для REST подсистем
     _save_session({"token": api_token_clean, "merchant_id": new_store.merchant_id})
@@ -267,14 +281,10 @@ async def select_active_store(
     if decrypted_api_key:
         _save_session({"token": decrypted_api_key, "merchant_id": store.merchant_id})
 
-    if store.encrypted_cookies:
-        decrypted_cookies = decrypt_data(store.encrypted_cookies)
-        if decrypted_cookies:
-            os.makedirs("states", exist_ok=True)
-            cookies_pairs = [c.split("=", 1) for c in decrypted_cookies.split("; ") if "=" in c]
-            cookie_objs = [{"name": k.strip(), "value": v.strip()} for k, v in cookies_pairs]
-            with open("state.json", "w", encoding="utf-8") as f:
-                json.dump({"cookies": cookie_objs}, f, indent=2)
+    # MC-сессия (куки) этого магазина уже лежит в его собственной строке БД
+    # (store.encrypted_cookies) — переносить её в общий state.json не нужно:
+    # это ровно то "протекание" сессии между магазинами, которое было решено
+    # исключить (HANDOFF 3.1). Все MC-эндпоинты читают/обновляют куки по store_id.
 
     return {"status": "ok", "message": f"Контекст активного магазина {store.name} установлен."}
 
@@ -298,49 +308,30 @@ async def verify_store_cookies(
         raise HTTPException(status_code=404, detail="Магазин не найден или нет прав доступа")
 
     store, role = row
-    decrypted_cookies = decrypt_data(store.encrypted_cookies)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Cookie": decrypted_cookies
-    }
 
-    is_valid = False
-    if decrypted_cookies:
+    def _check_cookie_str(cookie_str: Optional[str]) -> bool:
+        if not cookie_str:
+            return False
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Cookie": cookie_str
+        }
         try:
             r = requests.get("https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=headers, timeout=5)
-            if r.status_code == 200:
-                is_valid = True
+            return r.status_code == 200
         except Exception:
-            pass
-
-    # Если куки в БД просрочились — пробуем привязать свежие системные куки из state.json
-    if not is_valid:
-        from backend.state_helpers import _load_mc_cookies
-
-        def _try_system_cookies() -> bool:
-            sys_cookies = _load_mc_cookies()
-            if not (sys_cookies and "mc-session" in sys_cookies and "mc-sid" in sys_cookies):
-                return False
-            sys_cookie_str = "; ".join([f"{k}={v}" for k, v in sys_cookies.items()])
-            sys_headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Cookie": sys_cookie_str
-            }
-            try:
-                r_sys = requests.get("https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=sys_headers, timeout=5)
-                if r_sys.status_code == 200:
-                    store.encrypted_cookies = encrypt_data(sys_cookie_str)
-                    return True
-            except Exception:
-                pass
             return False
 
-        is_valid = _try_system_cookies()
+    decrypted_cookies = decrypt_data(store.encrypted_cookies) if store.encrypted_cookies else None
+    is_valid = _check_cookie_str(decrypted_cookies)
 
-        # Системные куки тоже просрочены/отсутствуют — пробуем автоматически
-        # перелогиниться сохранёнными email/паролем и повторить проверку один раз.
-        if not is_valid and _refresh_mc_session():
-            is_valid = _try_system_cookies()
+    # Куки этого магазина просрочены — пробуем обновить сессию ЕГО СОБСТВЕННЫМИ
+    # email/паролем. Никакого фоллбека на общую систему/другой магазин: если
+    # своих кредов нет или вход не удался, пользователь должен войти заново.
+    if not is_valid and _refresh_mc_session(store_id=store_id):
+        await db.refresh(store)
+        decrypted_cookies = decrypt_data(store.encrypted_cookies) if store.encrypted_cookies else None
+        is_valid = _check_cookie_str(decrypted_cookies)
 
     if is_valid:
         store.status = "ACTIVE"
@@ -367,7 +358,12 @@ async def sync_store_cookies(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Принудительная привязка и зашифрованное сохранение системных куков (state.json) к магазину"""
+    """Принудительное обновление сессии Kaspi MC для конкретного магазина.
+
+    Использует ТОЛЬКО email/пароль, сохранённые для этого store_id — без
+    фоллбека на общий state.json/session.json или сессию другого магазина.
+    Если своих кредов нет или вход не удался — нужен повторный вход.
+    """
     stmt = (
         select(Store, UserStore.role)
         .join(UserStore, Store.id == UserStore.store_id)
@@ -380,54 +376,46 @@ async def sync_store_cookies(
         raise HTTPException(status_code=404, detail="Магазин не найден или нет прав доступа")
 
     store, role = row
-    from backend.state_helpers import _load_mc_cookies
-    sys_cookies = _load_mc_cookies()
-    if not sys_cookies or "mc-session" not in sys_cookies or "mc-sid" not in sys_cookies:
-        # Системных куков нет вообще — пробуем автоматически перелогиниться сохранёнными кредами.
-        if not _refresh_mc_session():
-            raise HTTPException(status_code=400, detail="Системные куки в state.json отсутствуют, и автообновление сессии не удалось (нет сохранённых email/пароля). Пройдите авторизацию заново.")
-        sys_cookies = _load_mc_cookies()
-        if not sys_cookies or "mc-session" not in sys_cookies or "mc-sid" not in sys_cookies:
-            raise HTTPException(status_code=400, detail="Автообновление сессии не дало валидных куков. Пройдите авторизацию заново.")
 
-    def _check_and_store(cookies: dict):
-        cookie_str = "; ".join([f"{k}={v}" for k, v in cookies.items()])
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Cookie": cookie_str
-        }
-        r = requests.get("https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=headers, timeout=5)
-        return r.status_code, cookie_str
+    if not _refresh_mc_session(store_id=store_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Не удалось обновить сессию Kaspi MC: для этого магазина нет сохранённых email/пароля, "
+                   "либо вход не удался. Войдите в Kaspi MC заново."
+        )
 
+    await db.refresh(store)
+    decrypted_cookies = decrypt_data(store.encrypted_cookies) if store.encrypted_cookies else None
+    if not decrypted_cookies:
+        raise HTTPException(status_code=400, detail="Сессия обновлена, но куки не были сохранены. Войдите в Kaspi MC заново.")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Cookie": decrypted_cookies
+    }
     try:
-        status_code, cookie_str = _check_and_store(sys_cookies)
-
-        # Куки просрочены (401) — пробуем автообновить сессию и проверить ещё раз.
-        if status_code != 200 and _refresh_mc_session():
-            sys_cookies = _load_mc_cookies()
-            if sys_cookies and "mc-session" in sys_cookies and "mc-sid" in sys_cookies:
-                status_code, cookie_str = _check_and_store(sys_cookies)
-
-        if status_code == 200:
-            store.encrypted_cookies = encrypt_data(cookie_str)
-            store.status = "ACTIVE"
-            store.last_sync_at = datetime.utcnow()
-            await db.commit()
-            return StoreResponse(
-                id=store.id,
-                merchant_id=store.merchant_id,
-                name=store.name,
-                status=store.status,
-                role=role,
-                last_sync_at=store.last_sync_at.isoformat() if store.last_sync_at else None,
-                created_at=store.created_at.isoformat()
-            )
-        else:
-            raise HTTPException(status_code=400, detail="Куки Kaspi MC истекли (401), автообновление сессии не помогло. Пройдите авторизацию заново.")
-    except HTTPException:
-        raise
+        r = requests.get("https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=headers, timeout=5)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ошибка проверки куков: {e}")
+
+    if r.status_code != 200:
+        store.status = "COOKIE_EXPIRED"
+        await db.commit()
+        raise HTTPException(status_code=400, detail="Куки Kaspi MC истекли (401) сразу после обновления сессии. Войдите заново.")
+
+    store.status = "ACTIVE"
+    store.last_sync_at = datetime.utcnow()
+    await db.commit()
+
+    return StoreResponse(
+        id=store.id,
+        merchant_id=store.merchant_id,
+        name=store.name,
+        status=store.status,
+        role=role,
+        last_sync_at=store.last_sync_at.isoformat() if store.last_sync_at else None,
+        created_at=store.created_at.isoformat()
+    )
 
 
 @router.delete("/{store_id}")
