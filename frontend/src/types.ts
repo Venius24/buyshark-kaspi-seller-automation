@@ -70,6 +70,19 @@ export interface ChatbotStatus {
   processed_chats_count: number;
 }
 
+export interface DumpingConfig {
+  min_price: number;
+  max_price: number;
+  dump_step: number;
+  enabled: boolean;
+  mode?: string;
+  target_position?: number;
+  max_delivery_days?: number | null;
+  min_seller_rating?: number | null;
+  same_city_only?: boolean;
+  blacklisted_merchants?: string[];
+}
+
 export type ActiveTab =
   | 'stores'
   | 'overview'
