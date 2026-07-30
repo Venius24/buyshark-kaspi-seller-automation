@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, API_URL } from '../api';
 
 interface StoreItem {
@@ -25,11 +26,21 @@ interface UserProfile {
   };
 }
 
+const fetchProfile = async (): Promise<UserProfile | null> => {
+  const res = await apiFetch(`${API_URL}/api/v1/auth/me`);
+  if (!res.ok) return null;
+  return res.json();
+};
+
+const fetchStores = async (): Promise<StoreItem[]> => {
+  const res = await apiFetch(`${API_URL}/api/v1/stores`);
+  if (!res.ok) return [];
+  return res.json();
+};
+
 export const StoreHub: React.FC = () => {
-  const [stores, setStores] = useState<StoreItem[]>([]);
+  const queryClient = useQueryClient();
   const [activeStoreId, setActiveStoreId] = useState<string>('');
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
 
   // Modal State
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
@@ -43,30 +54,21 @@ export const StoreHub: React.FC = () => {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const fetchStoresAndProfile = async () => {
-    setLoading(true);
-    try {
-      // Profile
-      const pRes = await apiFetch(`${API_URL}/api/v1/auth/me`);
-      if (pRes.ok) {
-        const pData = await pRes.json();
-        setProfile(pData);
-      }
+  const { data: profile } = useQuery({
+    queryKey: ['auth', 'me'],
+    queryFn: fetchProfile,
+    refetchInterval: 30_000,
+  });
 
-      // Stores
-      const sRes = await apiFetch(`${API_URL}/api/v1/stores`);
-      if (sRes.ok) {
-        const sData: StoreItem[] = await sRes.json();
-        setStores(sData);
-        if (sData.length > 0 && !activeStoreId) {
-          selectStoreContext(sData[0].id);
-        }
-      }
-    } catch (err) {
-      console.error('Error loading Store Hub:', err);
-    } finally {
-      setLoading(false);
-    }
+  const { data: stores = [], isLoading: loading } = useQuery({
+    queryKey: ['stores'],
+    queryFn: fetchStores,
+    refetchInterval: 30_000,
+  });
+
+  const refetchStoresAndProfile = () => {
+    queryClient.invalidateQueries({ queryKey: ['stores'] });
+    queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
   };
 
   const selectStoreContext = async (storeId: string) => {
@@ -81,9 +83,13 @@ export const StoreHub: React.FC = () => {
     }
   };
 
+  // Auto-select the first store once the list loads, if nothing selected yet.
   useEffect(() => {
-    fetchStoresAndProfile();
-  }, []);
+    if (stores.length > 0 && !activeStoreId) {
+      selectStoreContext(stores[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stores]);
 
   // Unified Form Submit: API Token (Public REST) + Email/Password (Kaspi MC login)
   const handleConnectFullStore = async (e: React.FormEvent) => {
@@ -119,7 +125,7 @@ export const StoreHub: React.FC = () => {
 
       setShowAddModal(false);
       resetModalState();
-      fetchStoresAndProfile();
+      refetchStoresAndProfile();
     } catch (err: any) {
       setErrorMsg(err.message || 'Ошибка подключения магазина');
     } finally {
@@ -141,7 +147,7 @@ export const StoreHub: React.FC = () => {
         method: 'POST',
       });
       if (res.ok) {
-        fetchStoresAndProfile();
+        refetchStoresAndProfile();
       }
     } catch (err) {
       console.error('Error verifying store:', err);
@@ -155,7 +161,7 @@ export const StoreHub: React.FC = () => {
       });
       if (res.ok) {
         alert('✅ Куки успешно синхронизированы с магазином!');
-        fetchStoresAndProfile();
+        refetchStoresAndProfile();
       } else {
         const errData = await res.json();
         alert(`⚠️ ${errData.detail || 'Требуется повторный вход в Kaspi MC'}. Перейдите во вкладку «Подключения & Сессия» и нажмите «Войти в Kaspi MC».`);
@@ -173,7 +179,7 @@ export const StoreHub: React.FC = () => {
         method: 'DELETE',
       });
       if (res.ok) {
-        fetchStoresAndProfile();
+        refetchStoresAndProfile();
       }
     } catch (err) {
       console.error('Error deleting store:', err);

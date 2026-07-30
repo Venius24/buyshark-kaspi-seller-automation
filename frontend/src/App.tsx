@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, setUnauthorizedHandler, API_URL, getWsUrl } from './api';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useLogs } from './hooks/useLogs';
@@ -23,6 +24,7 @@ import { DumpingTab } from './components/tabs/DumpingTab';
 import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig } from './types';
 
 export default function App() {
+  const queryClient = useQueryClient();
   const [isLoaded, setIsLoaded] = useState(false);
   const [isAuthed, setIsAuthed] = useState<boolean>(() => !!localStorage.getItem('access_token'));
 
@@ -67,20 +69,32 @@ export default function App() {
     blocked_chats: [],
     processed_chats_count: 0
   });
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [fetchingOrders, setFetchingOrders] = useState(false);
   const [orderStatusFilter, setOrderStatusFilter] = useState<'NEW' | 'ASSEMBLY'>('ASSEMBLY');
   const [orderLimit, setOrderLimit] = useState(10);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [packingAll, setPackingAll] = useState(false);
 
-  const [transfers, setTransfers] = useState<Transfer[]>([]);
-  const [fetchingTransfers, setFetchingTransfers] = useState(false);
   const [transferFilter, setTransferFilter] = useState<'ALL' | 'EXPRESS' | 'TODAY'>('ALL');
 
   const { logs, addLog, clearLogs } = useLogs();
 
-  const [mcHasSession, setMcHasSession] = useState(false);
+  // Фоновый поллинг статуса MC-сессии без verify (дёшево, читает БД) — держит
+  // бейдж в Settings живым, не дёргая общий Playwright-воркер каждые 15с.
+  // verify=true остаётся только для явных случаев: первичная проверка на
+  // монтировании и ручная кнопка «Проверить» (см. checkMcStatus ниже).
+  const { data: mcHasSession = false } = useQuery({
+    queryKey: ['mc-status'],
+    queryFn: async () => {
+      try {
+        const res = await apiFetch(`${API_URL}/api/mc-status?verify=false`);
+        const data = await res.json();
+        return res.ok && data.success ? !!(data.has_session && data.valid) : false;
+      } catch {
+        return false;
+      }
+    },
+    refetchInterval: 15_000,
+  });
   const {
     emailInput, setEmailInput,
     passwordInput, setPasswordInput,
@@ -88,7 +102,7 @@ export default function App() {
     openModal: openMcAuthModal,
     closeModal: closeMcAuthModal,
     submitLogin: submitMcAuthLogin,
-  } = useMcAuth(addLog, () => setMcHasSession(true));
+  } = useMcAuth(addLog, () => queryClient.invalidateQueries({ queryKey: ['mc-status'] }));
 
   // Dumping & Analytics States
   const [dumpingConfigs, setDumpingConfigs] = useState<Record<string, DumpingConfig>>({});
@@ -109,8 +123,9 @@ export default function App() {
       const res = await apiFetch(`${API_URL}/api/mc-status?verify=${verify}`);
       const data = await res.json();
       if (res.ok && data.success) {
-        setMcHasSession(data.has_session && data.valid);
-        return data.has_session && data.valid;
+        const valid = !!(data.has_session && data.valid);
+        queryClient.setQueryData(['mc-status'], valid);
+        return valid;
       }
     } catch {
       // Ignore
@@ -380,42 +395,30 @@ export default function App() {
     return { state: 'KASPI_DELIVERY', status: 'ACCEPTED_BY_MERCHANT', assembled: false };
   };
 
-  const loadOrders = async (statusF = orderStatusFilter, limit = orderLimit) => {
-    setFetchingOrders(true);
-    setSelectedOrderIds(new Set());
-    const { state, status, assembled } = getOrderParams(statusF);
-    addLog(`Загрузка заказов (${statusF === 'NEW' ? 'Новые' : 'На сборке'}, Лимит: ${limit})...`);
-    try {
-      let url = `${API_URL}/api/orders?state=${state}&status=${status}&limit=${limit}`;
+  // Заказы теперь живут в React Query — кэш переживает переключение вкладок,
+  // фоновый refetchInterval держит их свежими без клика пользователя. Смена
+  // фильтра/лимита меняет queryKey и триггерит перезапрос сама по себе.
+  const { data: orders = [], isFetching: fetchingOrders, refetch: refetchOrders } = useQuery({
+    queryKey: ['orders', orderStatusFilter, orderLimit],
+    queryFn: async () => {
+      const { state, status, assembled } = getOrderParams(orderStatusFilter);
+      let url = `${API_URL}/api/orders?state=${state}&status=${status}&limit=${orderLimit}`;
       if (assembled !== undefined) url += `&assembled=${assembled}`;
       const res = await apiFetch(url);
       const data = await res.json();
-      if (res.ok && data.success) {
-        setOrders(data.orders);
-        const total = data.orders.length;
-        const assembledCount = data.orders.filter((o: any) => o.assembled).length;
-        const transmittedCount = data.orders.filter((o: any) => o.courierTransmissionDate !== null).length;
-        const types = Array.from(new Set(data.orders.map((o: any) => o.deliveryType))).join(', ');
-        addLog(`Загружено ${total} заказов. Из них собранных (assembled): ${assembledCount}, переданных курьеру: ${transmittedCount}. Типы доставки: [${types}]`);
-        // Логируем SKU для каждой позиции заказа
-        for (const order of data.orders) {
-          if (order.entries && order.entries.length > 0) {
-            for (const entry of order.entries) {
-              const mSku = entry.merchantSku || '—';
-              const kSku = entry.kaspiSku || '—';
-              addLog(`  📦 Заказ #${order.id} → ${entry.productName}: Merchant SKU: ${mSku}, Kaspi SKU: ${kSku}`);
-            }
-          }
-        }
-      } else {
-        addLog(`Ошибка загрузки заказов: ${data.detail || 'Ошибка бэкенда'}`);
+      if (!res.ok || !data.success) {
+        throw new Error(data.detail || 'Ошибка бэкенда');
       }
-    } catch (err: any) {
-      addLog(`Ошибка сети при загрузке заказов: ${err.message || err}`);
-    } finally {
-      setFetchingOrders(false);
-    }
-  };
+      return data.orders as Order[];
+    },
+    refetchInterval: 30_000,
+  });
+
+  // Сбрасываем выделение только при явной смене фильтра/лимита, не при
+  // каждом фоновом обновлении списка.
+  useEffect(() => {
+    setSelectedOrderIds(new Set());
+  }, [orderStatusFilter, orderLimit]);
 
   const packOrder = async (orderId: string, internalId: string) => {
     addLog(`Сборка заказа #${orderId}...`);
@@ -428,7 +431,7 @@ export default function App() {
       const data = await res.json();
       if (res.ok && data.success) {
         addLog(`Заказ #${orderId} успешно обработан.`);
-        loadOrders(orderStatusFilter, orderLimit);
+        refetchOrders();
       } else {
         addLog(`Ошибка сборки #${orderId}: ${data.detail || 'Ошибка'}`);
       }
@@ -446,7 +449,7 @@ export default function App() {
       if (res.ok && data.success) {
         addLog(data.message);
         setSelectedOrderIds(new Set());
-        loadOrders(orderStatusFilter, orderLimit);
+        refetchOrders();
       } else {
         addLog(`Ошибка массовой сборки: ${data.detail || 'Ошибка'}`);
       }
@@ -483,7 +486,7 @@ export default function App() {
         }
       }
     }
-    loadOrders(orderStatusFilter, orderLimit);
+    refetchOrders();
   };
 
   const toggleOrderSelection = (orderId: string) => {
@@ -503,24 +506,18 @@ export default function App() {
     }
   };
 
-  const loadTransfers = async (filter = transferFilter) => {
-    setFetchingTransfers(true);
-    addLog(`Загрузка передач (Фильтр: ${filter === 'ALL' ? 'Все' : filter === 'EXPRESS' ? 'Экспресс' : 'Сегодня'})...`);
-    try {
-      const res = await apiFetch(`${API_URL}/api/transfers?filter=${filter}`);
+  const { data: transfers = [], isFetching: fetchingTransfers, refetch: refetchTransfers } = useQuery({
+    queryKey: ['transfers', transferFilter],
+    queryFn: async () => {
+      const res = await apiFetch(`${API_URL}/api/transfers?filter=${transferFilter}`);
       const data = await res.json();
-      if (res.ok && data.success) {
-        setTransfers(data.transfers);
-        addLog(`Загружено ${data.transfers.length} передач.`);
-      } else {
-        addLog(`Ошибка загрузки передач: ${data.detail || 'Ошибка бэкенда'}`);
+      if (!res.ok || !data.success) {
+        throw new Error(data.detail || 'Ошибка бэкенда');
       }
-    } catch {
-      addLog('Ошибка сети при загрузке передач.');
-    } finally {
-      setFetchingTransfers(false);
-    }
-  };
+      return data.transfers as Transfer[];
+    },
+    refetchInterval: 30_000,
+  });
 
   const loadChatbotConfig = async () => {
     try {
@@ -597,11 +594,9 @@ export default function App() {
     } else if (tab === 'chatbot') {
       loadChatbotConfig();
       loadChatbotStatus();
-    } else if (tab === 'packaging') {
-      loadOrders(orderStatusFilter, orderLimit);
-    } else if (tab === 'transfer') {
-      loadTransfers(transferFilter);
     }
+    // packaging/transfer: заказы и передачи теперь на React Query — уже
+    // загружены и обновляются в фоне независимо от активной вкладки.
   };
 
   // ── UI helpers ─────────────────────────────────────────
@@ -693,7 +688,8 @@ export default function App() {
             }}
             onOpenPackaging={() => {
               setActiveTab('packaging');
-              loadOrders('ASSEMBLY', 10);
+              setOrderStatusFilter('ASSEMBLY');
+              setOrderLimit(10);
             }}
             onOpenLogs={() => setActiveTab('logs')}
           />
@@ -818,15 +814,9 @@ export default function App() {
                 filteredOrders={filteredOrders}
                 fetchingOrders={fetchingOrders}
                 orderLimit={orderLimit}
-                onOrderLimitChange={(limit) => {
-                  setOrderLimit(limit);
-                  loadOrders(orderStatusFilter, limit);
-                }}
+                onOrderLimitChange={setOrderLimit}
                 orderStatusFilter={orderStatusFilter}
-                onOrderStatusFilterChange={(status) => {
-                  setOrderStatusFilter(status);
-                  loadOrders(status, orderLimit);
-                }}
+                onOrderStatusFilterChange={setOrderStatusFilter}
                 pkgDeliveryFilter={pkgDeliveryFilter}
                 onPkgDeliveryFilterChange={setPkgDeliveryFilter}
                 selectedOrderIds={selectedOrderIds}
@@ -836,7 +826,7 @@ export default function App() {
                 onPackAllOrders={packAllOrders}
                 onPackOrder={packOrder}
                 packingAll={packingAll}
-                onRefresh={() => loadOrders(orderStatusFilter, orderLimit)}
+                onRefresh={refetchOrders}
               />
             )}
 
@@ -846,11 +836,8 @@ export default function App() {
                 transfers={transfers}
                 fetchingTransfers={fetchingTransfers}
                 transferFilter={transferFilter}
-                onTransferFilterChange={(filter) => {
-                  setTransferFilter(filter);
-                  loadTransfers(filter);
-                }}
-                onRefresh={() => loadTransfers(transferFilter)}
+                onTransferFilterChange={setTransferFilter}
+                onRefresh={refetchTransfers}
               />
             )}
           </div>

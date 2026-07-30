@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Layers,
   Plus,
@@ -64,10 +65,31 @@ interface ProductItem {
   kaspiSku?: string;
 }
 
+const fetchGroupsQuery = async (): Promise<MasterStockGroup[]> => {
+  const res = await apiFetch(`${API_URL}/api/stock-groups`);
+  const data = await res.json();
+  return data.success ? (data.groups || []) : [];
+};
+
+const fetchProductsQuery = async (): Promise<ProductItem[]> => {
+  const res = await apiFetch(`${API_URL}/api/products?page=1&page_size=1000&status=all`);
+  const data = await res.json();
+  return data.success ? (data.products || []) : [];
+};
+
 export const MasterStockGroups: React.FC = () => {
-  const [groups, setGroups] = useState<MasterStockGroup[]>([]);
-  const [products, setProducts] = useState<ProductItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const queryClient = useQueryClient();
+  const { data: groups = [] } = useQuery({
+    queryKey: ['stock-groups'],
+    queryFn: fetchGroupsQuery,
+    refetchInterval: 5_000,
+  });
+  const { data: products = [], isLoading: loading } = useQuery({
+    queryKey: ['products', 'all-for-stock-groups'],
+    queryFn: fetchProductsQuery,
+    refetchInterval: 30_000,
+  });
+  const refetchGroups = () => queryClient.invalidateQueries({ queryKey: ['stock-groups'] });
   const [syncingGroupId, setSyncingGroupId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -109,7 +131,7 @@ export const MasterStockGroups: React.FC = () => {
           return [...prev.slice(-100), logLine];
         });
       } else if (wsEvent.type === 'stock_group_updated') {
-        fetchGroups();
+        refetchGroups();
       }
     }
   }, [wsEvent]);
@@ -121,45 +143,6 @@ export const MasterStockGroups: React.FC = () => {
     setToastMessage({ type, text });
     setTimeout(() => setToastMessage(null), 4000);
   };
-
-  const fetchGroups = async () => {
-    try {
-      const res = await apiFetch(`${API_URL}/api/stock-groups`);
-      const data = await res.json();
-      if (data.success) {
-        setGroups(data.groups || []);
-      }
-    } catch (e) {
-      console.error('Error fetching stock groups:', e);
-    }
-  };
-
-  const fetchProducts = async () => {
-    try {
-      const res = await apiFetch(`${API_URL}/api/products?page=1&page_size=1000&status=all`);
-      const data = await res.json();
-      if (data.success) {
-        setProducts(data.products || []);
-      }
-    } catch (e) {
-      console.error('Error fetching products:', e);
-    }
-  };
-
-  const loadData = async () => {
-    setLoading(true);
-    await Promise.all([fetchGroups(), fetchProducts()]);
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    loadData();
-    // Auto-refresh periodically for real-time status updates
-    const interval = setInterval(() => {
-      fetchGroups();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Filtered Groups
   const filteredGroups = useMemo(() => {
@@ -275,7 +258,7 @@ export const MasterStockGroups: React.FC = () => {
       if (data.success) {
         showToast('success', data.message || 'Мастер-Группа сохранена.');
         setIsModalOpen(false);
-        fetchGroups();
+        refetchGroups();
       } else {
         showToast('error', data.detail || 'Не удалось сохранить группу.');
       }
@@ -303,7 +286,7 @@ export const MasterStockGroups: React.FC = () => {
       if (data.success) {
         showToast('success', data.message || 'Остаток группы обновлен.');
         setEditingStockId(null);
-        fetchGroups();
+        refetchGroups();
       } else {
         showToast('error', data.detail || 'Не удалось обновить остаток.');
       }
@@ -320,7 +303,7 @@ export const MasterStockGroups: React.FC = () => {
       const data = await res.json();
       if (data.success) {
         showToast('success', 'Синхронизация запущена на Kaspi.');
-        fetchGroups();
+        refetchGroups();
       } else {
         showToast('error', data.detail || 'Не удалось запустить синхронизацию.');
       }
@@ -340,7 +323,7 @@ export const MasterStockGroups: React.FC = () => {
       const data = await res.json();
       if (data.success) {
         showToast('success', data.message || 'Группа удалена.');
-        fetchGroups();
+        refetchGroups();
       } else {
         showToast('error', data.detail || 'Не удалось удалить группу.');
       }
@@ -426,7 +409,10 @@ export const MasterStockGroups: React.FC = () => {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <button
-            onClick={loadData}
+            onClick={() => {
+              queryClient.invalidateQueries({ queryKey: ['stock-groups'] });
+              queryClient.invalidateQueries({ queryKey: ['products', 'all-for-stock-groups'] });
+            }}
             disabled={loading}
             style={{
               display: 'flex',

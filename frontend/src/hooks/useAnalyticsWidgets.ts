@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, API_URL } from '../api';
 
 interface Analytics {
@@ -15,39 +16,46 @@ const INITIAL_ANALYTICS: Analytics = {
   total_saved_margin: 145000,
 };
 
-export function useAnalyticsWidgets(wsEvent: { type: string; data?: any } | null) {
-  const [analytics, setAnalytics] = useState<Analytics>(INITIAL_ANALYTICS);
-  const [widgetData, setWidgetData] = useState<any>(null);
+const fetchWidgets = async (): Promise<any> => {
+  try {
+    const res = await apiFetch(`${API_URL}/api/analytics/widgets`);
+    const data = await res.json();
+    return res.ok && data.success ? data : null;
+  } catch {
+    return null;
+  }
+};
 
-  useEffect(() => {
-    const fetchWidgets = async () => {
-      try {
-        const res = await apiFetch(`${API_URL}/api/analytics/widgets`);
-        const data = await res.json();
-        if (res.ok && data.success) {
-          setWidgetData(data);
-          if (data.analytics) {
-            setAnalytics(prev => ({
-              ...prev,
-              buy_box_share: data.analytics.buy_box_share ?? prev.buy_box_share,
-              winning_count: data.analytics.winning_count ?? prev.winning_count,
-              total_scanned: data.analytics.total_scanned ?? prev.total_scanned,
-              total_saved_margin: data.analytics.total_saved_margin ?? prev.total_saved_margin,
-            }));
-          }
-        }
-      } catch { /* ignore */ }
-    };
-    fetchWidgets();
-    const interval = setInterval(fetchWidgets, 10000);
-    return () => clearInterval(interval);
-  }, []);
+export function useAnalyticsWidgets(wsEvent: { type: string; data?: any } | null) {
+  const queryClient = useQueryClient();
+
+  const { data: widgetData = null } = useQuery({
+    queryKey: ['analytics-widgets'],
+    queryFn: fetchWidgets,
+    refetchInterval: 10_000,
+  });
+
+  const analytics: Analytics = useMemo(() => {
+    if (widgetData?.analytics) {
+      return {
+        buy_box_share: widgetData.analytics.buy_box_share ?? INITIAL_ANALYTICS.buy_box_share,
+        winning_count: widgetData.analytics.winning_count ?? INITIAL_ANALYTICS.winning_count,
+        total_scanned: widgetData.analytics.total_scanned ?? INITIAL_ANALYTICS.total_scanned,
+        total_saved_margin: widgetData.analytics.total_saved_margin ?? INITIAL_ANALYTICS.total_saved_margin,
+      };
+    }
+    return INITIAL_ANALYTICS;
+  }, [widgetData]);
 
   useEffect(() => {
     if (wsEvent?.type === 'analytics_update' && wsEvent.data) {
-      setAnalytics(wsEvent.data);
+      queryClient.setQueryData(['analytics-widgets'], (prev: any) => ({
+        ...(prev || {}),
+        success: true,
+        analytics: wsEvent.data,
+      }));
     }
-  }, [wsEvent]);
+  }, [wsEvent, queryClient]);
 
   return { analytics, widgetData };
 }
