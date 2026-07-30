@@ -82,7 +82,10 @@ class TestChatsRouter(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertTrue(data["success"])
-        self.assertEqual(data["chats"], [{"id": "g1", "title": "Товар"}])
+        self.assertEqual(len(data["chats"]), 1)
+        self.assertEqual(data["chats"][0]["id"], "g1")
+        self.assertEqual(data["chats"][0]["title"], "Товар")
+        self.assertFalse(data["chats"][0]["is_human_override"])
 
     @patch("backend.routers.chats.discover_merchant_id")
     @patch("backend.chatbot.chat_client.http_session")
@@ -121,6 +124,44 @@ class TestChatsRouter(unittest.TestCase):
         resp = self.client.post("/api/chats/g1/messages", json={"text": "hi"}, headers=self._headers())
 
         self.assertEqual(resp.status_code, 502)
+
+    @patch("backend.routers.chats.load_chat_cookies")
+    def test_take_over_marks_human_override_without_sending(self, mock_load_cookies):
+        mock_load_cookies.return_value = {"mc-session": "s", "mc-sid": "sid"}
+        self._auth_override()
+        from backend.chatbot import config as chatbot_config
+        chatbot_config.PROCESSED_CHATS.pop("g-takeover", None)
+
+        resp = self.client.post("/api/chats/g-takeover/take-over", headers=self._headers())
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+        self.assertEqual(chatbot_config.PROCESSED_CHATS.get("g-takeover"), "HUMAN_OVERRIDE")
+        chatbot_config.PROCESSED_CHATS.pop("g-takeover", None)
+
+    @patch("backend.routers.chats.discover_merchant_id")
+    @patch("backend.chatbot.chat_client.http_session")
+    @patch("backend.routers.chats.load_chat_cookies")
+    def test_send_with_override_flag_marks_human_override(self, mock_load_cookies, mock_http, mock_discover):
+        mock_load_cookies.return_value = {"mc-session": "s", "mc-sid": "sid"}
+        mock_discover.return_value = "20186986"
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"StatusCode": 0, "data": {"id": "msg-1"}}
+        mock_http.post.return_value = mock_resp
+        self._auth_override()
+        from backend.chatbot import config as chatbot_config
+        chatbot_config.PROCESSED_CHATS.pop("g-quickreply", None)
+
+        resp = self.client.post(
+            "/api/chats/g-quickreply/messages",
+            json={"text": "Добрый день!", "override": True},
+            headers=self._headers(),
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(chatbot_config.PROCESSED_CHATS.get("g-quickreply"), "HUMAN_OVERRIDE")
+        chatbot_config.PROCESSED_CHATS.pop("g-quickreply", None)
 
 
 if __name__ == "__main__":

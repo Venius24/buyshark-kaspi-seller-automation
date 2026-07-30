@@ -8,6 +8,18 @@ from backend.chatbot import config, bot_instance
 
 logger = logging.getLogger(__name__)
 
+def _esc_md(text) -> str:
+    """
+    Экранирует спецсимволы legacy Telegram Markdown (_ * ` [) в значениях,
+    подставляемых в текст алерта. Без этого один незакрытый '_' в
+    merchant_id/имени клиента/тексте сообщения роняет всю отправку
+    ("can't parse entities") — подтверждено вживую на 'm_87776f40'.
+    """
+    text = str(text)
+    for ch in ("_", "*", "`", "["):
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
 def reset_cookie_alert():
     """Сбрасывает флаг предупреждения при успешном запросе с валидными куками."""
     if config.COOKIE_ALERT_SENT:
@@ -33,7 +45,7 @@ async def notify_cookie_expired(reason: str):
     alert_text = (
         f"🚨 **ВНИМАНИЕ: СЕССИЯ ЧАТА KASPI ИСТЕКЛА!**\n"
         f"----------------------------------------\n"
-        f"⚠️ **Причина:** {reason}\n"
+        f"⚠️ **Причина:** {_esc_md(reason)}\n"
         f"⏰ **Время:** {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
         f"----------------------------------------\n"
         f"🛠 **Действие:** Зайдите в дашборд → вкладка «ИИ-Автоответчик» и повторно войдите по номеру телефона (SMS-код). "
@@ -67,7 +79,7 @@ async def notify_startup():
         f"🚀 **Бот успешно запущен и начал работу!**\n"
         f"----------------------------------------\n"
         f"⏰ **Время:** {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
-        f"🏪 **Merchant ID:** `{merchant_id}`"
+        f"🏪 **Merchant ID:** `{_esc_md(merchant_id)}`"
     )
 
     logger.info(f"🚀 Отправка уведомления о запуске бота на Telegram IDs: {admin_ids}")
@@ -132,9 +144,9 @@ async def notify_manager_and_block(
     alert_text = (
         f"🚨 **СРОЧНЫЙ ВЫЗОВ МЕНЕДЖЕРА В КАСПИ!**\n"
         f"----------------------------------------\n"
-        f"👤 **Клиент:** {client_name}\n"
-        f"📦 **Товар:** {item_title}\n"
-        f"💬 **Проблема/Запрос:** \"{client_text}\"\n"
+        f"👤 **Клиент:** {_esc_md(client_name)}\n"
+        f"📦 **Товар:** {_esc_md(item_title)}\n"
+        f"💬 **Проблема/Запрос:** \"{_esc_md(client_text)}\"\n"
         f"----------------------------------------\n"
         f"🔗 [Открыть в ЛК Веб]({web_link})\n"
         f"📱 [Открыть через Pay-ссылку]({pay_link})\n"

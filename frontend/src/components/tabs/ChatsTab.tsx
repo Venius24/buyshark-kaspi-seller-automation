@@ -12,6 +12,8 @@ interface ChatGroup {
     created?: number;
   };
   style?: { iconUrl?: string };
+  analytics?: { order_id?: string };
+  is_human_override?: boolean;
 }
 
 interface ChatAttachment {
@@ -30,6 +32,24 @@ interface ChatMessage {
   messageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO';
   attachment?: ChatAttachment;
 }
+
+// Стартовый набор — легко расширить/отредактировать под реальные частые вопросы.
+const QUICK_REPLIES: Record<'ru' | 'kk', string[]> = {
+  ru: [
+    'Здравствуйте! Уточните, пожалуйста, детали вашего вопроса.',
+    'Наш адрес: ЖК City Plus, Толе би 285/8, цокольный этаж. Работаем по будням до 16:00.',
+    'Извините за неудобства, разберёмся и решим вопрос.',
+    'Спасибо за обращение! Хорошего дня.',
+    'Один момент, уточняю информацию.',
+  ],
+  kk: [
+    'Сәлеметсіз бе! Сұрағыңыздың егжей-тегжейін нақтылаңызшы.',
+    'Мекен-жайымыз: ЖК City Plus, Төле би 285/8, цокольный қабат. Жұмыс күндері сағат 16:00-ге дейін жұмыс істейміз.',
+    'Ыңғайсыздық үшін кешірім сұраймыз, мәселені шешеміз.',
+    'Хабарласқаныңыз үшін рахмет! Қайырлы күн.',
+    'Бір сәт, ақпаратты нақтылап жатырмын.',
+  ],
+};
 
 const fetchChats = async (): Promise<ChatGroup[]> => {
   try {
@@ -77,6 +97,8 @@ export function ChatsTab() {
   const [messageInput, setMessageInput] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
+  const [takingOver, setTakingOver] = useState(false);
+  const [quickReplyLang, setQuickReplyLang] = useState<'ru' | 'kk'>('ru');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { data: chats = [], isLoading: chatsLoading } = useQuery({
@@ -96,33 +118,66 @@ export function ChatsTab() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length, selectedGroupId]);
 
-  const handleSend = async () => {
-    const text = messageInput.trim();
-    if (!text || !selectedGroupId || sending) return;
+  const refreshAfterAction = () => {
+    queryClient.invalidateQueries({ queryKey: ['chats', selectedGroupId, 'messages'] });
+    queryClient.invalidateQueries({ queryKey: ['chats', 'list'] });
+  };
+
+  const sendText = async (text: string, override: boolean): Promise<boolean> => {
+    if (!text.trim() || !selectedGroupId) return false;
     setSending(true);
     setSendError('');
     try {
       const res = await apiFetch(`${API_URL}/api/chats/${selectedGroupId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text: text.trim(), override }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setMessageInput('');
-        queryClient.invalidateQueries({ queryKey: ['chats', selectedGroupId, 'messages'] });
-        queryClient.invalidateQueries({ queryKey: ['chats', 'list'] });
-      } else {
-        setSendError(data.detail || 'Не удалось отправить сообщение.');
+        refreshAfterAction();
+        return true;
       }
+      setSendError(data.detail || 'Не удалось отправить сообщение.');
+      return false;
     } catch {
       setSendError('Ошибка сети при отправке.');
+      return false;
     } finally {
       setSending(false);
     }
   };
 
+  const handleSend = async () => {
+    const ok = await sendText(messageInput, false);
+    if (ok) setMessageInput('');
+  };
+
+  const handleQuickReply = async (text: string) => {
+    await sendText(text, true);
+  };
+
+  const handleTakeOver = async () => {
+    if (!selectedGroupId || takingOver) return;
+    setTakingOver(true);
+    try {
+      const res = await apiFetch(`${API_URL}/api/chats/${selectedGroupId}/take-over`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        refreshAfterAction();
+      } else {
+        setSendError(data.detail || 'Не удалось забрать диалог у ИИ.');
+      }
+    } catch {
+      setSendError('Ошибка сети.');
+    } finally {
+      setTakingOver(false);
+    }
+  };
+
   const selectedChat = chats.find((c) => c.id === selectedGroupId);
+  const kaspiWebLink = selectedGroupId ? `https://msg-web.kaspi.kz/#/chats/chat/${selectedGroupId}` : '';
+  const kaspiPayLink = selectedGroupId ? `https://pay.kaspi.kz/chat?threadId=${selectedGroupId}&isWeb=true` : '';
 
   return (
     <div className="glass-card" style={{ display: 'flex', height: 'calc(100vh - 160px)', minHeight: '500px', padding: 0, overflow: 'hidden' }}>
@@ -150,8 +205,13 @@ export function ChatsTab() {
                   background: selectedGroupId === chat.id ? 'rgba(99, 102, 241, 0.12)' : 'transparent',
                 }}
               >
-                <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff', marginBottom: '2px' }}>
-                  {chat.subtitle || chat.title || 'Без имени'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>
+                    {chat.subtitle || chat.title || 'Без имени'}
+                  </div>
+                  {chat.is_human_override && (
+                    <span className="badge badge-warning" style={{ fontSize: '9px', padding: '1px 6px' }}>1-на-1</span>
+                  )}
                 </div>
                 {chat.subtitle && chat.title && (
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -175,13 +235,40 @@ export function ChatsTab() {
           </div>
         ) : (
           <>
-            <div style={{ padding: '16px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: '#fff' }}>
-                {selectedChat?.subtitle || selectedChat?.title || 'Диалог'}
+            <div style={{ padding: '16px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 700, color: '#fff' }}>
+                    {selectedChat?.subtitle || selectedChat?.title || 'Диалог'}
+                  </span>
+                  {selectedChat?.is_human_override && (
+                    <span className="badge badge-warning" style={{ fontSize: '10px' }}>Взято под контроль (1-на-1)</span>
+                  )}
+                </div>
+                {selectedChat?.title && (
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    📦 Товар: {selectedChat.title}
+                    {selectedChat?.analytics?.order_id && <> · Заказ №{selectedChat.analytics.order_id}</>}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+                  <a href={kaspiWebLink} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: 'var(--primary)' }}>
+                    🔗 Открыть в чате Kaspi (медиа)
+                  </a>
+                  <a href={kaspiPayLink} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: 'var(--primary)' }}>
+                    📱 Через Pay-ссылку
+                  </a>
+                </div>
               </div>
-              {selectedChat?.subtitle && selectedChat?.title && (
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{selectedChat.title}</div>
-              )}
+
+              <button
+                className="btn btn-secondary"
+                style={{ fontSize: '12px', padding: '8px 14px', whiteSpace: 'nowrap' }}
+                onClick={handleTakeOver}
+                disabled={takingOver || selectedChat?.is_human_override}
+              >
+                {selectedChat?.is_human_override ? '✅ Уже под контролем' : takingOver ? '...' : '🙋 Вмешаться'}
+              </button>
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -219,24 +306,60 @@ export function ChatsTab() {
               <div style={{ padding: '8px 16px', fontSize: '12px', color: 'var(--error)' }}>{sendError}</div>
             )}
 
-            <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', gap: '8px' }}>
-              <input
-                type="text"
-                className="form-input"
-                style={{ flex: 1 }}
-                placeholder="Сообщение..."
-                value={messageInput}
-                onChange={(e) => setMessageInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-              />
-              <button className="btn btn-primary" onClick={handleSend} disabled={sending || !messageInput.trim()}>
-                {sending ? '...' : 'Отправить'}
-              </button>
+            <div style={{ padding: '10px 16px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Быстрые ответы:</span>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {(['ru', 'kk'] as const).map((lang) => (
+                    <button
+                      key={lang}
+                      onClick={() => setQuickReplyLang(lang)}
+                      className="btn btn-secondary"
+                      style={{
+                        fontSize: '10px',
+                        padding: '3px 10px',
+                        background: quickReplyLang === lang ? 'var(--primary)' : undefined,
+                      }}
+                    >
+                      {lang.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                {QUICK_REPLIES[quickReplyLang].map((reply, i) => (
+                  <button
+                    key={i}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '11px', padding: '5px 10px', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={reply}
+                    onClick={() => handleQuickReply(reply)}
+                    disabled={sending}
+                  >
+                    {reply}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ flex: 1 }}
+                  placeholder="Сообщение..."
+                  value={messageInput}
+                  onChange={(e) => setMessageInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                />
+                <button className="btn btn-primary" onClick={handleSend} disabled={sending || !messageInput.trim()}>
+                  {sending ? '...' : 'Отправить'}
+                </button>
+              </div>
             </div>
           </>
         )}

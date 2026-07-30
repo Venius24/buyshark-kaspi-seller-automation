@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend.chatbot.kaspi import load_chat_cookies
-from backend.chatbot import chat_client
+from backend.chatbot import chat_client, config as chatbot_config
 from backend.dumper.config import discover_merchant_id
 from backend.security.store_context import StoreContext, get_store_context
 
@@ -14,6 +14,9 @@ router = APIRouter(prefix="/api/chats", tags=["chats"])
 
 class SendMessageRequest(BaseModel):
     text: str
+    # Быстрые ответы (см. фронт) отправляют текст и сразу забирают чат у
+    # ИИ одним запросом, чтобы бот не ответил повторно поверх ручного ответа.
+    override: Optional[bool] = False
 
 
 class ReadReceiptItem(BaseModel):
@@ -44,6 +47,8 @@ async def list_chats(ctx: StoreContext = Depends(get_store_context)):
     cookies = _require_chat_session(ctx)
     merchant_id = _resolve_merchant_id(ctx)
     groups = await chat_client.list_groups(cookies, merchant_id)
+    for g in groups:
+        g["is_human_override"] = chatbot_config.PROCESSED_CHATS.get(g.get("id")) == "HUMAN_OVERRIDE"
     return {"success": True, "chats": groups}
 
 
@@ -65,7 +70,22 @@ async def send_chat_message(group_id: str, req: SendMessageRequest, ctx: StoreCo
     result = await chat_client.send_message(group_id, text, cookies, merchant_id)
     if not result.get("success"):
         raise HTTPException(status_code=502, detail=f"Kaspi отклонил отправку: {result.get('error')}")
+    if req.override:
+        chatbot_config.PROCESSED_CHATS[group_id] = "HUMAN_OVERRIDE"
     return {"success": True, "message": result.get("message")}
+
+
+@router.post("/{group_id}/take-over")
+async def take_over_chat(group_id: str, ctx: StoreContext = Depends(get_store_context)):
+    """
+    Забирает диалог у ИИ без отправки сообщения — менеджер продолжает
+    переписку 1-на-1 сам. Тот же PROCESSED_CHATS[group_id]="HUMAN_OVERRIDE",
+    что использует эскалация бота (backend/chatbot/notifications.py);
+    снять можно уже существующим POST /api/chatbot/unblock.
+    """
+    _require_chat_session(ctx)  # чат должен быть реально доступен этому стору
+    chatbot_config.PROCESSED_CHATS[group_id] = "HUMAN_OVERRIDE"
+    return {"success": True}
 
 
 @router.post("/{group_id}/read")
