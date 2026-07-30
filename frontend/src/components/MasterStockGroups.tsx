@@ -21,6 +21,7 @@ import {
 import { useWebSocket } from '../hooks/useWebSocket';
 import { LiveTerminalStream } from './LiveTerminalStream';
 import { apiFetch, API_URL, getWsUrl } from '../api';
+import { fetchGroupsQuery, fetchProductsQuery } from '../queries';
 
 interface GroupDumpingConfig {
   enabled: boolean;
@@ -36,7 +37,7 @@ interface GroupDumpingConfig {
   city_code?: string;
 }
 
-interface MasterStockGroup {
+export interface MasterStockGroup {
   group_id: string;
   group_name: string;
   shared_stock: number;
@@ -54,7 +55,7 @@ interface MasterStockGroup {
 }
 
 
-interface ProductItem {
+export interface ProductItem {
   sku: string;
   name: string;
   price_num?: number;
@@ -64,18 +65,6 @@ interface ProductItem {
   merchantSku?: string;
   kaspiSku?: string;
 }
-
-const fetchGroupsQuery = async (): Promise<MasterStockGroup[]> => {
-  const res = await apiFetch(`${API_URL}/api/stock-groups`);
-  const data = await res.json();
-  return data.success ? (data.groups || []) : [];
-};
-
-const fetchProductsQuery = async (): Promise<ProductItem[]> => {
-  const res = await apiFetch(`${API_URL}/api/products?page=1&page_size=1000&status=all`);
-  const data = await res.json();
-  return data.success ? (data.products || []) : [];
-};
 
 export const MasterStockGroups: React.FC = () => {
   const queryClient = useQueryClient();

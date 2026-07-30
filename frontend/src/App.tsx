@@ -13,6 +13,7 @@ import { IntegrationsPublicApi } from './components/IntegrationsPublicApi';
 import { PrintBatcher } from './components/PrintBatcher';
 import { AuthModal } from './components/AuthModal';
 import { StoreHub } from './components/StoreHub';
+import { BackgroundSync } from './components/BackgroundSync';
 import { McAuthModal } from './components/McAuthModal';
 import { Sidebar } from './components/Sidebar';
 import { ContentHeader } from './components/ContentHeader';
@@ -648,6 +649,7 @@ export default function App() {
   // ── Dashboard Screen ───────────────────────────────────
   return (
     <div className="app-shell">
+      <BackgroundSync />
       {/* ── STITCH MCP SIDEBAR ─────────────────────────────────── */}
       <Sidebar
         activeTab={activeTab}

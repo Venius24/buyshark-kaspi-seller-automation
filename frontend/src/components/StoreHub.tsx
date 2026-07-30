@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, API_URL } from '../api';
+import { fetchProfile, fetchStores } from '../queries';
 
-interface StoreItem {
+export interface StoreItem {
   id: string;
   merchant_id: string;
   name: string;
@@ -12,7 +13,7 @@ interface StoreItem {
   created_at: string;
 }
 
-interface UserProfile {
+export interface UserProfile {
   user: {
     id: string;
     email: string;
@@ -25,18 +26,6 @@ interface UserProfile {
     valid_until: string;
   };
 }
-
-const fetchProfile = async (): Promise<UserProfile | null> => {
-  const res = await apiFetch(`${API_URL}/api/v1/auth/me`);
-  if (!res.ok) return null;
-  return res.json();
-};
-
-const fetchStores = async (): Promise<StoreItem[]> => {
-  const res = await apiFetch(`${API_URL}/api/v1/stores`);
-  if (!res.ok) return [];
-  return res.json();
-};
 
 export const StoreHub: React.FC = () => {
   const queryClient = useQueryClient();
