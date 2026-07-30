@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 from backend.chatbot import config, bot_instance
-from backend.chatbot.kaspi import load_cookies, format_time, check_logistics_question, get_chat_history, http_session
+from backend.chatbot.kaspi import load_chat_cookies, format_time, check_logistics_question, get_chat_history, http_session
 from backend.chatbot.ai import generate_ai_reply
 from backend.chatbot.notifications import notify_startup, notify_cookie_expired, notify_manager_and_block, reset_cookie_alert
 from backend.chatbot.handlers import register_handlers
@@ -223,7 +223,7 @@ async def run_chatbot_cycle():
         any_cookies = False
         for store in stores:
             try:
-                cookies = load_cookies(store_id=store.store_id)
+                cookies = load_chat_cookies(store_id=store.store_id)
                 if not cookies:
                     logger.warning(f"[Chatbot] Store {store.store_id}: куки Kaspi MC отсутствуют/истекли, пропускаем проход.")
                     continue
@@ -238,7 +238,7 @@ async def run_chatbot_cycle():
             await notify_cookie_expired("Куки Kaspi MC отсутствуют/истекли ни у одного активного стора")
             return 10
     else:
-        cookies = load_cookies(store_id=None)
+        cookies = load_chat_cookies(store_id=None)
         if not cookies:
             await notify_cookie_expired("Куки отсутствуют или истекли в states/session.json")
             return 10

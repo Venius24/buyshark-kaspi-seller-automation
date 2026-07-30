@@ -49,13 +49,13 @@ class TestRunChatbotCycle(unittest.IsolatedAsyncioTestCase):
     @patch("backend.chatbot.worker.config")
     async def test_disabled_returns_5s_delay_without_touching_cookies(self, mock_config):
         mock_config.load_chatbot_config.return_value = {"enabled": False}
-        with patch("backend.chatbot.worker.load_cookies") as mock_cookies:
+        with patch("backend.chatbot.worker.load_chat_cookies") as mock_cookies:
             delay = await worker.run_chatbot_cycle()
         mock_cookies.assert_not_called()
         self.assertEqual(delay, 5)
 
     @patch("backend.chatbot.worker.notify_cookie_expired", new_callable=AsyncMock)
-    @patch("backend.chatbot.worker.load_cookies")
+    @patch("backend.chatbot.worker.load_chat_cookies")
     @patch("backend.chatbot.worker.config")
     async def test_missing_cookies_returns_10s_delay(self, mock_config, mock_load_cookies, mock_notify):
         mock_config.load_chatbot_config.return_value = {"enabled": True}
@@ -66,7 +66,7 @@ class TestRunChatbotCycle(unittest.IsolatedAsyncioTestCase):
 
     @patch("backend.chatbot.worker._run_chatbot_pass", new_callable=AsyncMock)
     @patch("backend.chatbot.worker.list_active_stores", new_callable=AsyncMock)
-    @patch("backend.chatbot.worker.load_cookies")
+    @patch("backend.chatbot.worker.load_chat_cookies")
     @patch("backend.chatbot.worker.config")
     async def test_no_stores_in_db_falls_back_to_legacy_session(
         self, mock_config, mock_load_cookies, mock_list_stores, mock_pass
@@ -84,7 +84,7 @@ class TestRunChatbotCycle(unittest.IsolatedAsyncioTestCase):
     @patch("backend.chatbot.worker.discover_merchant_id")
     @patch("backend.chatbot.worker._run_chatbot_pass", new_callable=AsyncMock)
     @patch("backend.chatbot.worker.list_active_stores", new_callable=AsyncMock)
-    @patch("backend.chatbot.worker.load_cookies")
+    @patch("backend.chatbot.worker.load_chat_cookies")
     @patch("backend.chatbot.worker.config")
     async def test_iterates_every_active_store_with_dynamically_resolved_merchant_id(
         self, mock_config, mock_load_cookies, mock_list_stores, mock_pass, mock_discover
@@ -115,7 +115,7 @@ class TestRunChatbotCycle(unittest.IsolatedAsyncioTestCase):
     @patch("backend.chatbot.worker.discover_merchant_id")
     @patch("backend.chatbot.worker._run_chatbot_pass", new_callable=AsyncMock)
     @patch("backend.chatbot.worker.list_active_stores", new_callable=AsyncMock)
-    @patch("backend.chatbot.worker.load_cookies")
+    @patch("backend.chatbot.worker.load_chat_cookies")
     @patch("backend.chatbot.worker.config")
     async def test_unresolvable_merchant_id_falls_back_to_config_default(
         self, mock_config, mock_load_cookies, mock_list_stores, mock_pass, mock_discover
@@ -135,7 +135,7 @@ class TestRunChatbotCycle(unittest.IsolatedAsyncioTestCase):
     @patch("backend.chatbot.worker.discover_merchant_id")
     @patch("backend.chatbot.worker._run_chatbot_pass", new_callable=AsyncMock)
     @patch("backend.chatbot.worker.list_active_stores", new_callable=AsyncMock)
-    @patch("backend.chatbot.worker.load_cookies")
+    @patch("backend.chatbot.worker.load_chat_cookies")
     @patch("backend.chatbot.worker.config")
     async def test_one_store_failing_does_not_block_the_others(
         self, mock_config, mock_load_cookies, mock_list_stores, mock_pass, mock_discover
@@ -160,7 +160,7 @@ class TestRunChatbotCycle(unittest.IsolatedAsyncioTestCase):
     @patch("backend.chatbot.worker.discover_merchant_id")
     @patch("backend.chatbot.worker._run_chatbot_pass", new_callable=AsyncMock)
     @patch("backend.chatbot.worker.list_active_stores", new_callable=AsyncMock)
-    @patch("backend.chatbot.worker.load_cookies")
+    @patch("backend.chatbot.worker.load_chat_cookies")
     @patch("backend.chatbot.worker.config")
     async def test_http_failure_in_one_store_pass_returns_10s_without_raising(
         self, mock_config, mock_load_cookies, mock_list_stores, mock_pass, mock_discover

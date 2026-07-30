@@ -25,6 +25,18 @@ def load_cookies(store_id: str | None = None) -> dict:
         return {}
     return cookies
 
+def load_chat_cookies(store_id: str | None = None) -> dict:
+    """
+    Куки для чат-API Kaspi — отдельная сессия от общего кабинета, полученная
+    через телефон+SMS вход (см. state_helpers._load_chat_cookies).
+    """
+    from backend.state_helpers import _load_chat_cookies
+    cookies = _load_chat_cookies(store_id=store_id)
+    if not cookies or "mc-session" not in cookies or "mc-sid" not in cookies:
+        logger.warning(f"⚠️ Куки чата Kaspi (SMS-сессия) отсутствуют для стора {store_id!r}.")
+        return {}
+    return cookies
+
 
 def format_time(ts_ms) -> str:
     if not ts_ms:

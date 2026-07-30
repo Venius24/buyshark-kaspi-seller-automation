@@ -31,12 +31,13 @@ async def notify_cookie_expired(reason: str):
     cfg = config.load_chatbot_config()
     merchant_id = cfg.get("merchant_id", "20186986")
     alert_text = (
-        f"🚨 **ВНИМАНИЕ: КУКИ KASPI НЕВАЛИДНЫ / СЕССИЯ ИСТЕКЛА!**\n"
+        f"🚨 **ВНИМАНИЕ: СЕССИЯ ЧАТА KASPI ИСТЕКЛА!**\n"
         f"----------------------------------------\n"
         f"⚠️ **Причина:** {reason}\n"
         f"⏰ **Время:** {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
         f"----------------------------------------\n"
-        f"🛠 **Действие:** Пожалуйста, обновите `session.json` с актуальными куки `mc-session` и `mc-sid`!"
+        f"🛠 **Действие:** Зайдите в дашборд → вкладка «ИИ-Автоответчик» и повторно войдите по номеру телефона (SMS-код). "
+        f"Это отдельный вход от основного кабинета — email/пароль тут не поможет."
     )
 
     logger.warning(f"🚨 [COOKIE ALERT] {reason}. Отправка уведомления на Telegram IDs: {admin_ids}")

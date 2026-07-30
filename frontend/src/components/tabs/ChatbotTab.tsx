@@ -1,3 +1,7 @@
+import { useQuery } from '@tanstack/react-query';
+import { useChatAuth } from '../../hooks/useChatAuth';
+import { ChatSmsAuthModal } from '../ChatSmsAuthModal';
+import { fetchChatbotHasSession } from '../../queries';
 import type { ChatbotConfig, ChatbotStatus } from '../../types';
 
 interface ChatbotTabProps {
@@ -8,10 +12,41 @@ interface ChatbotTabProps {
 }
 
 export function ChatbotTab({ chatbotConfig, chatbotStatus, onSaveChatbotConfig, onUnblockChatbotGroup }: ChatbotTabProps) {
+  const {
+    phoneInput, setPhoneInput,
+    codeInput, setCodeInput,
+    chatAuthStep, chatAuthError,
+    openModal: openChatAuthModal,
+    closeModal: closeChatAuthModal,
+    submitPhone: submitChatAuthPhone,
+    submitCode: submitChatAuthCode,
+  } = useChatAuth();
+
+  // Отдельный статус SMS-сессии чата (не путать с chatbotStatus.enabled/
+  // blocked_chats выше — та часть по-прежнему приходит из App.tsx). Живой
+  // поллинг, чтобы бейдж не зависал на устаревшем значении.
+  const { data: hasChatSession = false } = useQuery({
+    queryKey: ['chatbot-status'],
+    queryFn: fetchChatbotHasSession,
+    refetchInterval: 30_000,
+  });
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <ChatSmsAuthModal
+        chatAuthStep={chatAuthStep}
+        chatAuthError={chatAuthError}
+        phoneInput={phoneInput}
+        onPhoneChange={setPhoneInput}
+        codeInput={codeInput}
+        onCodeChange={setCodeInput}
+        onClose={closeChatAuthModal}
+        onSubmitPhone={submitChatAuthPhone}
+        onSubmitCode={submitChatAuthCode}
+      />
+
       {/* Top Header Card */}
-      <div className="glass-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="glass-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h2 style={{ fontSize: '18px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', color: '#fff' }}>
             🤖 Kaspi ИИ-Автоответчик (DeepSeek + Telegram)
@@ -21,7 +56,22 @@ export function ChatbotTab({ chatbotConfig, chatbotStatus, onSaveChatbotConfig, 
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Сессия чата (SMS):</span>
+            <span className={`badge ${hasChatSession ? 'badge-success' : 'badge-warning'}`}>
+              {hasChatSession ? '🟢 Подключена' : '🔴 Требуется вход'}
+            </span>
+          </div>
+
+          <button
+            className="btn btn-secondary"
+            style={{ padding: '10px 20px', fontSize: '13px', fontWeight: 600, borderRadius: '8px' }}
+            onClick={openChatAuthModal}
+          >
+            📱 {hasChatSession ? 'Переподключить чат' : 'Войти в чат (SMS)'}
+          </button>
+
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
             <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Статус автоответчика:</span>
             <span className={`badge ${chatbotStatus.enabled ? 'badge-success' : 'badge-warning'}`}>

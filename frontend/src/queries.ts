@@ -25,3 +25,13 @@ export const fetchProductsQuery = async (): Promise<ProductItem[]> => {
   const data = await res.json();
   return data.success ? (data.products || []) : [];
 };
+
+export const fetchChatbotHasSession = async (): Promise<boolean> => {
+  try {
+    const res = await apiFetch(`${API_URL}/api/chatbot/status`);
+    const data = await res.json();
+    return res.ok && data.success ? !!data.has_session : false;
+  } catch {
+    return false;
+  }
+};

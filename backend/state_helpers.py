@@ -568,6 +568,82 @@ def _save_mc_cookies_for_store(store_id: str, cookies: dict) -> bool:
     finally:
         session.close()
 
+def _load_chat_cookies(store_id: Optional[str] = None) -> dict:
+    """
+    Отдельная от _load_mc_cookies сессия — Kaspi чат-API требует куки,
+    полученные через телефон+SMS вход (idmc.shop.kaspi.kz), а не через
+    обычный email+пароль вход в кабинет. Те же имена кук (mc-session,
+    mc-sid), но из другого источника, поэтому отдельное поле/файл, чтобы
+    не перезаписывать основную MC-сессию демпинга/заказов.
+
+    store_id=None (легаси): 'state_chat.json' в корне (аналог state.json).
+    store_id given: Store.encrypted_chat_cookies этого стора, без фоллбека.
+    """
+    if store_id is not None:
+        session = _get_sync_db_session()
+        if not session:
+            return {}
+        try:
+            from backend.db.models import Store
+            from backend.security.crypto import decrypt_data
+            store = session.get(Store, store_id)
+            if not store or not store.encrypted_chat_cookies:
+                return {}
+            cookie_str = decrypt_data(store.encrypted_chat_cookies)
+            if not cookie_str:
+                return {}
+            cookies = {}
+            for part in cookie_str.split(";"):
+                part = part.strip()
+                if "=" not in part:
+                    continue
+                name, _, value = part.partition("=")
+                if name.strip() in ("mc-session", "mc-sid"):
+                    cookies[name.strip()] = value.strip()
+            return cookies if "mc-session" in cookies and "mc-sid" in cookies else {}
+        finally:
+            session.close()
+
+    if not os.path.exists("state_chat.json"):
+        return {}
+    try:
+        with open("state_chat.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
+        cookies = {}
+        if isinstance(data, dict):
+            cookies_list = data.get("cookies", [])
+            if isinstance(cookies_list, list):
+                for c in cookies_list:
+                    if isinstance(c, dict) and c.get("name") in ["mc-session", "mc-sid"]:
+                        cookies[c["name"]] = c["value"]
+        return cookies if "mc-session" in cookies and "mc-sid" in cookies else {}
+    except Exception:
+        return {}
+
+def _save_chat_cookies_for_store(store_id: str, cookies: dict) -> bool:
+    """Сохраняет куки чат-сессии (SMS-вход) в Store.encrypted_chat_cookies. Не трогает encrypted_cookies (основная MC-сессия)."""
+    if not cookies or "mc-session" not in cookies or "mc-sid" not in cookies:
+        return False
+    session = _get_sync_db_session()
+    if not session:
+        return False
+    try:
+        from backend.db.models import Store
+        from backend.security.crypto import encrypt_data
+        store = session.get(Store, store_id)
+        if not store:
+            return False
+        cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        store.encrypted_chat_cookies = encrypt_data(cookie_str)
+        session.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения кук чата Kaspi для стора {store_id}: {e}")
+        session.rollback()
+        return False
+    finally:
+        session.close()
+
 def _save_mc_credentials(email: str, password: str, store_id: Optional[str] = None):
     """
     Сохраняет email/пароль от кабинета Kaspi MC (в зашифрованном виде), чтобы
