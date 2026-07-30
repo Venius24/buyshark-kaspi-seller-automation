@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import random
 import asyncio
 import logging
 import functools
@@ -81,17 +82,23 @@ async def run_scheduled_dumping_cycle() -> dict:
     logger.info(f"🤖 [Scheduler] Automated cycle finished. Applied changes: {total_updated}.")
     return {"updated_count": total_updated, "stores_processed": len(stores)}
 
+def _next_interval_seconds() -> float:
+    # Джиттер ±45с вокруг 5 минут: ровные тики раз в 300с — заметный для
+    # антибот-систем паттерн бота, случайный разброс делает трафик менее
+    # предсказуемым (см. разбор IP-бана Kaspi, 2026-07-30).
+    return 300.0 + random.uniform(-45.0, 45.0)
+
 async def background_dumping_loop():
-    logger.info("Background price dumping loop initialized (5-minute interval).")
-    # При запуске ставим первую авто-проверку через 5 минут
-    DumpingSchedulerState.next_run_timestamp = time.time() + 300.0
+    logger.info("Background price dumping loop initialized (~5-minute interval, jittered).")
+    # При запуске ставим первую авто-проверку через ~5 минут
+    DumpingSchedulerState.next_run_timestamp = time.time() + _next_interval_seconds()
 
     while True:
         try:
             now = time.time()
             if now >= DumpingSchedulerState.next_run_timestamp:
                 # Планируем следующий запуск
-                DumpingSchedulerState.next_run_timestamp = now + 300.0
+                DumpingSchedulerState.next_run_timestamp = now + _next_interval_seconds()
                 DumpingSchedulerState.is_running = True
                 try:
                     await run_scheduled_dumping_cycle()
