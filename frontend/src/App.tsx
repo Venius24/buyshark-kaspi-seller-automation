@@ -20,6 +20,7 @@ import { ContentHeader } from './components/ContentHeader';
 import { PackagingTab } from './components/tabs/PackagingTab';
 import { TransferTab } from './components/tabs/TransferTab';
 import { ChatbotTab } from './components/tabs/ChatbotTab';
+import { ChatsTab } from './components/tabs/ChatsTab';
 import { ProductsTab } from './components/tabs/ProductsTab';
 import { DumpingTab } from './components/tabs/DumpingTab';
 import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig } from './types';
@@ -853,6 +854,8 @@ export default function App() {
             onUnblockChatbotGroup={unblockChatbotGroup}
           />
         )}
+
+        {activeTab === 'chats' && <ChatsTab />}
 
         {/* 🔗 TAB: MASTER STOCK GROUPS */}
         {activeTab === 'stock-groups' && (

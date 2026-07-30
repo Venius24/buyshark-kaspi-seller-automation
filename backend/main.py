@@ -34,7 +34,7 @@ from backend.db.seed import seed_default_admin
 from backend.routers import (
     auth, products, orders, dumping, ws, analytics,
     chatbot, stock_groups, api_keys, print_batcher,
-    auth_v1, stores_v1
+    auth_v1, stores_v1, chats
 )
 from backend.routers.public_api import groups as public_groups
 
@@ -85,6 +85,7 @@ app.include_router(dumping.router)
 app.include_router(ws.router)
 app.include_router(analytics.router)
 app.include_router(chatbot.router)
+app.include_router(chats.router)
 app.include_router(stock_groups.router)
 app.include_router(api_keys.router)
 app.include_router(print_batcher.router)

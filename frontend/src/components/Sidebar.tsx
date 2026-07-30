@@ -93,6 +93,16 @@ export function Sidebar({
           </button>
 
           <button
+            className={`sidebar-item ${activeTab === 'chats' ? 'active' : ''}`}
+            onClick={() => onSelectTab('chats')}
+          >
+            <div className="sidebar-item-left">
+              <span className="sidebar-icon">💬</span>
+              <span>Чаты</span>
+            </div>
+          </button>
+
+          <button
             className={`sidebar-item ${activeTab === 'stock-groups' ? 'active' : ''}`}
             onClick={() => onSelectTab('stock-groups')}
           >

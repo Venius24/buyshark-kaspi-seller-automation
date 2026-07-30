@@ -89,6 +89,7 @@ export type ActiveTab =
   | 'products'
   | 'dumping'
   | 'chatbot'
+  | 'chats'
   | 'stock-groups'
   | 'public-api'
   | 'print-batcher'
