@@ -4,7 +4,7 @@ from backend.kaspi_wrapper import KaspiAPI
 from backend.models import AuthRequest, LoginCredentialsRequest
 from backend.state_helpers import (
     _get_token, _save_session, SESSION_FILE, _save_mc_credentials, _refresh_mc_session,
-    _load_mc_cookies, _save_mc_cookies_for_store,
+    _load_mc_cookies, _save_mc_cookies_for_store, _get_store_status,
 )
 from backend.services.playwright_worker import worker, Command
 from backend.security.store_context import StoreContext, get_store_context
@@ -99,6 +99,15 @@ def get_mc_status(verify: bool = False, ctx: StoreContext = Depends(get_store_co
     в БД для ИМЕННО ЭТОГО стора, а не общий state.json.
     ctx.store_id=None (легаси/дев без Store в БД): старое поведение.
 
+    ВАЖНО (2026-07-30): при verify=False valid раньше всегда возвращался
+    True, если куки просто расшифровывались — независимо от Store.status.
+    Это давало рассинхрон с StoreHub (который честно читает Store.status):
+    куки физически лежат в БД и корректно расшифровываются, но давно
+    невалидны на стороне Kaspi (health_check_worker/verify уже пометили
+    статус COOKIE_EXPIRED), а бейдж в Настройках всё равно светился зелёным.
+    Теперь valid при verify=False = (Store.status == 'ACTIVE') — тот же
+    источник правды, что и у StoreHub.
+
     Ограничение (Phase 5, не решается здесь): verify=True всё ещё гоняет
     единственный общий Playwright-браузер (Command.VERIFY_SESSION), который
     физически один на все сторы — де-глобализация воркера отложена (см.
@@ -129,7 +138,12 @@ def get_mc_status(verify: bool = False, ctx: StoreContext = Depends(get_store_co
         else:
             return {"success": False, "detail": valid}
 
-    return {"success": True, "has_session": True, "valid": True}
+    if ctx.store_id is not None:
+        is_valid = _get_store_status(ctx.store_id) == "ACTIVE"
+    else:
+        is_valid = True
+
+    return {"success": True, "has_session": True, "valid": is_valid}
 
 @router.post("/close")
 def close_session():

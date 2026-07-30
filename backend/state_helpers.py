@@ -473,6 +473,26 @@ def _save_processed_orders(orders: dict):
     with open(PROCESSED_ORDERS_FILE, "w", encoding="utf-8") as f:
         json.dump(orders, f, ensure_ascii=False, indent=2)
 
+def _get_store_status(store_id: str) -> Optional[str]:
+    """
+    Возвращает Store.status ('ACTIVE'/'COOKIE_EXPIRED'/'PAUSED') или None,
+    если стор не найден. Это единственный источник правды, который реально
+    обновляется по факту использования куки (health_check_worker,
+    stores_v1.py verify/sync-cookies), в отличие от простого наличия
+    расшифровываемых кук в _load_mc_cookies — куки могут физически лежать
+    в БД и корректно расшифровываться, но быть уже недействительными на
+    стороне Kaspi, пока их кто-то реально не проверит.
+    """
+    session = _get_sync_db_session()
+    if not session:
+        return None
+    try:
+        from backend.db.models import Store
+        store = session.get(Store, store_id)
+        return store.status if store else None
+    finally:
+        session.close()
+
 def _load_mc_cookies(store_id: Optional[str] = None) -> dict:
     """
     store_id=None (легаси, дев-стенд без Store в БД): нескоуп-чтение —
