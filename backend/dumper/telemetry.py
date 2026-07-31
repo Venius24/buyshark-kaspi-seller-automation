@@ -7,6 +7,18 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
 
+# Ссылка на главный event loop, сохраняемая при старте приложения
+# (backend/main.py::startup_event). emit_telemetry_sync() вызывается не
+# только с самого лупа, но и из рабочих потоков (asyncio.to_thread) — там
+# asyncio.get_event_loop() луп не находит и падает в except (сообщение
+# молча терялось бы). Явная ссылка на нужный луп нужна именно для этого.
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    global _main_loop
+    _main_loop = loop
+
 class ConnectionManager:
     """
     Менеджер WebSocket-подключений для бродкаста событий в реальном времени.
@@ -65,11 +77,13 @@ telemetry_manager = ConnectionManager()
 
 def emit_telemetry_sync(event_type: str, payload: Dict[str, Any], store_id: Optional[str] = None):
     """
-    Синхронный помощник для отправки событий из обычных потоков/функций.
+    Синхронный помощник для отправки событий из обычных потоков/функций
+    (в т.ч. из asyncio.to_thread — отсюда явный _main_loop, а не
+    get_event_loop(), который в рабочем потоке луп не найдёт).
     """
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
+        loop = _main_loop
+        if loop is not None and loop.is_running():
             asyncio.run_coroutine_threadsafe(telemetry_manager.broadcast(event_type, payload, store_id), loop)
     except Exception:
-        pass
+        logger.debug("emit_telemetry_sync: failed to deliver event", exc_info=True)
