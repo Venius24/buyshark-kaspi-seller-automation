@@ -3,12 +3,15 @@ import re
 import uuid
 import json
 import hashlib
+import logging
 import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple, Set
 import fitz  # PyMuPDF
+
+logger = logging.getLogger(__name__)
 
 PT_TO_MM = 25.4 / 72.0
 A4_WIDTH_PT = 595.28
@@ -82,10 +85,31 @@ def get_today_str() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
-def load_printed_history(date_str: Optional[str] = None) -> Set[str]:
-    """Загрузка истории напечатанных идентификаторов заказов/страниц за день"""
+def load_printed_history(store_id: Optional[str] = None, date_str: Optional[str] = None) -> Set[str]:
+    """
+    Загрузка истории напечатанных идентификаторов заказов/страниц за день.
+
+    store_id given (Слайс 5): PrintHistoryDB этого магазина.
+    store_id=None (легаси, Telegram-бот — общий на все магазины): старый
+    файл в системном temp, как было всегда.
+    """
     if date_str is None:
         date_str = get_today_str()
+
+    if store_id is not None:
+        from backend.state_helpers import _get_sync_db_session
+        from sqlalchemy import select
+        session = _get_sync_db_session()
+        if not session:
+            return set()
+        try:
+            from backend.db.models import PrintHistoryDB
+            rows = session.scalars(
+                select(PrintHistoryDB).where(PrintHistoryDB.store_id == store_id, PrintHistoryDB.date == date_str)
+            ).all()
+            return {r.order_key for r in rows}
+        finally:
+            session.close()
 
     if not HISTORY_FILE_PATH.exists():
         return set()
@@ -98,12 +122,31 @@ def load_printed_history(date_str: Optional[str] = None) -> Set[str]:
         return set()
 
 
-def save_printed_history(new_keys: Set[str], date_str: Optional[str] = None):
-    """Сохранение истории напечатанных заказов"""
+def save_printed_history(new_keys: Set[str], store_id: Optional[str] = None, date_str: Optional[str] = None):
+    """Сохранение истории напечатанных заказов этого магазина."""
     if not new_keys:
         return
     if date_str is None:
         date_str = get_today_str()
+
+    if store_id is not None:
+        from backend.state_helpers import _get_sync_db_session
+        session = _get_sync_db_session()
+        if not session:
+            return
+        try:
+            from backend.db.models import PrintHistoryDB
+            for key in new_keys:
+                row = session.get(PrintHistoryDB, (store_id, date_str, key))
+                if not row:
+                    session.add(PrintHistoryDB(store_id=store_id, date=date_str, order_key=key))
+            session.commit()
+        except Exception as e:
+            logger.error(f"Error persisting print history to DB: {e}")
+            session.rollback()
+        finally:
+            session.close()
+        return
 
     data: Dict[str, List[str]] = {}
     if HISTORY_FILE_PATH.exists():
@@ -121,10 +164,29 @@ def save_printed_history(new_keys: Set[str], date_str: Optional[str] = None):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def reset_printed_history(date_str: Optional[str] = None):
-    """Сброс истории печати за указанную дату"""
+def reset_printed_history(store_id: Optional[str] = None, date_str: Optional[str] = None):
+    """Сброс истории печати этого магазина за указанную дату."""
     if date_str is None:
         date_str = get_today_str()
+
+    if store_id is not None:
+        from backend.state_helpers import _get_sync_db_session
+        from sqlalchemy import delete
+        session = _get_sync_db_session()
+        if not session:
+            return
+        try:
+            from backend.db.models import PrintHistoryDB
+            session.execute(
+                delete(PrintHistoryDB).where(PrintHistoryDB.store_id == store_id, PrintHistoryDB.date == date_str)
+            )
+            session.commit()
+        except Exception as e:
+            logger.error(f"Error resetting print history in DB: {e}")
+            session.rollback()
+        finally:
+            session.close()
+        return
 
     if HISTORY_FILE_PATH.exists():
         try:
@@ -402,16 +464,21 @@ def process_zip_or_pdfs(
     express_mode: str = "separate",        # 'separate' | 'exclude' | 'ignore'
     deduplicate_history: bool = True,
     force_reprint: bool = False,
-    output_layout: str = "auto"           # 'auto' | 'a4_4' | 'a4_8' | 'a4_9' | 'a4_1' | 'thermal_75_120' | 'thermal_100_150' | 'just_merge'
+    output_layout: str = "auto",          # 'auto' | 'a4_4' | 'a4_8' | 'a4_9' | 'a4_1' | 'thermal_75_120' | 'thermal_100_150' | 'just_merge'
+    store_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Основной пайплайн обработки, подгонки и аудита геометрии накладных.
+
+    store_id given (Слайс 5, дашборд): суточная дедупликация печати этого
+    магазина. store_id=None (легаси, Telegram-бот — общий на все магазины,
+    вне scope Слайса 5): общая история, как было всегда.
     """
     batch_id = str(uuid.uuid4())
     batch_out_dir = TEMP_BATCH_DIR / batch_id
     batch_out_dir.mkdir(parents=True, exist_ok=True)
 
-    history_printed_keys = load_printed_history() if (deduplicate_history and not force_reprint) else set()
+    history_printed_keys = load_printed_history(store_id=store_id) if (deduplicate_history and not force_reprint) else set()
 
     extracted_pdf_paths: List[Tuple[str, int]] = []
 
@@ -672,7 +739,7 @@ def process_zip_or_pdfs(
 
     # Сохранение истории
     if new_keys_to_save and deduplicate_history:
-        save_printed_history(new_keys_to_save)
+        save_printed_history(new_keys_to_save, store_id=store_id)
 
     total_new_pages = len(all_pages)
     all_duplicates = (total_pages_found > 0 and total_new_pages == 0)

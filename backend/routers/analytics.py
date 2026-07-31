@@ -5,11 +5,9 @@ FastAPI router for Dashboard Analytics and Widget stats.
 from fastapi import APIRouter, Depends
 from datetime import datetime, timedelta
 import random
-import os
-import json
 import time
 import logging
-from backend.state_helpers import _load_dumping_configs, _load_products
+from backend.state_helpers import _load_dumping_configs, _load_products, _load_analytics_snapshot, _load_dumper_logs
 from backend.dumper.config import _decode_base64_if_needed
 from backend.dumper.radar import _fetch_offers_sync
 from backend.security.store_context import StoreContext, get_store_context
@@ -54,14 +52,9 @@ def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
     configs = _load_dumping_configs(store_id=ctx.store_id)
     
     # 2. Load or compute analytics summary
-    analytics_data = {}
-    if os.path.exists("states/analytics.json"):
-        try:
-            with open("states/analytics.json", "r", encoding="utf-8") as f:
-                analytics_data = json.load(f)
-        except Exception:
-            logger.exception("Failed to load states/analytics.json")
-            
+    analytics_data = _load_analytics_snapshot(ctx.store_id)
+
+
     # Calculate fallback counts if states/analytics.json does not exist
     total_scanned = analytics_data.get("total_scanned", 0)
     winning_count = analytics_data.get("winning_count", 0)
@@ -156,15 +149,10 @@ def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
                         if is_self:
                             our_rank = idx
 
-    # 4. Load recent sniper events from states/dumper_logs.json
-    radar_events = []
-    if os.path.exists("states/dumper_logs.json"):
-        try:
-            with open("states/dumper_logs.json", "r", encoding="utf-8") as f:
-                radar_events = json.load(f)[:5]
-        except Exception:
-            logger.exception("Failed to load states/dumper_logs.json")
-            
+    # 4. Load recent sniper events (per-store, Слайс 5)
+    radar_events = _load_dumper_logs(ctx.store_id, limit=5)
+
+
     # Default fallback events if list is empty
     if not radar_events:
         radar_events = [

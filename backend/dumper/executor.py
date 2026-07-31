@@ -360,15 +360,11 @@ class RateLimitExecutorWorker:
             for future in concurrent.futures.as_completed(futures):
                 future.result()  # пробрасывает исключение из потока, если оно было, а не глотает его
 
-        # Сохранение логов для радара
+        # Сохранение логов для радара (per-store, Слайс 5)
         try:
             import datetime
-            logs_file = "states/dumper_logs.json"
-            existing_logs = []
-            if os.path.exists(logs_file):
-                with open(logs_file, "r", encoding="utf-8") as f:
-                    existing_logs = json.load(f)
-            
+            from backend.state_helpers import _append_dumper_logs
+
             now_str = datetime.datetime.now().strftime("%H:%M:%S")
             formatted_new = []
             for m in log_messages:
@@ -381,13 +377,10 @@ class RateLimitExecutorWorker:
                     "message": m,
                     "saved_margin": saved_val
                 })
-            
-            combined_logs = (formatted_new + existing_logs)[:50]
-            os.makedirs("states", exist_ok=True)
-            with open(logs_file, "w", encoding="utf-8") as f:
-                json.dump(combined_logs, f, ensure_ascii=False, indent=2)
+
+            _append_dumper_logs(formatted_new, store_id=store_id)
         except Exception as e:
-            logger.error(f"Failed to save dumper logs to file: {e}")
+            logger.error(f"Failed to save dumper logs: {e}")
 
         summary_msg = f"🚀 [Executor] Исполнение очереди завершено. Применено изменений: {updated_count}."
         return {

@@ -573,19 +573,73 @@ def _save_master_stock_groups(groups: dict, store_id: Optional[str] = None):
             session.rollback()
             session.close()
 
-def _load_processed_orders() -> dict:
-    if os.path.exists(PROCESSED_ORDERS_FILE):
+def _load_processed_orders_by_kind(store_id: Optional[str], kind: str, legacy_file: str) -> dict:
+    """
+    store_id given (Слайс 5): {order_id: payload} из ProcessedOrderDB этого
+    магазина+kind ('radar' или 'packaging' — держит их независимыми, раньше
+    делили один файл только по типу, не по стору).
+    store_id=None (легаси): старый общий файл этого kind.
+    """
+    if store_id is not None:
+        session = _get_sync_db_session()
+        if not session:
+            return {}
         try:
-            with open(PROCESSED_ORDERS_FILE, "r", encoding="utf-8") as f:
+            from backend.db.models import ProcessedOrderDB
+            rows = session.scalars(
+                select(ProcessedOrderDB).where(
+                    ProcessedOrderDB.store_id == store_id, ProcessedOrderDB.kind == kind
+                )
+            ).all()
+            result = {}
+            for r in rows:
+                try:
+                    result[r.order_id] = json.loads(r.payload)
+                except Exception:
+                    result[r.order_id] = {}
+            return result
+        finally:
+            session.close()
+
+    if os.path.exists(legacy_file):
+        try:
+            with open(legacy_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             pass
     return {}
 
-def _save_processed_orders(orders: dict):
-    os.makedirs("states", exist_ok=True)
-    with open(PROCESSED_ORDERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(orders, f, ensure_ascii=False, indent=2)
+def _save_processed_orders_by_kind(orders: dict, store_id: Optional[str], kind: str, legacy_file: str):
+    if store_id is None:
+        os.makedirs("states", exist_ok=True)
+        with open(legacy_file, "w", encoding="utf-8") as f:
+            json.dump(orders, f, ensure_ascii=False, indent=2)
+        return
+
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import ProcessedOrderDB
+        for order_id, payload in orders.items():
+            row = session.get(ProcessedOrderDB, (store_id, kind, order_id))
+            payload_json = json.dumps(payload, ensure_ascii=False)
+            if not row:
+                session.add(ProcessedOrderDB(store_id=store_id, kind=kind, order_id=order_id, payload=payload_json))
+            else:
+                row.payload = payload_json
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting processed orders ({kind}) to DB: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
+def _load_processed_orders(store_id: Optional[str] = None) -> dict:
+    return _load_processed_orders_by_kind(store_id, "radar", PROCESSED_ORDERS_FILE)
+
+def _save_processed_orders(orders: dict, store_id: Optional[str] = None):
+    _save_processed_orders_by_kind(orders, store_id, "radar", PROCESSED_ORDERS_FILE)
 
 def _get_store_status(store_id: str) -> Optional[str]:
     """
@@ -1088,19 +1142,144 @@ def _save_webhook_config(cfg: dict, store_id: Optional[str] = None):
 
 PROCESSED_PACKAGING_ORDERS_FILE = "states/processed_packaging_orders.json"
 
-def _load_processed_packaging_orders() -> dict:
-    if os.path.exists(PROCESSED_PACKAGING_ORDERS_FILE):
+def _load_processed_packaging_orders(store_id: Optional[str] = None) -> dict:
+    return _load_processed_orders_by_kind(store_id, "packaging", PROCESSED_PACKAGING_ORDERS_FILE)
+
+def _save_processed_packaging_orders(data: dict, store_id: Optional[str] = None):
+    _save_processed_orders_by_kind(data, store_id, "packaging", PROCESSED_PACKAGING_ORDERS_FILE)
+
+DUMPER_LOGS_FILE = "states/dumper_logs.json"
+
+def _append_dumper_logs(events: list, store_id: Optional[str] = None):
+    """
+    events: список {"timestamp", "message", "saved_margin"} — новые события
+    демпинга за один проход исполнителя.
+
+    store_id given (Слайс 5): своя строка DumperLogDB на событие — виджет
+    Overview у одного магазина больше не видит события другого.
+    store_id=None (легаси): старый общий файл (prepend + обрезка до 50).
+    """
+    if not events:
+        return
+
+    if store_id is not None:
+        session = _get_sync_db_session()
+        if not session:
+            return
         try:
-            with open(PROCESSED_PACKAGING_ORDERS_FILE, "r", encoding="utf-8") as f:
+            from backend.db.models import DumperLogDB
+            import datetime as _dt
+            for event in events:
+                session.add(DumperLogDB(
+                    store_id=store_id,
+                    created_at=_dt.datetime.utcnow(),
+                    payload=json.dumps(event, ensure_ascii=False),
+                ))
+            session.commit()
+        except Exception as e:
+            logger.error(f"Error persisting dumper logs to DB: {e}")
+            session.rollback()
+        finally:
+            session.close()
+        return
+
+    existing_logs = []
+    if os.path.exists(DUMPER_LOGS_FILE):
+        try:
+            with open(DUMPER_LOGS_FILE, "r", encoding="utf-8") as f:
+                existing_logs = json.load(f)
+        except Exception:
+            existing_logs = []
+    combined = (events + existing_logs)[:50]
+    os.makedirs("states", exist_ok=True)
+    with open(DUMPER_LOGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(combined, f, ensure_ascii=False, indent=2)
+
+def _load_dumper_logs(store_id: Optional[str] = None, limit: int = 5) -> list:
+    if store_id is not None:
+        session = _get_sync_db_session()
+        if not session:
+            return []
+        try:
+            from backend.db.models import DumperLogDB
+            rows = session.scalars(
+                select(DumperLogDB)
+                .where(DumperLogDB.store_id == store_id)
+                .order_by(DumperLogDB.id.desc())
+                .limit(limit)
+            ).all()
+            result = []
+            for r in rows:
+                try:
+                    result.append(json.loads(r.payload))
+                except Exception:
+                    pass
+            return result
+        finally:
+            session.close()
+
+    if os.path.exists(DUMPER_LOGS_FILE):
+        try:
+            with open(DUMPER_LOGS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)[:limit]
+        except Exception:
+            pass
+    return []
+
+def _load_analytics_snapshot(store_id: Optional[str] = None) -> dict:
+    """
+    store_id given (Слайс 5): AnalyticsSnapshotDB этого магазина.
+    store_id=None (легаси): старый общий states/analytics.json.
+    """
+    if store_id is not None:
+        session = _get_sync_db_session()
+        if not session:
+            return {}
+        try:
+            from backend.db.models import AnalyticsSnapshotDB
+            row = session.get(AnalyticsSnapshotDB, store_id)
+            if not row:
+                return {}
+            try:
+                return json.loads(row.payload)
+            except Exception:
+                return {}
+        finally:
+            session.close()
+
+    if os.path.exists("states/analytics.json"):
+        try:
+            with open("states/analytics.json", "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             pass
     return {}
 
-def _save_processed_packaging_orders(data: dict):
-    os.makedirs("states", exist_ok=True)
-    with open(PROCESSED_PACKAGING_ORDERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def _save_analytics_snapshot(data: dict, store_id: Optional[str] = None):
+    if store_id is None:
+        os.makedirs("states", exist_ok=True)
+        with open("states/analytics.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return
+
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import AnalyticsSnapshotDB
+        payload = json.dumps(data, ensure_ascii=False)
+        row = session.get(AnalyticsSnapshotDB, store_id)
+        if not row:
+            row = AnalyticsSnapshotDB(store_id=store_id, payload=payload)
+            session.add(row)
+        else:
+            row.payload = payload
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting analytics snapshot to DB: {e}")
+        session.rollback()
+    finally:
+        session.close()
 
 
 

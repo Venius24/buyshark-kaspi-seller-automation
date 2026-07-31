@@ -53,6 +53,7 @@ async def process_print_batch(
                 deduplicate_history=deduplicate_history,
                 force_reprint=force_reprint,
                 output_layout=output_layout,
+                store_id=ctx.store_id,
             )
         )
         return JSONResponse(content=manifest)
@@ -66,7 +67,7 @@ async def process_print_batch(
 async def reset_history(ctx: StoreContext = Depends(get_store_context)):
     """Сбросить суточную историю напечатанных заказов"""
     try:
-        await asyncio.to_thread(reset_printed_history)
+        await asyncio.to_thread(reset_printed_history, ctx.store_id)
         return {"status": "ok", "message": "История напечатанных заказов за сегодня успешно сброшена"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка при сбросе истории: {str(e)}")
@@ -75,7 +76,7 @@ async def reset_history(ctx: StoreContext = Depends(get_store_context)):
 @router.get("/history-stats")
 async def get_history_stats(ctx: StoreContext = Depends(get_store_context)):
     """Получить количество напечатанных заказов в истории за сегодня"""
-    history_keys = await asyncio.to_thread(load_printed_history)
+    history_keys = await asyncio.to_thread(load_printed_history, ctx.store_id)
     return {"printed_count": len(history_keys)}
 
 

@@ -253,9 +253,7 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
     остаток у совпавших Мастер-Групп, запускает веерную синхронизацию.
 
     store_id=None (легаси) — нескоуп-чтение групп, как было всегда.
-    Каталог товаров теперь per-store (Слайс 1). Дедупликация заказов
-    (_load_processed_orders/_save_processed_orders) остаётся общей на все
-    сторы — известное ограничение, закрывается отдельным слайсом (см. HANDOFF).
+    Каталог товаров (Слайс 1) и дедупликация заказов (Слайс 5) — per-store.
     """
     groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
     active_groups = {gid: g for gid, g in groups.items() if g.get("is_active", True)}
@@ -281,7 +279,7 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
     # Загружаем товары из кэша для резолва алиасов ключей (per-store, Слайс 1)
     all_products_cache = await asyncio.to_thread(_load_products, store_id)
 
-    processed_orders = await asyncio.to_thread(_load_processed_orders)
+    processed_orders = await asyncio.to_thread(_load_processed_orders, store_id)
     order_dedup_changed = False
 
     for order in orders_resp:
@@ -365,7 +363,7 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
             asyncio.create_task(execute_broadcast_sync(gid, token, store_id=store_id))
 
     if order_dedup_changed:
-        await asyncio.to_thread(_save_processed_orders, processed_orders)
+        await asyncio.to_thread(_save_processed_orders, processed_orders, store_id)
 
 async def run_stock_radar_cycle():
     """
@@ -438,7 +436,7 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
     """
     from backend.state_helpers import _load_processed_packaging_orders, _save_processed_packaging_orders
 
-    processed_orders = await asyncio.to_thread(_load_processed_packaging_orders)
+    processed_orders = await asyncio.to_thread(_load_processed_packaging_orders, store_id)
 
     try:
         # Синхронный постраничный обход Kaspi MC (весь список заказов
@@ -536,7 +534,7 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
 
         if groups_modified:
             await asyncio.to_thread(_save_master_stock_groups, groups, store_id=store_id)
-            await asyncio.to_thread(_save_processed_packaging_orders, processed_orders)
+            await asyncio.to_thread(_save_processed_packaging_orders, processed_orders, store_id)
 
     return {
         "success": True,

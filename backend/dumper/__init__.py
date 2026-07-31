@@ -63,12 +63,10 @@ async def run_price_dumping_job(
     analytics = brain_result["analytics"]
     calculation_logs = brain_result.get("calculation_logs", [])
 
-    # Сохраняем агрегированную аналитику в стейт
+    # Сохраняем агрегированную аналитику в стейт (per-store, Слайс 5)
     try:
-        import os, json
-        os.makedirs("states", exist_ok=True)
-        with open("states/analytics.json", "w", encoding="utf-8") as f:
-            json.dump(analytics, f, ensure_ascii=False, indent=2)
+        from backend.state_helpers import _save_analytics_snapshot
+        _save_analytics_snapshot(analytics, store_id=store_id)
     except Exception:
         pass
 

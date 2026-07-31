@@ -188,3 +188,37 @@ class ChatStateDB(Base):
     human_override: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
+
+class ProcessedOrderDB(Base):
+    __tablename__ = "processed_orders"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20), primary_key=True)  # 'radar' | 'packaging'
+    order_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")  # JSON-stringified dict
+
+
+class PrintHistoryDB(Base):
+    __tablename__ = "print_history"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    date: Mapped[str] = mapped_column(String(10), primary_key=True)  # 'YYYY-MM-DD'
+    order_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+
+
+class DumperLogDB(Base):
+    __tablename__ = "dumper_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-stringified event dict
+
+
+class AnalyticsSnapshotDB(Base):
+    __tablename__ = "analytics_snapshots"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")  # JSON-stringified dict
+    updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+

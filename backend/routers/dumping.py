@@ -12,10 +12,24 @@ from backend.security.store_context import StoreContext, get_store_context, list
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dumping", tags=["dumping"])
 
-class DumpingSchedulerState:
-    last_run_timestamp: float = 0.0
-    next_run_timestamp: float = time.time() + 300.0
-    is_running: bool = False
+class _SchedulerState:
+    def __init__(self):
+        self.last_run_timestamp: float = 0.0
+        self.next_run_timestamp: float = time.time() + 300.0
+        self.is_running: bool = False
+
+# Слайс 5: раньше был единый class-level DumpingSchedulerState — "последний
+# запуск" одного магазина перезаписывал показания статуса для всех остальных.
+# Ключ None — состояние общего фонового цикла (next_run_timestamp/is_running
+# самого шедулера, он один физический asyncio-таск на всё приложение);
+# per-store ключи — когда именно ЭТОТ магазин последний раз реально
+# демпинговался (из шедулера или ручной кнопки "Запустить сейчас").
+_scheduler_states: dict = {}
+
+def _get_scheduler_state(store_id=None) -> _SchedulerState:
+    if store_id not in _scheduler_states:
+        _scheduler_states[store_id] = _SchedulerState()
+    return _scheduler_states[store_id]
 
 async def _run_dumping_cycle(token: str, store_id) -> dict:
     """
@@ -61,6 +75,7 @@ async def run_scheduled_dumping_cycle() -> dict:
             try:
                 res = await _run_dumping_cycle(store.token, store.store_id)
                 total_updated += res.get("updated_count", 0)
+                _get_scheduler_state(store.store_id).last_run_timestamp = time.time()
             except Exception as e:
                 logger.error(f"Scheduled dumper run failed for store {store.store_id}: {e}")
     else:
@@ -69,8 +84,9 @@ async def run_scheduled_dumping_cycle() -> dict:
             logger.info("🤖 [Scheduler] Running automated 5-minute price dumper cycle (legacy single-tenant session)...")
             res = await _run_dumping_cycle(token, None)
             total_updated += res.get("updated_count", 0)
+            _get_scheduler_state(None).last_run_timestamp = time.time()
 
-    DumpingSchedulerState.last_run_timestamp = time.time()
+    _get_scheduler_state(None).last_run_timestamp = time.time()
     logger.info(f"🤖 [Scheduler] Automated cycle finished. Applied changes: {total_updated}.")
     return {"updated_count": total_updated, "stores_processed": len(stores)}
 
@@ -82,22 +98,23 @@ def _next_interval_seconds() -> float:
 
 async def background_dumping_loop():
     logger.info("Background price dumping loop initialized (~5-minute interval, jittered).")
+    global_state = _get_scheduler_state(None)
     # При запуске ставим первую авто-проверку через ~5 минут
-    DumpingSchedulerState.next_run_timestamp = time.time() + _next_interval_seconds()
+    global_state.next_run_timestamp = time.time() + _next_interval_seconds()
 
     while True:
         try:
             now = time.time()
-            if now >= DumpingSchedulerState.next_run_timestamp:
+            if now >= global_state.next_run_timestamp:
                 # Планируем следующий запуск
-                DumpingSchedulerState.next_run_timestamp = now + _next_interval_seconds()
-                DumpingSchedulerState.is_running = True
+                global_state.next_run_timestamp = now + _next_interval_seconds()
+                global_state.is_running = True
                 try:
                     await run_scheduled_dumping_cycle()
                 except Exception as e:
                     logger.error(f"Error during scheduled dumper run: {e}")
                 finally:
-                    DumpingSchedulerState.is_running = False
+                    global_state.is_running = False
 
             await asyncio.sleep(1)
         except Exception as e:
@@ -131,15 +148,25 @@ def save_dumping_config(req: DumpingConfigRequest, ctx: StoreContext = Depends(g
     return {"success": True, "message": f"Конфигурация демпинга для {req.sku} сохранена."}
 
 @router.get("/status")
-def get_dumping_status():
-    """Получить статус и таймер фонового авто-демпинга."""
+def get_dumping_status(ctx: StoreContext = Depends(get_store_context)):
+    """
+    Получить статус и таймер фонового авто-демпинга.
+
+    Слайс 5: "когда этот магазин последний раз реально демпинговался" —
+    per-store (раньше ручной запуск ОДНОГО магазина показывал "выполнено
+    только что" всем остальным). Таймер/флаг общего фонового цикла
+    (next_run_seconds/is_running) — общий, т.к. это один физический
+    asyncio-таск на всё приложение, а не по одному на магазин.
+    """
     now = time.time()
-    next_run_seconds = max(0, int(DumpingSchedulerState.next_run_timestamp - now))
+    global_state = _get_scheduler_state(None)
+    store_state = _get_scheduler_state(ctx.store_id)
+    next_run_seconds = max(0, int(global_state.next_run_timestamp - now))
     return {
         "success": True,
-        "last_run_time": DumpingSchedulerState.last_run_timestamp,
+        "last_run_time": store_state.last_run_timestamp,
         "next_run_seconds": next_run_seconds,
-        "is_running": DumpingSchedulerState.is_running
+        "is_running": global_state.is_running or store_state.is_running
     }
 
 @router.post("/run")
@@ -148,16 +175,17 @@ async def run_price_dumping(ctx: StoreContext = Depends(get_store_context)):
     if not _load_products(ctx.store_id):
         raise HTTPException(status_code=404, detail="Список товаров пуст. Загрузите товары.")
 
-    DumpingSchedulerState.is_running = True
+    store_state = _get_scheduler_state(ctx.store_id)
+    store_state.is_running = True
     try:
         try:
             res = await _run_dumping_cycle(ctx.token, ctx.store_id)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Ошибка выполнения демпинга: {e}")
 
-        # Сбрасываем таймер следующего запуска, так как только что выполнили
-        DumpingSchedulerState.next_run_timestamp = time.time() + 300.0
-        DumpingSchedulerState.last_run_timestamp = time.time()
+        # Сбрасываем таймер следующего запуска общего цикла, так как только что выполнили
+        _get_scheduler_state(None).next_run_timestamp = time.time() + 300.0
+        store_state.last_run_timestamp = time.time()
         return res
     finally:
-        DumpingSchedulerState.is_running = False
+        store_state.is_running = False
