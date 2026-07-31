@@ -80,15 +80,26 @@ class DumpingConfigsStoreScopingTest(unittest.TestCase):
         configs_scoped = self.state_helpers._load_dumping_configs(store_id="store-A")
         self.assertEqual(configs_scoped, {})
 
-    def test_unscoped_legacy_load_still_sees_everything(self):
-        """Backward compatibility: a caller not yet migrated (store_id=None)
-        must keep seeing the exact same unfiltered view it always has."""
+    def test_unscoped_legacy_load_still_sees_every_scoped_row(self):
+        """An unfiltered (store_id=None) load still returns every store's
+        rows unfiltered — that mixing-view behavior is unchanged by Слайс 2."""
         self.state_helpers._save_dumping_configs({"SKU-A": make_config_dict(100)}, store_id="store-A")
         self.state_helpers._save_dumping_configs({"SKU-B": make_config_dict(200)}, store_id="store-B")
-        self.state_helpers._save_dumping_configs({"SKU-LEGACY": make_config_dict(300)})
 
         legacy_view = self.state_helpers._load_dumping_configs()
-        self.assertEqual(set(legacy_view.keys()), {"SKU-A", "SKU-B", "SKU-LEGACY"})
+        self.assertEqual(set(legacy_view.keys()), {"SKU-A", "SKU-B"})
+
+    def test_legacy_unscoped_save_no_longer_persists_to_db(self):
+        """Слайс 2: store_id is now part of the primary key and NOT NULL —
+        a legacy (store_id=None) save can no longer create a row at all
+        (ownership would be ambiguous by construction). The DB write fails
+        and is caught/logged/rolled back; it must not raise or corrupt
+        other stores' data."""
+        self.state_helpers._save_dumping_configs({"SKU-A": make_config_dict(100)}, store_id="store-A")
+        self.state_helpers._save_dumping_configs({"SKU-LEGACY": make_config_dict(300)})  # must not raise
+
+        self.assertEqual(self.state_helpers._load_dumping_configs(store_id="store-A")["SKU-A"]["min_price"], 100.0)
+        self.assertNotIn("SKU-LEGACY", self.state_helpers._load_dumping_configs())
 
     def test_scoped_save_tags_a_previously_legacy_row(self):
         """A row created before store scoping existed (store_id NULL) gets

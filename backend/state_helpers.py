@@ -189,7 +189,13 @@ def _save_override(
             return
         try:
             from backend.db.models import ProductOverrideDB
-            db_obj = session.get(ProductOverrideDB, sku)
+            # Слайс 2: PK составной (store_id, sku) — session.get(Model, sku)
+            # больше не однозначно резолвит строку, ищем явным запросом.
+            db_obj = session.execute(
+                select(ProductOverrideDB).where(
+                    ProductOverrideDB.sku == sku, ProductOverrideDB.store_id == store_id
+                )
+            ).scalar_one_or_none()
             if not db_obj:
                 db_obj = ProductOverrideDB(
                     sku=sku,
@@ -396,7 +402,13 @@ def _save_dumping_configs(configs: dict, store_id: Optional[str] = None):
     try:
         from backend.db.models import DumpingConfigDB
         for sku, cfg in configs.items():
-            db_obj = session.get(DumpingConfigDB, sku)
+            # Слайс 2: PK составной (store_id, sku) — session.get(Model, sku)
+            # больше не однозначно резолвит строку, ищем явным запросом.
+            db_obj = session.execute(
+                select(DumpingConfigDB).where(
+                    DumpingConfigDB.sku == sku, DumpingConfigDB.store_id == store_id
+                )
+            ).scalar_one_or_none()
             blacklisted_str = json.dumps(cfg.get("blacklisted_merchants") or [], ensure_ascii=False)
             if not db_obj:
                 db_obj = DumpingConfigDB(

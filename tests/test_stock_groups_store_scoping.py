@@ -78,12 +78,24 @@ class MasterStockGroupsStoreScopingTest(unittest.TestCase):
         scoped = self.state_helpers._load_master_stock_groups(store_id="store-A")
         self.assertEqual(scoped, {})
 
-    def test_unscoped_legacy_load_still_sees_everything(self):
+    def test_unscoped_legacy_load_still_sees_every_scoped_row(self):
+        """An unfiltered (store_id=None) load still returns every store's
+        rows unfiltered — that mixing-view behavior is unchanged by Слайс 2."""
         self.state_helpers._save_master_stock_groups({"grp_A": make_group_dict("A")}, store_id="store-A")
         self.state_helpers._save_master_stock_groups({"grp_B": make_group_dict("B")}, store_id="store-B")
-        self.state_helpers._save_master_stock_groups({"grp_LEGACY": make_group_dict("Legacy")})
         legacy_view = self.state_helpers._load_master_stock_groups()
-        self.assertEqual(set(legacy_view.keys()), {"grp_A", "grp_B", "grp_LEGACY"})
+        self.assertEqual(set(legacy_view.keys()), {"grp_A", "grp_B"})
+
+    def test_legacy_unscoped_save_no_longer_persists_to_db(self):
+        """Слайс 2: master_stock_groups.store_id is now NOT NULL — a legacy
+        (store_id=None) save can no longer create a row at all. The DB write
+        fails and is caught/logged/rolled back; it must not raise or
+        corrupt other stores' data."""
+        self.state_helpers._save_master_stock_groups({"grp_A": make_group_dict("A")}, store_id="store-A")
+        self.state_helpers._save_master_stock_groups({"grp_LEGACY": make_group_dict("Legacy")})  # must not raise
+
+        self.assertEqual(self.state_helpers._load_master_stock_groups(store_id="store-A")["grp_A"]["group_name"], "A")
+        self.assertNotIn("grp_LEGACY", self.state_helpers._load_master_stock_groups())
 
     def test_scoped_save_tags_a_previously_legacy_row(self):
         self.state_helpers._save_master_stock_groups({"grp_X": make_group_dict("X", shared_stock=1)})

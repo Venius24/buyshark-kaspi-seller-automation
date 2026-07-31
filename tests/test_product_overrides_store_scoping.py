@@ -59,12 +59,24 @@ class ProductOverridesStoreScopingTest(unittest.TestCase):
         scoped = self.state_helpers._load_overrides(store_id="store-A")
         self.assertEqual(scoped, {})
 
-    def test_unscoped_legacy_load_still_sees_everything(self):
+    def test_unscoped_legacy_load_still_sees_every_scoped_row(self):
+        """An unfiltered (store_id=None) load still returns every store's
+        rows unfiltered — that mixing-view behavior is unchanged by Слайс 2."""
         self.state_helpers._save_override("SKU-A", 100, 5, store_id="store-A")
         self.state_helpers._save_override("SKU-B", 200, 6, store_id="store-B")
-        self.state_helpers._save_override("SKU-LEGACY", 300, 7)
         legacy_view = self.state_helpers._load_overrides()
-        self.assertEqual(set(legacy_view.keys()), {"SKU-A", "SKU-B", "SKU-LEGACY"})
+        self.assertEqual(set(legacy_view.keys()), {"SKU-A", "SKU-B"})
+
+    def test_legacy_unscoped_save_no_longer_persists_to_db(self):
+        """Слайс 2: store_id is now part of the primary key and NOT NULL —
+        a legacy (store_id=None) save can no longer create a row at all.
+        The DB write fails and is caught/logged/rolled back; it must not
+        raise or corrupt other stores' data."""
+        self.state_helpers._save_override("SKU-A", 100, 5, store_id="store-A")
+        self.state_helpers._save_override("SKU-LEGACY", 300, 7)  # must not raise
+
+        self.assertEqual(self.state_helpers._load_overrides(store_id="store-A")["SKU-A"]["price_num"], 100)
+        self.assertNotIn("SKU-LEGACY", self.state_helpers._load_overrides())
 
     def test_apply_overrides_is_store_scoped(self):
         self.state_helpers._save_override("SKU-A", 555, 9, store_id="store-A")
