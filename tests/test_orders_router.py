@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 sys.path.append(os.getcwd())
 
 from backend.main import app
+from backend.kaspi_wrapper import KaspiAPI
 
 class TestOrdersRouter(unittest.TestCase):
     """
@@ -16,6 +17,12 @@ class TestOrdersRouter(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
         self.fake_token = "REDACTED_KASPI_API_TOKEN"
+        # Категория 1 (B.2): /api/orders/packaging/tabs теперь идёт через
+        # KaspiAPI.get_all_packaging_tabs_cached (общий кэш, TTL 45с, ключ —
+        # сам token). Другой тест с тем же fake_token, запущенный в течение
+        # 45с до этого, мог бы оставить в кэше чужой мок — чистим явно,
+        # чтобы тест не зависел от порядка запуска.
+        KaspiAPI._packaging_tabs_cache.clear()
 
     @patch("backend.security.store_context.discover_merchant_id")
     @patch("backend.security.store_context._require_token")

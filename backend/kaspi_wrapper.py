@@ -5,6 +5,7 @@ KaspiAPI — чистый REST-клиент для Kaspi Merchant API v2 & MC AP
 
 import os
 import json
+import threading
 import time
 import base64
 import datetime
@@ -22,6 +23,16 @@ class KaspiAPI:
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
     )
+
+    # Категория 1 (B.2): один общий кэш get_all_packaging_tabs — раньше три
+    # независимых места (routers/orders.py без кэша, routers/stock_groups.py
+    # с 45с кэшем без ключа по token/store, services/stock_sync_worker.py
+    # 30с-тик без кэша) гоняли один и тот же тяжёлый постраничный обход
+    # независимо друг от друга. Ключ — сам token (у каждого стора свой REST
+    # токен, поэтому это уже корректно разделяет сторы без отдельного
+    # store_id — старый кэш в stock_groups.py был НЕ ключирован вообще).
+    _packaging_tabs_cache: Dict[str, dict] = {}
+    _packaging_tabs_cache_lock = threading.Lock()
 
     # ── helpers ──────────────────────────────────────────────
 
@@ -593,6 +604,31 @@ class KaspiAPI:
                 "transmitted": len(transmitted)
             }
         }
+
+    @staticmethod
+    def get_all_packaging_tabs_cached(token: str, ttl_seconds: float = 45.0) -> dict:
+        """
+        Кэширующая обёртка над get_all_packaging_tabs() — единая точка для
+        всех вызывающих (routers/orders.py, routers/stock_groups.py,
+        services/stock_sync_worker.py 30с-тик), которые раньше независимо
+        гоняли один и тот же тяжёлый постраничный обход. Ключ — token, TTL
+        по умолчанию 45с (как было в старом кэше stock_groups.py).
+        """
+        now = time.time()
+        with KaspiAPI._packaging_tabs_cache_lock:
+            cached = KaspiAPI._packaging_tabs_cache.get(token)
+            if cached and now < cached["expires_at"]:
+                return cached["data"]
+
+        try:
+            data = KaspiAPI.get_all_packaging_tabs(token)
+            with KaspiAPI._packaging_tabs_cache_lock:
+                KaspiAPI._packaging_tabs_cache[token] = {"data": data, "expires_at": time.time() + ttl_seconds}
+            return data
+        except Exception:
+            with KaspiAPI._packaging_tabs_cache_lock:
+                cached = KaspiAPI._packaging_tabs_cache.get(token)
+            return cached["data"] if cached else {}
 
     # ── 6. update order status ───────────────────────────────
 
