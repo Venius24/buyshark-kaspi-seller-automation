@@ -70,10 +70,9 @@ def login(req: LoginCredentialsRequest, ctx: StoreContext = Depends(get_store_co
 
     ctx.store_id резолвится дуальной авторизацией (JWT -> стор пользователя,
     X-Store-Id либо самый старый стор, см. security/store_context.py) — без
-    какого-либо нового стейта на фронтенде. Если стор резолвится, креды и
-    свежие куки сохраняются ИСКЛЮЧИТЕЛЬНО в БД (Store.encrypted_mc_email/
-    password/cookies) для этого стора — закрывает 3.1, часть (а). Иначе
-    (легаси/дев без Store в БД) — ровно старое поведение (states/session.json).
+    какого-либо нового стейта на фронтенде. Креды и свежие куки сохраняются
+    ИСКЛЮЧИТЕЛЬНО в БД (Store.encrypted_mc_email/password/cookies) для
+    этого стора — закрывает 3.1, часть (а).
     """
     email = req.email.strip()
     password = req.password
@@ -85,9 +84,8 @@ def login(req: LoginCredentialsRequest, ctx: StoreContext = Depends(get_store_co
         # Сохраняем креды (в зашифрованном виде), чтобы при истечении сессионных
         # куков backend мог автоматически перелогиниться без участия пользователя.
         _save_mc_credentials(email, password, store_id=ctx.store_id)
-        if ctx.store_id is not None:
-            fresh_cookies = _load_mc_cookies(store_id=None)
-            _save_mc_cookies_for_store(ctx.store_id, fresh_cookies)
+        fresh_cookies = _load_mc_cookies(store_id=None)
+        _save_mc_cookies_for_store(ctx.store_id, fresh_cookies)
         return {"success": True, "message": msg}
     else:
         raise HTTPException(status_code=400, detail=msg)
@@ -95,9 +93,8 @@ def login(req: LoginCredentialsRequest, ctx: StoreContext = Depends(get_store_co
 @router.get("/mc-status")
 def get_mc_status(verify: bool = False, ctx: StoreContext = Depends(get_store_context)):
     """
-    ctx.store_id given: has_session отражает наличие Store.encrypted_cookies
-    в БД для ИМЕННО ЭТОГО стора, а не общий state.json.
-    ctx.store_id=None (легаси/дев без Store в БД): старое поведение.
+    has_session отражает наличие Store.encrypted_cookies в БД для ИМЕННО
+    ЭТОГО стора, а не общий state.json.
 
     ВАЖНО (2026-07-30): при verify=False valid раньше всегда возвращался
     True, если куки просто расшифровывались — независимо от Store.status.
@@ -116,10 +113,7 @@ def get_mc_status(verify: bool = False, ctx: StoreContext = Depends(get_store_co
     проверке/автообновлении свежие куки сразу синхронизируются в
     Store.encrypted_cookies резолвленного стора.
     """
-    if ctx.store_id is not None:
-        has_session = bool(_load_mc_cookies(store_id=ctx.store_id))
-    else:
-        has_session = os.path.exists("state.json")
+    has_session = bool(_load_mc_cookies(store_id=ctx.store_id))
 
     if not has_session:
         return {"success": True, "has_session": False, "valid": False}
@@ -131,18 +125,14 @@ def get_mc_status(verify: bool = False, ctx: StoreContext = Depends(get_store_co
             if _refresh_mc_session(store_id=ctx.store_id):
                 success, valid = worker.send_cmd(Command.VERIFY_SESSION)
         if success:
-            if valid and ctx.store_id is not None:
+            if valid:
                 fresh_cookies = _load_mc_cookies(store_id=None)
                 _save_mc_cookies_for_store(ctx.store_id, fresh_cookies)
             return {"success": True, "has_session": True, "valid": valid}
         else:
             return {"success": False, "detail": valid}
 
-    if ctx.store_id is not None:
-        is_valid = _get_store_status(ctx.store_id) == "ACTIVE"
-    else:
-        is_valid = True
-
+    is_valid = _get_store_status(ctx.store_id) == "ACTIVE"
     return {"success": True, "has_session": True, "valid": is_valid}
 
 @router.post("/close")

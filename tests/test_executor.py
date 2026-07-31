@@ -217,18 +217,44 @@ class TestExecuteUpdatesDedup(ExecutorTestBase):
 
 class TestExecuteUpdatesLogPersistence(ExecutorTestBase):
     """Characterizes the current saved_margin placeholder (hardcoded 1500/2500 by
-    substring-matching the log message) — a known stub flagged for a real fix in Phase 4."""
+    substring-matching the log message) — a known stub flagged for a real fix in Phase 4.
+    Слайс 7: _append_dumper_logs now requires a real store_id and writes to the DB,
+    not states/dumper_logs.json — isolate against a scratch SQLite DB, same pattern as
+    test_dumping_configs_store_scoping.py."""
+
+    def setUp(self):
+        super().setUp()
+        import backend.db.models  # noqa: F401 registers ORM classes on Base.metadata
+        from backend.db.database import Base
+        from sqlalchemy import create_engine
+
+        db_path = os.path.join(self._tmp_dir, "executor_test.db")
+        self._sync_engine = create_engine(
+            f"sqlite:///{db_path.replace(os.sep, '/')}", connect_args={"check_same_thread": False}
+        )
+        Base.metadata.create_all(self._sync_engine)
+
+        from backend import state_helpers
+        from sqlalchemy.orm import Session
+        self._session_patch = patch.object(
+            state_helpers, "_get_sync_db_session", side_effect=lambda: Session(self._sync_engine)
+        )
+        self._session_patch.start()
+
+    def tearDown(self):
+        self._session_patch.stop()
+        super().tearDown()
 
     @patch("backend.dumper.executor._load_mc_cookies")
     def test_default_saved_margin_is_hardcoded_1500(self, mock_cookies):
         mock_cookies.return_value = {}
         task = make_task()
         RateLimitExecutorWorker.execute_updates(
-            [task], self.save_override, rate_limit_delay=0, merchant_id="999"
+            [task], self.save_override, rate_limit_delay=0, merchant_id="999",
+            store_id="store-test",
         )
-        import json
-        with open("states/dumper_logs.json", encoding="utf-8") as f:
-            logs = json.load(f)
+        from backend.state_helpers import _load_dumper_logs
+        logs = _load_dumper_logs("store-test", limit=5)
         self.assertEqual(logs[0]["saved_margin"], 1500)
 
     @patch("backend.state_helpers._load_master_stock_groups")
@@ -243,11 +269,11 @@ class TestExecuteUpdatesLogPersistence(ExecutorTestBase):
         task = make_task()
         task["calculation_result"]["action"] = "PULL_UP_PRICE"
         RateLimitExecutorWorker.execute_updates(
-            [task], self.save_override, rate_limit_delay=0, merchant_id="999"
+            [task], self.save_override, rate_limit_delay=0, merchant_id="999",
+            store_id="store-test",
         )
-        import json
-        with open("states/dumper_logs.json", encoding="utf-8") as f:
-            logs = json.load(f)
+        from backend.state_helpers import _load_dumper_logs
+        logs = _load_dumper_logs("store-test", limit=5)
         self.assertEqual(logs[0]["saved_margin"], 2500)
 
 

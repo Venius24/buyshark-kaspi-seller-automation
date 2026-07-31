@@ -20,14 +20,6 @@ _overrides_file_lock = threading.Lock()  # см. _save_override()
 _mc_refresh_lock = threading.Lock()      # см. _refresh_mc_session()
 
 SESSION_FILE = "states/session.json"
-OVERRIDES_FILE = "states/products_overrides.json"
-DUMPING_CONFIGS_FILE = "states/dumping_configs.json"
-MASTER_STOCK_GROUPS_FILE = "states/master_stock_groups.json"
-PROCESSED_ORDERS_FILE = "states/processed_orders.json"
-API_KEYS_FILE = "states/api_keys.json"
-WEBHOOK_CONFIG_FILE = "states/webhook_config.json"
-PROCESSED_PACKAGING_ORDERS_FILE = "states/processed_packaging_orders.json"
-PRODUCTS_FILE = "states/products.json"
 
 def _get_sync_db_session():
     """Возвращает синхронную сессию SQLAlchemy для безопасного сохранения состояния в БД.
@@ -103,53 +95,32 @@ def extract_brand(name: Optional[str]) -> str:
             return b.capitalize()
     return "Barkhan"
 
-def _load_overrides(store_id: Optional[str] = None) -> dict:
+def _load_overrides(store_id: str) -> dict:
     """
-    store_id=None (legacy, pre-Phase-4d callers): unscoped load, exact
-    current behavior — including the JSON-file fallback below.
-
-    store_id given (Phase 4d-migrated callers): DB rows are filtered to that
-    store. An empty result means "no overrides yet for this store", not a
-    cue to fall back to the shared legacy JSON file (which mixes every
-    store's overrides together).
+    Слайс 7: store_id обязателен — легаси-фоллбек на общий states/products_overrides.json
+    (мешал оверрайды всех магазинов в одну кучу) убран целиком. Пустой
+    результат значит "у этого магазина ещё нет оверрайдов", а не сигнал
+    падать на общий файл.
     """
-    # 1. Загрузка из базы данных
     session = _get_sync_db_session()
     overrides = {}
     if session:
         try:
             from backend.db.models import ProductOverrideDB
-            stmt = select(ProductOverrideDB)
-            if store_id is not None:
-                stmt = stmt.where(ProductOverrideDB.store_id == store_id)
+            stmt = select(ProductOverrideDB).where(ProductOverrideDB.store_id == store_id)
             rows = session.scalars(stmt).all()
-            if rows:
-                for r in rows:
-                    overrides[r.sku] = {
-                        "price_num": r.price_num,
-                        "stock": r.stock,
-                        "brand": r.brand,
-                        "status": r.status
-                    }
-                session.close()
-                return overrides
-            session.close()
+            for r in rows:
+                overrides[r.sku] = {
+                    "price_num": r.price_num,
+                    "stock": r.stock,
+                    "brand": r.brand,
+                    "status": r.status
+                }
         except Exception as e:
             logger.debug(f"DB load overrides error: {e}")
-            if session:
-                session.close()
-
-    if store_id is not None:
-        return {}
-
-    # 2. Фоллбек из локального JSON файла (только для legacy-вызовов)
-    if os.path.exists(OVERRIDES_FILE):
-        try:
-            with open(OVERRIDES_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+        finally:
+            session.close()
+    return overrides
 
 def _save_override(
     sku: str,
@@ -157,40 +128,27 @@ def _save_override(
     stock: int,
     brand: Optional[str] = None,
     status: Optional[str] = None,
-    store_id: Optional[str] = None,
+    *,
+    store_id: str,
 ):
     # Категория 1: RateLimitExecutorWorker.execute_updates может звать это
-    # из нескольких потоков одновременно (по одному на SKU). Без лока
-    # read-modify-write полного OVERRIDES_FILE ниже гонится к побитой/
-    # частично перезаписанной JSON-структуре при параллельных SKU — лок
-    # сериализует именно эту (быструю, локальную) часть, не трогая
-    # медленные параллельные сетевые вызовы к Kaspi выше по стеку.
+    # из нескольких потоков одновременно (по одному на SKU). Лок сериализует
+    # доступ к общему in-process ресурсу (сама БД-транзакция ниже уже
+    # атомарна), не трогая медленные параллельные сетевые вызовы к Kaspi
+    # выше по стеку.
     with _overrides_file_lock:
-        overrides = _load_overrides(store_id=store_id)
         ov_data = {
             "price_num": price,
             "stock": stock,
             "brand": brand,
             "status": status or ("Активен" if stock > 0 else "Архив")
         }
-        overrides[sku] = ov_data
 
-        # Зеркалирование на диск
-        os.makedirs("states", exist_ok=True)
-        try:
-            with open(OVERRIDES_FILE, "w", encoding="utf-8") as f:
-                json.dump(overrides, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"Error writing overrides file: {e}")
-
-        # Сохранение в БД
         session = _get_sync_db_session()
         if not session:
             return
         try:
             from backend.db.models import ProductOverrideDB
-            # Слайс 2: PK составной (store_id, sku) — session.get(Model, sku)
-            # больше не однозначно резолвит строку, ищем явным запросом.
             db_obj = session.execute(
                 select(ProductOverrideDB).where(
                     ProductOverrideDB.sku == sku, ProductOverrideDB.store_id == store_id
@@ -207,8 +165,6 @@ def _save_override(
                 )
                 session.add(db_obj)
             else:
-                if store_id is not None:
-                    db_obj.store_id = store_id
                 db_obj.price_num = price
                 db_obj.stock = stock
                 if brand:
@@ -223,48 +179,25 @@ def _save_override(
                 session.rollback()
                 session.close()
 
-def _load_products(store_id: Optional[str] = None) -> list:
-    """
-    store_id given (Слайс 1-мигрированные вызовы): каталог этого магазина из
-    StoreProductDB, ключ — исключительно store_id. Пустой результат значит
-    "у этого магазина ещё нет синхронизированного каталога", не сигнал
-    читать общий legacy-файл — иначе ровно та утечка между магазинами,
-    ради закрытия которой это писалось.
-
-    store_id=None (легаси, ещё не мигрированные вызовы, напр. публичный
-    1С-API до Слайса 3): старое нескоуп-поведение — общий states/products.json.
-    """
-    if store_id is not None:
-        session = _get_sync_db_session()
-        if not session:
+def _load_products(store_id: str) -> list:
+    """Каталог этого магазина из StoreProductDB. Пустой результат значит
+    "у этого магазина ещё нет синхронизированного каталога"."""
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import StoreProductDB
+        row = session.get(StoreProductDB, store_id)
+        if not row:
             return []
         try:
-            from backend.db.models import StoreProductDB
-            row = session.get(StoreProductDB, store_id)
-            if not row:
-                return []
-            try:
-                return json.loads(row.payload)
-            except Exception:
-                return []
-        finally:
-            session.close()
-
-    if os.path.exists(PRODUCTS_FILE):
-        try:
-            with open(PRODUCTS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+            return json.loads(row.payload)
         except Exception:
-            pass
-    return []
+            return []
+    finally:
+        session.close()
 
-def _save_products(products: list, store_id: Optional[str] = None):
-    if store_id is None:
-        os.makedirs("states", exist_ok=True)
-        with open(PRODUCTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(products, f, ensure_ascii=False, indent=2)
-        return
-
+def _save_products(products: list, store_id: str):
     session = _get_sync_db_session()
     if not session:
         return
@@ -284,8 +217,8 @@ def _save_products(products: list, store_id: Optional[str] = None):
     finally:
         session.close()
 
-def _apply_overrides(products: list, store_id: Optional[str] = None) -> list:
-    overrides = _load_overrides(store_id=store_id)
+def _apply_overrides(products: list, store_id: str) -> list:
+    overrides = _load_overrides(store_id)
     for p in products:
         sku = p.get("sku")
         if "price_num" not in p:
@@ -312,98 +245,50 @@ def _apply_overrides(products: list, store_id: Optional[str] = None) -> list:
                 p["status"] = ov["status"]
     return products
 
-def _load_dumping_configs(store_id: Optional[str] = None) -> dict:
-    """
-    store_id=None (legacy, pre-Phase-4d callers): unscoped load, exact
-    current behavior — including the JSON-file fallback below.
-
-    store_id given (Phase 4d-migrated callers): DB rows are filtered to that
-    store. An empty result is treated as "this store has no configs yet",
-    NOT as a signal to fall back to the shared legacy JSON file — that file
-    mixes every store's data together, so using it as a fallback for a
-    scoped read would leak other stores' configs into this one's response.
-    """
-    # 1. Загрузка из базы данных
+def _load_dumping_configs(store_id: str) -> dict:
+    """Конфиги демпинга этого магазина. Пустой результат значит "у этого
+    магазина ещё нет конфигов демпинга"."""
     session = _get_sync_db_session()
     configs = {}
     if session:
         try:
             from backend.db.models import DumpingConfigDB
-            stmt = select(DumpingConfigDB)
-            if store_id is not None:
-                stmt = stmt.where(DumpingConfigDB.store_id == store_id)
+            stmt = select(DumpingConfigDB).where(DumpingConfigDB.store_id == store_id)
             rows = session.scalars(stmt).all()
-            if rows:
-                for r in rows:
-                    blacklisted = []
-                    if r.blacklisted_merchants:
-                        try:
-                            blacklisted = json.loads(r.blacklisted_merchants)
-                        except Exception:
-                            blacklisted = []
-                    configs[r.sku] = {
-                        "sku": r.sku,
-                        "min_price": float(r.min_price or 0.0),
-                        "max_price": float(r.max_price or 0.0),
-                        "dump_step": float(r.dump_step or 10.0),
-                        "enabled": bool(r.enabled),
-                        "mode": r.mode or "TOP_1",
-                        "target_position": int(r.target_position or 1),
-                        "max_delivery_days": r.max_delivery_days,
-                        "min_seller_rating": r.min_seller_rating,
-                        "same_city_only": bool(r.same_city_only),
-                        "blacklisted_merchants": blacklisted,
-                        "city_code": r.city_code or "750000000"
-                    }
-                session.close()
-                return configs
-            session.close()
+            for r in rows:
+                blacklisted = []
+                if r.blacklisted_merchants:
+                    try:
+                        blacklisted = json.loads(r.blacklisted_merchants)
+                    except Exception:
+                        blacklisted = []
+                configs[r.sku] = {
+                    "sku": r.sku,
+                    "min_price": float(r.min_price or 0.0),
+                    "max_price": float(r.max_price or 0.0),
+                    "dump_step": float(r.dump_step or 10.0),
+                    "enabled": bool(r.enabled),
+                    "mode": r.mode or "TOP_1",
+                    "target_position": int(r.target_position or 1),
+                    "max_delivery_days": r.max_delivery_days,
+                    "min_seller_rating": r.min_seller_rating,
+                    "same_city_only": bool(r.same_city_only),
+                    "blacklisted_merchants": blacklisted,
+                    "city_code": r.city_code or "750000000"
+                }
         except Exception as e:
             logger.debug(f"DB load dumping configs error: {e}")
-            if session:
-                session.close()
+        finally:
+            session.close()
+    return configs
 
-    if store_id is not None:
-        # Scoped callers never fall back to the shared legacy file — it mixes
-        # every store's data, so treat "no DB rows" / "no DB session" as
-        # "this store has no configs yet", not as a cue to read someone else's.
-        return {}
-
-    # 2. Фоллбек из файла с авто-миграцией в БД (только для legacy-вызовов)
-    if os.path.exists(DUMPING_CONFIGS_FILE):
-        try:
-            with open(DUMPING_CONFIGS_FILE, "r", encoding="utf-8") as f:
-                configs = json.load(f)
-                if configs and session:
-                    _save_dumping_configs(configs)
-                return configs
-        except Exception:
-            pass
-    return {}
-
-def _save_dumping_configs(configs: dict, store_id: Optional[str] = None):
-    """
-    store_id given (Phase 4d-migrated callers): tags every created/updated
-    row with store_id, so subsequent scoped loads pick it up correctly even
-    if the row previously existed unscoped (store_id=None, legacy data).
-    """
-    # Зеркалирование в локальный JSON
-    os.makedirs("states", exist_ok=True)
-    try:
-        with open(DUMPING_CONFIGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(configs, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Error writing dumping configs file: {e}")
-
-    # Персистентное сохранение в БД
+def _save_dumping_configs(configs: dict, store_id: str):
     session = _get_sync_db_session()
     if not session:
         return
     try:
         from backend.db.models import DumpingConfigDB
         for sku, cfg in configs.items():
-            # Слайс 2: PK составной (store_id, sku) — session.get(Model, sku)
-            # больше не однозначно резолвит строку, ищем явным запросом.
             db_obj = session.execute(
                 select(DumpingConfigDB).where(
                     DumpingConfigDB.sku == sku, DumpingConfigDB.store_id == store_id
@@ -428,8 +313,6 @@ def _save_dumping_configs(configs: dict, store_id: Optional[str] = None):
                 )
                 session.add(db_obj)
             else:
-                if store_id is not None:
-                    db_obj.store_id = store_id
                 db_obj.min_price = float(cfg.get("min_price", 0.0))
                 db_obj.max_price = float(cfg.get("max_price", 0.0))
                 db_obj.dump_step = float(cfg.get("dump_step", 10.0))
@@ -449,79 +332,42 @@ def _save_dumping_configs(configs: dict, store_id: Optional[str] = None):
             session.rollback()
             session.close()
 
-def _load_master_stock_groups(store_id: Optional[str] = None) -> dict:
-    """
-    store_id=None (legacy, pre-Phase-4d callers): unscoped load, exact
-    current behavior — including the JSON-file fallback below.
-
-    store_id given (Phase 4d-migrated callers): DB rows are filtered to that
-    store. An empty result means "no groups yet for this store", not a cue
-    to fall back to the shared legacy JSON file (which mixes every store's
-    groups together).
-    """
-    # 1. Загрузка из базы данных
+def _load_master_stock_groups(store_id: str) -> dict:
+    """Мастер-Группы остатка этого магазина. Пустой результат означает "у
+    этого магазина ещё нет групп"."""
     session = _get_sync_db_session()
     groups = {}
     if session:
         try:
             from backend.db.models import MasterStockGroupDB
-            stmt = select(MasterStockGroupDB)
-            if store_id is not None:
-                stmt = stmt.where(MasterStockGroupDB.store_id == store_id)
+            stmt = select(MasterStockGroupDB).where(MasterStockGroupDB.store_id == store_id)
             rows = session.scalars(stmt).all()
-            if rows:
-                for r in rows:
-                    linked_skus = json.loads(r.linked_skus) if r.linked_skus else []
-                    dumping_cfg = json.loads(r.dumping_config) if r.dumping_config else None
-                    sync_logs = json.loads(r.sync_logs) if r.sync_logs else []
-                    groups[r.group_id] = {
-                        "group_id": r.group_id,
-                        "group_name": r.group_name,
-                        "shared_stock": r.shared_stock,
-                        "linked_skus": linked_skus,
-                        "external_code": r.external_code,
-                        "is_active": r.is_active,
-                        "dumping_config": dumping_cfg,
-                        "status": r.status,
-                        "created_at": r.created_at,
-                        "updated_at": r.updated_at,
-                        "last_synced_at": r.last_synced_at,
-                        "last_sync_log": r.last_sync_log,
-                        "sync_logs": sync_logs
-                    }
-                session.close()
-                return groups
-            session.close()
+            for r in rows:
+                linked_skus = json.loads(r.linked_skus) if r.linked_skus else []
+                dumping_cfg = json.loads(r.dumping_config) if r.dumping_config else None
+                sync_logs = json.loads(r.sync_logs) if r.sync_logs else []
+                groups[r.group_id] = {
+                    "group_id": r.group_id,
+                    "group_name": r.group_name,
+                    "shared_stock": r.shared_stock,
+                    "linked_skus": linked_skus,
+                    "external_code": r.external_code,
+                    "is_active": r.is_active,
+                    "dumping_config": dumping_cfg,
+                    "status": r.status,
+                    "created_at": r.created_at,
+                    "updated_at": r.updated_at,
+                    "last_synced_at": r.last_synced_at,
+                    "last_sync_log": r.last_sync_log,
+                    "sync_logs": sync_logs
+                }
         except Exception as e:
             logger.debug(f"DB load master stock groups error: {e}")
-            if session:
-                session.close()
+        finally:
+            session.close()
+    return groups
 
-    if store_id is not None:
-        return {}
-
-    # 2. Фоллбек из файла с авто-миграцией в БД (только для legacy-вызовов)
-    if os.path.exists(MASTER_STOCK_GROUPS_FILE):
-        try:
-            with open(MASTER_STOCK_GROUPS_FILE, "r", encoding="utf-8") as f:
-                groups = json.load(f)
-                if groups and session:
-                    _save_master_stock_groups(groups)
-                return groups
-        except Exception:
-            pass
-    return {}
-
-def _save_master_stock_groups(groups: dict, store_id: Optional[str] = None):
-    # Зеркалирование в локальный JSON
-    os.makedirs("states", exist_ok=True)
-    try:
-        with open(MASTER_STOCK_GROUPS_FILE, "w", encoding="utf-8") as f:
-            json.dump(groups, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Error writing master stock groups file: {e}")
-
-    # Персистентное сохранение в БД
+def _save_master_stock_groups(groups: dict, store_id: str):
     session = _get_sync_db_session()
     if not session:
         return
@@ -551,8 +397,6 @@ def _save_master_stock_groups(groups: dict, store_id: Optional[str] = None):
                 )
                 session.add(db_obj)
             else:
-                if store_id is not None:
-                    db_obj.store_id = store_id
                 db_obj.group_name = g.get("group_name", "Группа")
                 db_obj.shared_stock = int(g.get("shared_stock", 0))
                 db_obj.linked_skus = linked_str
@@ -573,49 +417,30 @@ def _save_master_stock_groups(groups: dict, store_id: Optional[str] = None):
             session.rollback()
             session.close()
 
-def _load_processed_orders_by_kind(store_id: Optional[str], kind: str, legacy_file: str) -> dict:
-    """
-    store_id given (Слайс 5): {order_id: payload} из ProcessedOrderDB этого
-    магазина+kind ('radar' или 'packaging' — держит их независимыми, раньше
-    делили один файл только по типу, не по стору).
-    store_id=None (легаси): старый общий файл этого kind.
-    """
-    if store_id is not None:
-        session = _get_sync_db_session()
-        if not session:
-            return {}
-        try:
-            from backend.db.models import ProcessedOrderDB
-            rows = session.scalars(
-                select(ProcessedOrderDB).where(
-                    ProcessedOrderDB.store_id == store_id, ProcessedOrderDB.kind == kind
-                )
-            ).all()
-            result = {}
-            for r in rows:
-                try:
-                    result[r.order_id] = json.loads(r.payload)
-                except Exception:
-                    result[r.order_id] = {}
-            return result
-        finally:
-            session.close()
+def _load_processed_orders_by_kind(store_id: str, kind: str) -> dict:
+    """{order_id: payload} из ProcessedOrderDB этого магазина+kind ('radar'
+    или 'packaging' — держит их независимыми)."""
+    session = _get_sync_db_session()
+    if not session:
+        return {}
+    try:
+        from backend.db.models import ProcessedOrderDB
+        rows = session.scalars(
+            select(ProcessedOrderDB).where(
+                ProcessedOrderDB.store_id == store_id, ProcessedOrderDB.kind == kind
+            )
+        ).all()
+        result = {}
+        for r in rows:
+            try:
+                result[r.order_id] = json.loads(r.payload)
+            except Exception:
+                result[r.order_id] = {}
+        return result
+    finally:
+        session.close()
 
-    if os.path.exists(legacy_file):
-        try:
-            with open(legacy_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
-
-def _save_processed_orders_by_kind(orders: dict, store_id: Optional[str], kind: str, legacy_file: str):
-    if store_id is None:
-        os.makedirs("states", exist_ok=True)
-        with open(legacy_file, "w", encoding="utf-8") as f:
-            json.dump(orders, f, ensure_ascii=False, indent=2)
-        return
-
+def _save_processed_orders_by_kind(orders: dict, store_id: str, kind: str):
     session = _get_sync_db_session()
     if not session:
         return
@@ -635,11 +460,11 @@ def _save_processed_orders_by_kind(orders: dict, store_id: Optional[str], kind: 
     finally:
         session.close()
 
-def _load_processed_orders(store_id: Optional[str] = None) -> dict:
-    return _load_processed_orders_by_kind(store_id, "radar", PROCESSED_ORDERS_FILE)
+def _load_processed_orders(store_id: str) -> dict:
+    return _load_processed_orders_by_kind(store_id, "radar")
 
-def _save_processed_orders(orders: dict, store_id: Optional[str] = None):
-    _save_processed_orders_by_kind(orders, store_id, "radar", PROCESSED_ORDERS_FILE)
+def _save_processed_orders(orders: dict, store_id: str):
+    _save_processed_orders_by_kind(orders, store_id, "radar")
 
 def _get_store_status(store_id: str) -> Optional[str]:
     """
@@ -961,42 +786,27 @@ def _mc_api_request(method: str, url: str, store_id: Optional[str] = None, retry
             resp = requests.request(method, url, cookies=fresh_cookies, **kwargs)
     return resp
 
-def _list_api_keys(store_id: Optional[str] = None) -> dict:
-    """
-    Слайс 3: API-ключи 1С/ERP — раньше единый states/api_keys.json на все
-    магазины, любой валидный ключ давал доступ к данным любого стора.
-
-    store_id given: только ключи этого магазина (ApiKeyDB, БД).
-    store_id=None (легаси, ещё не мигрированные вызовы): старый общий файл.
-    """
-    if store_id is not None:
-        session = _get_sync_db_session()
-        if not session:
-            return {}
-        try:
-            from backend.db.models import ApiKeyDB
-            rows = session.scalars(select(ApiKeyDB).where(ApiKeyDB.store_id == store_id)).all()
-            return {
-                r.id: {
-                    "name": r.name,
-                    "hash": r.key_hash,
-                    "prefix": r.prefix,
-                    "created_at": r.created_at,
-                    "last_used": r.last_used,
-                    "active": r.active,
-                }
-                for r in rows
+def _list_api_keys(store_id: str) -> dict:
+    """API-ключи 1С/ERP этого магазина (ApiKeyDB)."""
+    session = _get_sync_db_session()
+    if not session:
+        return {}
+    try:
+        from backend.db.models import ApiKeyDB
+        rows = session.scalars(select(ApiKeyDB).where(ApiKeyDB.store_id == store_id)).all()
+        return {
+            r.id: {
+                "name": r.name,
+                "hash": r.key_hash,
+                "prefix": r.prefix,
+                "created_at": r.created_at,
+                "last_used": r.last_used,
+                "active": r.active,
             }
-        finally:
-            session.close()
-
-    if os.path.exists(API_KEYS_FILE):
-        try:
-            with open(API_KEYS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+            for r in rows
+        }
+    finally:
+        session.close()
 
 def _create_api_key(store_id: str, key_id: str, name: str, key_hash: str, prefix: str, created_at: str) -> bool:
     session = _get_sync_db_session()
@@ -1073,46 +883,28 @@ def _touch_api_key_last_used(key_id: str, when: str):
     finally:
         session.close()
 
-def _load_webhook_config(store_id: Optional[str] = None) -> dict:
-    """
-    store_id given: конфиг вебхука этого магазина (WebhookConfigDB, БД),
-    секрет хранится зашифрованным (security.crypto), возвращается расшифрованным.
-    store_id=None (легаси): старый общий файл (секрет там всегда был plaintext).
-    """
-    if store_id is not None:
-        session = _get_sync_db_session()
-        if not session:
+def _load_webhook_config(store_id: str) -> dict:
+    """Конфиг вебхука этого магазина (WebhookConfigDB), секрет хранится
+    зашифрованным (security.crypto), возвращается расшифрованным."""
+    session = _get_sync_db_session()
+    if not session:
+        return {}
+    try:
+        from backend.db.models import WebhookConfigDB
+        from backend.security.crypto import decrypt_data
+        row = session.get(WebhookConfigDB, store_id)
+        if not row:
             return {}
-        try:
-            from backend.db.models import WebhookConfigDB
-            from backend.security.crypto import decrypt_data
-            row = session.get(WebhookConfigDB, store_id)
-            if not row:
-                return {}
-            return {
-                "url": row.url,
-                "secret": decrypt_data(row.encrypted_secret) if row.encrypted_secret else "",
-                "enabled": row.enabled,
-                "updated_at": row.updated_at,
-            }
-        finally:
-            session.close()
+        return {
+            "url": row.url,
+            "secret": decrypt_data(row.encrypted_secret) if row.encrypted_secret else "",
+            "enabled": row.enabled,
+            "updated_at": row.updated_at,
+        }
+    finally:
+        session.close()
 
-    if os.path.exists(WEBHOOK_CONFIG_FILE):
-        try:
-            with open(WEBHOOK_CONFIG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
-
-def _save_webhook_config(cfg: dict, store_id: Optional[str] = None):
-    if store_id is None:
-        os.makedirs("states", exist_ok=True)
-        with open(WEBHOOK_CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
-        return
-
+def _save_webhook_config(cfg: dict, store_id: str):
     session = _get_sync_db_session()
     if not session:
         return
@@ -1140,128 +932,77 @@ def _save_webhook_config(cfg: dict, store_id: Optional[str] = None):
     finally:
         session.close()
 
-PROCESSED_PACKAGING_ORDERS_FILE = "states/processed_packaging_orders.json"
+def _load_processed_packaging_orders(store_id: str) -> dict:
+    return _load_processed_orders_by_kind(store_id, "packaging")
 
-def _load_processed_packaging_orders(store_id: Optional[str] = None) -> dict:
-    return _load_processed_orders_by_kind(store_id, "packaging", PROCESSED_PACKAGING_ORDERS_FILE)
+def _save_processed_packaging_orders(data: dict, store_id: str):
+    _save_processed_orders_by_kind(data, store_id, "packaging")
 
-def _save_processed_packaging_orders(data: dict, store_id: Optional[str] = None):
-    _save_processed_orders_by_kind(data, store_id, "packaging", PROCESSED_PACKAGING_ORDERS_FILE)
-
-DUMPER_LOGS_FILE = "states/dumper_logs.json"
-
-def _append_dumper_logs(events: list, store_id: Optional[str] = None):
-    """
-    events: список {"timestamp", "message", "saved_margin"} — новые события
-    демпинга за один проход исполнителя.
-
-    store_id given (Слайс 5): своя строка DumperLogDB на событие — виджет
-    Overview у одного магазина больше не видит события другого.
-    store_id=None (легаси): старый общий файл (prepend + обрезка до 50).
-    """
+def _append_dumper_logs(events: list, store_id: str):
+    """events: список {"timestamp", "message", "saved_margin"} — новые
+    события демпинга этого магазина за один проход исполнителя."""
     if not events:
         return
 
-    if store_id is not None:
-        session = _get_sync_db_session()
-        if not session:
-            return
-        try:
-            from backend.db.models import DumperLogDB
-            import datetime as _dt
-            for event in events:
-                session.add(DumperLogDB(
-                    store_id=store_id,
-                    created_at=_dt.datetime.utcnow(),
-                    payload=json.dumps(event, ensure_ascii=False),
-                ))
-            session.commit()
-        except Exception as e:
-            logger.error(f"Error persisting dumper logs to DB: {e}")
-            session.rollback()
-        finally:
-            session.close()
+    session = _get_sync_db_session()
+    if not session:
         return
+    try:
+        from backend.db.models import DumperLogDB
+        import datetime as _dt
+        for event in events:
+            session.add(DumperLogDB(
+                store_id=store_id,
+                created_at=_dt.datetime.utcnow(),
+                payload=json.dumps(event, ensure_ascii=False),
+            ))
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting dumper logs to DB: {e}")
+        session.rollback()
+    finally:
+        session.close()
 
-    existing_logs = []
-    if os.path.exists(DUMPER_LOGS_FILE):
-        try:
-            with open(DUMPER_LOGS_FILE, "r", encoding="utf-8") as f:
-                existing_logs = json.load(f)
-        except Exception:
-            existing_logs = []
-    combined = (events + existing_logs)[:50]
-    os.makedirs("states", exist_ok=True)
-    with open(DUMPER_LOGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(combined, f, ensure_ascii=False, indent=2)
+def _load_dumper_logs(store_id: str, limit: int = 5) -> list:
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import DumperLogDB
+        rows = session.scalars(
+            select(DumperLogDB)
+            .where(DumperLogDB.store_id == store_id)
+            .order_by(DumperLogDB.id.desc())
+            .limit(limit)
+        ).all()
+        result = []
+        for r in rows:
+            try:
+                result.append(json.loads(r.payload))
+            except Exception:
+                pass
+        return result
+    finally:
+        session.close()
 
-def _load_dumper_logs(store_id: Optional[str] = None, limit: int = 5) -> list:
-    if store_id is not None:
-        session = _get_sync_db_session()
-        if not session:
-            return []
-        try:
-            from backend.db.models import DumperLogDB
-            rows = session.scalars(
-                select(DumperLogDB)
-                .where(DumperLogDB.store_id == store_id)
-                .order_by(DumperLogDB.id.desc())
-                .limit(limit)
-            ).all()
-            result = []
-            for r in rows:
-                try:
-                    result.append(json.loads(r.payload))
-                except Exception:
-                    pass
-            return result
-        finally:
-            session.close()
-
-    if os.path.exists(DUMPER_LOGS_FILE):
-        try:
-            with open(DUMPER_LOGS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)[:limit]
-        except Exception:
-            pass
-    return []
-
-def _load_analytics_snapshot(store_id: Optional[str] = None) -> dict:
-    """
-    store_id given (Слайс 5): AnalyticsSnapshotDB этого магазина.
-    store_id=None (легаси): старый общий states/analytics.json.
-    """
-    if store_id is not None:
-        session = _get_sync_db_session()
-        if not session:
+def _load_analytics_snapshot(store_id: str) -> dict:
+    """AnalyticsSnapshotDB этого магазина."""
+    session = _get_sync_db_session()
+    if not session:
+        return {}
+    try:
+        from backend.db.models import AnalyticsSnapshotDB
+        row = session.get(AnalyticsSnapshotDB, store_id)
+        if not row:
             return {}
         try:
-            from backend.db.models import AnalyticsSnapshotDB
-            row = session.get(AnalyticsSnapshotDB, store_id)
-            if not row:
-                return {}
-            try:
-                return json.loads(row.payload)
-            except Exception:
-                return {}
-        finally:
-            session.close()
-
-    if os.path.exists("states/analytics.json"):
-        try:
-            with open("states/analytics.json", "r", encoding="utf-8") as f:
-                return json.load(f)
+            return json.loads(row.payload)
         except Exception:
-            pass
-    return {}
+            return {}
+    finally:
+        session.close()
 
-def _save_analytics_snapshot(data: dict, store_id: Optional[str] = None):
-    if store_id is None:
-        os.makedirs("states", exist_ok=True)
-        with open("states/analytics.json", "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        return
-
+def _save_analytics_snapshot(data: dict, store_id: str):
     session = _get_sync_db_session()
     if not session:
         return

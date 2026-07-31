@@ -806,16 +806,16 @@ class KaspiAPI:
     @staticmethod
     def sync_merchant_assortment(token: str, store_id: Optional[str] = None) -> list:
         """Выкачивает ВСЕ товары из кабинета Kaspi (ассортимент) через BFF эндпоинт или фоллбеки."""
-        from backend.state_helpers import _load_session
-        session = _load_session()
-        m_id = session.get("merchant_id")
-        if not m_id or not str(m_id).isdigit():
-            try:
-                m_id = KaspiAPI.get_merchant_id(token)
-            except Exception:
-                m_id = "20186986"
-            if not str(m_id).isdigit():
-                m_id = "20186986"
+        # Слайс 7: раньше сперва читался merchant_id из общего states/session.json
+        # — для стора B это могло вернуть merchant_id стора A. Токен уже
+        # однозначно указывает, чей это запрос — резолвим напрямую по нему
+        # (тот же фикс, что и в dumper/config.py::discover_merchant_id).
+        try:
+            m_id = KaspiAPI.get_merchant_id(token)
+        except Exception:
+            m_id = "20186986"
+        if not str(m_id).isdigit():
+            m_id = "20186986"
         merchant_id = str(m_id)
 
         cookies = KaspiAPI._load_mc_cookies(store_id=store_id)

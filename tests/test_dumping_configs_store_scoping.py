@@ -26,10 +26,9 @@ def make_config_dict(min_price=100.0):
 
 class DumpingConfigsStoreScopingTest(unittest.TestCase):
     """
-    Phase 4b: _load_dumping_configs/_save_dumping_configs now accept an
-    optional store_id. These tests are the evidence that scoped reads never
-    leak another store's (or legacy, unscoped) data — the exact bug class
-    Phase 4 exists to close.
+    _load_dumping_configs/_save_dumping_configs require store_id (Слайс 7 —
+    legacy unscoped/shared-file path removed entirely). These tests are the
+    evidence that scoped reads never leak another store's data.
     """
 
     def setUp(self):
@@ -74,57 +73,28 @@ class DumpingConfigsStoreScopingTest(unittest.TestCase):
         configs_b = self.state_helpers._load_dumping_configs(store_id="store-B")
         self.assertEqual(configs_b, {})
 
-    def test_scoped_load_does_not_see_legacy_unscoped_rows(self):
-        # Legacy caller writes with no store_id (store_id stays NULL)
-        self.state_helpers._save_dumping_configs({"SKU-LEGACY": make_config_dict(50)})
-        configs_scoped = self.state_helpers._load_dumping_configs(store_id="store-A")
-        self.assertEqual(configs_scoped, {})
+    def test_two_stores_keep_independent_configs_for_the_same_sku(self):
+        """Слайс 2: composite PK (store_id, sku) — same SKU, different stores,
+        no clobbering."""
+        self.state_helpers._save_dumping_configs({"SKU-X": make_config_dict(100)}, store_id="store-A")
+        self.state_helpers._save_dumping_configs({"SKU-X": make_config_dict(200)}, store_id="store-B")
 
-    def test_unscoped_legacy_load_still_sees_every_scoped_row(self):
-        """An unfiltered (store_id=None) load still returns every store's
-        rows unfiltered — that mixing-view behavior is unchanged by Слайс 2."""
-        self.state_helpers._save_dumping_configs({"SKU-A": make_config_dict(100)}, store_id="store-A")
-        self.state_helpers._save_dumping_configs({"SKU-B": make_config_dict(200)}, store_id="store-B")
+        self.assertEqual(self.state_helpers._load_dumping_configs(store_id="store-A")["SKU-X"]["min_price"], 100.0)
+        self.assertEqual(self.state_helpers._load_dumping_configs(store_id="store-B")["SKU-X"]["min_price"], 200.0)
 
-        legacy_view = self.state_helpers._load_dumping_configs()
-        self.assertEqual(set(legacy_view.keys()), {"SKU-A", "SKU-B"})
+    def test_save_call_requires_store_id(self):
+        with self.assertRaises(TypeError):
+            self.state_helpers._save_dumping_configs({"SKU-A": make_config_dict(100)})
 
-    def test_legacy_unscoped_save_no_longer_persists_to_db(self):
-        """Слайс 2: store_id is now part of the primary key and NOT NULL —
-        a legacy (store_id=None) save can no longer create a row at all
-        (ownership would be ambiguous by construction). The DB write fails
-        and is caught/logged/rolled back; it must not raise or corrupt
-        other stores' data."""
-        self.state_helpers._save_dumping_configs({"SKU-A": make_config_dict(100)}, store_id="store-A")
-        self.state_helpers._save_dumping_configs({"SKU-LEGACY": make_config_dict(300)})  # must not raise
+    def test_load_call_requires_store_id(self):
+        with self.assertRaises(TypeError):
+            self.state_helpers._load_dumping_configs()
 
-        self.assertEqual(self.state_helpers._load_dumping_configs(store_id="store-A")["SKU-A"]["min_price"], 100.0)
-        self.assertNotIn("SKU-LEGACY", self.state_helpers._load_dumping_configs())
-
-    def test_scoped_save_tags_a_previously_legacy_row(self):
-        """A row created before store scoping existed (store_id NULL) gets
-        correctly tagged once a scoped caller updates it."""
-        self.state_helpers._save_dumping_configs({"SKU-X": make_config_dict(10)})  # legacy write
-        self.assertEqual(self.state_helpers._load_dumping_configs(store_id="store-A"), {})
-
-        self.state_helpers._save_dumping_configs({"SKU-X": make_config_dict(20)}, store_id="store-A")
-        scoped = self.state_helpers._load_dumping_configs(store_id="store-A")
-        self.assertEqual(scoped["SKU-X"]["min_price"], 20.0)
-
-    def test_no_db_session_scoped_load_returns_empty_not_shared_file(self):
-        """If the DB is unreachable, a scoped caller must never fall back to
-        the shared legacy JSON file — that file mixes every store's data."""
-        os.makedirs("states", exist_ok=True)
-        with open("states/dumping_configs.json", "w", encoding="utf-8") as f:
-            import json
-            json.dump({"SOMEONE-ELSES-SKU": make_config_dict(999)}, f)
-
+    def test_no_db_session_scoped_load_returns_empty(self):
+        """If the DB is unreachable, a scoped load must degrade to empty —
+        there is no shared file left to fall back to."""
         with patch.object(self.state_helpers, "_get_sync_db_session", return_value=None):
-            scoped = self.state_helpers._load_dumping_configs(store_id="store-A")
-            self.assertEqual(scoped, {})
-
-            legacy = self.state_helpers._load_dumping_configs()
-            self.assertIn("SOMEONE-ELSES-SKU", legacy)
+            self.assertEqual(self.state_helpers._load_dumping_configs(store_id="store-A"), {})
 
 
 if __name__ == "__main__":

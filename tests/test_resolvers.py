@@ -28,36 +28,24 @@ def make_response(status_code=200, json_data=None):
 
 
 class TestDiscoverMerchantIdConfigModule(unittest.TestCase):
-    """dumper/config.py::discover_merchant_id"""
-
-    @patch("backend.state_helpers._load_session")
-    def test_session_has_plain_digit_merchant_id(self, mock_session):
-        mock_session.return_value = {"merchant_id": "20186986"}
-        self.assertEqual(discover_merchant_id("tok"), "20186986")
-
-    @patch("backend.state_helpers._load_session")
-    def test_session_has_prefixed_merchant_id(self, mock_session):
-        mock_session.return_value = {"merchant_id": "m_20186986"}
-        self.assertEqual(discover_merchant_id("tok"), "20186986")
+    """
+    dumper/config.py::discover_merchant_id — Слайс 7: больше не читает общий
+    states/session.json (тот кэш мог вернуть merchant_id ЧУЖОГО магазина),
+    резолвит всегда через живой API-запрос по переданному токену.
+    """
 
     @patch("backend.dumper.config.requests.get")
-    @patch("backend.state_helpers._load_session")
-    def test_no_session_id_resolves_via_api_with_underscore(self, mock_session, mock_get):
-        mock_session.return_value = {}
+    def test_resolves_via_api_with_underscore(self, mock_get):
         mock_get.return_value = make_response(200, {"data": [{"id": "12345_001"}]})
         self.assertEqual(discover_merchant_id("tok"), "12345")
 
     @patch("backend.dumper.config.requests.get")
-    @patch("backend.state_helpers._load_session")
-    def test_no_session_id_resolves_via_api_without_underscore(self, mock_session, mock_get):
-        mock_session.return_value = {}
+    def test_resolves_via_api_without_underscore(self, mock_get):
         mock_get.return_value = make_response(200, {"data": [{"id": "98765"}]})
         self.assertEqual(discover_merchant_id("tok"), "98765")
 
     @patch("backend.dumper.config.requests.get")
-    @patch("backend.state_helpers._load_session")
-    def test_total_failure_falls_back_to_hardcoded_default(self, mock_session, mock_get):
-        mock_session.return_value = {}
+    def test_total_failure_falls_back_to_hardcoded_default(self, mock_get):
         mock_get.side_effect = Exception("network down")
         self.assertEqual(discover_merchant_id("tok"), "20186986")
 

@@ -10,11 +10,9 @@ sys.path.append(os.getcwd())
 
 class ProductOverridesStoreScopingTest(unittest.TestCase):
     """
-    Phase 4d (products.py migration): _load_overrides/_save_override/
-    _apply_overrides now accept an optional store_id, mirroring the
-    dumping_configs pattern (see test_dumping_configs_store_scoping.py).
-    Evidence that scoped reads never leak another store's (or legacy,
-    unscoped) override data.
+    _load_overrides/_save_override/_apply_overrides require store_id (Слайс 7
+    — legacy unscoped/shared-file path removed entirely). Evidence that
+    scoped reads never leak another store's override data.
     """
 
     def setUp(self):
@@ -54,29 +52,12 @@ class ProductOverridesStoreScopingTest(unittest.TestCase):
         overrides_b = self.state_helpers._load_overrides(store_id="store-B")
         self.assertEqual(overrides_b, {})
 
-    def test_scoped_load_does_not_see_legacy_unscoped_rows(self):
-        self.state_helpers._save_override("SKU-LEGACY", 50, 3)  # legacy, no store_id
-        scoped = self.state_helpers._load_overrides(store_id="store-A")
-        self.assertEqual(scoped, {})
+    def test_two_stores_keep_independent_overrides_for_the_same_sku(self):
+        self.state_helpers._save_override("SKU-X", 100, 5, store_id="store-A")
+        self.state_helpers._save_override("SKU-X", 200, 6, store_id="store-B")
 
-    def test_unscoped_legacy_load_still_sees_every_scoped_row(self):
-        """An unfiltered (store_id=None) load still returns every store's
-        rows unfiltered — that mixing-view behavior is unchanged by Слайс 2."""
-        self.state_helpers._save_override("SKU-A", 100, 5, store_id="store-A")
-        self.state_helpers._save_override("SKU-B", 200, 6, store_id="store-B")
-        legacy_view = self.state_helpers._load_overrides()
-        self.assertEqual(set(legacy_view.keys()), {"SKU-A", "SKU-B"})
-
-    def test_legacy_unscoped_save_no_longer_persists_to_db(self):
-        """Слайс 2: store_id is now part of the primary key and NOT NULL —
-        a legacy (store_id=None) save can no longer create a row at all.
-        The DB write fails and is caught/logged/rolled back; it must not
-        raise or corrupt other stores' data."""
-        self.state_helpers._save_override("SKU-A", 100, 5, store_id="store-A")
-        self.state_helpers._save_override("SKU-LEGACY", 300, 7)  # must not raise
-
-        self.assertEqual(self.state_helpers._load_overrides(store_id="store-A")["SKU-A"]["price_num"], 100)
-        self.assertNotIn("SKU-LEGACY", self.state_helpers._load_overrides())
+        self.assertEqual(self.state_helpers._load_overrides(store_id="store-A")["SKU-X"]["price_num"], 100)
+        self.assertEqual(self.state_helpers._load_overrides(store_id="store-B")["SKU-X"]["price_num"], 200)
 
     def test_apply_overrides_is_store_scoped(self):
         self.state_helpers._save_override("SKU-A", 555, 9, store_id="store-A")
@@ -88,18 +69,17 @@ class ProductOverridesStoreScopingTest(unittest.TestCase):
         scoped_result_a = self.state_helpers._apply_overrides(list(products), store_id="store-A")
         self.assertEqual(scoped_result_a[0]["price_num"], 555)
 
-    def test_no_db_session_scoped_load_returns_empty_not_shared_file(self):
-        os.makedirs("states", exist_ok=True)
-        with open("states/products_overrides.json", "w", encoding="utf-8") as f:
-            import json
-            json.dump({"SOMEONE-ELSES-SKU": {"price_num": 999, "stock": 1, "brand": None, "status": "Активен"}}, f)
+    def test_save_call_requires_store_id(self):
+        with self.assertRaises(TypeError):
+            self.state_helpers._save_override("SKU-A", 100, 5)
 
+    def test_load_call_requires_store_id(self):
+        with self.assertRaises(TypeError):
+            self.state_helpers._load_overrides()
+
+    def test_no_db_session_scoped_load_returns_empty(self):
         with patch.object(self.state_helpers, "_get_sync_db_session", return_value=None):
-            scoped = self.state_helpers._load_overrides(store_id="store-A")
-            self.assertEqual(scoped, {})
-
-            legacy = self.state_helpers._load_overrides()
-            self.assertIn("SOMEONE-ELSES-SKU", legacy)
+            self.assertEqual(self.state_helpers._load_overrides(store_id="store-A"), {})
 
 
 if __name__ == "__main__":

@@ -23,7 +23,10 @@ def _make_response(offers, total=None):
 
 
 def _run_sync(offers):
-    with patch("backend.state_helpers._load_session", return_value={"merchant_id": "20186986"}), \
+    # Слайс 7: sync_merchant_assortment больше не читает merchant_id из общего
+    # states/session.json (тот кэш мог вернуть merchant_id ЧУЖОГО магазина) —
+    # резолвит его напрямую через KaspiAPI.get_merchant_id(token).
+    with patch.object(KaspiAPI, "get_merchant_id", return_value="20186986"), \
          patch.object(KaspiAPI, "_load_mc_cookies", return_value={"mc-session": "x", "mc-sid": "y"}), \
          patch.object(KaspiAPI, "_request_with_mc_refresh", side_effect=[_make_response(offers), _make_response([])]):
         return KaspiAPI.sync_merchant_assortment(token="tok")

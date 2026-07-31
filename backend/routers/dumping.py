@@ -5,7 +5,7 @@ import logging
 import functools
 from fastapi import APIRouter, Depends, HTTPException
 from backend.models import DumpingConfigRequest
-from backend.state_helpers import _get_token, _load_dumping_configs, _save_dumping_configs, _save_override, _apply_overrides, _load_products, _save_products
+from backend.state_helpers import _load_dumping_configs, _save_dumping_configs, _save_override, _apply_overrides, _load_products, _save_products
 from backend.dumper import run_price_dumping_job
 from backend.security.store_context import StoreContext, get_store_context, list_active_stores
 
@@ -60,31 +60,23 @@ async def _run_dumping_cycle(token: str, store_id) -> dict:
 
 async def run_scheduled_dumping_cycle() -> dict:
     """
-    Один запланированный проход демпинга по всем активным сторам (Phase 7).
-    Если в БД ещё нет ни одного Store (dev-стенд без миграции) — падает на
-    legacy глобальную сессию, ровно то же поведение, что было до Phase 7.
-    Вынесено из background_dumping_loop отдельной функцией для юнит-тестов
-    (без бесконечного цикла/sleep вокруг).
+    Один запланированный проход демпинга по всем активным сторам.
+
+    Слайс 7: легаси-фоллбек на общую сессию (когда в БД ещё нет ни одного
+    Store) убран — нет активных сторов, нечего демпинговать, цикл просто
+    ничего не делает вместо угадывания токена из общего states/session.json.
     """
     total_updated = 0
     stores = await list_active_stores()
 
-    if stores:
-        logger.info(f"🤖 [Scheduler] Running automated 5-minute price dumper cycle for {len(stores)} store(s)...")
-        for store in stores:
-            try:
-                res = await _run_dumping_cycle(store.token, store.store_id)
-                total_updated += res.get("updated_count", 0)
-                _get_scheduler_state(store.store_id).last_run_timestamp = time.time()
-            except Exception as e:
-                logger.error(f"Scheduled dumper run failed for store {store.store_id}: {e}")
-    else:
-        token = _get_token()
-        if token:
-            logger.info("🤖 [Scheduler] Running automated 5-minute price dumper cycle (legacy single-tenant session)...")
-            res = await _run_dumping_cycle(token, None)
+    logger.info(f"🤖 [Scheduler] Running automated 5-minute price dumper cycle for {len(stores)} store(s)...")
+    for store in stores:
+        try:
+            res = await _run_dumping_cycle(store.token, store.store_id)
             total_updated += res.get("updated_count", 0)
-            _get_scheduler_state(None).last_run_timestamp = time.time()
+            _get_scheduler_state(store.store_id).last_run_timestamp = time.time()
+        except Exception as e:
+            logger.error(f"Scheduled dumper run failed for store {store.store_id}: {e}")
 
     _get_scheduler_state(None).last_run_timestamp = time.time()
     logger.info(f"🤖 [Scheduler] Automated cycle finished. Applied changes: {total_updated}.")

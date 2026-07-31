@@ -27,9 +27,8 @@ def make_group_dict(group_name="Test Group", shared_stock=10):
 
 class MasterStockGroupsStoreScopingTest(unittest.TestCase):
     """
-    Phase 4d (stock_groups.py migration): _load_master_stock_groups/
-    _save_master_stock_groups now accept an optional store_id, mirroring the
-    dumping_configs pattern (see test_dumping_configs_store_scoping.py).
+    _load_master_stock_groups/_save_master_stock_groups require store_id
+    (Слайс 7 — legacy unscoped/shared-file path removed entirely).
     """
 
     def setUp(self):
@@ -73,52 +72,17 @@ class MasterStockGroupsStoreScopingTest(unittest.TestCase):
         groups_b = self.state_helpers._load_master_stock_groups(store_id="store-B")
         self.assertEqual(groups_b, {})
 
-    def test_scoped_load_does_not_see_legacy_unscoped_rows(self):
-        self.state_helpers._save_master_stock_groups({"grp_LEGACY": make_group_dict("Legacy Group")})
-        scoped = self.state_helpers._load_master_stock_groups(store_id="store-A")
-        self.assertEqual(scoped, {})
+    def test_save_call_requires_store_id(self):
+        with self.assertRaises(TypeError):
+            self.state_helpers._save_master_stock_groups({"grp_A": make_group_dict("A")})
 
-    def test_unscoped_legacy_load_still_sees_every_scoped_row(self):
-        """An unfiltered (store_id=None) load still returns every store's
-        rows unfiltered — that mixing-view behavior is unchanged by Слайс 2."""
-        self.state_helpers._save_master_stock_groups({"grp_A": make_group_dict("A")}, store_id="store-A")
-        self.state_helpers._save_master_stock_groups({"grp_B": make_group_dict("B")}, store_id="store-B")
-        legacy_view = self.state_helpers._load_master_stock_groups()
-        self.assertEqual(set(legacy_view.keys()), {"grp_A", "grp_B"})
+    def test_load_call_requires_store_id(self):
+        with self.assertRaises(TypeError):
+            self.state_helpers._load_master_stock_groups()
 
-    def test_legacy_unscoped_save_no_longer_persists_to_db(self):
-        """Слайс 2: master_stock_groups.store_id is now NOT NULL — a legacy
-        (store_id=None) save can no longer create a row at all. The DB write
-        fails and is caught/logged/rolled back; it must not raise or
-        corrupt other stores' data."""
-        self.state_helpers._save_master_stock_groups({"grp_A": make_group_dict("A")}, store_id="store-A")
-        self.state_helpers._save_master_stock_groups({"grp_LEGACY": make_group_dict("Legacy")})  # must not raise
-
-        self.assertEqual(self.state_helpers._load_master_stock_groups(store_id="store-A")["grp_A"]["group_name"], "A")
-        self.assertNotIn("grp_LEGACY", self.state_helpers._load_master_stock_groups())
-
-    def test_scoped_save_tags_a_previously_legacy_row(self):
-        self.state_helpers._save_master_stock_groups({"grp_X": make_group_dict("X", shared_stock=1)})
-        self.assertEqual(self.state_helpers._load_master_stock_groups(store_id="store-A"), {})
-
-        self.state_helpers._save_master_stock_groups(
-            {"grp_X": make_group_dict("X", shared_stock=2)}, store_id="store-A"
-        )
-        scoped = self.state_helpers._load_master_stock_groups(store_id="store-A")
-        self.assertEqual(scoped["grp_X"]["shared_stock"], 2)
-
-    def test_no_db_session_scoped_load_returns_empty_not_shared_file(self):
-        os.makedirs("states", exist_ok=True)
-        with open("states/master_stock_groups.json", "w", encoding="utf-8") as f:
-            import json
-            json.dump({"SOMEONE-ELSES-GROUP": make_group_dict("Leak")}, f)
-
+    def test_no_db_session_scoped_load_returns_empty(self):
         with patch.object(self.state_helpers, "_get_sync_db_session", return_value=None):
-            scoped = self.state_helpers._load_master_stock_groups(store_id="store-A")
-            self.assertEqual(scoped, {})
-
-            legacy = self.state_helpers._load_master_stock_groups()
-            self.assertIn("SOMEONE-ELSES-GROUP", legacy)
+            self.assertEqual(self.state_helpers._load_master_stock_groups(store_id="store-A"), {})
 
 
 if __name__ == "__main__":

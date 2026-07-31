@@ -27,9 +27,9 @@ class TestGetStockLock(unittest.IsolatedAsyncioTestCase):
         lock_b = worker.get_stock_lock("store-b")
         self.assertIsNot(lock_a, lock_b)
 
-    async def test_none_store_id_is_the_legacy_shared_key(self):
-        """store_id=None (unscoped/legacy callers) all share one lock — the
-        same contract the single global asyncio.Lock() used to provide."""
+    async def test_none_store_id_is_a_distinct_shared_key(self):
+        """store_id=None all share one lock key — not reachable from any
+        real call site any more (Слайс 7), but harmless as a dict key."""
         lock1 = worker.get_stock_lock(None)
         lock2 = worker.get_stock_lock()
         self.assertIs(lock1, lock2)
@@ -52,23 +52,14 @@ class TestRunStockRadarCycle(unittest.IsolatedAsyncioTestCase):
     """Phase 7: run_stock_radar_cycle() — the testable core of
     master_stock_radar_loop(), extracted from the infinite while-loop."""
 
-    @patch("backend.services.stock_sync_worker._get_token")
     @patch("backend.services.stock_sync_worker.list_active_stores", new_callable=AsyncMock)
-    async def test_no_stores_and_no_legacy_token_does_nothing(self, mock_list_stores, mock_get_token):
+    async def test_no_active_stores_does_nothing(self, mock_list_stores):
+        """Слайс 7: легаси-фоллбек на общую сессию убран — нет активных
+        сторов, нечего сканировать."""
         mock_list_stores.return_value = []
-        mock_get_token.return_value = None
         with patch("backend.services.stock_sync_worker._run_stock_radar_pass", new_callable=AsyncMock) as mock_pass:
             await worker.run_stock_radar_cycle()
         mock_pass.assert_not_awaited()
-
-    @patch("backend.services.stock_sync_worker._get_token")
-    @patch("backend.services.stock_sync_worker.list_active_stores", new_callable=AsyncMock)
-    async def test_no_stores_in_db_falls_back_to_legacy_session(self, mock_list_stores, mock_get_token):
-        mock_list_stores.return_value = []
-        mock_get_token.return_value = "legacy_token"
-        with patch("backend.services.stock_sync_worker._run_stock_radar_pass", new_callable=AsyncMock) as mock_pass:
-            await worker.run_stock_radar_cycle()
-        mock_pass.assert_awaited_once_with("legacy_token", None)
 
     @patch("backend.services.stock_sync_worker.list_active_stores", new_callable=AsyncMock)
     async def test_iterates_every_active_store_independently(self, mock_list_stores):
@@ -100,22 +91,11 @@ class TestRunPackagingSyncCycle(unittest.IsolatedAsyncioTestCase):
     """Phase 7: run_packaging_sync_cycle() — the testable core of
     start_packaging_sync_loop()."""
 
-    @patch("backend.services.stock_sync_worker._get_token")
     @patch("backend.services.stock_sync_worker.list_active_stores", new_callable=AsyncMock)
-    async def test_no_stores_in_db_falls_back_to_legacy_session(self, mock_list_stores, mock_get_token):
+    async def test_no_active_stores_does_nothing(self, mock_list_stores):
+        """Слайс 7: легаси-фоллбек на общую сессию убран — нет активных
+        сторов, нечего списывать."""
         mock_list_stores.return_value = []
-        mock_get_token.return_value = "legacy_token"
-        with patch("backend.services.stock_sync_worker.process_packaging_auto_deduction", new_callable=AsyncMock) as mock_dedup:
-            await worker.run_packaging_sync_cycle()
-        mock_dedup.assert_awaited_once_with("legacy_token")
-
-    @patch("backend.services.stock_sync_worker._get_token")
-    @patch("backend.services.stock_sync_worker.list_active_stores", new_callable=AsyncMock)
-    async def test_legacy_test_token_is_skipped(self, mock_list_stores, mock_get_token):
-        """Characterizes the pre-existing dev/test guard: a token starting
-        with 'test_' must not trigger a real Kaspi API call."""
-        mock_list_stores.return_value = []
-        mock_get_token.return_value = "test_fake_token"
         with patch("backend.services.stock_sync_worker.process_packaging_auto_deduction", new_callable=AsyncMock) as mock_dedup:
             await worker.run_packaging_sync_cycle()
         mock_dedup.assert_not_awaited()
@@ -155,12 +135,6 @@ class TestExecuteBroadcastSyncStoreScoping(unittest.IsolatedAsyncioTestCase):
         mock_load.return_value = {}
         await worker.execute_broadcast_sync("grp_1", "token", store_id="store-a")
         mock_load.assert_called_once_with(store_id="store-a")
-
-    @patch("backend.services.stock_sync_worker._load_master_stock_groups")
-    async def test_none_store_id_preserves_legacy_unscoped_read(self, mock_load):
-        mock_load.return_value = {}
-        await worker.execute_broadcast_sync("grp_1", "token")
-        mock_load.assert_called_once_with(store_id=None)
 
 
 if __name__ == "__main__":

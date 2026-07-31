@@ -7,20 +7,14 @@ logger = logging.getLogger(__name__)
 
 def discover_merchant_id(token: str) -> str:
     """
-    Автоматически определяет Merchant ID (ID кабинета) по API-токену.
-    Делает GET-запрос к /pointofservices или использует сохраненный merchant_id.
-    """
-    from backend.state_helpers import _load_session
-    session = _load_session()
-    raw_m_id = str(session.get("merchant_id") or "").strip()
-    if raw_m_id:
-        if raw_m_id.isdigit():
-            return raw_m_id
-        # Если строка содержит подчёркивание или префикс (например "m_20186986" или "20186986_001")
-        parts = [p for p in raw_m_id.replace("_", " ").replace("-", " ").split() if p.isdigit()]
-        if parts:
-            return parts[0]
+    Автоматически определяет Merchant ID (ID кабинета) по API-токену через
+    GET-запрос к /pointofservices.
 
+    Слайс 7: раньше сперва проверялся merchant_id из общего states/session.json
+    — общий на все магазины кэш, который для стора B мог вернуть merchant_id
+    стора A (если тот когда-либо залогинился через legacy-поток first). Токен
+    уже однозначно указывает, чей это запрос — резолвим напрямую по нему.
+    """
     url = "https://kaspi.kz/shop/api/v2/pointofservices"
     headers = {
         "Content-Type": "application/vnd.api+json",

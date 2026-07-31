@@ -1,8 +1,7 @@
-import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Optional
-from fastapi import Request, WebSocket, Depends
+from fastapi import Request, WebSocket, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -10,8 +9,6 @@ from backend.db.database import get_db
 from backend.db.models import User, Store, UserStore
 from backend.security.auth import decode_token
 from backend.security.crypto import decrypt_data
-from backend.state_helpers import _require_token
-from backend.dumper.config import discover_merchant_id
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +17,7 @@ logger = logging.getLogger(__name__)
 class StoreContext:
     token: str
     merchant_id: str
-    store_id: Optional[str]  # None only for legacy (pre-Phase-4e) callers
+    store_id: str
 
 
 async def _resolve_store_for_user(request: Request, db: AsyncSession, user_id: str) -> Optional[Store]:
@@ -50,16 +47,14 @@ async def get_store_context(
     db: AsyncSession = Depends(get_db),
 ) -> StoreContext:
     """
-    Резолвит (token, merchant_id, store_id) для эндпоинтов, мигрирующих на
-    per-store модель (Phase 4b-4d refactor plan).
+    Резолвит (token, merchant_id, store_id) для store-scoped эндпоинтов.
 
-    Переходный период (dual-auth, до Phase 4e — удаления legacy-пути):
-    если запрос несёт валидный JWT Bearer, резолвящийся в активного User,
-    и у пользователя есть доступный Store (через заголовок X-Store-Id или
-    единственный/старейший магазин) — используем новую, per-store схему.
-    Иначе — падаем обратно на legacy глобальную сессию (states/session.json),
-    ТОЧНО то же поведение, что и текущий _require_token()+discover_merchant_id().
-    Ничего не ломается для клиентов, ещё не отправляющих JWT.
+    Слайс 7: legacy-фоллбек на общую сессию (states/session.json) удалён
+    целиком — запрос без валидного JWT Bearer, без активного User или без
+    доступного этому пользователю Store (X-Store-Id либо единственный/
+    старейший магазин) получает явный 401, а не тихий доступ к общей/чужой
+    сессии. Раньше это было переходным поведением на время dual-auth
+    миграции (Phase 4b-4e) — миграция завершена, все клиенты шлют JWT.
     """
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
@@ -82,17 +77,7 @@ async def get_store_context(
                                 store_id=store.id,
                             )
 
-    # Legacy fallback — unchanged behavior for pre-migration clients. Both
-    # calls are blocking (file I/O, and discover_merchant_id can hit
-    # kaspi.kz over the network) — this dependency runs on nearly every
-    # request in the app, so leaving it unwrapped stalled the single
-    # event loop for every user on every request, not just this one.
-    def _resolve_legacy():
-        token = _require_token()
-        return token, discover_merchant_id(token)
-
-    legacy_token, legacy_merchant_id = await asyncio.to_thread(_resolve_legacy)
-    return StoreContext(token=legacy_token, merchant_id=legacy_merchant_id, store_id=None)
+    raise HTTPException(status_code=401, detail="Требуется вход в аккаунт с подключённым магазином.")
 
 
 async def list_active_stores() -> list[StoreContext]:

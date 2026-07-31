@@ -105,29 +105,14 @@ class TestRunScheduledDumpingCycle(unittest.IsolatedAsyncioTestCase):
     background_dumping_loop(), extracted so it can run without the
     infinite while-loop/sleep wrapper around it."""
 
-    @patch("backend.routers.dumping._get_token")
     @patch("backend.routers.dumping.list_active_stores", new_callable=AsyncMock)
-    async def test_no_stores_and_no_legacy_token_does_nothing(self, mock_list_stores, mock_get_token):
+    async def test_no_active_stores_does_nothing(self, mock_list_stores):
+        """Слайс 7: легаси-фоллбек на общую сессию убран — нет активных
+        сторов, нечего демпинговать."""
         mock_list_stores.return_value = []
-        mock_get_token.return_value = None
         result = await dumping.run_scheduled_dumping_cycle()
         self.assertEqual(result["updated_count"], 0)
         self.assertEqual(result["stores_processed"], 0)
-
-    @patch("backend.routers.dumping._run_dumping_cycle", new_callable=AsyncMock)
-    @patch("backend.routers.dumping._get_token")
-    @patch("backend.routers.dumping.list_active_stores", new_callable=AsyncMock)
-    async def test_no_stores_in_db_falls_back_to_legacy_session(self, mock_list_stores, mock_get_token, mock_cycle):
-        """Pre-Phase-4 / dev environments with no Store rows yet must keep
-        working exactly as before Phase 7."""
-        mock_list_stores.return_value = []
-        mock_get_token.return_value = "legacy_token"
-        mock_cycle.return_value = {"updated_count": 3}
-
-        result = await dumping.run_scheduled_dumping_cycle()
-
-        mock_cycle.assert_awaited_once_with("legacy_token", None)
-        self.assertEqual(result["updated_count"], 3)
 
     @patch("backend.routers.dumping._run_dumping_cycle", new_callable=AsyncMock)
     @patch("backend.routers.dumping.list_active_stores", new_callable=AsyncMock)

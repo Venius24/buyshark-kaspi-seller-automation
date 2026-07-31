@@ -8,6 +8,7 @@ sys.path.append(os.getcwd())
 
 from backend.main import app
 from backend.kaspi_wrapper import KaspiAPI
+from backend.security.store_context import StoreContext, get_store_context
 
 class TestOrdersRouter(unittest.TestCase):
     """
@@ -24,12 +25,19 @@ class TestOrdersRouter(unittest.TestCase):
         # чтобы тест не зависел от порядка запуска.
         KaspiAPI._packaging_tabs_cache.clear()
 
-    @patch("backend.security.store_context.discover_merchant_id")
-    @patch("backend.security.store_context._require_token")
+        # Слайс 7: get_store_context больше не падает на legacy-сессию без
+        # JWT — переопределяем саму зависимость напрямую фиксированным
+        # контекстом, эти тесты про логику роутера, а не про auth.
+        app.dependency_overrides[get_store_context] = lambda: StoreContext(
+            token=self.fake_token, merchant_id="12345678", store_id="store-test"
+        )
+
+    def tearDown(self):
+        app.dependency_overrides.pop(get_store_context, None)
+
     @patch("backend.kaspi_wrapper.KaspiAPI.get_all_packaging_tabs")
-    def test_get_packaging_tabs_endpoint(self, mock_tabs, mock_token, mock_merchant_id):
+    def test_get_packaging_tabs_endpoint(self, mock_tabs):
         """Проверка GET /api/orders/packaging/tabs."""
-        mock_token.return_value = self.fake_token
         mock_tabs.return_value = {
             "success": True,
             "cargo_assembly": [{"id": "1001", "code": "1009566143"}],
@@ -44,12 +52,9 @@ class TestOrdersRouter(unittest.TestCase):
         self.assertTrue(data["success"])
         self.assertEqual(data["counts"]["cargo_assembly"], 1)
 
-    @patch("backend.security.store_context.discover_merchant_id")
-    @patch("backend.security.store_context._require_token")
     @patch("backend.kaspi_wrapper.KaspiAPI.get_packaging_orders_by_sku_prefix")
-    def test_get_packaging_by_prefix_endpoint(self, mock_prefix, mock_token, mock_merchant_id):
+    def test_get_packaging_by_prefix_endpoint(self, mock_prefix):
         """Проверка GET /api/orders/packaging/by-prefix."""
-        mock_token.return_value = self.fake_token
         mock_prefix.return_value = {
             "success": True,
             "prefix": "T219-0005",
@@ -66,12 +71,9 @@ class TestOrdersRouter(unittest.TestCase):
         self.assertEqual(data["count"], 2)
         self.assertEqual(data["total_quantity"], 3)
 
-    @patch("backend.security.store_context.discover_merchant_id")
-    @patch("backend.security.store_context._require_token")
     @patch("backend.kaspi_wrapper.KaspiAPI.get_orders_with_products")
-    def test_get_orders_endpoint(self, mock_orders, mock_token, mock_merchant_id):
+    def test_get_orders_endpoint(self, mock_orders):
         """Проверка GET /api/orders."""
-        mock_token.return_value = self.fake_token
         mock_orders.return_value = [
             {"id": "1009566143", "productName": "Грипсы Barkhan", "assembled": False}
         ]

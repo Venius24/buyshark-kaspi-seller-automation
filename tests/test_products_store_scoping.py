@@ -85,27 +85,17 @@ class ProductsStoreScopingTest(unittest.TestCase):
         scoped = self.state_helpers._load_products(store_id="store-A")
         self.assertEqual(scoped, [])
 
-    def test_unscoped_legacy_call_still_reads_shared_file(self):
-        """Backward compat: not-yet-migrated callers (store_id=None, e.g.
-        public API before Слайс 3) keep the exact old shared-file behavior."""
-        os.makedirs("states", exist_ok=True)
-        with open("states/products.json", "w", encoding="utf-8") as f:
-            json.dump([make_product("LEGACY-SKU")], f)
+    def test_save_call_requires_store_id(self):
+        with self.assertRaises(TypeError):
+            self.state_helpers._save_products([make_product("SKU-A")])
 
-        legacy_view = self.state_helpers._load_products()
-        self.assertEqual([p["sku"] for p in legacy_view], ["LEGACY-SKU"])
+    def test_load_call_requires_store_id(self):
+        with self.assertRaises(TypeError):
+            self.state_helpers._load_products()
 
-    def test_no_db_session_scoped_load_returns_empty_not_shared_file(self):
-        os.makedirs("states", exist_ok=True)
-        with open("states/products.json", "w", encoding="utf-8") as f:
-            json.dump([make_product("SOMEONE-ELSES-SKU")], f)
-
+    def test_no_db_session_scoped_load_returns_empty(self):
         with patch.object(self.state_helpers, "_get_sync_db_session", return_value=None):
-            scoped = self.state_helpers._load_products(store_id="store-A")
-            self.assertEqual(scoped, [])
-
-            legacy = self.state_helpers._load_products()
-            self.assertEqual([p["sku"] for p in legacy], ["SOMEONE-ELSES-SKU"])
+            self.assertEqual(self.state_helpers._load_products(store_id="store-A"), [])
 
 
 if __name__ == "__main__":

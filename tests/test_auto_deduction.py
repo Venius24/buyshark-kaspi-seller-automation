@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 sys.path.append(os.getcwd())
@@ -11,6 +11,7 @@ from backend.services.stock_sync_worker import (
     _calculate_physical_units,
     process_packaging_auto_deduction
 )
+from backend.security.store_context import StoreContext, get_store_context
 
 class TestAutoDeductionEngine(unittest.TestCase):
     """
@@ -20,6 +21,15 @@ class TestAutoDeductionEngine(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
         self.fake_token = "REDACTED_KASPI_API_TOKEN"
+        # Слайс 7: get_store_context больше не падает на legacy-сессию без
+        # JWT — переопределяем саму зависимость напрямую фиксированным
+        # контекстом, этот тест про логику роутера, а не про auth.
+        app.dependency_overrides[get_store_context] = lambda: StoreContext(
+            token=self.fake_token, merchant_id="12345678", store_id="store-test"
+        )
+
+    def tearDown(self):
+        app.dependency_overrides.pop(get_store_context, None)
 
     def test_calculate_physical_units(self):
         """Тест вычисления физических единиц списания для обычных SKU и мульти-паков."""
@@ -76,12 +86,9 @@ class TestAutoDeductionEngine(unittest.TestCase):
         self.assertEqual(res["deductions"][0]["units"], 4)
         self.assertEqual(res["deductions"][0]["new_stock"], 6)
 
-    @patch("backend.security.store_context.discover_merchant_id")
-    @patch("backend.security.store_context._require_token")
     @patch("backend.services.stock_sync_worker.process_packaging_auto_deduction")
-    def test_check_packaging_deduction_endpoint(self, mock_deduction, mock_token, mock_merchant_id):
+    def test_check_packaging_deduction_endpoint(self, mock_deduction):
         """Тест API эндпоинта POST /api/stock-groups/check-packaging-deduction."""
-        mock_token.return_value = self.fake_token
         mock_deduction.return_value = {
             "success": True,
             "deducted_orders_count": 1,

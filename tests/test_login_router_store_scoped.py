@@ -118,32 +118,20 @@ class TestLoginRouterStoreScoped(unittest.TestCase):
         self.assertIn("mc-sid=fresh-sid", cookie_str)
 
     @patch("backend.routers.auth.worker")
-    def test_login_with_no_jwt_keeps_legacy_global_behavior(self, mock_worker):
-        """No Authorization header at all -> ctx.store_id is None -> exact
-        pre-3.1 behavior (global states/session.json), Store row untouched.
-
-        get_store_context's legacy fallback still requires SOME saved legacy
-        token (_require_token()), same as every other dual-auth-migrated
-        router — pre-seed one, matching test_dumping_router_dual_auth.py's
-        TestDumpingRouterLegacyPath convention.
-        """
-        with open("states/session.json", "w", encoding="utf-8") as f:
-            json.dump({"token": "legacy_token"}, f)
+    def test_login_with_no_jwt_returns_401(self, mock_worker):
+        """Слайс 7: legacy-фоллбек на общую сессию убран целиком — без
+        Authorization заголовка /api/login отдаёт 401, Store не трогается."""
         mock_worker.send_cmd.return_value = (True, "Success")
 
         resp = self.client.post(
             "/api/login",
             json={"email": "shop@kaspi.kz", "password": "hunter2"},
         )
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 401)
 
         db_store = self._read_store_from_db()
         self.assertIsNone(db_store.encrypted_cookies)
         self.assertIsNone(db_store.encrypted_mc_email)
-
-        with open("states/session.json", encoding="utf-8") as f:
-            session_data = json.load(f)
-        self.assertIn("mc_email_enc", session_data)
 
 
 if __name__ == "__main__":

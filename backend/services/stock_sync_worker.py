@@ -6,7 +6,6 @@ import requests
 from typing import Optional, List
 
 from backend.state_helpers import (
-    _get_token,
     _load_master_stock_groups,
     _save_master_stock_groups,
     _load_processed_orders,
@@ -367,22 +366,19 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
 
 async def run_stock_radar_cycle():
     """
-    Один цикл радара по всем активным сторам (Phase 7). Падает на legacy
-    глобальную сессию, только если в БД ещё нет ни одного Store (dev-стенд
-    без миграции). Вынесено из master_stock_radar_loop отдельной функцией
-    для юнит-тестов (без бесконечного цикла/sleep вокруг).
+    Один цикл радара по всем активным сторам. Вынесено из
+    master_stock_radar_loop отдельной функцией для юнит-тестов (без
+    бесконечного цикла/sleep вокруг).
+
+    Слайс 7: легаси-фоллбек на общую сессию (когда в БД ещё нет ни одного
+    Store) убран — нет активных сторов, нечего сканировать.
     """
     stores = await list_active_stores()
-    if stores:
-        for store in stores:
-            try:
-                await _run_stock_radar_pass(store.token, store.store_id)
-            except Exception as e:
-                logger.error(f"[Master Stock Radar] Store {store.store_id} pass failed: {e}")
-    else:
-        token = _get_token()
-        if token:
-            await _run_stock_radar_pass(token, None)
+    for store in stores:
+        try:
+            await _run_stock_radar_pass(store.token, store.store_id)
+        except Exception as e:
+            logger.error(f"[Master Stock Radar] Store {store.store_id} pass failed: {e}")
 
 async def master_stock_radar_loop():
     """
@@ -545,20 +541,18 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
 
 async def run_packaging_sync_cycle():
     """
-    Один цикл авто-списания по всем активным сторам (Phase 7), с legacy-
-    фоллбеком если в БД нет Store. Вынесено отдельной функцией для юнит-тестов.
+    Один цикл авто-списания по всем активным сторам. Вынесено отдельной
+    функцией для юнит-тестов.
+
+    Слайс 7: легаси-фоллбек на общую сессию (когда в БД ещё нет ни одного
+    Store) убран — нет активных сторов, нечего списывать.
     """
     stores = await list_active_stores()
-    if stores:
-        for store in stores:
-            try:
-                await process_packaging_auto_deduction(store.token, store.store_id)
-            except Exception as e:
-                logger.error(f"[Packaging Sync Loop] Store {store.store_id} failed: {e}")
-    else:
-        token = _get_token()
-        if token and not token.startswith("test_"):
-            await process_packaging_auto_deduction(token)
+    for store in stores:
+        try:
+            await process_packaging_auto_deduction(store.token, store.store_id)
+        except Exception as e:
+            logger.error(f"[Packaging Sync Loop] Store {store.store_id} failed: {e}")
 
 async def start_packaging_sync_loop(interval_seconds: int = 30):
     """Фоновый воркер авто-списания остатков при появлении новых заказов в Упаковке — по всем активным сторам (Phase 7)."""
