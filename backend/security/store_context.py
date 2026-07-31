@@ -125,6 +125,27 @@ async def list_active_stores() -> list[StoreContext]:
     return contexts
 
 
+async def get_store_by_id(store_id: str) -> Optional[StoreContext]:
+    """
+    Резолвит StoreContext для конкретного store_id без HTTP-запроса/JWT —
+    для system-internal вызовов, которые уже знают store_id (например,
+    публичный 1С/ERP API, резолвящий его из API-ключа — см.
+    routers/public_api/auth.py::get_api_key_user, Слайс 3).
+    """
+    from backend.db.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        stmt = select(Store).where(Store.id == store_id)
+        res = await session.execute(stmt)
+        store = res.scalar_one_or_none()
+        if not store or not store.encrypted_api_key:
+            return None
+        token = decrypt_data(store.encrypted_api_key)
+        if not token:
+            return None
+        return StoreContext(token=token, merchant_id=store.merchant_id, store_id=store.id)
+
+
 async def resolve_ws_store_id(websocket: WebSocket, db: AsyncSession) -> Optional[str]:
     """
     Резолвит store_id для WS-подключения (Phase 6). Браузерный WebSocket API не

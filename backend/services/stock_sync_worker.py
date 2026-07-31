@@ -346,7 +346,8 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
                                     "external_code": grp.get("external_code"),
                                     "previous_stock": current_stock,
                                     "remaining_shared_stock": new_stock
-                                }
+                                },
+                                store_id
                             )
                         )
 

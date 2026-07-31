@@ -907,10 +907,35 @@ def _mc_api_request(method: str, url: str, store_id: Optional[str] = None, retry
             resp = requests.request(method, url, cookies=fresh_cookies, **kwargs)
     return resp
 
-API_KEYS_FILE = "states/api_keys.json"
-WEBHOOK_CONFIG_FILE = "states/webhook_config.json"
+def _list_api_keys(store_id: Optional[str] = None) -> dict:
+    """
+    Слайс 3: API-ключи 1С/ERP — раньше единый states/api_keys.json на все
+    магазины, любой валидный ключ давал доступ к данным любого стора.
 
-def _load_api_keys() -> dict:
+    store_id given: только ключи этого магазина (ApiKeyDB, БД).
+    store_id=None (легаси, ещё не мигрированные вызовы): старый общий файл.
+    """
+    if store_id is not None:
+        session = _get_sync_db_session()
+        if not session:
+            return {}
+        try:
+            from backend.db.models import ApiKeyDB
+            rows = session.scalars(select(ApiKeyDB).where(ApiKeyDB.store_id == store_id)).all()
+            return {
+                r.id: {
+                    "name": r.name,
+                    "hash": r.key_hash,
+                    "prefix": r.prefix,
+                    "created_at": r.created_at,
+                    "last_used": r.last_used,
+                    "active": r.active,
+                }
+                for r in rows
+            }
+        finally:
+            session.close()
+
     if os.path.exists(API_KEYS_FILE):
         try:
             with open(API_KEYS_FILE, "r", encoding="utf-8") as f:
@@ -919,12 +944,106 @@ def _load_api_keys() -> dict:
             pass
     return {}
 
-def _save_api_keys(keys: dict):
-    os.makedirs("states", exist_ok=True)
-    with open(API_KEYS_FILE, "w", encoding="utf-8") as f:
-        json.dump(keys, f, ensure_ascii=False, indent=2)
+def _create_api_key(store_id: str, key_id: str, name: str, key_hash: str, prefix: str, created_at: str) -> bool:
+    session = _get_sync_db_session()
+    if not session:
+        return False
+    try:
+        from backend.db.models import ApiKeyDB
+        session.add(ApiKeyDB(
+            id=key_id, store_id=store_id, name=name, key_hash=key_hash,
+            prefix=prefix, created_at=created_at, last_used=None, active=True,
+        ))
+        session.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error creating API key in DB: {e}")
+        session.rollback()
+        return False
+    finally:
+        session.close()
 
-def _load_webhook_config() -> dict:
+def _revoke_api_key(store_id: str, key_id: str) -> Optional[str]:
+    """Удаляет ключ, ТОЛЬКО если он принадлежит этому store_id — иначе
+    (не найден / чужой магазин) возвращает None, ничего не удаляя."""
+    session = _get_sync_db_session()
+    if not session:
+        return None
+    try:
+        from backend.db.models import ApiKeyDB
+        row = session.get(ApiKeyDB, key_id)
+        if not row or row.store_id != store_id:
+            return None
+        name = row.name
+        session.delete(row)
+        session.commit()
+        return name
+    except Exception as e:
+        logger.error(f"Error revoking API key in DB: {e}")
+        session.rollback()
+        return None
+    finally:
+        session.close()
+
+def _find_api_key_by_hash(key_hash: str) -> Optional[dict]:
+    """Для публичного API (X-API-Key) — резолвит владельца (store_id) по
+    хешу ключа, без стор-скоупа: сам ключ и есть предъявленный идентификатор
+    доступа, скоуп его результата — задача вызывающего кода."""
+    session = _get_sync_db_session()
+    if not session:
+        return None
+    try:
+        from backend.db.models import ApiKeyDB
+        row = session.scalars(
+            select(ApiKeyDB).where(ApiKeyDB.key_hash == key_hash, ApiKeyDB.active == True)
+        ).first()
+        if not row:
+            return None
+        return {"key_id": row.id, "name": row.name, "store_id": row.store_id}
+    finally:
+        session.close()
+
+def _touch_api_key_last_used(key_id: str, when: str):
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import ApiKeyDB
+        row = session.get(ApiKeyDB, key_id)
+        if row:
+            row.last_used = when
+            session.commit()
+    except Exception as e:
+        logger.error(f"Error touching API key last_used: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
+def _load_webhook_config(store_id: Optional[str] = None) -> dict:
+    """
+    store_id given: конфиг вебхука этого магазина (WebhookConfigDB, БД),
+    секрет хранится зашифрованным (security.crypto), возвращается расшифрованным.
+    store_id=None (легаси): старый общий файл (секрет там всегда был plaintext).
+    """
+    if store_id is not None:
+        session = _get_sync_db_session()
+        if not session:
+            return {}
+        try:
+            from backend.db.models import WebhookConfigDB
+            from backend.security.crypto import decrypt_data
+            row = session.get(WebhookConfigDB, store_id)
+            if not row:
+                return {}
+            return {
+                "url": row.url,
+                "secret": decrypt_data(row.encrypted_secret) if row.encrypted_secret else "",
+                "enabled": row.enabled,
+                "updated_at": row.updated_at,
+            }
+        finally:
+            session.close()
+
     if os.path.exists(WEBHOOK_CONFIG_FILE):
         try:
             with open(WEBHOOK_CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -933,10 +1052,39 @@ def _load_webhook_config() -> dict:
             pass
     return {}
 
-def _save_webhook_config(cfg: dict):
-    os.makedirs("states", exist_ok=True)
-    with open(WEBHOOK_CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+def _save_webhook_config(cfg: dict, store_id: Optional[str] = None):
+    if store_id is None:
+        os.makedirs("states", exist_ok=True)
+        with open(WEBHOOK_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        return
+
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import WebhookConfigDB
+        from backend.security.crypto import encrypt_data
+        secret_plain = (cfg.get("secret") or "").strip()
+        secret_enc = encrypt_data(secret_plain) if secret_plain else None
+        row = session.get(WebhookConfigDB, store_id)
+        if not row:
+            row = WebhookConfigDB(
+                store_id=store_id, url=cfg.get("url", ""), encrypted_secret=secret_enc,
+                enabled=cfg.get("enabled", True), updated_at=cfg.get("updated_at"),
+            )
+            session.add(row)
+        else:
+            row.url = cfg.get("url", "")
+            row.encrypted_secret = secret_enc
+            row.enabled = cfg.get("enabled", True)
+            row.updated_at = cfg.get("updated_at")
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting webhook config to DB: {e}")
+        session.rollback()
+    finally:
+        session.close()
 
 PROCESSED_PACKAGING_ORDERS_FILE = "states/processed_packaging_orders.json"
 

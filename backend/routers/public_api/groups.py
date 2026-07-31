@@ -4,11 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 
 from backend.models import PublicStockUpdateRequest
 from backend.state_helpers import (
-    _get_token,
     _load_master_stock_groups,
     _save_master_stock_groups
 )
 from backend.routers.public_api.auth import get_api_key_user
+from backend.security.store_context import get_store_by_id
 from backend.services.stock_sync_worker import execute_broadcast_sync, get_stock_lock
 from backend.services.webhook_dispatcher import dispatch_webhook_event
 
@@ -17,9 +17,11 @@ router = APIRouter(prefix="/api/v1/public", tags=["public-api"])
 @router.get("/groups")
 def get_public_groups(auth_user: dict = Depends(get_api_key_user)):
     """
-    [Public API 1С/ERP] Получить список всех Мастер-Групп остатков с кодами 1С (external_code).
+    [Public API 1С/ERP] Получить список Мастер-Групп остатков ТОЛЬКО того
+    магазина, которому принадлежит предъявленный API-ключ (Слайс 3 — раньше
+    любой валидный ключ видел группы ВСЕХ магазинов).
     """
-    groups_dict = _load_master_stock_groups()
+    groups_dict = _load_master_stock_groups(store_id=auth_user["store_id"])
     data = []
 
     for gid, g in groups_dict.items():
@@ -44,7 +46,8 @@ async def update_public_stock(
     auth_user: dict = Depends(get_api_key_user)
 ):
     """
-    [Public API 1С/ERP] Обновить остаток Мастер-Группы по group_id или external_code.
+    [Public API 1С/ERP] Обновить остаток Мастер-Группы по group_id или external_code,
+    ТОЛЬКО в рамках магазина предъявленного API-ключа (Слайс 3).
     Поддерживает режим SET (установка точного остатка) и DELTA (списание/приход +/- N).
     """
     if not req.group_id and not req.external_code:
@@ -53,10 +56,17 @@ async def update_public_stock(
             detail="Необходимо указать хотя бы одно из полей: group_id или external_code."
         )
 
-    token = _get_token() or "offline_token"
+    store_id = auth_user["store_id"]
+    store_ctx = await get_store_by_id(store_id)
+    if not store_ctx:
+        raise HTTPException(
+            status_code=400,
+            detail="Магазин этого API-ключа не найден или не авторизован в Kaspi MC — обратитесь в поддержку."
+        )
+    token = store_ctx.token
 
-    async with get_stock_lock():
-        groups = _load_master_stock_groups()
+    async with get_stock_lock(store_id):
+        groups = _load_master_stock_groups(store_id=store_id)
 
         matched_gid = None
         target_group = None
@@ -92,12 +102,12 @@ async def update_public_stock(
         target_group["last_sync_log"] = f"Обновлено через Public API ({mode}): {new_stock} шт."
 
         groups[matched_gid] = target_group
-        _save_master_stock_groups(groups)
+        _save_master_stock_groups(groups, store_id=store_id)
 
     # Запускаем веерное обновление на Kaspi
-    background_tasks.add_task(execute_broadcast_sync, matched_gid, token)
+    background_tasks.add_task(execute_broadcast_sync, matched_gid, token, store_id)
 
-    # Отправляем Webhook событие во внешнюю 1С
+    # Отправляем Webhook событие во внешнюю 1С (конфиг этого же магазина)
     background_tasks.add_task(
         dispatch_webhook_event,
         "stock.updated",
@@ -109,7 +119,8 @@ async def update_public_stock(
             "new_stock": new_stock,
             "mode": mode,
             "source": f"Public API ({auth_user.get('name')})"
-        }
+        },
+        store_id
     )
 
     linked_count = len(target_group.get("linked_skus", []))

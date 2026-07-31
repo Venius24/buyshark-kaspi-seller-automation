@@ -146,3 +146,26 @@ class StoreProductDB(Base):
     payload: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON-stringified list товаров
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+class ApiKeyDB(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    prefix: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    last_used: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class WebhookConfigDB(Base):
+    __tablename__ = "webhook_configs"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    encrypted_secret: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+

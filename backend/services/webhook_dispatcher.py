@@ -6,18 +6,21 @@ import asyncio
 import logging
 import requests
 import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from backend.state_helpers import _load_webhook_config
 
 logger = logging.getLogger(__name__)
 
-async def dispatch_webhook_event(event_type: str, payload_data: Dict[str, Any]):
+async def dispatch_webhook_event(event_type: str, payload_data: Dict[str, Any], store_id: Optional[str] = None):
     """
-    Отправляет HTTP Webhook POST запрос во внешнюю систему 1С/ERP.
+    Отправляет HTTP Webhook POST запрос во внешнюю систему 1С/ERP этого магазина.
     Добавляет HMAC-SHA256 подпись в заголовок X-Webhook-Signature и выполняет 3 повторные попытки при ошибках.
+
+    store_id given (Слайс 3): конфиг вебхука этого магазина (WebhookConfigDB).
+    store_id=None (легаси, ещё не мигрированные вызовы): старый общий файл.
     """
-    cfg = _load_webhook_config()
+    cfg = _load_webhook_config(store_id=store_id)
     if not cfg or not cfg.get("enabled", True):
         return
 
