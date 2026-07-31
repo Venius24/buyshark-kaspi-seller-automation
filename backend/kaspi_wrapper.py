@@ -66,6 +66,41 @@ class KaspiAPI:
         }
 
     @staticmethod
+    def _fetch_pages_batched(fetch_page_fn, max_workers: int = 3):
+        """
+        Категория 1 (B.1): постраничный обход с ограниченной конкурентностью.
+        Страницы номер N известны заранее не будут (Kaspi API v2 не отдаёт
+        total count в ответе) — качаем батчами по max_workers одновременно
+        (тот же уровень конкурентности, что уже используется в
+        routers/orders.py::pack_all_orders для assemble_cargo), но ОТДАЁМ
+        вызывающему коду строго по возрастанию номера страницы — это
+        критично для сохранения существующей эвристики терминации
+        "короткая/пустая страница = последняя": если бы отдавали в порядке
+        завершения запроса, можно было бы обработать страницу N+1 раньше,
+        чем определили, что страница N — последняя.
+
+        Компромисс: если реальных данных меньше, чем max_workers страниц,
+        мы всё равно закачаем весь батч (1-2 лишних быстрых запроса на
+        пустые страницы) — цена того, что медленный случай (много страниц,
+        отсюда и была проблема 14-39с ответа) ускоряется кратно.
+
+        Исключение из любой страницы батча пробрасывается наружу (через
+        future.result()) в момент, когда до неё доходит очередь в
+        сортированном порядке — так же, как необработанное исключение из
+        requests.get() пробросилось бы и в старом строго последовательном
+        коде.
+        """
+        page = 0
+        while True:
+            batch_page_numbers = list(range(page, page + max_workers))
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {pool.submit(fetch_page_fn, p): p for p in batch_page_numbers}
+                batch_futures = {futures[fut]: fut for fut in as_completed(futures)}
+            for page_number in sorted(batch_futures):
+                yield page_number, batch_futures[page_number].result()
+            page += max_workers
+
+    @staticmethod
     def _get(url: str, token: str, params: dict = None) -> requests.Response:
         """GET with exponential backoff on 429."""
         headers = KaspiAPI._headers(token)
@@ -253,12 +288,11 @@ class KaspiAPI:
         Индексирует включенный массив `included` по entry_id для мгновенной сборки состава заказа за O(N).
         """
         ge, le = KaspiAPI._date_range(13)
-        page = 0
         results = []
 
-        while True:
+        def fetch_page(page_number: int) -> requests.Response:
             params = {
-                "page[number]": page,
+                "page[number]": page_number,
                 "page[size]": 100,
                 "include[orders]": "entries",
                 "filter[orders][creationDate][$ge]": ge,
@@ -266,17 +300,18 @@ class KaspiAPI:
                 "filter[orders][state]": state,
                 "filter[orders][status]": status,
             }
-            
-            resp = KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
+            return KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
+
+        for _page_number, resp in KaspiAPI._fetch_pages_batched(fetch_page):
             if resp.status_code != 200:
-                break
-                
+                return results
+
             res_json = resp.json()
             orders_data = res_json.get("data", [])
             included_data = res_json.get("included", [])
-            
+
             if not orders_data:
-                break
+                return results
 
             # 1. СТРОИМ ИНДЕКС ХЭШ-КАРТЫ ДЛЯ INCLUDED ПО UNIQUE ID (entry_id)
             included_entries = {}
@@ -373,8 +408,7 @@ class KaspiAPI:
                     return results
 
             if len(orders_data) < 100:
-                break
-            page += 1
+                return results
 
         return results
 
@@ -510,31 +544,44 @@ class KaspiAPI:
           3. transmitted (🚚 Переданы на доставку / Архив): is_assembled and transmission_date is not None
         """
         ge, le = KaspiAPI._date_range(13)
-        page = 0
         cargo_assembly = []
         wait_for_courier = []
         transmitted = []
 
-        while True:
+        def _result() -> dict:
+            return {
+                "success": True,
+                "cargo_assembly": cargo_assembly,
+                "wait_for_courier": wait_for_courier,
+                "transmitted": transmitted,
+                "counts": {
+                    "cargo_assembly": len(cargo_assembly),
+                    "wait_for_courier": len(wait_for_courier),
+                    "transmitted": len(transmitted)
+                }
+            }
+
+        def fetch_page(page_number: int) -> requests.Response:
             params = {
                 "page[size]": 100,
-                "page[number]": page,
+                "page[number]": page_number,
                 "include[orders]": "entries",
                 "filter[orders][state]": "KASPI_DELIVERY",
                 "filter[orders][status]": "ACCEPTED_BY_MERCHANT",
                 "filter[orders][creationDate][$ge]": ge,
             }
+            return KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
 
-            resp = KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
+        for _page_number, resp in KaspiAPI._fetch_pages_batched(fetch_page):
             if resp.status_code != 200:
-                break
+                return _result()
 
             res_json = resp.json()
             data = res_json.get("data", [])
             included = res_json.get("included", [])
 
             if not data:
-                break
+                return _result()
 
             included_entries = {}
             for item in included:
@@ -590,20 +637,9 @@ class KaspiAPI:
                     transmitted.append(order_payload)
 
             if len(data) < 100:
-                break
-            page += 1
+                return _result()
 
-        return {
-            "success": True,
-            "cargo_assembly": cargo_assembly,
-            "wait_for_courier": wait_for_courier,
-            "transmitted": transmitted,
-            "counts": {
-                "cargo_assembly": len(cargo_assembly),
-                "wait_for_courier": len(wait_for_courier),
-                "transmitted": len(transmitted)
-            }
-        }
+        return _result()
 
     @staticmethod
     def get_all_packaging_tabs_cached(token: str, ttl_seconds: float = 45.0) -> dict:
@@ -954,26 +990,26 @@ class KaspiAPI:
     def get_transfers(token: str, delivery_filter: str = "ALL") -> list:
         """Вкладка «Передача»: собранные заказы (assembled = True, transmissionDate == null)."""
         ge, le = KaspiAPI._date_range(13)
-        page = 0
         results = []
 
-        while True:
+        def fetch_page(page_number: int) -> requests.Response:
             params = {
-                "page[number]": page,
+                "page[number]": page_number,
                 "page[size]": 100,
                 "filter[orders][creationDate][$ge]": ge,
                 "filter[orders][creationDate][$le]": le,
                 "filter[orders][state]": "KASPI_DELIVERY",
                 "filter[orders][status]": "ACCEPTED_BY_MERCHANT",
             }
+            return KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
 
-            resp = KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
+        for _page_number, resp in KaspiAPI._fetch_pages_batched(fetch_page):
             if resp.status_code != 200:
-                break
+                return results
 
             orders_data = resp.json().get("data", [])
             if not orders_data:
-                break
+                return results
 
             for item in orders_data:
                 attr = item.get("attributes", {})
@@ -1019,7 +1055,6 @@ class KaspiAPI:
                 })
 
             if len(orders_data) < 100:
-                break
-            page += 1
+                return results
 
         return results
