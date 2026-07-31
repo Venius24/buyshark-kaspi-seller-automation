@@ -27,6 +27,7 @@ PROCESSED_ORDERS_FILE = "states/processed_orders.json"
 API_KEYS_FILE = "states/api_keys.json"
 WEBHOOK_CONFIG_FILE = "states/webhook_config.json"
 PROCESSED_PACKAGING_ORDERS_FILE = "states/processed_packaging_orders.json"
+PRODUCTS_FILE = "states/products.json"
 
 def _get_sync_db_session():
     """Возвращает синхронную сессию SQLAlchemy для безопасного сохранения состояния в БД.
@@ -215,6 +216,67 @@ def _save_override(
             if session:
                 session.rollback()
                 session.close()
+
+def _load_products(store_id: Optional[str] = None) -> list:
+    """
+    store_id given (Слайс 1-мигрированные вызовы): каталог этого магазина из
+    StoreProductDB, ключ — исключительно store_id. Пустой результат значит
+    "у этого магазина ещё нет синхронизированного каталога", не сигнал
+    читать общий legacy-файл — иначе ровно та утечка между магазинами,
+    ради закрытия которой это писалось.
+
+    store_id=None (легаси, ещё не мигрированные вызовы, напр. публичный
+    1С-API до Слайса 3): старое нескоуп-поведение — общий states/products.json.
+    """
+    if store_id is not None:
+        session = _get_sync_db_session()
+        if not session:
+            return []
+        try:
+            from backend.db.models import StoreProductDB
+            row = session.get(StoreProductDB, store_id)
+            if not row:
+                return []
+            try:
+                return json.loads(row.payload)
+            except Exception:
+                return []
+        finally:
+            session.close()
+
+    if os.path.exists(PRODUCTS_FILE):
+        try:
+            with open(PRODUCTS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+def _save_products(products: list, store_id: Optional[str] = None):
+    if store_id is None:
+        os.makedirs("states", exist_ok=True)
+        with open(PRODUCTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(products, f, ensure_ascii=False, indent=2)
+        return
+
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import StoreProductDB
+        payload = json.dumps(products, ensure_ascii=False)
+        row = session.get(StoreProductDB, store_id)
+        if not row:
+            row = StoreProductDB(store_id=store_id, payload=payload)
+            session.add(row)
+        else:
+            row.payload = payload
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting products to DB for store {store_id}: {e}")
+        session.rollback()
+    finally:
+        session.close()
 
 def _apply_overrides(products: list, store_id: Optional[str] = None) -> list:
     overrides = _load_overrides(store_id=store_id)

@@ -9,7 +9,7 @@ import os
 import json
 import time
 import logging
-from backend.state_helpers import _load_dumping_configs
+from backend.state_helpers import _load_dumping_configs, _load_products
 from backend.dumper.config import _decode_base64_if_needed
 from backend.dumper.radar import _fetch_offers_sync
 from backend.security.store_context import StoreContext, get_store_context
@@ -49,13 +49,7 @@ def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
     now = datetime.now()
 
     # 1. Load actual products & dumping configs
-    products = []
-    if os.path.exists("states/products.json"):
-        try:
-            with open("states/products.json", "r", encoding="utf-8") as f:
-                products = json.load(f)
-        except Exception:
-            logger.exception("Failed to load states/products.json")
+    products = _load_products(ctx.store_id)
 
     configs = _load_dumping_configs(store_id=ctx.store_id)
     

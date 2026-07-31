@@ -2,8 +2,6 @@ import asyncio
 import logging
 import random
 import datetime
-import os
-import json
 import requests
 from typing import Optional, List
 
@@ -15,6 +13,8 @@ from backend.state_helpers import (
     _save_processed_orders,
     _load_overrides,
     _save_override,
+    _load_products,
+    _save_products,
 )
 from backend.kaspi_wrapper import KaspiAPI
 from backend.dumper.executor import RateLimitExecutorWorker, _load_mc_cookies
@@ -127,15 +127,8 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
 
     logger.info(f"🔄 [Broadcast Sync] Начало обхода {len(linked_skus)} SKU для группы '{group_name}' (Остаток: {shared_stock})")
 
-    # Загружаем товары из кэша
-    products_file = "states/products.json"
-    all_products = []
-    if os.path.exists(products_file):
-        try:
-            with open(products_file, "r", encoding="utf-8") as f:
-                all_products = json.load(f)
-        except Exception:
-            all_products = []
+    # Загружаем товары из кэша (per-store, см. state_helpers._load_products)
+    all_products = _load_products(store_id)
 
     cookies = _load_mc_cookies(store_id=store_id)
     has_cookies = bool(cookies and "mc-session" in cookies and "mc-sid" in cookies)
@@ -177,7 +170,7 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
         # Сохраняем локальный оверрайд
         _save_override(sku, price, shared_stock, target_p.get("brand"), status_text, store_id=store_id)
 
-        # Обновляем в файле products.json
+        # Обновляем в кэше товаров
         for p in all_products:
             if p.get("sku") == sku or p.get("merchantSku") == sku or p.get("kaspiSku") == sku:
                 p["stock"] = shared_stock
@@ -219,13 +212,12 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
             jitter_delay = random.uniform(1.2, 2.0)
             await asyncio.sleep(jitter_delay)
 
-    # Сохраняем обновленный products.json
+    # Сохраняем обновлённый кэш товаров
     if all_products:
         try:
-            with open(products_file, "w", encoding="utf-8") as f:
-                json.dump(all_products, f, ensure_ascii=False, indent=2)
+            _save_products(all_products, store_id)
         except Exception:
-            pass
+            logger.exception("Failed to persist updated products cache for store %s", store_id)
 
     # Итоговое обновление статуса группы
     async with get_stock_lock(store_id):
@@ -261,9 +253,9 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
     остаток у совпавших Мастер-Групп, запускает веерную синхронизацию.
 
     store_id=None (легаси) — нескоуп-чтение групп, как было всегда.
-    Дедупликация заказов (_load_processed_orders/_save_processed_orders) и
-    кэш товаров (products.json) остаются общими на все сторы — известное
-    ограничение, актуально только когда сторов в проде станет больше одного.
+    Каталог товаров теперь per-store (Слайс 1). Дедупликация заказов
+    (_load_processed_orders/_save_processed_orders) остаётся общей на все
+    сторы — известное ограничение, закрывается отдельным слайсом (см. HANDOFF).
     """
     groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
     active_groups = {gid: g for gid, g in groups.items() if g.get("is_active", True)}
@@ -286,19 +278,8 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
     if not orders_resp:
         return
 
-    # Загружаем товары из кэша для резолва алиасов ключей — тик каждые 20с,
-    # файл может быть весь каталог (сотни товаров), поэтому в поток.
-    def _load_products_cache():
-        products_file = "states/products.json"
-        if not os.path.exists(products_file):
-            return []
-        try:
-            with open(products_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-
-    all_products_cache = await asyncio.to_thread(_load_products_cache)
+    # Загружаем товары из кэша для резолва алиасов ключей (per-store, Слайс 1)
+    all_products_cache = await asyncio.to_thread(_load_products, store_id)
 
     processed_orders = await asyncio.to_thread(_load_processed_orders)
     order_dedup_changed = False

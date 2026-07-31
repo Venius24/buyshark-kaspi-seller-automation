@@ -84,11 +84,16 @@ class TestProductsRouterNewPath(unittest.TestCase):
         self._tmp_dir = tempfile.mkdtemp()
         os.chdir(self._tmp_dir)
         os.makedirs("states", exist_ok=True)
-        with open("states/products.json", "w", encoding="utf-8") as f:
-            json.dump([{
-                "sku": "PROD-2", "name": "Test Product 2", "price": "2000 ₸",
-                "status": "Активен", "merchantSku": "PROD-2", "kaspiSku": "222",
-            }], f)
+
+        # Слайс 1: каталог теперь per-store (StoreProductDB), не общий файл —
+        # засеиваем ИМЕННО кэш store-1 через тот же _save_products, который
+        # использует сам роутер, а не общий states/products.json.
+        from backend import state_helpers
+        state_helpers._save_products([{
+            "sku": "PROD-2", "name": "Test Product 2", "price": "2000 ₸",
+            "status": "Активен", "merchantSku": "PROD-2", "kaspiSku": "222",
+        }], store_id="store-1")
+
         self.client = TestClient(app)
 
     def tearDown(self):

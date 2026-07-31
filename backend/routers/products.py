@@ -1,10 +1,8 @@
-import os
-import json
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from backend.kaspi_wrapper import KaspiAPI
 from backend.models import UpdateProductRequest
-from backend.state_helpers import _load_session, _save_override, _apply_overrides
+from backend.state_helpers import _save_override, _apply_overrides, _load_products, _save_products
 from backend.security.store_context import StoreContext, get_store_context
 from backend.dumper import generate_xml_feed
 
@@ -23,29 +21,19 @@ def get_products(
 ):
     """Получить список товаров из кэша или Kaspi API с конфигурациями и статусами демпинга."""
     token = ctx.token
-    products_file = "states/products.json"
 
-    all_products = []
-    if os.path.exists(products_file):
-        try:
-            with open(products_file, "r", encoding="utf-8") as f:
-                all_products = json.load(f)
-                # Если кэш содержит тестовые фейковые товары SKU-001 — отбрасываем
-                if any(p.get("sku") in ["SKU-001", "SKU-002"] for p in all_products):
-                    all_products = []
-                else:
-                    all_products = _apply_overrides(all_products, store_id=ctx.store_id)
-        except Exception:
-            logger.exception("Failed to load/parse %s", products_file)
-            all_products = []
+    all_products = _load_products(ctx.store_id)
+    # Если кэш содержит тестовые фейковые товары SKU-001 — отбрасываем
+    if any(p.get("sku") in ["SKU-001", "SKU-002"] for p in all_products):
+        all_products = []
+    else:
+        all_products = _apply_overrides(all_products, store_id=ctx.store_id)
 
     if not all_products:
         try:
             all_products = KaspiAPI.sync_merchant_assortment(token, store_id=ctx.store_id)
             all_products = _apply_overrides(all_products, store_id=ctx.store_id)
-            os.makedirs("states", exist_ok=True)
-            with open(products_file, "w", encoding="utf-8") as f:
-                json.dump(all_products, f, ensure_ascii=False, indent=2)
+            _save_products(all_products, ctx.store_id)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Не удалось получить товары: {e}")
 
@@ -110,16 +98,13 @@ def get_products(
 def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(get_store_context)):
     """Обновить цену и остаток товара (сохранить в overrides и применить в Kaspi MC)."""
     token = ctx.token
-    products_file = "states/products.json"
-    if not os.path.exists(products_file):
+    products = _load_products(ctx.store_id)
+    if not products:
         raise HTTPException(status_code=404, detail="Список товаров не найден. Загрузите товары сначала.")
 
     try:
         _save_override(req.sku, req.price, req.stock, req.brand, req.status, store_id=ctx.store_id)
-        
-        with open(products_file, "r", encoding="utf-8") as f:
-            products = json.load(f)
-            
+
         updated = False
         target_p = None
         for p in products:
@@ -133,13 +118,12 @@ def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(get_st
                 target_p = p
                 updated = True
                 break
-                
+
         if not updated:
             raise HTTPException(status_code=404, detail=f"Товар с SKU {req.sku} не найден.")
-            
-        with open(products_file, "w", encoding="utf-8") as f:
-            json.dump(products, f, ensure_ascii=False, indent=2)
-            
+
+        _save_products(products, ctx.store_id)
+
         # Моментальный push в Kaspi MC
         from backend.dumper.executor import _load_mc_cookies, RateLimitExecutorWorker
         from backend.dumper.config import discover_merchant_id, _decode_base64_if_needed
@@ -181,32 +165,22 @@ def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(get_st
 @router.post("/products/refresh")
 def refresh_products(ctx: StoreContext = Depends(get_store_context)):
     """Принудительно обновить кеш товаров из Kaspi API."""
-    token = ctx.token
-    products_file = "states/products.json"
     try:
-        products = KaspiAPI.sync_merchant_assortment(token, store_id=ctx.store_id)
+        products = KaspiAPI.sync_merchant_assortment(ctx.token, store_id=ctx.store_id)
         products = _apply_overrides(products, store_id=ctx.store_id)
-        os.makedirs("states", exist_ok=True)
-        with open(products_file, "w", encoding="utf-8") as f:
-            json.dump(products, f, ensure_ascii=False, indent=2)
+        _save_products(products, ctx.store_id)
         return {"success": True, "count": len(products), "message": f"Обновлено {len(products)} товаров."}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/feed")
-def get_xml_feed():
-    """Сгенерировать XML-фид для Kaspi Catalog Sync."""
-    session = _load_session()
-    merchant_id = session.get("merchant_id", "20186986")
-    
-    products_file = "states/products.json"
-    products = []
-    if os.path.exists(products_file):
-        try:
-            with open(products_file, "r", encoding="utf-8") as f:
-                products = json.load(f)
-        except Exception:
-            pass
-            
-    xml_data = generate_xml_feed(merchant_id, products)
+def get_xml_feed(ctx: StoreContext = Depends(get_store_context)):
+    """Сгенерировать XML-фид для Kaspi Catalog Sync (магазина текущего пользователя).
+
+    Раньше был вообще без авторизации (читал states/session.json напрямую) —
+    теперь, как и остальные эндпоинты этого роутера, резолвит контекст через
+    dual-auth (см. security/store_context.py::get_store_context).
+    """
+    products = _load_products(ctx.store_id)
+    xml_data = generate_xml_feed(ctx.merchant_id, products)
     return Response(content=xml_data, media_type="application/xml")

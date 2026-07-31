@@ -132,3 +132,11 @@ class ProductOverrideDB(Base):
     status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+class StoreProductDB(Base):
+    __tablename__ = "store_products"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON-stringified list товаров
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+

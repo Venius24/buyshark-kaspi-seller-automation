@@ -14,30 +14,20 @@ from backend.models import (
 )
 from backend.state_helpers import (
     _load_master_stock_groups,
-    _save_master_stock_groups
+    _save_master_stock_groups,
+    _load_products,
 )
 from backend.security.store_context import StoreContext, get_store_context
 from backend.services.stock_sync_worker import execute_broadcast_sync, get_stock_lock
 
 router = APIRouter(prefix="/api/stock-groups", tags=["stock-groups"])
 
-import os
-import json
-
-def _expand_linked_skus(skus: List[str]) -> List[str]:
+def _expand_linked_skus(skus: List[str], store_id: Optional[str]) -> List[str]:
     """
     Расширяет список привязанных SKU, автоматически добавляя и merchantSku, и kaspiSku для каждого товара.
     """
     expanded = set()
-    products = []
-    products_file = "states/products.json"
-    if os.path.exists(products_file):
-        try:
-            with open(products_file, "r", encoding="utf-8") as f:
-                products = json.load(f)
-        except Exception:
-            logger.exception("Failed to load %s", products_file)
-            products = []
+    products = _load_products(store_id)
 
     for raw_sku in skus:
         s = str(raw_sku).strip()
@@ -150,7 +140,7 @@ async def create_stock_group(
         "group_id": group_id,
         "group_name": req.group_name.strip(),
         "shared_stock": int(req.shared_stock),
-        "linked_skus": _expand_linked_skus(req.linked_skus),
+        "linked_skus": _expand_linked_skus(req.linked_skus, ctx.store_id),
         "external_code": (req.external_code or "").strip() or None,
         "is_active": req.is_active if req.is_active is not None else True,
         "dumping_config": req.dumping_config.dict() if req.dumping_config else None,
@@ -196,7 +186,7 @@ async def update_stock_group(
         if req.shared_stock is not None and req.shared_stock >= 0:
             group["shared_stock"] = int(req.shared_stock)
         if req.linked_skus is not None and req.linked_skus:
-            group["linked_skus"] = _expand_linked_skus(req.linked_skus)
+            group["linked_skus"] = _expand_linked_skus(req.linked_skus, ctx.store_id)
         if req.external_code is not None:
             group["external_code"] = req.external_code.strip() or None
         if req.is_active is not None:

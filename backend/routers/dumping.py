@@ -1,5 +1,3 @@
-import os
-import json
 import time
 import random
 import asyncio
@@ -7,14 +5,12 @@ import logging
 import functools
 from fastapi import APIRouter, Depends, HTTPException
 from backend.models import DumpingConfigRequest
-from backend.state_helpers import _get_token, _load_dumping_configs, _save_dumping_configs, _save_override, _apply_overrides
+from backend.state_helpers import _get_token, _load_dumping_configs, _save_dumping_configs, _save_override, _apply_overrides, _load_products, _save_products
 from backend.dumper import run_price_dumping_job
 from backend.security.store_context import StoreContext, get_store_context, list_active_stores
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dumping", tags=["dumping"])
-
-PRODUCTS_FILE = "states/products.json"
 
 class DumpingSchedulerState:
     last_run_timestamp: float = 0.0
@@ -23,16 +19,13 @@ class DumpingSchedulerState:
 
 async def _run_dumping_cycle(token: str, store_id) -> dict:
     """
-    Один проход демпинга для одного магазина: локальный кэш товаров общий на всех
-    сторов (products.json пока не разделён по сторам — известное ограничение,
-    актуально только пока в проде больше одного стора), а конфиги/оверрайды/
-    мастер-группы остатка — per-store через store_id.
+    Один проход демпинга для одного магазина. Каталог товаров теперь per-store
+    (Слайс 1, см. state_helpers._load_products) — store_id=None (легаси
+    dev-бутстрап без Store в БД) читает старый общий файл, как и раньше.
     """
-    if not os.path.exists(PRODUCTS_FILE):
+    products = _load_products(store_id)
+    if not products:
         return {"updated_count": 0}
-
-    with open(PRODUCTS_FILE, "r", encoding="utf-8") as f:
-        products = json.load(f)
     products = _apply_overrides(products, store_id=store_id)
 
     configs = _load_dumping_configs(store_id=store_id)
@@ -47,8 +40,7 @@ async def _run_dumping_cycle(token: str, store_id) -> dict:
     )
 
     if res.get("updated_count", 0) > 0:
-        with open(PRODUCTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(products, f, ensure_ascii=False, indent=2)
+        _save_products(products, store_id)
 
     return res
 
@@ -153,7 +145,7 @@ def get_dumping_status():
 @router.post("/run")
 async def run_price_dumping(ctx: StoreContext = Depends(get_store_context)):
     """Запустить расчет авто-демпинга вручную для стора текущего пользователя."""
-    if not os.path.exists(PRODUCTS_FILE):
+    if not _load_products(ctx.store_id):
         raise HTTPException(status_code=404, detail="Список товаров пуст. Загрузите товары.")
 
     DumpingSchedulerState.is_running = True

@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, call
 
 sys.path.append(os.getcwd())
 
@@ -41,17 +41,20 @@ class TestRunProductsSyncCycle(unittest.IsolatedAsyncioTestCase):
         mock_sync.assert_awaited_once_with("tok_a", "store-a")
 
     @patch("backend.services.products_sync_worker.list_active_stores", new_callable=AsyncMock)
-    async def test_multiple_stores_only_syncs_the_first_no_silent_clobber(self, mock_list_stores):
-        """states/products.json is a single shared file (no per-store cache
-        yet) — syncing more than one store into it would race/clobber, so
-        only the first store (by creation order) is synced, loudly."""
+    async def test_multiple_stores_are_each_synced_independently(self, mock_list_stores):
+        """Слайс 1: каталог теперь per-store (StoreProductDB) — каждый
+        активный магазин синхронизируется в свой собственный кэш, больше не
+        только первый по порядку создания."""
         mock_list_stores.return_value = [
             StoreContext(token="tok_a", merchant_id="m_a", store_id="store-a"),
             StoreContext(token="tok_b", merchant_id="m_b", store_id="store-b"),
         ]
         with patch("backend.services.products_sync_worker._sync_store_products", new_callable=AsyncMock) as mock_sync:
             await worker.run_products_sync_cycle()
-        mock_sync.assert_awaited_once_with("tok_a", "store-a")
+        self.assertEqual(
+            mock_sync.await_args_list,
+            [call("tok_a", "store-a"), call("tok_b", "store-b")],
+        )
 
     @patch("backend.services.products_sync_worker.list_active_stores", new_callable=AsyncMock)
     async def test_sync_failure_is_caught_not_raised(self, mock_list_stores):
@@ -67,7 +70,7 @@ class TestRunProductsSyncCycle(unittest.IsolatedAsyncioTestCase):
 
 
 class TestSyncStoreProducts(unittest.IsolatedAsyncioTestCase):
-    """_sync_store_products() — the actual Kaspi fetch + overrides + file write."""
+    """_sync_store_products() — the actual Kaspi fetch + overrides + per-store cache write."""
 
     @patch("backend.services.products_sync_worker._apply_overrides")
     @patch("backend.services.products_sync_worker.KaspiAPI.sync_merchant_assortment")
@@ -77,30 +80,30 @@ class TestSyncStoreProducts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(count, 0)
         mock_overrides.assert_not_called()
 
-    @patch("builtins.open")
-    @patch("os.makedirs")
+    @patch("backend.services.products_sync_worker._save_products")
     @patch("backend.services.products_sync_worker._apply_overrides")
     @patch("backend.services.products_sync_worker.KaspiAPI.sync_merchant_assortment")
-    async def test_overrides_applied_with_the_given_store_id(self, mock_fetch, mock_overrides, mock_makedirs, mock_open):
+    async def test_overrides_applied_and_saved_with_the_given_store_id(self, mock_fetch, mock_overrides, mock_save):
         mock_fetch.return_value = [{"sku": "X1"}]
         mock_overrides.return_value = [{"sku": "X1", "price_num": 500}]
 
         count = await worker._sync_store_products("tok", "store-a")
 
         mock_overrides.assert_called_once_with([{"sku": "X1"}], store_id="store-a")
+        mock_save.assert_called_once_with([{"sku": "X1", "price_num": 500}], "store-a")
         self.assertEqual(count, 1)
 
-    @patch("builtins.open")
-    @patch("os.makedirs")
+    @patch("backend.services.products_sync_worker._save_products")
     @patch("backend.services.products_sync_worker._apply_overrides")
     @patch("backend.services.products_sync_worker.KaspiAPI.sync_merchant_assortment")
-    async def test_none_store_id_preserves_legacy_unscoped_overrides(self, mock_fetch, mock_overrides, mock_makedirs, mock_open):
+    async def test_none_store_id_preserves_legacy_unscoped_overrides(self, mock_fetch, mock_overrides, mock_save):
         mock_fetch.return_value = [{"sku": "X1"}]
         mock_overrides.return_value = [{"sku": "X1"}]
 
         await worker._sync_store_products("tok")
 
         mock_overrides.assert_called_once_with([{"sku": "X1"}], store_id=None)
+        mock_save.assert_called_once_with([{"sku": "X1"}], None)
 
 
 if __name__ == "__main__":

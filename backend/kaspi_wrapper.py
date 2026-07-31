@@ -972,12 +972,13 @@ class KaspiAPI:
             except Exception as ex:
                 print(f"[BFF Sync] Ошибка фоллбека из заказов: {ex}")
 
-        # Фоллбек 2: Загрузка из ранее сохраненного файла states/products.json
-        if not all_products and os.path.exists("states/products.json"):
+        # Фоллбек 2: Загрузка из ранее сохранённого кэша этого магазина (per-store, Слайс 1)
+        if not all_products:
             try:
-                with open("states/products.json", "r", encoding="utf-8") as f:
-                    all_products = json.load(f)
-                print(f"[BFF Sync] Загружено {len(all_products)} товаров из сохраненного файла кэша.")
+                from backend.state_helpers import _load_products
+                all_products = _load_products(store_id)
+                if all_products:
+                    print(f"[BFF Sync] Загружено {len(all_products)} товаров из сохранённого кэша (store_id={store_id}).")
             except Exception:
                 pass
 

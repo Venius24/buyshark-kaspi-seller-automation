@@ -1,22 +1,19 @@
-import os
-import json
 import asyncio
 import logging
 from backend.kaspi_wrapper import KaspiAPI
-from backend.state_helpers import _get_token, _apply_overrides
+from backend.state_helpers import _get_token, _apply_overrides, _save_products
 from backend.security.store_context import list_active_stores
 
 logger = logging.getLogger(__name__)
 
-PRODUCTS_FILE = "states/products.json"
-
 async def _sync_store_products(token: str, store_id=None) -> int:
     """
-    Синхронизирует каталог товаров для одного магазина и перезаписывает
-    states/products.json. Возвращает количество синхронизированных товаров.
+    Синхронизирует каталог товаров для одного магазина в его собственный
+    кэш (per-store, Слайс 1 — StoreProductDB, см. state_helpers._save_products).
+    Возвращает количество синхронизированных товаров.
 
-    store_id=None (легаси) — нескоуп-применение оверрайдов, как было всегда.
-    store_id задан (Phase 7) — оверрайды применяются в рамках стора.
+    store_id=None (легаси) — нескоуп-применение оверрайдов/сохранение в общий
+    файл, как было всегда (только dev-бутстрап без Store в БД).
     """
     products = await asyncio.to_thread(KaspiAPI.sync_merchant_assortment, token, store_id)
 
@@ -25,9 +22,7 @@ async def _sync_store_products(token: str, store_id=None) -> int:
         return 0
 
     products = _apply_overrides(products, store_id=store_id)
-    os.makedirs("states", exist_ok=True)
-    with open(PRODUCTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(products, f, ensure_ascii=False, indent=2)
+    await asyncio.to_thread(_save_products, products, store_id)
 
     logger.info(f"✅ [Products Sync Worker] Успешно обновлено {len(products)} товаров из Kaspi API (store {store_id}).")
     return len(products)
@@ -37,24 +32,16 @@ async def run_products_sync_cycle():
     Один цикл синхронизации каталога (Phase 7). Падает на legacy глобальную
     сессию, только если в БД ещё нет ни одного Store.
 
-    ВАЖНО: states/products.json — единый файл на все сторы (известное
-    ограничение, каталог per-store ещё не реализован — см. HANDOFF). Если
-    активных сторов больше одного, синхронизируем только первый по порядку
-    создания, чтобы второй не затирал первого гонкой перезаписи одного и
-    того же файла — предупреждаем в логе вместо тихой порчи данных.
+    Каталог теперь per-store (Слайс 1) — синхронизируем КАЖДЫЙ активный
+    магазин отдельно, больше не только первый по порядку создания.
     """
     stores = await list_active_stores()
     if stores:
-        if len(stores) > 1:
-            logger.warning(
-                f"⚠️ [Products Sync Worker] {len(stores)} активных сторов, а states/products.json общий на всех "
-                "(per-store каталог ещё не реализован). Синхронизируется только первый стор."
-            )
-        store = stores[0]
-        try:
-            await _sync_store_products(store.token, store.store_id)
-        except Exception as e:
-            logger.error(f"❌ [Products Sync Worker] Ошибка синхронизации для стора {store.store_id}: {e}")
+        for store in stores:
+            try:
+                await _sync_store_products(store.token, store.store_id)
+            except Exception as e:
+                logger.error(f"❌ [Products Sync Worker] Ошибка синхронизации для стора {store.store_id}: {e}")
     else:
         token = _get_token()
         if not token:
