@@ -13,6 +13,12 @@ logger = logging.getLogger(__name__)
 _sync_engine_cache = {"engine": None, "url": None}
 _sync_engine_lock = threading.Lock()
 
+# Категория 1: RateLimitExecutorWorker.execute_updates теперь обрабатывает
+# несколько SKU параллельно (ThreadPoolExecutor) — эти два лока защищают
+# ресурсы, которые раньше никогда не вызывались конкурентно.
+_overrides_file_lock = threading.Lock()  # см. _save_override()
+_mc_refresh_lock = threading.Lock()      # см. _refresh_mc_session()
+
 SESSION_FILE = "states/session.json"
 OVERRIDES_FILE = "states/products_overrides.json"
 DUMPING_CONFIGS_FILE = "states/dumping_configs.json"
@@ -152,56 +158,63 @@ def _save_override(
     status: Optional[str] = None,
     store_id: Optional[str] = None,
 ):
-    overrides = _load_overrides(store_id=store_id)
-    ov_data = {
-        "price_num": price,
-        "stock": stock,
-        "brand": brand,
-        "status": status or ("Активен" if stock > 0 else "Архив")
-    }
-    overrides[sku] = ov_data
+    # Категория 1: RateLimitExecutorWorker.execute_updates может звать это
+    # из нескольких потоков одновременно (по одному на SKU). Без лока
+    # read-modify-write полного OVERRIDES_FILE ниже гонится к побитой/
+    # частично перезаписанной JSON-структуре при параллельных SKU — лок
+    # сериализует именно эту (быструю, локальную) часть, не трогая
+    # медленные параллельные сетевые вызовы к Kaspi выше по стеку.
+    with _overrides_file_lock:
+        overrides = _load_overrides(store_id=store_id)
+        ov_data = {
+            "price_num": price,
+            "stock": stock,
+            "brand": brand,
+            "status": status or ("Активен" if stock > 0 else "Архив")
+        }
+        overrides[sku] = ov_data
 
-    # Зеркалирование на диск
-    os.makedirs("states", exist_ok=True)
-    try:
-        with open(OVERRIDES_FILE, "w", encoding="utf-8") as f:
-            json.dump(overrides, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Error writing overrides file: {e}")
+        # Зеркалирование на диск
+        os.makedirs("states", exist_ok=True)
+        try:
+            with open(OVERRIDES_FILE, "w", encoding="utf-8") as f:
+                json.dump(overrides, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"Error writing overrides file: {e}")
 
-    # Сохранение в БД
-    session = _get_sync_db_session()
-    if not session:
-        return
-    try:
-        from backend.db.models import ProductOverrideDB
-        db_obj = session.get(ProductOverrideDB, sku)
-        if not db_obj:
-            db_obj = ProductOverrideDB(
-                sku=sku,
-                store_id=store_id,
-                price_num=price,
-                stock=stock,
-                brand=brand,
-                status=ov_data["status"]
-            )
-            session.add(db_obj)
-        else:
-            if store_id is not None:
-                db_obj.store_id = store_id
-            db_obj.price_num = price
-            db_obj.stock = stock
-            if brand:
-                db_obj.brand = brand
-            if status:
-                db_obj.status = ov_data["status"]
-        session.commit()
-        session.close()
-    except Exception as e:
-        logger.error(f"Error persisting override to DB: {e}")
-        if session:
-            session.rollback()
+        # Сохранение в БД
+        session = _get_sync_db_session()
+        if not session:
+            return
+        try:
+            from backend.db.models import ProductOverrideDB
+            db_obj = session.get(ProductOverrideDB, sku)
+            if not db_obj:
+                db_obj = ProductOverrideDB(
+                    sku=sku,
+                    store_id=store_id,
+                    price_num=price,
+                    stock=stock,
+                    brand=brand,
+                    status=ov_data["status"]
+                )
+                session.add(db_obj)
+            else:
+                if store_id is not None:
+                    db_obj.store_id = store_id
+                db_obj.price_num = price
+                db_obj.stock = stock
+                if brand:
+                    db_obj.brand = brand
+                if status:
+                    db_obj.status = ov_data["status"]
+            session.commit()
             session.close()
+        except Exception as e:
+            logger.error(f"Error persisting override to DB: {e}")
+            if session:
+                session.rollback()
+                session.close()
 
 def _apply_overrides(products: list, store_id: Optional[str] = None) -> list:
     overrides = _load_overrides(store_id=store_id)
@@ -778,20 +791,28 @@ def _refresh_mc_session(store_id: Optional[str] = None) -> bool:
         logger.warning(f"Автообновление сессии Kaspi MC невозможно: email/пароль не сохранены для стора {store_id!r} (нужен повторный вход).")
         return False
     email, password = creds
-    try:
-        from backend.services.playwright_worker import worker, Command
-        success, msg = worker.send_cmd(Command.LOGIN, {"email": email, "password": password})
-        if success:
-            logger.info(f"Сессия Kaspi MC автоматически обновлена (истёкшие куки перевыпущены) для стора {store_id!r}.")
-            if store_id is not None:
-                fresh_cookies = _load_mc_cookies(store_id=None)
-                _save_mc_cookies_for_store(store_id, fresh_cookies)
-        else:
-            logger.error(f"Автообновление сессии Kaspi MC не удалось: {msg}")
-        return bool(success)
-    except Exception as e:
-        logger.error(f"Автообновление сессии Kaspi MC вызвало исключение: {e}")
-        return False
+    # Категория 1: с параллельной обработкой SKU несколько потоков могут
+    # словить 401 одновременно. worker.send_cmd() шлёт команду в общую
+    # cmd_queue и блокирующе читает ОБЩУЮ result_queue
+    # (backend/services/playwright_worker.py::send_cmd) — без лока два
+    # конкурентных вызова могут перепутать, кто чей результат вычитал.
+    # Единственный глобальный (не per-store) лок — сам браузерный воркер
+    # тоже один общий на все сторы (Phase 5, ещё не де-глобализирован).
+    with _mc_refresh_lock:
+        try:
+            from backend.services.playwright_worker import worker, Command
+            success, msg = worker.send_cmd(Command.LOGIN, {"email": email, "password": password})
+            if success:
+                logger.info(f"Сессия Kaspi MC автоматически обновлена (истёкшие куки перевыпущены) для стора {store_id!r}.")
+                if store_id is not None:
+                    fresh_cookies = _load_mc_cookies(store_id=None)
+                    _save_mc_cookies_for_store(store_id, fresh_cookies)
+            else:
+                logger.error(f"Автообновление сессии Kaspi MC не удалось: {msg}")
+            return bool(success)
+        except Exception as e:
+            logger.error(f"Автообновление сессии Kaspi MC вызвало исключение: {e}")
+            return False
 
 def _mc_api_request(method: str, url: str, store_id: Optional[str] = None, retry_on_401: bool = True, **kwargs):
     """
