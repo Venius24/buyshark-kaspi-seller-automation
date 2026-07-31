@@ -169,3 +169,22 @@ class WebhookConfigDB(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
+
+class ChatbotSettingsDB(Base):
+    __tablename__ = "chatbot_settings"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    admin_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON-stringified list
+    updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+
+class ChatStateDB(Base):
+    __tablename__ = "chat_states"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    group_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    last_replied_msg_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    human_override: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+

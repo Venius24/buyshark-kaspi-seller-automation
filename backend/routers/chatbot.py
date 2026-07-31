@@ -26,9 +26,9 @@ class MobileLoginSubmitRequest(BaseModel):
 
 @router.get("/config")
 def get_chatbot_config(ctx: StoreContext = Depends(get_store_context)):
-    """Получить конфигурацию ИИ-автоответчика."""
-    cfg = config.load_chatbot_config()
-    admin_ids = config.load_admin_ids()
+    """Получить конфигурацию ИИ-автоответчика этого магазина."""
+    cfg = config.load_chatbot_config(ctx.store_id)
+    admin_ids = config.load_admin_ids(ctx.store_id)
 
     return {
         "success": True,
@@ -41,14 +41,14 @@ def get_chatbot_config(ctx: StoreContext = Depends(get_store_context)):
 
 @router.post("/config")
 def save_chatbot_config(req: ChatbotConfigRequest, ctx: StoreContext = Depends(get_store_context)):
-    """Сохранить пользовательские настройки чат-бота (admin_ids, enabled)."""
+    """Сохранить пользовательские настройки чат-бота (admin_ids, enabled) этого магазина."""
     update_data = {}
     if req.enabled is not None:
         update_data["enabled"] = req.enabled
     if req.admin_ids is not None:
         update_data["admin_ids"] = req.admin_ids
 
-    updated = config.save_chatbot_config(update_data)
+    updated = config.save_chatbot_config(update_data, ctx.store_id)
     return {
         "success": True,
         "message": "Настройки уведомлений чат-бота сохранены.",
@@ -57,8 +57,8 @@ def save_chatbot_config(req: ChatbotConfigRequest, ctx: StoreContext = Depends(g
 
 @router.get("/status")
 def get_chatbot_status(ctx: StoreContext = Depends(get_store_context)):
-    """Получить статус сессии, блокировки и активных диалогов чат-бота."""
-    cfg = config.load_chatbot_config()
+    """Получить статус сессии, блокировки и активных диалогов чат-бота этого магазина."""
+    cfg = config.load_chatbot_config(ctx.store_id)
     # Статус чата отражает отдельную SMS-сессию (encrypted_chat_cookies), а
     # не общие MC-куки email+пароль входа — чат-API Kaspi требует именно её.
     chat_cookies = load_chat_cookies(store_id=ctx.store_id)
@@ -66,26 +66,24 @@ def get_chatbot_status(ctx: StoreContext = Depends(get_store_context)):
 
     blocked_chats = [
         {"group_id": gid, "reason": "HUMAN_OVERRIDE"}
-        for gid, val in config.PROCESSED_CHATS.items()
-        if val == "HUMAN_OVERRIDE"
+        for gid in config.list_blocked_chat_ids(ctx.store_id)
     ]
 
     return {
         "success": True,
         "enabled": cfg.get("enabled", True),
         "has_session": has_valid_cookies,
-        "cookie_alert_sent": config.COOKIE_ALERT_SENT,
+        "cookie_alert_sent": config.is_cookie_alert_sent(ctx.store_id),
         "blocked_chats_count": len(blocked_chats),
         "blocked_chats": blocked_chats,
-        "processed_chats_count": len(config.PROCESSED_CHATS)
+        "processed_chats_count": config.count_processed_chats(ctx.store_id)
     }
 
 @router.post("/unblock")
 def unblock_chat(req: UnblockChatRequest, ctx: StoreContext = Depends(get_store_context)):
-    """Разблокировать чат (HUMAN_OVERRIDE) из дашборда UI."""
+    """Разблокировать чат (HUMAN_OVERRIDE) этого магазина из дашборда UI."""
     gid = req.group_id.strip()
-    if config.PROCESSED_CHATS.get(gid) == "HUMAN_OVERRIDE":
-        config.PROCESSED_CHATS.pop(gid, None)
+    if config.clear_chat_human_override(ctx.store_id, gid):
         return {"success": True, "message": f"Чат {gid} успешно разблокирован для ИИ."}
 
     return {"success": True, "message": f"Чат {gid} не был заблокирован."}
@@ -122,6 +120,6 @@ def submit_mobile_login_code(req: MobileLoginSubmitRequest, ctx: StoreContext = 
     if not _save_chat_cookies_for_store(ctx.store_id, fresh_cookies):
         raise HTTPException(status_code=400, detail="Вход выполнен, но не удалось сохранить куки чата.")
 
-    config.COOKIE_ALERT_SENT = False
+    config.set_cookie_alert_sent(ctx.store_id, False)
 
     return {"success": True, "message": "Вход в чат Kaspi выполнен, сессия сохранена."}

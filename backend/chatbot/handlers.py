@@ -144,13 +144,13 @@ def register_handlers():
 
         cfg = config.load_chatbot_config()
         merchant_id = cfg.get("merchant_id", "20186986")
-        blocked_count = sum(1 for v in config.PROCESSED_CHATS.values() if v == "HUMAN_OVERRIDE")
+        blocked_count = config.count_blocked_chats()  # Telegram — бот общий на все магазины
 
         await message.reply(
             f"🤖 **Статус автоответчика:** {'🟢 Работает' if cfg.get('enabled', True) else '⏸️ Приостановлен'}\n"
             f"🏪 **Merchant ID:** `{merchant_id}`\n"
             f"🔒 **Заблокировано чатов (Human Override):** {blocked_count}\n"
-            f"🔑 **Cookie статус:** {'🚨 Требуется обновление' if config.COOKIE_ALERT_SENT else '✅ Валидны'}"
+            f"🔑 **Cookie статус:** {'🚨 Требуется обновление' if config.any_cookie_alert_sent() else '✅ Валидны'}"
         )
 
     @dp.message(F.text == "/settings")
@@ -320,11 +320,16 @@ def register_handlers():
 
     @dp.callback_query(F.data.startswith("unblock_"))
     async def process_unblock_callback(callback_query: types.CallbackQuery):
-        group_id = callback_query.data.split("_")[1]
-        
-        if config.PROCESSED_CHATS.get(group_id) == "HUMAN_OVERRIDE":
-            config.PROCESSED_CHATS.pop(group_id, None)
-            
+        # split("_", 1): group_id может само содержать "_", берём весь хвост
+        group_id = callback_query.data.split("_", 1)[1]
+
+        # Слайс 4: чат теперь per-store (chat_states) — Telegram-колбэк не
+        # несёт store_id (единый бот на все магазины), поэтому ищем и
+        # разблокируем чат с этим group_id независимо от того, какому
+        # магазину он принадлежит.
+        unblocked_store_id = config.clear_human_override_any_store(group_id)
+
+        if unblocked_store_id is not None:
             original_text = callback_query.message.text or ""
             updated_text = original_text + "\n\n✅ **Чат разблокирован менеджером для ИИ.**"
             

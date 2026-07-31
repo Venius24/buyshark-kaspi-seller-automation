@@ -48,7 +48,7 @@ async def list_chats(ctx: StoreContext = Depends(get_store_context)):
     merchant_id = _resolve_merchant_id(ctx)
     groups = await chat_client.list_groups(cookies, merchant_id)
     for g in groups:
-        g["is_human_override"] = chatbot_config.PROCESSED_CHATS.get(g.get("id")) == "HUMAN_OVERRIDE"
+        g["is_human_override"] = chatbot_config.is_chat_human_override(ctx.store_id, g.get("id"))
     return {"success": True, "chats": groups}
 
 
@@ -71,7 +71,7 @@ async def send_chat_message(group_id: str, req: SendMessageRequest, ctx: StoreCo
     if not result.get("success"):
         raise HTTPException(status_code=502, detail=f"Kaspi отклонил отправку: {result.get('error')}")
     if req.override:
-        chatbot_config.PROCESSED_CHATS[group_id] = "HUMAN_OVERRIDE"
+        chatbot_config.set_chat_human_override(ctx.store_id, group_id)
     return {"success": True, "message": result.get("message")}
 
 
@@ -79,12 +79,12 @@ async def send_chat_message(group_id: str, req: SendMessageRequest, ctx: StoreCo
 async def take_over_chat(group_id: str, ctx: StoreContext = Depends(get_store_context)):
     """
     Забирает диалог у ИИ без отправки сообщения — менеджер продолжает
-    переписку 1-на-1 сам. Тот же PROCESSED_CHATS[group_id]="HUMAN_OVERRIDE",
+    переписку 1-на-1 сам. Та же per-store блокировка (chat_states.human_override),
     что использует эскалация бота (backend/chatbot/notifications.py);
     снять можно уже существующим POST /api/chatbot/unblock.
     """
     _require_chat_session(ctx)  # чат должен быть реально доступен этому стору
-    chatbot_config.PROCESSED_CHATS[group_id] = "HUMAN_OVERRIDE"
+    chatbot_config.set_chat_human_override(ctx.store_id, group_id)
     return {"success": True}
 
 

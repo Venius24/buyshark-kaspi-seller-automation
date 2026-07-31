@@ -3,6 +3,7 @@ import uuid
 import asyncio
 import logging
 from datetime import datetime
+from typing import Optional
 
 from backend.chatbot import config, bot_instance
 
@@ -20,27 +21,28 @@ def _esc_md(text) -> str:
         text = text.replace(ch, f"\\{ch}")
     return text
 
-def reset_cookie_alert():
+def reset_cookie_alert(store_id: Optional[str] = None):
     """Сбрасывает флаг предупреждения при успешном запросе с валидными куками."""
-    if config.COOKIE_ALERT_SENT:
+    if config.is_cookie_alert_sent(store_id):
         logger.info("✅ Сессия Kaspi восстановлена. Куки снова валидны!")
-        config.COOKIE_ALERT_SENT = False
+        config.set_cookie_alert_sent(store_id, False)
 
-async def notify_cookie_expired(reason: str):
+async def notify_cookie_expired(reason: str, store_id: Optional[str] = None):
     """
-    Отправляет алерт о невалидных/просроченных куках в Telegram.
-    Отправка происходит единоразово с предотвращением спама.
+    Отправляет алерт о невалидных/просроченных куках в Telegram админам
+    ТОГО магазина, где это произошло (Слайс 4). Отправка единоразовая с
+    предотвращением спама — per-store.
     """
-    if config.COOKIE_ALERT_SENT:
+    if config.is_cookie_alert_sent(store_id):
         return
 
-    admin_ids = config.load_admin_ids()
+    admin_ids = config.load_admin_ids(store_id)
     if not bot_instance.bot:
         logger.warning(f"🚨 [COOKIE ALERT] {reason}. (Telegram-бот выключен/не настроен)")
-        config.COOKIE_ALERT_SENT = True
+        config.set_cookie_alert_sent(store_id, True)
         return
 
-    cfg = config.load_chatbot_config()
+    cfg = config.load_chatbot_config(store_id)
     merchant_id = cfg.get("merchant_id", "20186986")
     alert_text = (
         f"🚨 **ВНИМАНИЕ: СЕССИЯ ЧАТА KASPI ИСТЕКЛА!**\n"
@@ -65,7 +67,7 @@ async def notify_cookie_expired(reason: str):
         except Exception as e:
             logger.error(f"⚠️ Ошибка отправки алерта админу {admin_id}: {e}")
 
-    config.COOKIE_ALERT_SENT = True
+    config.set_cookie_alert_sent(store_id, True)
 
 async def notify_startup():
     """Отправляет уведомление о запуске бота в Telegram всем администраторам."""
@@ -96,11 +98,13 @@ async def notify_startup():
 
 async def notify_manager_and_block(
     group_id: str, client_name: str, item_title: str, client_text: str,
-    cookies: dict, headers: dict, msg_id: str, last_msg_created: int
+    cookies: dict, headers: dict, msg_id: str, last_msg_created: int,
+    store_id: Optional[str] = None
 ):
     """
-    Отправляет успокаивающий ответ клиенту в Kaspi,
-    затем шлет алерт в Telegram и блокирует чат для ИИ (HUMAN_OVERRIDE).
+    Отправляет успокаивающий ответ клиенту в Kaspi, затем шлет алерт в
+    Telegram (админам ТОГО магазина, где пришёл этот чат — Слайс 4) и
+    блокирует чат для ИИ (HUMAN_OVERRIDE), per-store.
     """
     clean_text = client_text.lower()
     is_kz = any(word in clean_text for word in ['ката', 'кате', 'бузык', 'істемейді', 'қайтару', 'шағым', 'бар ма', 'бар ма?', 'қалды'])
@@ -152,7 +156,7 @@ async def notify_manager_and_block(
         f"📱 [Открыть через Pay-ссылку]({pay_link})\n"
     )
 
-    admin_ids = config.load_admin_ids()
+    admin_ids = config.load_admin_ids(store_id)
     if bot_instance.bot and bot_instance.HAS_AIOGRAM:
         try:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -173,4 +177,4 @@ async def notify_manager_and_block(
         except Exception as e:
             logger.error(f"⚠️ Ошибка формирования Telegram клавиатуры: {e}")
 
-    config.PROCESSED_CHATS[group_id] = "HUMAN_OVERRIDE"
+    config.set_chat_human_override(store_id, group_id)

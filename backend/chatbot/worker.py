@@ -78,13 +78,13 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
     resp = await asyncio.to_thread(fetch_diff)
 
     if resp.status_code in (401, 403):
-        await notify_cookie_expired(f"Kaspi API вернул HTTP {resp.status_code}")
+        await notify_cookie_expired(f"Kaspi API вернул HTTP {resp.status_code}", store_id=store_id)
         return False
 
     if resp.status_code != 200:
         return False
 
-    reset_cookie_alert()
+    reset_cookie_alert(store_id)
 
     data = resp.json().get("data", {})
     groups = data.get("groups", [])
@@ -104,10 +104,10 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
         if msg_created < day_start_ts:
             continue
 
-        if config.PROCESSED_CHATS.get(group_id) == "HUMAN_OVERRIDE":
+        if config.is_chat_human_override(store_id, group_id):
             continue
 
-        already_replied = config.PROCESSED_CHATS.get(group_id) == msg_id
+        already_replied = config.get_chat_last_replied(store_id, group_id) == msg_id
 
         if last_msg.get("sender") == "messenger" and not already_replied:
             client_name = group.get("subtitle") or group.get("title", "Клиент")
@@ -129,7 +129,8 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
                     cookies=cookies,
                     headers=headers,
                     msg_id=msg_id,
-                    last_msg_created=msg_created
+                    last_msg_created=msg_created,
+                    store_id=store_id
                 )
                 continue
 
@@ -140,7 +141,7 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
             send_url = "https://mc.shop.kaspi.kz/chats/api/mobile/api/v1/messages/sendMessage"
 
             if logistics_reply:
-                config.PROCESSED_CHATS[group_id] = msg_id
+                config.mark_chat_replied(store_id, group_id, msg_id)
                 def send_logistics():
                     http_session.post(typing_url, headers=headers, cookies=cookies, json={"groupId": group_id, "text": logistics_reply + "\n"}, timeout=5)
                     time.sleep(1.5)
@@ -162,7 +163,7 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
                 logger.info(f"✅ [Chatbot] Логистический шаблон отправлен клиенту {client_name}.")
                 continue
 
-            config.PROCESSED_CHATS[group_id] = msg_id
+            config.mark_chat_replied(store_id, group_id, msg_id)
             history = await get_chat_history(group_id, cookies, headers)
             ai_reply, is_human_override = await generate_ai_reply(client_name, item_title, history)
 
@@ -175,7 +176,8 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
                     cookies=cookies,
                     headers=headers,
                     msg_id=msg_id,
-                    last_msg_created=msg_created
+                    last_msg_created=msg_created,
+                    store_id=store_id
                 )
                 continue
 
@@ -211,39 +213,41 @@ async def run_chatbot_cycle():
     Один тик мониторинга чатов по всем активным сторам (Phase 7). Возвращает
     задержку в секундах до следующего тика (сохраняет исходный тайминг:
     5с — выключено/успех, 10с — куки истекли).
+
+    Слайс 4: флаг "enabled" теперь проверяется ОТДЕЛЬНО для каждого стора
+    (ChatbotSettingsDB) — раньше один общий флаг выключал бота всем сразу.
     """
-    # Тик каждые 5с на каждый активный стор — file I/O/sync DB здесь без
-    # to_thread копится в постоянный фоновый налог на единственный event
-    # loop приложения (--workers 1).
-    cfg = await asyncio.to_thread(config.load_chatbot_config)
-
-    # Если чат-бот отключен пользователем через интерфейс дашборда
-    if not cfg.get("enabled", True):
-        return 5
-
     stores = await list_active_stores()
     if stores:
         any_cookies = False
+        any_enabled = False
         for store in stores:
             try:
+                store_cfg = await asyncio.to_thread(config.load_chatbot_config, store.store_id)
+                if not store_cfg.get("enabled", True):
+                    continue
+                any_enabled = True
                 cookies = await asyncio.to_thread(load_chat_cookies, store_id=store.store_id)
                 if not cookies:
                     logger.warning(f"[Chatbot] Store {store.store_id}: куки Kaspi MC отсутствуют/истекли, пропускаем проход.")
                     continue
                 any_cookies = True
-                merchant_id = await asyncio.to_thread(discover_merchant_id, store.token) or cfg.get("merchant_id", "20186986")
+                merchant_id = await asyncio.to_thread(discover_merchant_id, store.token) or store_cfg.get("merchant_id", "20186986")
                 ok = await _run_chatbot_pass(cookies, merchant_id, store.store_id)
                 if not ok:
                     return 10
             except Exception as e:
                 logger.error(f"[Chatbot] Store {store.store_id} pass failed: {e}")
-        if not any_cookies:
-            await notify_cookie_expired("Куки Kaspi MC отсутствуют/истекли ни у одного активного стора")
+        if any_enabled and not any_cookies:
+            await notify_cookie_expired("Куки Kaspi MC отсутствуют/истекли ни у одного активного стора", store_id=None)
             return 10
     else:
+        cfg = await asyncio.to_thread(config.load_chatbot_config)
+        if not cfg.get("enabled", True):
+            return 5
         cookies = await asyncio.to_thread(load_chat_cookies, store_id=None)
         if not cookies:
-            await notify_cookie_expired("Куки отсутствуют или истекли в states/session.json")
+            await notify_cookie_expired("Куки отсутствуют или истекли в states/session.json", store_id=None)
             return 10
         merchant_id = cfg.get("merchant_id", "20186986")
         ok = await _run_chatbot_pass(cookies, merchant_id, None)

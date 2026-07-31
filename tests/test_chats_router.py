@@ -38,6 +38,26 @@ class TestChatsRouter(unittest.TestCase):
             encrypted_api_key=encrypt_data("rest_token"),
         )
 
+        # chat_states (Слайс 4) persists to the sync DB — isolate it in a
+        # scratch SQLite file so these tests never touch the tracked
+        # kaspi_saas.db (known CI quirk, see HANDOFF).
+        import tempfile
+        import backend.db.models  # noqa: F401 registers ORM classes on Base.metadata
+        from backend.db.database import Base
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        self._tmp_dir = tempfile.mkdtemp()
+        db_path = os.path.join(self._tmp_dir, "chats_router_test.db")
+        self._sync_engine = create_engine(f"sqlite:///{db_path.replace(os.sep, '/')}", connect_args={"check_same_thread": False})
+        Base.metadata.create_all(self._sync_engine)
+
+        from backend import state_helpers
+        self._session_patch = patch.object(
+            state_helpers, "_get_sync_db_session", side_effect=lambda: Session(self._sync_engine)
+        )
+        self._session_patch.start()
+
     def _auth_override(self):
         fake_db = AsyncMock()
         fake_db.execute.side_effect = [make_scalar_result(self.user), make_scalar_result(self.store)]
@@ -49,6 +69,9 @@ class TestChatsRouter(unittest.TestCase):
         app.dependency_overrides[real_get_db] = fake_get_db_gen
 
     def tearDown(self):
+        self._session_patch.stop()
+        import shutil
+        shutil.rmtree(self._tmp_dir, ignore_errors=True)
         from backend.db.database import get_db as real_get_db
         app.dependency_overrides.pop(real_get_db, None)
 
@@ -130,14 +153,12 @@ class TestChatsRouter(unittest.TestCase):
         mock_load_cookies.return_value = {"mc-session": "s", "mc-sid": "sid"}
         self._auth_override()
         from backend.chatbot import config as chatbot_config
-        chatbot_config.PROCESSED_CHATS.pop("g-takeover", None)
 
         resp = self.client.post("/api/chats/g-takeover/take-over", headers=self._headers())
 
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.json()["success"])
-        self.assertEqual(chatbot_config.PROCESSED_CHATS.get("g-takeover"), "HUMAN_OVERRIDE")
-        chatbot_config.PROCESSED_CHATS.pop("g-takeover", None)
+        self.assertTrue(chatbot_config.is_chat_human_override("store-1", "g-takeover"))
 
     @patch("backend.routers.chats.discover_merchant_id")
     @patch("backend.chatbot.chat_client.http_session")
@@ -151,7 +172,6 @@ class TestChatsRouter(unittest.TestCase):
         mock_http.post.return_value = mock_resp
         self._auth_override()
         from backend.chatbot import config as chatbot_config
-        chatbot_config.PROCESSED_CHATS.pop("g-quickreply", None)
 
         resp = self.client.post(
             "/api/chats/g-quickreply/messages",
@@ -160,8 +180,7 @@ class TestChatsRouter(unittest.TestCase):
         )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(chatbot_config.PROCESSED_CHATS.get("g-quickreply"), "HUMAN_OVERRIDE")
-        chatbot_config.PROCESSED_CHATS.pop("g-quickreply", None)
+        self.assertTrue(chatbot_config.is_chat_human_override("store-1", "g-quickreply"))
 
 
 if __name__ == "__main__":
