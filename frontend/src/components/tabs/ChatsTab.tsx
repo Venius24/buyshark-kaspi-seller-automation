@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, API_URL } from '../../api';
+import { useActiveStoreId } from '../../storeContext';
 
 interface ChatGroup {
   id: string;
@@ -93,6 +94,7 @@ function AttachmentView({ attachment }: { attachment: ChatAttachment }) {
 
 export function ChatsTab() {
   const queryClient = useQueryClient();
+  const activeStoreId = useActiveStoreId();
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -102,13 +104,13 @@ export function ChatsTab() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { data: chats = [], isLoading: chatsLoading } = useQuery({
-    queryKey: ['chats', 'list'],
+    queryKey: ['chats', activeStoreId, 'list'],
     queryFn: fetchChats,
     refetchInterval: 10_000,
   });
 
   const { data: messages = [], isFetching: messagesLoading } = useQuery({
-    queryKey: ['chats', selectedGroupId, 'messages'],
+    queryKey: ['chats', activeStoreId, selectedGroupId, 'messages'],
     queryFn: () => fetchMessages(selectedGroupId as string),
     enabled: !!selectedGroupId,
     refetchInterval: 5_000,
@@ -119,8 +121,8 @@ export function ChatsTab() {
   }, [messages.length, selectedGroupId]);
 
   const refreshAfterAction = () => {
-    queryClient.invalidateQueries({ queryKey: ['chats', selectedGroupId, 'messages'] });
-    queryClient.invalidateQueries({ queryKey: ['chats', 'list'] });
+    queryClient.invalidateQueries({ queryKey: ['chats', activeStoreId, selectedGroupId, 'messages'] });
+    queryClient.invalidateQueries({ queryKey: ['chats', activeStoreId, 'list'] });
   };
 
   const sendText = async (text: string, override: boolean): Promise<boolean> => {

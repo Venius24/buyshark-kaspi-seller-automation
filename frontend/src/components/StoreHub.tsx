@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, API_URL } from '../api';
 import { fetchProfile, fetchStores } from '../queries';
+import { useActiveStoreId, setActiveStoreId as setSharedActiveStoreId } from '../storeContext';
 
 export interface StoreItem {
   id: string;
@@ -29,7 +30,10 @@ export interface UserProfile {
 
 export const StoreHub: React.FC = () => {
   const queryClient = useQueryClient();
-  const [activeStoreId, setActiveStoreId] = useState<string>('');
+  // Слайс 6: выбор магазина живёт в общем модуле (storeContext.ts), не в
+  // локальном useState — переживает переключение вкладок и реально доходит
+  // до apiFetch/getWsUrl через X-Store-Id/?store_id=, а не только до UI.
+  const activeStoreId = useActiveStoreId() ?? '';
 
   // Modal State
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
@@ -60,16 +64,14 @@ export const StoreHub: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
   };
 
-  const selectStoreContext = async (storeId: string) => {
-    setActiveStoreId(storeId);
-    if (!storeId) return;
-    try {
-      await apiFetch(`${API_URL}/api/v1/stores/${storeId}/select`, {
-        method: 'POST',
-      });
-    } catch (err) {
-      console.error('Error selecting store context:', err);
-    }
+  const selectStoreContext = (storeId: string) => {
+    // Слайс 6: раньше это слал POST /select, который писал расшифрованный
+    // API-токен выбранного магазина в общий states/session.json на диске —
+    // тот самый глобальный файл, который эта же серия слайсов выпиливает
+    // как источник смешения данных между магазинами. Теперь выбор живёт
+    // только в браузере (localStorage) и уходит на бэкенд заголовком
+    // X-Store-Id на каждый запрос — самого запроса на "выбор" вообще не нужно.
+    setSharedActiveStoreId(storeId || null);
   };
 
   // Auto-select the first store once the list loads, if nothing selected yet.

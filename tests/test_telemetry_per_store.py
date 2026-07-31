@@ -87,10 +87,15 @@ class TestResolveWsStoreId(unittest.IsolatedAsyncioTestCase):
     """resolve_ws_store_id() — JWT comes in via ?token= query param (browser
     WebSocket API can't set Authorization headers), not the header."""
 
-    def _make_ws(self, token=None):
+    def _make_ws(self, token=None, store_id=None):
         from starlette.datastructures import QueryParams, Headers
         ws = MagicMock()
-        ws.query_params = QueryParams({"token": token} if token else {})
+        params = {}
+        if token:
+            params["token"] = token
+        if store_id:
+            params["store_id"] = store_id
+        ws.query_params = QueryParams(params)
         ws.headers = Headers({})
         return ws
 
@@ -145,6 +150,52 @@ class TestResolveWsStoreId(unittest.IsolatedAsyncioTestCase):
 
         result = await resolve_ws_store_id(self._make_ws(access_tok), db)
         self.assertEqual(result, "store-1")
+
+    async def test_explicit_store_id_query_param_is_respected(self):
+        """Слайс 6: браузерный WS не умеет заголовок X-Store-Id — выбор
+        магазина из storeContext.ts приходит через ?store_id=."""
+        from backend.security.store_context import resolve_ws_store_id
+        from backend.security.auth import create_access_token
+        from backend.db.models import User, Store
+
+        access_tok = create_access_token({"sub": "user-1"})
+        user = User(id="user-1", email="a@b.com", password_hash="x", is_active=True)
+        requested_store = Store(id="store-B", merchant_id="m_b", name="Shop B")
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        requested_store_result = MagicMock()
+        requested_store_result.scalars.return_value.first.return_value = requested_store
+
+        db = AsyncMock()
+        db.execute.side_effect = [user_result, requested_store_result]
+
+        result = await resolve_ws_store_id(self._make_ws(access_tok, store_id="store-B"), db)
+        self.assertEqual(result, "store-B")
+
+    async def test_store_id_query_param_not_owned_by_user_falls_back_to_default(self):
+        """A store_id the user doesn't have access to must not be trusted —
+        falls back to the normal (oldest-store) resolution instead."""
+        from backend.security.store_context import resolve_ws_store_id
+        from backend.security.auth import create_access_token
+        from backend.db.models import User, Store
+
+        access_tok = create_access_token({"sub": "user-1"})
+        user = User(id="user-1", email="a@b.com", password_hash="x", is_active=True)
+        default_store = Store(id="store-default", merchant_id="m_default", name="Default Shop")
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        not_owned_result = MagicMock()
+        not_owned_result.scalars.return_value.first.return_value = None  # not this user's store
+        fallback_result = MagicMock()
+        fallback_result.scalars.return_value.first.return_value = default_store
+
+        db = AsyncMock()
+        db.execute.side_effect = [user_result, not_owned_result, fallback_result]
+
+        result = await resolve_ws_store_id(self._make_ws(access_tok, store_id="someone-elses-store"), db)
+        self.assertEqual(result, "store-default")
 
 
 class TestEmitTelemetrySyncFromWorkerThread(unittest.IsolatedAsyncioTestCase):

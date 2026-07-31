@@ -22,6 +22,7 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { LiveTerminalStream } from './LiveTerminalStream';
 import { apiFetch, API_URL, getWsUrl } from '../api';
 import { fetchGroupsQuery, fetchProductsQuery } from '../queries';
+import { useActiveStoreId } from '../storeContext';
 
 interface GroupDumpingConfig {
   enabled: boolean;
@@ -68,13 +69,14 @@ export interface ProductItem {
 
 export const MasterStockGroups: React.FC = () => {
   const queryClient = useQueryClient();
+  const activeStoreId = useActiveStoreId();
   const { data: groups = [] } = useQuery({
-    queryKey: ['stock-groups'],
+    queryKey: ['stock-groups', activeStoreId],
     queryFn: fetchGroupsQuery,
     refetchInterval: 5_000,
   });
   const { data: products = [], isLoading: loading } = useQuery({
-    queryKey: ['products', 'all-for-stock-groups'],
+    queryKey: ['products', 'all-for-stock-groups', activeStoreId],
     queryFn: fetchProductsQuery,
     // Kept in sync with BackgroundSync.tsx's interval for the same key —
     // see the comment there for why 30s was dropped to 300s.

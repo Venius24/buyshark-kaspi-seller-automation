@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useChatAuth } from '../../hooks/useChatAuth';
 import { ChatSmsAuthModal } from '../ChatSmsAuthModal';
 import { fetchChatbotHasSession } from '../../queries';
+import { useActiveStoreId } from '../../storeContext';
 import type { ChatbotConfig, ChatbotStatus } from '../../types';
 
 interface ChatbotTabProps {
@@ -25,8 +26,9 @@ export function ChatbotTab({ chatbotConfig, chatbotStatus, onSaveChatbotConfig, 
   // Отдельный статус SMS-сессии чата (не путать с chatbotStatus.enabled/
   // blocked_chats выше — та часть по-прежнему приходит из App.tsx). Живой
   // поллинг, чтобы бейдж не зависал на устаревшем значении.
+  const activeStoreId = useActiveStoreId();
   const { data: hasChatSession = false } = useQuery({
-    queryKey: ['chatbot-status'],
+    queryKey: ['chatbot-status', activeStoreId],
     queryFn: fetchChatbotHasSession,
     refetchInterval: 30_000,
   });

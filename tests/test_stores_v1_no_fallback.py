@@ -163,24 +163,14 @@ class TestStoresV1NoFallback(unittest.TestCase):
         self.assertEqual(resp.json()["status"], "COOKIE_EXPIRED")
         mock_refresh.assert_called_once_with(store_id="store-existing-1")
 
-    def test_select_active_store_does_not_write_global_state_json(self):
-        """Selecting a store must not push its cookies into the shared
-        state.json -- that was the cross-store leak HANDOFF 3.1 removed."""
-        os.remove("state.json")
-
-        store_row = Store(
-            id="store-existing-1", merchant_id="m_existing", name="ExistingShop",
-            encrypted_cookies=encrypt_data("mc-session=x; mc-sid=y"),
-            encrypted_api_key=None, created_at=datetime.utcnow(),
-        )
-        fake_db = AsyncMock()
-        fake_db.execute.side_effect = [make_result(store_row)]
-        self._override_db(fake_db)
-
+    def test_select_endpoint_removed(self):
+        """Слайс 6: /select удалён целиком — раньше он писал расшифрованный
+        API-токен выбранного магазина в общий states/session.json, и с тех
+        пор как фронтенд выбирает магазин через localStorage + X-Store-Id
+        (storeContext.ts), этот эндпоинт больше не вызывается и был вреден
+        (тихо переключал общую легаси-сессию на последний выбранный магазин)."""
         resp = self.client.post("/api/v1/stores/store-existing-1/select")
-
-        self.assertEqual(resp.status_code, 200, resp.text)
-        self.assertFalse(os.path.exists("state.json"))
+        self.assertEqual(resp.status_code, 404)
 
 
 if __name__ == "__main__":

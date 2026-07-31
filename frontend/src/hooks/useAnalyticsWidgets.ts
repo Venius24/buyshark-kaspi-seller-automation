@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, API_URL } from '../api';
+import { useActiveStoreId } from '../storeContext';
 
 interface Analytics {
   buy_box_share: number;
@@ -28,9 +29,11 @@ const fetchWidgets = async (): Promise<any> => {
 
 export function useAnalyticsWidgets(wsEvent: { type: string; data?: any } | null) {
   const queryClient = useQueryClient();
+  const activeStoreId = useActiveStoreId();
+  const widgetsQueryKey = ['analytics-widgets', activeStoreId];
 
   const { data: widgetData = null } = useQuery({
-    queryKey: ['analytics-widgets'],
+    queryKey: widgetsQueryKey,
     queryFn: fetchWidgets,
     refetchInterval: 10_000,
   });
@@ -49,13 +52,13 @@ export function useAnalyticsWidgets(wsEvent: { type: string; data?: any } | null
 
   useEffect(() => {
     if (wsEvent?.type === 'analytics_update' && wsEvent.data) {
-      queryClient.setQueryData(['analytics-widgets'], (prev: any) => ({
+      queryClient.setQueryData(widgetsQueryKey, (prev: any) => ({
         ...(prev || {}),
         success: true,
         analytics: wsEvent.data,
       }));
     }
-  }, [wsEvent, queryClient]);
+  }, [wsEvent, queryClient, activeStoreId]);
 
   return { analytics, widgetData };
 }

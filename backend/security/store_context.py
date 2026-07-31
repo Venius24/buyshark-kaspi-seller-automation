@@ -149,10 +149,11 @@ async def get_store_by_id(store_id: str) -> Optional[StoreContext]:
 async def resolve_ws_store_id(websocket: WebSocket, db: AsyncSession) -> Optional[str]:
     """
     Резолвит store_id для WS-подключения (Phase 6). Браузерный WebSocket API не
-    может слать кастомные заголовки (Authorization), поэтому JWT передаётся
-    через query-параметр `?token=` при подключении, а не в заголовке — отсюда
-    отдельная функция, а не переиспользование get_store_context (которой нужен
-    HTTP Request с Authorization header).
+    может слать кастомные заголовки (Authorization, X-Store-Id), поэтому и JWT,
+    и выбранный магазин передаются через query-параметры (`?token=`, `?store_id=`,
+    последний — Слайс 6) при подключении, а не в заголовках — отсюда отдельная
+    функция, а не переиспользование get_store_context (которой нужен HTTP
+    Request с Authorization header).
 
     При отсутствии/невалидности токена или нерезолвящемся сторе — возвращает
     None (legacy/общий телеметрийный канал, то же поведение, что было до
@@ -175,6 +176,23 @@ async def resolve_ws_store_id(websocket: WebSocket, db: AsyncSession) -> Optiona
     user = res.scalar_one_or_none()
     if not user or not user.is_active:
         return None
+
+    # Слайс 6: ?store_id= — явный выбор магазина из UI (StoreHub/storeContext.ts).
+    # Браузерный WebSocket не умеет заголовок X-Store-Id, отсюда query-параметр,
+    # а не переиспользование _resolve_store_for_user's header-путь напрямую.
+    requested_store_id = websocket.query_params.get("store_id")
+    if requested_store_id:
+        stmt = (
+            select(Store)
+            .join(UserStore, Store.id == UserStore.store_id)
+            .where(Store.id == requested_store_id, UserStore.user_id == user.id)
+        )
+        res = await db.execute(stmt)
+        requested_store = res.scalars().first()
+        if requested_store:
+            return requested_store.id
+        # Запрошенный store_id не принадлежит этому пользователю — не
+        # угадываем чужой магазин, падаем на обычный резолв ниже.
 
     store = await _resolve_store_for_user(websocket, db, user.id)
     return store.id if store else None

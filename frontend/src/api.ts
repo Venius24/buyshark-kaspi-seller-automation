@@ -1,11 +1,18 @@
+import { getActiveStoreId } from './storeContext';
+
 export const API_URL = import.meta.env.VITE_API_URL || '';
 
 export function getWsUrl(path: string = '/api/ws/telemetry'): string {
-  // Браузерный WebSocket API не может слать кастомные заголовки (Authorization),
-  // поэтому JWT передаётся через query-параметр — backend читает его в
-  // resolve_ws_store_id() (Phase 6), чтобы телеметрия шла только своему стору.
+  // Браузерный WebSocket API не может слать кастомные заголовки (Authorization,
+  // X-Store-Id), поэтому оба передаются через query-параметры — backend читает
+  // их в resolve_ws_store_id() (Phase 6 + Слайс 6), чтобы телеметрия шла
+  // только своему стору, а не самому старому магазину пользователя по умолчанию.
   const token = localStorage.getItem('access_token');
-  const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
+  const storeId = getActiveStoreId();
+  const params = new URLSearchParams();
+  if (token) params.set('token', token);
+  if (storeId) params.set('store_id', storeId);
+  const suffix = params.toString() ? `?${params.toString()}` : '';
 
   if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL + suffix;
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -29,6 +36,11 @@ export async function apiFetch(input: string | URL, init: RequestInit = {}): Pro
 
   if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const storeId = getActiveStoreId();
+  if (storeId && !headers.has('X-Store-Id')) {
+    headers.set('X-Store-Id', storeId);
   }
 
   const updatedInit: RequestInit = {

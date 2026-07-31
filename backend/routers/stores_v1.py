@@ -260,36 +260,6 @@ async def connect_full_store(
     )
 
 
-@router.post("/{store_id}/select")
-async def select_active_store(
-    store_id: str,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Активация контекста выбранного магазина для всех подсистем"""
-    stmt = (
-        select(Store)
-        .join(UserStore, Store.id == UserStore.store_id)
-        .where(Store.id == store_id, UserStore.user_id == user.id)
-    )
-    res = await db.execute(stmt)
-    store = res.scalar_one_or_none()
-
-    if not store:
-        raise HTTPException(status_code=404, detail="Магазин не найден или нет прав доступа")
-
-    decrypted_api_key = decrypt_data(store.encrypted_api_key)
-    if decrypted_api_key:
-        _save_session({"token": decrypted_api_key, "merchant_id": store.merchant_id})
-
-    # MC-сессия (куки) этого магазина уже лежит в его собственной строке БД
-    # (store.encrypted_cookies) — переносить её в общий state.json не нужно:
-    # это ровно то "протекание" сессии между магазинами, которое было решено
-    # исключить (HANDOFF 3.1). Все MC-эндпоинты читают/обновляют куки по store_id.
-
-    return {"status": "ok", "message": f"Контекст активного магазина {store.name} установлен."}
-
-
 @router.post("/{store_id}/verify", response_model=StoreResponse)
 async def verify_store_cookies(
     store_id: str,

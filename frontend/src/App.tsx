@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, setUnauthorizedHandler, API_URL, getWsUrl } from './api';
+import { useActiveStoreId } from './storeContext';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useLogs } from './hooks/useLogs';
 import { useAnalyticsWidgets } from './hooks/useAnalyticsWidgets';
@@ -29,6 +30,11 @@ export default function App() {
   const queryClient = useQueryClient();
   const [isLoaded, setIsLoaded] = useState(false);
   const [isAuthed, setIsAuthed] = useState<boolean>(() => !!localStorage.getItem('access_token'));
+  // Слайс 6: включён в queryKey всех store-специфичных запросов ниже — без
+  // этого переключение магазина в StoreHub показывало бы кэш ПРЕДЫДУЩЕГО
+  // магазина, пока не придёт ответ на новый запрос (React Query считает
+  // одинаковый ключ = один и тот же кэш, независимо от заголовка X-Store-Id).
+  const activeStoreId = useActiveStoreId();
 
 
   const handleLogout = () => {
@@ -85,7 +91,7 @@ export default function App() {
   // verify=true остаётся только для явных случаев: первичная проверка на
   // монтировании и ручная кнопка «Проверить» (см. checkMcStatus ниже).
   const { data: mcHasSession = false } = useQuery({
-    queryKey: ['mc-status'],
+    queryKey: ['mc-status', activeStoreId],
     queryFn: async () => {
       try {
         const res = await apiFetch(`${API_URL}/api/mc-status?verify=false`);
@@ -126,7 +132,7 @@ export default function App() {
       const data = await res.json();
       if (res.ok && data.success) {
         const valid = !!(data.has_session && data.valid);
-        queryClient.setQueryData(['mc-status'], valid);
+        queryClient.setQueryData(['mc-status', activeStoreId], valid);
         return valid;
       }
     } catch {
@@ -401,7 +407,7 @@ export default function App() {
   // фоновый refetchInterval держит их свежими без клика пользователя. Смена
   // фильтра/лимита меняет queryKey и триггерит перезапрос сама по себе.
   const { data: orders = [], isFetching: fetchingOrders, refetch: refetchOrders } = useQuery({
-    queryKey: ['orders', orderStatusFilter, orderLimit],
+    queryKey: ['orders', activeStoreId, orderStatusFilter, orderLimit],
     queryFn: async () => {
       const { state, status, assembled } = getOrderParams(orderStatusFilter);
       let url = `${API_URL}/api/orders?state=${state}&status=${status}&limit=${orderLimit}`;
@@ -509,7 +515,7 @@ export default function App() {
   };
 
   const { data: transfers = [], isFetching: fetchingTransfers, refetch: refetchTransfers } = useQuery({
-    queryKey: ['transfers', transferFilter],
+    queryKey: ['transfers', activeStoreId, transferFilter],
     queryFn: async () => {
       const res = await apiFetch(`${API_URL}/api/transfers?filter=${transferFilter}`);
       const data = await res.json();
