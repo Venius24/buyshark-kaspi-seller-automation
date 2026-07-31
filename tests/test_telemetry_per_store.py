@@ -1,5 +1,7 @@
+import asyncio
 import os
 import sys
+import threading
 import unittest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -143,6 +145,66 @@ class TestResolveWsStoreId(unittest.IsolatedAsyncioTestCase):
 
         result = await resolve_ws_store_id(self._make_ws(access_tok), db)
         self.assertEqual(result, "store-1")
+
+
+class TestEmitTelemetrySyncFromWorkerThread(unittest.IsolatedAsyncioTestCase):
+    """
+    Regression for the category-0 perf fix that moved
+    RateLimitExecutorWorker.execute_updates onto asyncio.to_thread
+    (backend/dumper/__init__.py::run_price_dumping_job) — executor.py calls
+    emit_telemetry_sync() from inside that worker thread. Before the fix,
+    emit_telemetry_sync used asyncio.get_event_loop(), which cannot find the
+    running loop from a worker thread; the failure was swallowed by a bare
+    `except: pass`, so telemetry would silently vanish with no error anywhere.
+    set_main_loop() fixes this by capturing an explicit loop reference at
+    startup instead of relying on thread-local loop discovery.
+    """
+
+    def setUp(self):
+        import backend.dumper.telemetry as telemetry
+        self.telemetry = telemetry
+        self.telemetry.telemetry_manager.active_connections.clear()
+        self._orig_main_loop = telemetry._main_loop
+
+    def tearDown(self):
+        self.telemetry._main_loop = self._orig_main_loop
+
+    async def test_emit_from_worker_thread_reaches_connected_client(self):
+        ws = make_ws()
+        await self.telemetry.telemetry_manager.connect(ws, "store-a")
+        self.telemetry.set_main_loop(asyncio.get_running_loop())
+
+        done = threading.Event()
+
+        def worker():
+            self.telemetry.emit_telemetry_sync(
+                "terminal_log", {"message": "hi from thread"}, store_id="store-a"
+            )
+            done.set()
+
+        t = threading.Thread(target=worker)
+        t.start()
+        self.assertTrue(done.wait(timeout=2), "worker thread did not finish")
+        t.join(timeout=2)
+
+        # run_coroutine_threadsafe only schedules the coroutine onto the
+        # loop — give this coroutine's own event loop a tick to run it.
+        for _ in range(10):
+            await asyncio.sleep(0.02)
+            if ws.send_json.await_count:
+                break
+
+        ws.send_json.assert_awaited_once()
+        sent = ws.send_json.call_args.args[0]
+        self.assertEqual(sent["type"], "terminal_log")
+        self.assertEqual(sent["data"]["message"], "hi from thread")
+
+    async def test_emit_without_main_loop_set_does_not_raise(self):
+        self.telemetry.set_main_loop(None)
+        # Must not raise even though there is nowhere to deliver the event —
+        # this is the pre-fix behavior (silent no-op), just via an explicit
+        # None check now instead of a get_event_loop() exception.
+        self.telemetry.emit_telemetry_sync("terminal_log", {"message": "hi"})
 
 
 if __name__ == "__main__":

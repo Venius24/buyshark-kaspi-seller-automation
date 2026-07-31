@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import List
 from backend.dumper.config import discover_merchant_id, _decode_base64_if_needed, DumpingProductConfig
@@ -76,7 +77,15 @@ async def run_price_dumping_job(
     await telemetry_manager.broadcast("analytics_update", analytics, store_id=store_id)
 
     # 3. 🚀 Воркер-Исполнитель
-    exec_result = RateLimitExecutorWorker.execute_updates(update_queue, save_override_func, merchant_id=merchant_id, store_id=store_id)
+    # execute_updates — синхронная функция с последовательными сетевыми
+    # запросами к Kaspi MC и time.sleep() джиттером/backoff'ом между ними
+    # (до 60с при 429/403). Вызов без to_thread замораживал единственный
+    # event loop приложения (--workers 1) на всё время выполнения очереди —
+    # это и был периодический "сервис недоступен" каждые ~5 минут.
+    exec_result = await asyncio.to_thread(
+        RateLimitExecutorWorker.execute_updates,
+        update_queue, save_override_func, merchant_id=merchant_id, store_id=store_id,
+    )
     exec_result["analytics"] = analytics
     
     # Объединяем диагностические логи расчета и выполнения

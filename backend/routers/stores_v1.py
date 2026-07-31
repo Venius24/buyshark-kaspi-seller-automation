@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import uuid
@@ -323,7 +324,7 @@ async def verify_store_cookies(
             return False
 
     decrypted_cookies = decrypt_data(store.encrypted_cookies) if store.encrypted_cookies else None
-    is_valid = _check_cookie_str(decrypted_cookies)
+    is_valid = await asyncio.to_thread(_check_cookie_str, decrypted_cookies)
 
     # Куки этого магазина просрочены — пробуем обновить сессию ЕГО СОБСТВЕННЫМИ
     # email/паролем. Никакого фоллбека на общую систему/другой магазин: если
@@ -331,7 +332,7 @@ async def verify_store_cookies(
     if not is_valid and _refresh_mc_session(store_id=store_id):
         await db.refresh(store)
         decrypted_cookies = decrypt_data(store.encrypted_cookies) if store.encrypted_cookies else None
-        is_valid = _check_cookie_str(decrypted_cookies)
+        is_valid = await asyncio.to_thread(_check_cookie_str, decrypted_cookies)
 
     if is_valid:
         store.status = "ACTIVE"
@@ -394,7 +395,9 @@ async def sync_store_cookies(
         "Cookie": decrypted_cookies
     }
     try:
-        r = requests.get("https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=headers, timeout=5)
+        r = await asyncio.to_thread(
+            requests.get, "https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=headers, timeout=5
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ошибка проверки куков: {e}")
 

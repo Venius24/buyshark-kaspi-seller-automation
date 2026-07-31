@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Optional
@@ -81,9 +82,16 @@ async def get_store_context(
                                 store_id=store.id,
                             )
 
-    # Legacy fallback — unchanged behavior for pre-migration clients.
-    legacy_token = _require_token()
-    legacy_merchant_id = discover_merchant_id(legacy_token)
+    # Legacy fallback — unchanged behavior for pre-migration clients. Both
+    # calls are blocking (file I/O, and discover_merchant_id can hit
+    # kaspi.kz over the network) — this dependency runs on nearly every
+    # request in the app, so leaving it unwrapped stalled the single
+    # event loop for every user on every request, not just this one.
+    def _resolve_legacy():
+        token = _require_token()
+        return token, discover_merchant_id(token)
+
+    legacy_token, legacy_merchant_id = await asyncio.to_thread(_resolve_legacy)
     return StoreContext(token=legacy_token, merchant_id=legacy_merchant_id, store_id=None)
 
 

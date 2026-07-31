@@ -212,7 +212,10 @@ async def run_chatbot_cycle():
     задержку в секундах до следующего тика (сохраняет исходный тайминг:
     5с — выключено/успех, 10с — куки истекли).
     """
-    cfg = config.load_chatbot_config()
+    # Тик каждые 5с на каждый активный стор — file I/O/sync DB здесь без
+    # to_thread копится в постоянный фоновый налог на единственный event
+    # loop приложения (--workers 1).
+    cfg = await asyncio.to_thread(config.load_chatbot_config)
 
     # Если чат-бот отключен пользователем через интерфейс дашборда
     if not cfg.get("enabled", True):
@@ -223,12 +226,12 @@ async def run_chatbot_cycle():
         any_cookies = False
         for store in stores:
             try:
-                cookies = load_chat_cookies(store_id=store.store_id)
+                cookies = await asyncio.to_thread(load_chat_cookies, store_id=store.store_id)
                 if not cookies:
                     logger.warning(f"[Chatbot] Store {store.store_id}: куки Kaspi MC отсутствуют/истекли, пропускаем проход.")
                     continue
                 any_cookies = True
-                merchant_id = discover_merchant_id(store.token) or cfg.get("merchant_id", "20186986")
+                merchant_id = await asyncio.to_thread(discover_merchant_id, store.token) or cfg.get("merchant_id", "20186986")
                 ok = await _run_chatbot_pass(cookies, merchant_id, store.store_id)
                 if not ok:
                     return 10
@@ -238,7 +241,7 @@ async def run_chatbot_cycle():
             await notify_cookie_expired("Куки Kaspi MC отсутствуют/истекли ни у одного активного стора")
             return 10
     else:
-        cookies = load_chat_cookies(store_id=None)
+        cookies = await asyncio.to_thread(load_chat_cookies, store_id=None)
         if not cookies:
             await notify_cookie_expired("Куки отсутствуют или истекли в states/session.json")
             return 10

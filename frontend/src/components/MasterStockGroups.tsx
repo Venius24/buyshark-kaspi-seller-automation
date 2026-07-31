@@ -76,7 +76,9 @@ export const MasterStockGroups: React.FC = () => {
   const { data: products = [], isLoading: loading } = useQuery({
     queryKey: ['products', 'all-for-stock-groups'],
     queryFn: fetchProductsQuery,
-    refetchInterval: 30_000,
+    // Kept in sync with BackgroundSync.tsx's interval for the same key —
+    // see the comment there for why 30s was dropped to 300s.
+    refetchInterval: 300_000,
   });
   const refetchGroups = () => queryClient.invalidateQueries({ queryKey: ['stock-groups'] });
   const [syncingGroupId, setSyncingGroupId] = useState<string | null>(null);

@@ -35,7 +35,9 @@ async def check_all_stores_health():
             }
 
             try:
-                r = requests.get("https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=headers, timeout=5)
+                r = await asyncio.to_thread(
+                    requests.get, "https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=headers, timeout=5
+                )
                 if r.status_code == 200:
                     store.last_sync_at = datetime.utcnow()
                 else:

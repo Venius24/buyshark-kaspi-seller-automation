@@ -88,7 +88,7 @@ async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus
                 "parse_mode": "HTML"
             }
             try:
-                requests.post(url, json=payload, proxies=proxies, timeout=5)
+                await asyncio.to_thread(requests.post, url, json=payload, proxies=proxies, timeout=5)
             except Exception as ex:
                 logger.error(f"Error sending Telegram zero-stock alert to {admin_id}: {ex}")
     except Exception as e:
@@ -265,7 +265,7 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
     кэш товаров (products.json) остаются общими на все сторы — известное
     ограничение, актуально только когда сторов в проде станет больше одного.
     """
-    groups = _load_master_stock_groups(store_id=store_id)
+    groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
     active_groups = {gid: g for gid, g in groups.items() if g.get("is_active", True)}
     if not active_groups:
         return
@@ -286,17 +286,21 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
     if not orders_resp:
         return
 
-    # Загружаем товары из кэша для резолва алиасов ключей
-    products_file = "states/products.json"
-    all_products_cache = []
-    if os.path.exists(products_file):
+    # Загружаем товары из кэша для резолва алиасов ключей — тик каждые 20с,
+    # файл может быть весь каталог (сотни товаров), поэтому в поток.
+    def _load_products_cache():
+        products_file = "states/products.json"
+        if not os.path.exists(products_file):
+            return []
         try:
             with open(products_file, "r", encoding="utf-8") as f:
-                all_products_cache = json.load(f)
+                return json.load(f)
         except Exception:
-            pass
+            return []
 
-    processed_orders = _load_processed_orders()
+    all_products_cache = await asyncio.to_thread(_load_products_cache)
+
+    processed_orders = await asyncio.to_thread(_load_processed_orders)
     order_dedup_changed = False
 
     for order in orders_resp:
@@ -341,7 +345,7 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
                         new_stock = max(0, current_stock - qty)
                         grp["shared_stock"] = new_stock
                         groups[gid] = grp
-                        _save_master_stock_groups(groups, store_id=store_id)
+                        await asyncio.to_thread(_save_master_stock_groups, groups, store_id=store_id)
                         logger.info(
                             f"📦 [Order Sale Detected] Заказ {order_id} (Ключи: {list(all_possible_skus)}, qty: {qty}). "
                             f"Группа '{grp.get('group_name')}' остаток: {current_stock} -> {new_stock}"
@@ -379,7 +383,7 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
             asyncio.create_task(execute_broadcast_sync(gid, token, store_id=store_id))
 
     if order_dedup_changed:
-        _save_processed_orders(processed_orders)
+        await asyncio.to_thread(_save_processed_orders, processed_orders)
 
 async def run_stock_radar_cycle():
     """
@@ -452,10 +456,12 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
     """
     from backend.state_helpers import _load_processed_packaging_orders, _save_processed_packaging_orders
 
-    processed_orders = _load_processed_packaging_orders()
+    processed_orders = await asyncio.to_thread(_load_processed_packaging_orders)
 
     try:
-        tabs = KaspiAPI.get_all_packaging_tabs(token)
+        # Синхронный постраничный обход Kaspi MC (весь список заказов
+        # "На сборке") — тик каждые 30с на каждый активный стор.
+        tabs = await asyncio.to_thread(KaspiAPI.get_all_packaging_tabs, token)
     except Exception as e:
         logger.error(f"[AutoDeduction] Error fetching packaging tabs: {e}")
         return {"success": False, "error": str(e)}
@@ -467,7 +473,7 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
     new_deductions = []
 
     async with get_stock_lock(store_id):
-        groups = _load_master_stock_groups(store_id=store_id)
+        groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
         groups_modified = False
 
         for order in cargo_assembly:
@@ -547,8 +553,8 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                     break
 
         if groups_modified:
-            _save_master_stock_groups(groups, store_id=store_id)
-            _save_processed_packaging_orders(processed_orders)
+            await asyncio.to_thread(_save_master_stock_groups, groups, store_id=store_id)
+            await asyncio.to_thread(_save_processed_packaging_orders, processed_orders)
 
     return {
         "success": True,

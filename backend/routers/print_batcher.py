@@ -1,3 +1,6 @@
+import asyncio
+import functools
+
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from backend.services.print_batcher_service import (
@@ -35,15 +38,22 @@ async def process_print_batch(
 
     try:
         content = await file.read()
-        manifest = process_zip_or_pdfs(
-            file_bytes=content,
-            original_filename=file.filename,
-            sort_preset=sort_preset,
-            auto_rotate=auto_rotate,
-            express_mode=express_mode,
-            deduplicate_history=deduplicate_history,
-            force_reprint=force_reprint,
-            output_layout=output_layout
+        # process_zip_or_pdfs is a synchronous, CPU-heavy PyMuPDF pipeline
+        # (page-by-page parsing/rendering, PDF re-composition) — running it
+        # inline on the event loop froze the whole single-worker app for
+        # the duration of every print job.
+        manifest = await asyncio.to_thread(
+            functools.partial(
+                process_zip_or_pdfs,
+                file_bytes=content,
+                original_filename=file.filename,
+                sort_preset=sort_preset,
+                auto_rotate=auto_rotate,
+                express_mode=express_mode,
+                deduplicate_history=deduplicate_history,
+                force_reprint=force_reprint,
+                output_layout=output_layout,
+            )
         )
         return JSONResponse(content=manifest)
     except ValueError as ve:
@@ -56,7 +66,7 @@ async def process_print_batch(
 async def reset_history(ctx: StoreContext = Depends(get_store_context)):
     """Сбросить суточную историю напечатанных заказов"""
     try:
-        reset_printed_history()
+        await asyncio.to_thread(reset_printed_history)
         return {"status": "ok", "message": "История напечатанных заказов за сегодня успешно сброшена"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка при сбросе истории: {str(e)}")
@@ -65,7 +75,7 @@ async def reset_history(ctx: StoreContext = Depends(get_store_context)):
 @router.get("/history-stats")
 async def get_history_stats(ctx: StoreContext = Depends(get_store_context)):
     """Получить количество напечатанных заказов в истории за сегодня"""
-    history_keys = load_printed_history()
+    history_keys = await asyncio.to_thread(load_printed_history)
     return {"printed_count": len(history_keys)}
 
 

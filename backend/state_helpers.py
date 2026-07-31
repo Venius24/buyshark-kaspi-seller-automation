@@ -1,12 +1,17 @@
 import os
 import json
 import logging
+import threading
 from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+# Кэш engine для Postgres-пути (прод) — см. _get_sync_db_session().
+_sync_engine_cache = {"engine": None, "url": None}
+_sync_engine_lock = threading.Lock()
 
 SESSION_FILE = "states/session.json"
 OVERRIDES_FILE = "states/products_overrides.json"
@@ -18,18 +23,40 @@ WEBHOOK_CONFIG_FILE = "states/webhook_config.json"
 PROCESSED_PACKAGING_ORDERS_FILE = "states/processed_packaging_orders.json"
 
 def _get_sync_db_session():
-    """Возвращает синхронную сессию SQLAlchemy для безопасного сохранения состояния в БД."""
+    """Возвращает синхронную сессию SQLAlchemy для безопасного сохранения состояния в БД.
+
+    Postgres (прод): engine кэшируется на уровне модуля, а schema-check
+    (Base.metadata.create_all) выполняется только один раз, при первом
+    создании engine. Раньше это гоняло полный DDL-reflection на КАЖДЫЙ
+    вызов этой функции (а она вызывается 1-9+ раз за один HTTP-запрос) —
+    десятки лишних round-trip'ов к БД вхолостую. Alembic и так владеет
+    схемой (deploy.sh шаг 2 гоняет `alembic upgrade head`).
+
+    SQLite (dev/тесты): поведение сознательно не меняется — engine создаётся
+    заново на каждый вызов. DATABASE_URL здесь обычно относительный путь
+    (`sqlite+aiosqlite:///./kaspi_saas.db`), и часть тестов полагается на
+    то, что он резолвится от ТЕКУЩЕГО os.chdir() на момент вызова (см.
+    tests/test_login_router_store_scoped.py и др. — каждый тест меняет CWD
+    на свой tempfile.mkdtemp() без переопределения DATABASE_URL). Закэшированный
+    engine держал бы одно открытое соединение на файл первого вызвавшего
+    теста и был бы виден (и ломал бы изоляцию) всем последующим тестам.
+    """
     try:
         from backend.db.database import ASYNC_DB_URL, Base
         sync_url = ASYNC_DB_URL.replace("+asyncpg", "").replace("+aiosqlite", "")
+
         if "sqlite" in sync_url:
-            connect_args = {"check_same_thread": False}
-            sync_engine = create_engine(sync_url, connect_args=connect_args)
-        else:
-            sync_engine = create_engine(sync_url, pool_pre_ping=True)
-        
-        Base.metadata.create_all(sync_engine)
-        return Session(sync_engine)
+            sync_engine = create_engine(sync_url, connect_args={"check_same_thread": False})
+            Base.metadata.create_all(sync_engine)
+            return Session(sync_engine)
+
+        with _sync_engine_lock:
+            if _sync_engine_cache["engine"] is None or _sync_engine_cache["url"] != sync_url:
+                sync_engine = create_engine(sync_url, pool_pre_ping=True)
+                Base.metadata.create_all(sync_engine)
+                _sync_engine_cache["engine"] = sync_engine
+                _sync_engine_cache["url"] = sync_url
+            return Session(_sync_engine_cache["engine"])
     except Exception as e:
         logger.debug(f"Sync DB connection exception: {e}")
         return None
