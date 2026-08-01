@@ -314,17 +314,16 @@ class TestRefreshMcSessionStoreScoped(unittest.TestCase):
 
     @patch("backend.services.playwright_worker.worker")
     @patch("backend.state_helpers._save_mc_cookies_for_store")
-    @patch("backend.state_helpers._load_mc_cookies")
     @patch("backend.state_helpers._load_mc_credentials")
-    def test_successful_relogin_syncs_fresh_cookies_into_store_row(self, mock_load_creds, mock_load_cookies, mock_save_for_store, mock_worker):
+    def test_successful_relogin_syncs_fresh_cookies_into_store_row(self, mock_load_creds, mock_save_for_store, mock_worker):
         mock_load_creds.return_value = ("a@b.kz", "hunter2")
-        mock_load_cookies.return_value = {"mc-session": "fresh", "mc-sid": "fresh-sid"}
-        mock_worker.send_cmd.return_value = (True, "Success")
+        # Де-глобализация Playwright: LOGIN отдаёт куки напрямую (3-tuple),
+        # не через общий state.json — см. playwright_worker.py.
+        mock_worker.send_cmd.return_value = (True, "Success", {"mc-session": "fresh", "mc-sid": "fresh-sid"})
 
         result = state_helpers._refresh_mc_session(store_id="store-a")
 
         self.assertTrue(result)
-        mock_load_cookies.assert_called_once_with(store_id=None)
         mock_save_for_store.assert_called_once_with("store-a", {"mc-session": "fresh", "mc-sid": "fresh-sid"})
 
 

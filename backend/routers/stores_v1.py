@@ -1,6 +1,4 @@
 import asyncio
-import json
-import os
 import uuid
 import hashlib
 import logging
@@ -156,7 +154,7 @@ async def connect_full_store(
     if req.email and req.password:
         email_clean = req.email.strip()
         password_plain = req.password
-        success, msg = worker.send_cmd(Command.LOGIN, {"email": email_clean, "password": password_plain})
+        success, msg, login_cookies = worker.send_cmd(Command.LOGIN, {"email": email_clean, "password": password_plain})
         if not success:
             raise HTTPException(status_code=400, detail=f"Ошибка входа в Kaspi MC: {msg}")
 
@@ -165,15 +163,13 @@ async def connect_full_store(
         # session.json: иначе автообновление одного магазина будет читать
         # креды другого.
 
-        if os.path.exists("state.json"):
-            try:
-                with open("state.json", "r", encoding="utf-8") as f:
-                    state_data = json.load(f)
-                    cookie_list = state_data.get("cookies", [])
-                    parts = [f"{c['name']}={c['value']}" for c in cookie_list]
-                    cookies_str = "; ".join(parts)
-            except Exception as e:
-                logger.error(f"Ошибка чтения state.json: {e}")
+        # Куки приходят от worker.send_cmd напрямую (де-глобализация
+        # Playwright — каждый логин стейтлесс, без общего state.json,
+        # который при параллельном логине двух разных магазинов мог бы
+        # достаться не тому стору).
+        if login_cookies:
+            parts = [f"{name}={value}" for name, value in login_cookies.items()]
+            cookies_str = "; ".join(parts)
 
     # 4. Проверяем существование магазина в базе
     existing_stmt = select(Store).where(or_(Store.merchant_id == merchant_id, Store.name == name_clean))

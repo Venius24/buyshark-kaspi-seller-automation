@@ -79,13 +79,12 @@ def login(req: LoginCredentialsRequest, ctx: StoreContext = Depends(get_store_co
     if not email or not password:
         raise HTTPException(status_code=400, detail="Email и пароль обязательны")
 
-    success, msg = worker.send_cmd(Command.LOGIN, {"email": email, "password": password})
+    success, msg, cookies = worker.send_cmd(Command.LOGIN, {"email": email, "password": password})
     if success:
         # Сохраняем креды (в зашифрованном виде), чтобы при истечении сессионных
         # куков backend мог автоматически перелогиниться без участия пользователя.
         _save_mc_credentials(email, password, store_id=ctx.store_id)
-        fresh_cookies = _load_mc_cookies(store_id=None)
-        _save_mc_cookies_for_store(ctx.store_id, fresh_cookies)
+        _save_mc_cookies_for_store(ctx.store_id, cookies)
         return {"success": True, "message": msg}
     else:
         raise HTTPException(status_code=400, detail=msg)
@@ -105,28 +104,25 @@ def get_mc_status(verify: bool = False, ctx: StoreContext = Depends(get_store_co
     Теперь valid при verify=False = (Store.status == 'ACTIVE') — тот же
     источник правды, что и у StoreHub.
 
-    Ограничение (Phase 5, не решается здесь): verify=True всё ещё гоняет
-    единственный общий Playwright-браузер (Command.VERIFY_SESSION), который
-    физически один на все сторы — де-глобализация воркера отложена (см.
-    HANDOFF). Т.е. verify реально проверяет "текущую" браузерную сессию,
-    которая при 2+ сторах может принадлежать не этому стору. При успешной
-    проверке/автообновлении свежие куки сразу синхронизируются в
-    Store.encrypted_cookies резолвленного стора.
+    verify=True гоняет Command.VERIFY_SESSION именно с куками ЭТОГО стора
+    (де-глобализация Playwright-воркера — каждый вызов стейтлесс, без
+    общего браузера/файла на все сторы, см. playwright_worker.py).
     """
-    has_session = bool(_load_mc_cookies(store_id=ctx.store_id))
+    mc_cookies = _load_mc_cookies(store_id=ctx.store_id)
+    has_session = bool(mc_cookies)
 
     if not has_session:
         return {"success": True, "has_session": False, "valid": False}
 
     if verify:
-        success, valid = worker.send_cmd(Command.VERIFY_SESSION)
+        success, valid, fresh_cookies = worker.send_cmd(Command.VERIFY_SESSION, mc_cookies)
         if success and not valid:
             # Куки истекли — пробуем автоматически обновить их сохранёнными кредами.
             if _refresh_mc_session(store_id=ctx.store_id):
-                success, valid = worker.send_cmd(Command.VERIFY_SESSION)
+                mc_cookies = _load_mc_cookies(store_id=ctx.store_id)
+                success, valid, fresh_cookies = worker.send_cmd(Command.VERIFY_SESSION, mc_cookies)
         if success:
-            if valid:
-                fresh_cookies = _load_mc_cookies(store_id=None)
+            if valid and fresh_cookies:
                 _save_mc_cookies_for_store(ctx.store_id, fresh_cookies)
             return {"success": True, "has_session": True, "valid": valid}
         else:

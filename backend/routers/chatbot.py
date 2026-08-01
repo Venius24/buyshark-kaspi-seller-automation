@@ -92,14 +92,12 @@ def unblock_chat(req: UnblockChatRequest, ctx: StoreContext = Depends(get_store_
 def start_mobile_login(req: MobileLoginStartRequest, ctx: StoreContext = Depends(get_store_context)):
     """
     Шаг 1 из 2 повторного входа в Kaspi-чат: отправляет телефон, Kaspi
-    высылает SMS-код. Требует store_id (легаси dev-режим без Store в БД
-    не поддерживается — коду просто некуда сохранить отдельную сессию).
+    высылает SMS-код. Держит свой Chromium открытым до SUBMIT (де-
+    глобализация Playwright — сессия SMS-входа привязана к store_id, не к
+    общему на все магазины браузеру, см. playwright_worker.py).
     """
-    if ctx.store_id is None:
-        raise HTTPException(status_code=400, detail="Вход в чат по SMS доступен только для подключённых магазинов.")
-
     from backend.services.playwright_worker import worker, Command
-    success, msg = worker.send_cmd(Command.START_SMS_LOGIN, req.phone)
+    success, msg, _cookies = worker.send_cmd(Command.START_SMS_LOGIN, req.phone, store_id=ctx.store_id)
     if success:
         return {"success": True, "message": "Код из SMS отправлен на указанный номер."}
     raise HTTPException(status_code=400, detail=msg)
@@ -107,16 +105,11 @@ def start_mobile_login(req: MobileLoginStartRequest, ctx: StoreContext = Depends
 @router.post("/mobile-login/submit-code")
 def submit_mobile_login_code(req: MobileLoginSubmitRequest, ctx: StoreContext = Depends(get_store_context)):
     """Шаг 2 из 2: код из SMS завершает вход, куки сохраняются в Store.encrypted_chat_cookies этого стора."""
-    if ctx.store_id is None:
-        raise HTTPException(status_code=400, detail="Вход в чат по SMS доступен только для подключённых магазинов.")
-
     from backend.services.playwright_worker import worker, Command
-    success, msg = worker.send_cmd(Command.SUBMIT_SMS_LOGIN, req.code)
+    success, msg, fresh_cookies = worker.send_cmd(Command.SUBMIT_SMS_LOGIN, req.code, store_id=ctx.store_id)
     if not success:
         raise HTTPException(status_code=400, detail=msg)
 
-    from backend.state_helpers import _load_chat_cookies
-    fresh_cookies = _load_chat_cookies(store_id=None)
     if not _save_chat_cookies_for_store(ctx.store_id, fresh_cookies):
         raise HTTPException(status_code=400, detail="Вход выполнен, но не удалось сохранить куки чата.")
 

@@ -7,7 +7,6 @@ credentials/cookies are missing or invalid.
 """
 import os
 import sys
-import json
 import shutil
 import tempfile
 import unittest
@@ -39,11 +38,6 @@ class TestStoresV1NoFallback(unittest.TestCase):
         self._tmp_dir = tempfile.mkdtemp()
         os.chdir(self._tmp_dir)
         os.makedirs("states", exist_ok=True)
-        with open("state.json", "w", encoding="utf-8") as f:
-            json.dump({"cookies": [
-                {"name": "mc-session", "value": "fresh-sess"},
-                {"name": "mc-sid", "value": "fresh-sid"},
-            ]}, f)
 
         from backend.state_helpers import _get_sync_db_session
         session = _get_sync_db_session()
@@ -84,7 +78,9 @@ class TestStoresV1NoFallback(unittest.TestCase):
         never touch any OTHER store's row."""
         mock_kaspi.verify_token.return_value = True
         mock_kaspi.get_merchant_id.return_value = "m_existing"
-        mock_worker.send_cmd.return_value = (True, "Success")
+        # Де-глобализация Playwright: LOGIN отдаёт куки напрямую (3-tuple),
+        # не через общий state.json — см. playwright_worker.py.
+        mock_worker.send_cmd.return_value = (True, "Success", {"mc-session": "fresh-sess", "mc-sid": "fresh-sid"})
 
         existing_store_obj = Store(
             id="store-existing-1", merchant_id="m_existing", name="ExistingShop",

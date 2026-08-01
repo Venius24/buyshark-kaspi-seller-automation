@@ -14,10 +14,23 @@ _sync_engine_cache = {"engine": None, "url": None}
 _sync_engine_lock = threading.Lock()
 
 # Категория 1: RateLimitExecutorWorker.execute_updates теперь обрабатывает
-# несколько SKU параллельно (ThreadPoolExecutor) — эти два лока защищают
-# ресурсы, которые раньше никогда не вызывались конкурентно.
+# несколько SKU параллельно (ThreadPoolExecutor) — этот лок защищает
+# ресурс, который раньше никогда не вызывался конкурентно.
 _overrides_file_lock = threading.Lock()  # см. _save_override()
-_mc_refresh_lock = threading.Lock()      # см. _refresh_mc_session()
+
+# Де-глобализация Playwright: лок НЕ общий на всё приложение, а один на
+# store_id — конкурентные 401 у РАЗНЫХ сторов должны релогиниться реально
+# параллельно (в этом весь смысл пула потоков в playwright_worker.py), а
+# конкурентные 401 у ОДНОГО стора (несколько SKU словили 401 одновременно)
+# всё ещё должны сериализоваться в один relogin, а не бить по Kaspi N раз.
+_mc_refresh_locks: dict = {}
+_mc_refresh_locks_guard = threading.Lock()
+
+def _get_mc_refresh_lock(store_id) -> threading.Lock:
+    with _mc_refresh_locks_guard:
+        if store_id not in _mc_refresh_locks:
+            _mc_refresh_locks[store_id] = threading.Lock()
+        return _mc_refresh_locks[store_id]
 
 SESSION_FILE = "states/session.json"
 
@@ -732,34 +745,31 @@ def _refresh_mc_session(store_id: Optional[str] = None) -> bool:
     Автоматически обновляет сессионные куки Kaspi MC (mc-session/mc-sid) через сохранённые
     email/пароль — вызывается, когда куки истекли (401) или отсутствуют. Возвращает True при успехе.
 
-    store_id=None (легаси): точно текущее поведение (глобальные креды/куки).
+    store_id=None (легаси dev-бутстрап без Store в БД): глобальные креды/куки.
     store_id given: креды берутся из этого стора (без фоллбека — нет кред,
-    значит нужен явный повторный вход, а не угадывание чужих кред). После
-    успешного логина (пишет в state.json — единственный канал вывода
-    Playwright-воркера, общий на все сторы, см. Phase 5) свежие куки сразу
-    копируются в Store.encrypted_cookies ИМЕННО этого стора.
+    значит нужен явный повторный вход, а не угадывание чужих кред). Свежие
+    куки приходят от worker.send_cmd напрямую (не через общий файл — см.
+    playwright_worker.py, де-глобализация) и сразу копируются в
+    Store.encrypted_cookies ИМЕННО этого стора.
     """
     creds = _load_mc_credentials(store_id=store_id)
     if not creds:
         logger.warning(f"Автообновление сессии Kaspi MC невозможно: email/пароль не сохранены для стора {store_id!r} (нужен повторный вход).")
         return False
     email, password = creds
-    # Категория 1: с параллельной обработкой SKU несколько потоков могут
-    # словить 401 одновременно. worker.send_cmd() шлёт команду в общую
-    # cmd_queue и блокирующе читает ОБЩУЮ result_queue
-    # (backend/services/playwright_worker.py::send_cmd) — без лока два
-    # конкурентных вызова могут перепутать, кто чей результат вычитал.
-    # Единственный глобальный (не per-store) лок — сам браузерный воркер
-    # тоже один общий на все сторы (Phase 5, ещё не де-глобализирован).
-    with _mc_refresh_lock:
+    # Лок per-store (не общий на всё приложение): несколько потоков одного
+    # и того же стора могут словить 401 одновременно при параллельной
+    # обработке SKU (Категория 1) — сериализуем ИХ в один relogin, а не
+    # бьём по Kaspi несколько раз подряд. Разные сторы при этом релогинятся
+    # реально параллельно (пул потоков в playwright_worker.py).
+    with _get_mc_refresh_lock(store_id):
         try:
             from backend.services.playwright_worker import worker, Command
-            success, msg = worker.send_cmd(Command.LOGIN, {"email": email, "password": password})
+            success, msg, cookies = worker.send_cmd(Command.LOGIN, {"email": email, "password": password})
             if success:
                 logger.info(f"Сессия Kaspi MC автоматически обновлена (истёкшие куки перевыпущены) для стора {store_id!r}.")
-                if store_id is not None:
-                    fresh_cookies = _load_mc_cookies(store_id=None)
-                    _save_mc_cookies_for_store(store_id, fresh_cookies)
+                if store_id is not None and cookies:
+                    _save_mc_cookies_for_store(store_id, cookies)
             else:
                 logger.error(f"Автообновление сессии Kaspi MC не удалось: {msg}")
             return bool(success)

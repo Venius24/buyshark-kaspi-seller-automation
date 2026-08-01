@@ -6,7 +6,6 @@ into that Store's DB row — not into the shared state.json/session.json.
 """
 import os
 import sys
-import json
 import shutil
 import tempfile
 import unittest
@@ -36,14 +35,6 @@ class TestLoginRouterStoreScoped(unittest.TestCase):
         self._tmp_dir = tempfile.mkdtemp()
         os.chdir(self._tmp_dir)
         os.makedirs("states", exist_ok=True)
-        # Simulates the Playwright worker's own output mechanism (single
-        # shared browser session, Phase 5 limitation) — /api/login reads
-        # this once after a successful login to copy fresh cookies into DB.
-        with open("state.json", "w", encoding="utf-8") as f:
-            json.dump({"cookies": [
-                {"name": "mc-session", "value": "fresh-sess"},
-                {"name": "mc-sid", "value": "fresh-sid"},
-            ]}, f)
 
         # Real Store row in the (tmp-dir-scoped, fresh) sync DB so
         # _save_mc_credentials/_save_mc_cookies_for_store have something to
@@ -72,7 +63,9 @@ class TestLoginRouterStoreScoped(unittest.TestCase):
     @patch("backend.security.store_context.decrypt_data")
     def test_login_persists_creds_and_cookies_to_resolved_store_only(self, mock_decrypt, mock_worker):
         mock_decrypt.return_value = "rest_token"
-        mock_worker.send_cmd.return_value = (True, "Success")
+        # Де-глобализация Playwright: LOGIN отдаёт куки напрямую вызывающему
+        # (3-tuple), а не через общий state.json — см. playwright_worker.py.
+        mock_worker.send_cmd.return_value = (True, "Success", {"mc-session": "fresh-sess", "mc-sid": "fresh-sid"})
 
         access_tok = create_access_token({"sub": "user-1"})
         user = User(id="user-1", email="a@b.com", password_hash="x", is_active=True)
@@ -121,7 +114,7 @@ class TestLoginRouterStoreScoped(unittest.TestCase):
     def test_login_with_no_jwt_returns_401(self, mock_worker):
         """Слайс 7: legacy-фоллбек на общую сессию убран целиком — без
         Authorization заголовка /api/login отдаёт 401, Store не трогается."""
-        mock_worker.send_cmd.return_value = (True, "Success")
+        mock_worker.send_cmd.return_value = (True, "Success", {})
 
         resp = self.client.post(
             "/api/login",
