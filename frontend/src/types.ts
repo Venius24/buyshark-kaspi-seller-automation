@@ -83,6 +83,44 @@ export interface DumpingConfig {
   blacklisted_merchants?: string[];
 }
 
+export interface AutolistFeatureMeta {
+  name: string;
+  mandatory: boolean;
+  multiValued: boolean;
+  type: 'enum' | 'string' | 'number' | 'boolean';
+}
+
+export interface AutolistDraftPayload {
+  category_code: string | null;
+  category_name: string | null;
+  brand_name: string | null;
+  sku: string | null;
+  price: number | null;
+  stock: number | null;
+  features: Record<string, any>;
+  feature_meta: Record<string, AutolistFeatureMeta>;
+  classifications: Array<{ name: string; features: Array<{ attributeCode: string; name: string; minValue?: number | null; maxValue?: number | null; unit?: { name: string } | null; defaultValues?: Array<{ code: string; name: string }> }> }>;
+  description: string;
+  existing_candidates?: Array<{ id: string; title: string; shopLink: string }>;
+  category_search_query?: string;
+}
+
+export interface AutolistDraft {
+  id: string;
+  store_id: string;
+  photo_path: string;
+  raw_title: string;
+  status: 'draft' | 'needs_review' | 'approved' | 'submitting' | 'submitted' | 'error';
+  ai_raw: any;
+  draft_payload: AutolistDraftPayload;
+  missing_mandatory: string[];
+  kaspi_result: any;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  warning?: string;
+}
+
 export type ActiveTab =
   | 'stores'
   | 'overview'
@@ -91,6 +129,7 @@ export type ActiveTab =
   | 'chatbot'
   | 'chats'
   | 'stock-groups'
+  | 'autolist'
   | 'public-api'
   | 'print-batcher'
   | 'packaging'

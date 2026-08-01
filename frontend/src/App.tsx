@@ -9,6 +9,7 @@ import { useMcAuth } from './hooks/useMcAuth';
 import { LogsTab } from './components/tabs/LogsTab';
 import { OverviewTab } from './components/tabs/OverviewTab';
 import { SettingsTab } from './components/tabs/SettingsTab';
+import { AutolistTab } from './components/tabs/AutolistTab';
 import { MasterStockGroups } from './components/MasterStockGroups';
 import { IntegrationsPublicApi } from './components/IntegrationsPublicApi';
 import { PrintBatcher } from './components/PrintBatcher';
@@ -866,6 +867,11 @@ export default function App() {
         {/* 🔗 TAB: MASTER STOCK GROUPS */}
         {activeTab === 'stock-groups' && (
           <MasterStockGroups />
+        )}
+
+        {/* ✨ TAB: AUTOLIST (AI product auto-add) */}
+        {activeTab === 'autolist' && (
+          <AutolistTab />
         )}
 
         {/* 🔑 TAB: PUBLIC API & WEBHOOKS */}

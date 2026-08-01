@@ -222,3 +222,39 @@ class AnalyticsSnapshotDB(Base):
     payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")  # JSON-stringified dict
     updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
+
+class DraftProductDB(Base):
+    """Черновик фичи «Автодобавление товара» (backend/autolist/). Один ряд —
+    один товар от загрузки фото+названия до отправки на модерацию Kaspi.
+
+    draft_payload — единый JSON-блоб текущего редактируемого состояния
+    ({category_code, category_name, brand_name, sku, price, stock,
+    features: {attributeCode: value}, feature_meta, description}) — старт от
+    вывода extractor.py, дальше правится человеком в review UI поверх этого
+    же блоба (см. HANDOFF 3.17: показано живьём, что gpt-4o-mini регулярно
+    ошибается даже на "заполненных" полях — ревью человеком обязательно для
+    ЛЮБОГО поля, не только missing_mandatory, поэтому нет отдельных
+    ai_value/edited_value колонок — один источник правды, который редактируют).
+
+    ai_raw — неизменяемый снимок исходного вывода extractor.py (guess_category
+    + fill_attributes) для аудита/дебага "что предложил AI vs что отправили".
+    """
+    __tablename__ = "draft_products"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    photo_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    raw_title: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="draft", index=True)
+    # draft -> needs_review -> approved -> submitting -> submitted -> rejected -> error
+
+    ai_raw: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    draft_payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    missing_mandatory: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON-список attributeCode
+
+    kaspi_result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON последнего ответа Kaspi
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+

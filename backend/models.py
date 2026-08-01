@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 from pydantic import BaseModel
 
 class AuthRequest(BaseModel):
@@ -80,6 +80,13 @@ class WebhookConfigRequest(BaseModel):
     url: str
     secret: Optional[str] = None
     enabled: Optional[bool] = True
+
+class AutolistDraftPatchRequest(BaseModel):
+    """Патч поверх draft_products.draft_payload — только изменённые поля.
+    "features" сливается по ключу (attributeCode), остальные поля (sku,
+    price, stock, category_code, brand_name, description...) заменяются
+    целиком. См. backend/autolist/validator.py::update_draft."""
+    patch: Dict[str, Any]
 
 
 
