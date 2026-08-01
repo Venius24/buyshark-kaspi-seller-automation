@@ -356,6 +356,48 @@ def load_admin_ids(store_id: Optional[str] = None) -> list:
 
     return ["7119137844", "8661441552"]
 
+def get_store_ids_for_admin(admin_id: str) -> list:
+    """
+    Реверс-résolve: в каких магазинах этот Telegram ID числится получателем
+    чат-уведомлений (ChatbotSettingsDB.admin_ids). Бот единый на всё
+    приложение (см. HANDOFF 3.14 — рефакторинг на полностью per-store боты
+    отложен пользователем на потом), но админ может отвечать за несколько
+    магазинов сразу — /start и /status используют это, чтобы показать ЕГО
+    магазины, а не общую по всем сводку.
+    """
+    from backend.state_helpers import _get_sync_db_session
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import ChatbotSettingsDB
+        rows = session.query(ChatbotSettingsDB).all()
+        matching = []
+        for row in rows:
+            try:
+                ids = json.loads(row.admin_ids or "[]")
+            except Exception:
+                ids = []
+            if str(admin_id) in [str(i) for i in ids]:
+                matching.append(row.store_id)
+        return matching
+    finally:
+        session.close()
+
+def get_store_name(store_id: str) -> str:
+    """Человекочитаемое имя магазина для текстов Telegram-алертов/команд —
+    merchant_id ничего не говорит владельцу, если у него несколько сторов."""
+    from backend.state_helpers import _get_sync_db_session
+    session = _get_sync_db_session()
+    if not session:
+        return store_id
+    try:
+        from backend.db.models import Store
+        store = session.get(Store, store_id)
+        return store.name if store else store_id
+    finally:
+        session.close()
+
 PRINT_SETTINGS_FILE = os.path.join(STATES_DIR, "print_settings.json")
 
 DEFAULT_PRINT_SETTINGS = {

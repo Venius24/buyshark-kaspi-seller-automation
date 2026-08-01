@@ -3,6 +3,7 @@ import io
 import os
 from typing import Dict, Any
 from backend.chatbot import config, bot_instance
+from backend.chatbot.notifications import _esc_md
 from backend.services.print_batcher_service import (
     process_zip_or_pdfs,
     get_batch_file_path,
@@ -119,13 +120,23 @@ def register_handlers():
             await message.reply("⛔ У вас нет доступа к управлению этим ботом.")
             return
 
-        cfg = config.load_chatbot_config()
-        merchant_id = cfg.get("merchant_id", "20186986")
+        # Бот единый на все магазины (см. HANDOFF 3.14 — полный per-store
+        # рефакторинг отложен пользователем), но каждый admin_id обычно
+        # привязан к КОНКРЕТНЫМ магазинам (ChatbotSettingsDB.admin_ids) —
+        # показываем их имена, а не общий Merchant ID из .env.
+        my_store_ids = config.get_store_ids_for_admin(str(message.from_user.id))
+        if my_store_ids:
+            store_names = ", ".join(_esc_md(config.get_store_name(sid)) for sid in my_store_ids)
+            store_line = f"🏪 **Ваши магазины:** {store_names}\n\n"
+        else:
+            cfg = config.load_chatbot_config()
+            merchant_id = cfg.get("merchant_id", "20186986")
+            store_line = f"🏪 **Merchant ID:** `{merchant_id}`\n\n"
+
         history_count = len(load_printed_history())
-        stg = config.load_print_settings()
         await message.reply(
             f"👋 Привет! Я бот автоответчик Kaspi.\n"
-            f"🏪 **Merchant ID:** `{merchant_id}`\n\n"
+            f"{store_line}"
             f"🖨️ **Print-Batcher Engine — Автосборщик печати**\n"
             f"Отправьте мне любой **ZIP-архив** или **PDF-файл** с накладными Kaspi / 1С.\n"
             f"• Уже напечатано сегодня: `{history_count}` шт\n\n"
@@ -142,9 +153,29 @@ def register_handlers():
         if str(message.from_user.id) not in admin_ids:
             return
 
+        # Персонализация по вызывающему (см. cmd_start выше): у админа,
+        # привязанного к конкретным магазинам, статус показывается ПО
+        # КАЖДОМУ из них отдельно, а не общей цифрой по всем сразу — иначе
+        # заблокированный чат чужого магазина неотличим от своего.
+        my_store_ids = config.get_store_ids_for_admin(str(message.from_user.id))
+        if my_store_ids:
+            lines = ["🤖 **Статус автоответчика по вашим магазинам:**"]
+            for store_id in my_store_ids:
+                store_cfg = config.load_chatbot_config(store_id)
+                blocked = len(config.list_blocked_chat_ids(store_id))
+                cookie_bad = config.is_cookie_alert_sent(store_id)
+                lines.append(
+                    f"\n🏪 **{_esc_md(config.get_store_name(store_id))}**\n"
+                    f"{'🟢 Работает' if store_cfg.get('enabled', True) else '⏸️ Приостановлен'}\n"
+                    f"🔒 Заблокировано чатов: `{blocked}`\n"
+                    f"🔑 Куки: {'🚨 Требуется обновление' if cookie_bad else '✅ Валидны'}"
+                )
+            await message.reply("\n".join(lines))
+            return
+
         cfg = config.load_chatbot_config()
         merchant_id = cfg.get("merchant_id", "20186986")
-        blocked_count = config.count_blocked_chats()  # Telegram — бот общий на все магазины
+        blocked_count = config.count_blocked_chats()  # фоллбек: не привязан ни к одному стору — сводка по всем
 
         await message.reply(
             f"🤖 **Статус автоответчика:** {'🟢 Работает' if cfg.get('enabled', True) else '⏸️ Приостановлен'}\n"

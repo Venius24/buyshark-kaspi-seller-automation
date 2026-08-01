@@ -42,11 +42,12 @@ async def notify_cookie_expired(reason: str, store_id: Optional[str] = None):
         config.set_cookie_alert_sent(store_id, True)
         return
 
-    cfg = config.load_chatbot_config(store_id)
-    merchant_id = cfg.get("merchant_id", "20186986")
+    store_name = config.get_store_name(store_id) if store_id else None
+    store_line = f"🏪 **Магазин:** {_esc_md(store_name)}\n" if store_name else ""
     alert_text = (
         f"🚨 **ВНИМАНИЕ: СЕССИЯ ЧАТА KASPI ИСТЕКЛА!**\n"
         f"----------------------------------------\n"
+        f"{store_line}"
         f"⚠️ **Причина:** {_esc_md(reason)}\n"
         f"⏰ **Время:** {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
         f"----------------------------------------\n"
@@ -145,9 +146,12 @@ async def notify_manager_and_block(
     web_link = f"https://msg-web.kaspi.kz/#/chats/chat/{group_id}"
     pay_link = f"https://pay.kaspi.kz/chat?threadId={group_id}&isWeb=true"
 
+    store_name = config.get_store_name(store_id) if store_id else None
+    store_line = f"🏪 **Магазин:** {_esc_md(store_name)}\n" if store_name else ""
     alert_text = (
         f"🚨 **СРОЧНЫЙ ВЫЗОВ МЕНЕДЖЕРА В КАСПИ!**\n"
         f"----------------------------------------\n"
+        f"{store_line}"
         f"👤 **Клиент:** {_esc_md(client_name)}\n"
         f"📦 **Товар:** {_esc_md(item_title)}\n"
         f"💬 **Проблема/Запрос:** \"{_esc_md(client_text)}\"\n"
