@@ -66,7 +66,7 @@ class KaspiAPI:
         }
 
     @staticmethod
-    def _fetch_pages_batched(fetch_page_fn, max_workers: int = 3):
+    def _fetch_pages_batched(fetch_page_fn, max_workers: int = None):
         """
         Категория 1 (B.1): постраничный обход с ограниченной конкурентностью.
         Страницы номер N известны заранее не будут (Kaspi API v2 не отдаёт
@@ -89,7 +89,17 @@ class KaspiAPI:
         сортированном порядке — так же, как необработанное исключение из
         requests.get() пробросилось бы и в старом строго последовательном
         коде.
+
+        max_workers по умолчанию читается из KASPI_PAGE_FETCH_MAX_WORKERS
+        (без переменной — 3, прежнее поведение). mc.shop.kaspi.kz/kaspi.kz
+        v2 — токен-авторизованный кабинетный API без истории бана (в
+        отличие от публичной витрины kaspi.kz/yml, см. HANDOFF 3.9) —
+        можно поднимать конкурентность и мерить вживую на проде; если
+        Kaspi когда-нибудь пришлёт 429/403 на эти эндпоинты, откат —
+        просто вернуть переменную к 3, без изменения кода.
         """
+        if max_workers is None:
+            max_workers = int(os.getenv("KASPI_PAGE_FETCH_MAX_WORKERS", "3"))
         page = 0
         while True:
             batch_page_numbers = list(range(page, page + max_workers))

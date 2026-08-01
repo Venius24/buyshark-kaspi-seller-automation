@@ -3,6 +3,7 @@ import sys
 import time
 import unittest
 from itertools import islice
+from unittest.mock import patch
 
 sys.path.append(os.getcwd())
 
@@ -73,6 +74,35 @@ class TestFetchPagesBatched(unittest.TestCase):
         self.assertEqual([p for p, _ in batch], [0, 1, 2])
         # Sequential would take ~3*SLEEP; concurrent should be close to 1*SLEEP.
         self.assertLess(elapsed, SLEEP * 2)
+
+    def test_default_max_workers_falls_back_to_3_without_env_var(self):
+        calls = []
+
+        def fetch_page(page_number):
+            calls.append(page_number)
+            return {"data": []}
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("KASPI_PAGE_FETCH_MAX_WORKERS", None)
+            for _page_number, resp in KaspiAPI._fetch_pages_batched(fetch_page):
+                if not resp["data"]:
+                    break
+
+        self.assertEqual(sorted(calls), [0, 1, 2])
+
+    def test_max_workers_configurable_via_env_var(self):
+        calls = []
+
+        def fetch_page(page_number):
+            calls.append(page_number)
+            return {"data": []}
+
+        with patch.dict(os.environ, {"KASPI_PAGE_FETCH_MAX_WORKERS": "5"}):
+            for _page_number, resp in KaspiAPI._fetch_pages_batched(fetch_page):
+                if not resp["data"]:
+                    break
+
+        self.assertEqual(sorted(calls), [0, 1, 2, 3, 4])
 
 
 if __name__ == "__main__":
