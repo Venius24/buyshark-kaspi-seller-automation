@@ -893,7 +893,12 @@ class KaspiAPI:
                         stock_count = 0
                         availabilities = offer.get("availabilities", [])
                         if availabilities:
-                            stock_count = availabilities[0].get("stockCount", 0)
+                            # .get(..., 0) не спасает, если ключ присутствует со
+                            # значением null в JSON — тогда возвращается None,
+                            # а не 0, и int(stock_count) ниже падает и обрывает
+                            # всю пагинацию (поймано вживую на проде: 2 товара
+                            # выкачались, третий уронил всю остальную страницу).
+                            stock_count = availabilities[0].get("stockCount") or 0
 
                         # ВАЖНО: плоское поле offer["price"] у Kaspi BFF — денормализованный кэш,
                         # который у части офферов (~35% на реальном каталоге, подтверждено вживую
