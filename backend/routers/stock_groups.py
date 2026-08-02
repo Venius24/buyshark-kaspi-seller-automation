@@ -59,7 +59,7 @@ def get_stock_groups(ctx: StoreContext = Depends(get_store_context)):
     groups_dict = _load_master_stock_groups(store_id=ctx.store_id)
     groups_list = list(groups_dict.values())
 
-    # Выгружаем активную упаковку из общего кэша (TTL 45c, см. kaspi_wrapper.py)
+    # Выгружаем активную упаковку из общего кэша (TTL 120c, см. kaspi_wrapper.py)
     # для предотвращения зависания эндпоинта и лишних обходов Kaspi
     packaging_data = KaspiAPI.get_all_packaging_tabs_cached(token)
     cargo_assembly = packaging_data.get("cargo_assembly", [])

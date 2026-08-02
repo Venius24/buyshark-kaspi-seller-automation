@@ -652,13 +652,15 @@ class KaspiAPI:
         return _result()
 
     @staticmethod
-    def get_all_packaging_tabs_cached(token: str, ttl_seconds: float = 45.0) -> dict:
+    def get_all_packaging_tabs_cached(token: str, ttl_seconds: float = 120.0) -> dict:
         """
         Кэширующая обёртка над get_all_packaging_tabs() — единая точка для
-        всех вызывающих (routers/orders.py, routers/stock_groups.py,
-        services/stock_sync_worker.py 30с-тик), которые раньше независимо
-        гоняли один и тот же тяжёлый постраничный обход. Ключ — token, TTL
-        по умолчанию 45с (как было в старом кэше stock_groups.py).
+        routers/orders.py и routers/stock_groups.py (services/stock_sync_worker.py
+        30с-тик авто-списания в неё не ходит, ему нужна более свежая выборка —
+        см. docs/PERFORMANCE_REPORT.md §7.2), которые раньше независимо
+        гоняли один и тот же тяжёлый постраничный обход. TTL поднят с 45с до
+        120с: экран "Мастер-Группы"/"Упаковка" — это просмотр, не движок
+        списания, отставание на пару минут не влияет на корректность остатка.
         """
         now = time.time()
         with KaspiAPI._packaging_tabs_cache_lock:

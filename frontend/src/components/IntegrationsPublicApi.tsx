@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, API_URL } from '../api';
+import { useActiveStoreId } from '../storeContext';
 import {
   Key,
   Webhook,
@@ -33,13 +35,48 @@ interface WebhookConfig {
   enabled: boolean;
 }
 
+const DEFAULT_WEBHOOK_CONFIG: WebhookConfig = { url: '', secret: '', enabled: true };
+
+const fetchKeys = async (): Promise<ApiKeyItem[]> => {
+  const res = await apiFetch(`${API_URL}/api/integrations/keys`);
+  const data = await res.json();
+  return data.success ? (data.keys || []) : [];
+};
+
+const fetchWebhookConfig = async (): Promise<WebhookConfig> => {
+  const res = await apiFetch(`${API_URL}/api/integrations/webhook`);
+  const data = await res.json();
+  if (data.success && data.config) {
+    return {
+      url: data.config.url || '',
+      secret: data.config.secret || '',
+      secret_masked: data.config.secret_masked || '',
+      enabled: data.config.enabled ?? true
+    };
+  }
+  return DEFAULT_WEBHOOK_CONFIG;
+};
+
 export const IntegrationsPublicApi: React.FC = () => {
-  const [keys, setKeys] = useState<ApiKeyItem[]>([]);
-  const [webhookConfig, setWebhookConfig] = useState<WebhookConfig>({
-    url: '',
-    secret: '',
-    enabled: true
+  const queryClient = useQueryClient();
+  const activeStoreId = useActiveStoreId();
+  const keysQueryKey = ['integration-keys', activeStoreId];
+  const webhookQueryKey = ['integration-webhook', activeStoreId];
+
+  // react-query вместо ручного fetch-on-mount — переживает переключение
+  // вкладок и перезагрузку страницы через персистентный кэш (queryClient.ts).
+  const { data: keys = [] } = useQuery({ queryKey: keysQueryKey, queryFn: fetchKeys });
+  const { data: fetchedWebhookConfig } = useQuery({
+    queryKey: webhookQueryKey,
+    queryFn: fetchWebhookConfig,
   });
+
+  // Локальный editable-драфт, отдельно от query — иначе бы затирал то, что
+  // пользователь печатает в форме, при любом фоновом рефетче.
+  const [webhookConfig, setWebhookConfig] = useState<WebhookConfig>(DEFAULT_WEBHOOK_CONFIG);
+  useEffect(() => {
+    if (fetchedWebhookConfig) setWebhookConfig(fetchedWebhookConfig);
+  }, [fetchedWebhookConfig]);
 
   const [newKeyName, setNewKeyName] = useState<string>('');
   const [isKeyModalOpen, setIsKeyModalOpen] = useState<boolean>(false);
@@ -55,44 +92,6 @@ export const IntegrationsPublicApi: React.FC = () => {
     setToast({ type, text });
     setTimeout(() => setToast(null), 4000);
   };
-
-  const fetchKeys = async () => {
-    try {
-      const res = await apiFetch(`${API_URL}/api/integrations/keys`);
-      const data = await res.json();
-      if (data.success) {
-        setKeys(data.keys || []);
-      }
-    } catch (e) {
-      console.error('Error fetching API keys:', e);
-    }
-  };
-
-  const fetchWebhookConfig = async () => {
-    try {
-      const res = await apiFetch(`${API_URL}/api/integrations/webhook`);
-      const data = await res.json();
-      if (data.success && data.config) {
-        setWebhookConfig({
-          url: data.config.url || '',
-          secret: data.config.secret || '',
-          secret_masked: data.config.secret_masked || '',
-          enabled: data.config.enabled ?? true
-        });
-      }
-    } catch (e) {
-      console.error('Error fetching webhook config:', e);
-    }
-  };
-
-  const loadData = async () => {
-    await Promise.all([fetchKeys(), fetchWebhookConfig()]);
-  };
-
-
-  useEffect(() => {
-    loadData();
-  }, []);
 
   const handleCreateKey = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,7 +110,7 @@ export const IntegrationsPublicApi: React.FC = () => {
       if (data.success) {
         setCreatedSecret(data.api_secret);
         setNewKeyName('');
-        fetchKeys();
+        queryClient.invalidateQueries({ queryKey: keysQueryKey });
         showToast('success', 'API-ключ сгенерирован.');
       } else {
         showToast('error', data.detail || 'Ошибка создания API-ключа.');
@@ -128,7 +127,7 @@ export const IntegrationsPublicApi: React.FC = () => {
       const data = await res.json();
       if (data.success) {
         showToast('success', 'API-ключ отозван.');
-        fetchKeys();
+        queryClient.invalidateQueries({ queryKey: keysQueryKey });
       } else {
         showToast('error', data.detail || 'Не удалось отозвать ключ.');
       }
@@ -149,7 +148,7 @@ export const IntegrationsPublicApi: React.FC = () => {
       const data = await res.json();
       if (data.success) {
         showToast('success', 'Настройки Webhook сохранены.');
-        fetchWebhookConfig();
+        queryClient.invalidateQueries({ queryKey: webhookQueryKey });
       } else {
         showToast('error', data.detail || 'Не удалось сохранить Webhook.');
       }

@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, API_URL } from '../api';
+import { useActiveStoreId } from '../storeContext';
 
 interface GeometryAudit {
   is_valid: boolean;
@@ -38,7 +40,23 @@ interface ManifestResponse {
   batches: Record<string, BatchInfo>;
 }
 
+const fetchHistoryStats = async (): Promise<number> => {
+  try {
+    const res = await apiFetch(`${API_URL}/api/print-batcher/history-stats`);
+    if (res.ok) {
+      const data = await res.json();
+      return data.printed_count || 0;
+    }
+  } catch {
+    // Ignore if server restarting
+  }
+  return 0;
+};
+
 export const PrintBatcher: React.FC = () => {
+  const queryClient = useQueryClient();
+  const activeStoreId = useActiveStoreId();
+  const historyStatsKey = ['print-batcher-history-stats', activeStoreId];
   const [file, setFile] = useState<File | null>(null);
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
@@ -48,27 +66,17 @@ export const PrintBatcher: React.FC = () => {
   const [outputLayout, setOutputLayout] = useState<string>('auto'); // 'auto' | 'a4_4' | 'a4_8' | 'a4_9' | 'a4_1' | 'thermal_75_120' | 'thermal_100_150' | 'just_merge'
   const [deduplicateHistory, setDeduplicateHistory] = useState<boolean>(true);
   const [resultManifest, setResultManifest] = useState<ManifestResponse | null>(null);
-  const [printedCount, setPrintedCount] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
+  // react-query, а не ручной fetch-on-mount — переживает переключение вкладок
+  // и перезагрузку страницы через персистентный кэш (queryClient.ts).
+  const { data: printedCount = 0 } = useQuery({
+    queryKey: historyStatsKey,
+    queryFn: fetchHistoryStats,
+  });
+
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const fetchHistoryStats = async () => {
-    try {
-      const res = await apiFetch(`${API_URL}/api/print-batcher/history-stats`);
-      if (res.ok) {
-        const data = await res.json();
-        setPrintedCount(data.printed_count || 0);
-      }
-    } catch {
-      // Ignore if server restarting
-    }
-  };
-
-  useEffect(() => {
-    fetchHistoryStats();
-  }, []);
 
   const handleResetHistory = async () => {
     if (!window.confirm('Вы уверены, что хотите сбросить историю напечатанных заказов за сегодня?')) {
@@ -77,7 +85,7 @@ export const PrintBatcher: React.FC = () => {
     try {
       const res = await apiFetch(`${API_URL}/api/print-batcher/reset-history`, { method: 'POST' });
       if (res.ok) {
-        setPrintedCount(0);
+        queryClient.setQueryData(historyStatsKey, 0);
         alert('История печати за сегодня сброшена');
       }
     } catch {
@@ -138,7 +146,7 @@ export const PrintBatcher: React.FC = () => {
 
       const data: ManifestResponse = await response.json();
       setResultManifest(data);
-      fetchHistoryStats();
+      queryClient.invalidateQueries({ queryKey: historyStatsKey });
     } catch (err: any) {
       setError(err.message || 'Произошла непредвиденная ошибка');
     } finally {

@@ -12,8 +12,9 @@ def get_packaging_tabs(ctx: StoreContext = Depends(get_store_context)):
     """Разбор заказов по 3 вкладкам: На сборке, Ожидает курьера, Переданы на доставку (JSON:API benchmark)."""
     token = ctx.token
     try:
-        # Общий кэш (TTL 45c, см. kaspi_wrapper.py) — тот же тяжёлый обход
-        # дёргают ещё routers/stock_groups.py и 30с-тик в stock_sync_worker.py.
+        # Общий кэш (TTL 120с, см. kaspi_wrapper.py) — тот же тяжёлый обход
+        # дёргает ещё routers/stock_groups.py (30с-тик в stock_sync_worker.py
+        # в этот кэш не ходит, ему нужна более свежая выборка).
         return KaspiAPI.get_all_packaging_tabs_cached(token)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
