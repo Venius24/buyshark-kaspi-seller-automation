@@ -29,29 +29,35 @@ def make_response(status_code=200, json_data=None):
 
 class TestDiscoverMerchantIdConfigModule(unittest.TestCase):
     """
-    dumper/config.py::discover_merchant_id — Слайс 7: больше не читает общий
-    states/session.json (тот кэш мог вернуть merchant_id ЧУЖОГО магазина),
-    резолвит всегда через живой API-запрос по переданному токену.
+    dumper/config.py::discover_merchant_id — больше не отдельная урезанная
+    реализация (та никогда не пыталась резолвить через историю заказов,
+    только через /pointofservices) — теперь тонкая обёртка над
+    KaspiAPI.get_merchant_id (см. TestGetMerchantIdKaspiWrapper ниже за
+    полным перечнем фоллбеков), которая отбрасывает синтетический
+    m_<hash> в None, т.к. вызывающий код здесь ожидает None как сигнал
+    "пропустить операцию", а не non-digit ID, непригодный для Kaspi API.
     """
 
-    @patch("backend.dumper.config.requests.get")
-    def test_resolves_via_api_with_underscore(self, mock_get):
-        mock_get.return_value = make_response(200, {"data": [{"id": "12345_001"}]})
+    @patch("backend.kaspi_wrapper.KaspiAPI.get_point_of_services")
+    def test_resolves_via_api_with_underscore(self, mock_pos):
+        mock_pos.return_value = [{"id": "12345_001"}]
         self.assertEqual(discover_merchant_id("tok"), "12345")
 
-    @patch("backend.dumper.config.requests.get")
-    def test_resolves_via_api_without_underscore(self, mock_get):
-        mock_get.return_value = make_response(200, {"data": [{"id": "98765"}]})
+    @patch("backend.kaspi_wrapper.KaspiAPI.get_point_of_services")
+    def test_resolves_via_api_without_underscore(self, mock_pos):
+        mock_pos.return_value = [{"id": "98765"}]
         self.assertEqual(discover_merchant_id("tok"), "98765")
 
-    @patch("backend.dumper.config.requests.get")
-    def test_total_failure_returns_none_not_another_stores_id(self, mock_get):
+    @patch("backend.kaspi_wrapper.KaspiAPI._get")
+    @patch("backend.kaspi_wrapper.KaspiAPI.get_point_of_services")
+    def test_total_failure_returns_none_not_another_stores_id(self, mock_pos, mock_get):
         # Раньше здесь был хардкод-фоллбек "20186986" (реальный numeric
         # merchant_id магазина Barkhan) — при недоступном /pointofservices
         # ЛЮБОЙ другой магазин тихо начинал резолвиться как Barkhan. Теперь
         # неопределённость явно возвращается как None — вызывающий код сам
         # решает, пропустить операцию или залогировать предупреждение.
-        mock_get.side_effect = Exception("network down")
+        mock_pos.side_effect = Exception("pointofservices down")
+        mock_get.return_value = make_response(400, {"errors": [{"title": "bad filter"}]})
         self.assertIsNone(discover_merchant_id("tok"))
 
 
@@ -76,6 +82,22 @@ class TestGetMerchantIdKaspiWrapper(unittest.TestCase):
             "data": [{"attributes": {"pickupPointId": "222_001"}}]
         })
         self.assertEqual(KaspiAPI.get_merchant_id("tok"), "222")
+
+    @patch("backend.kaspi_wrapper.KaspiAPI._get")
+    @patch("backend.kaspi_wrapper.KaspiAPI.get_point_of_services")
+    def test_orders_fallback_requests_at_most_14_day_window(self, mock_pos, mock_get):
+        # Регрессия: раньше здесь стояло days=30, но Kaspi отклоняет
+        # filter[orders][creationDate] шире 14 дней с 400 "Exceeded the
+        # maximum difference ... max [14]" — фоллбек через историю заказов
+        # НИКОГДА не срабатывал ни для одного магазина, даже с заказами.
+        # Поймано вживую на проде для магазина ИП САУЛЕ, у которого заказы
+        # были, но merchant_id всё равно не резолвился.
+        mock_pos.side_effect = Exception("pointofservices 500")
+        mock_get.return_value = make_response(200, {"data": []})
+        KaspiAPI.get_merchant_id("tok")
+        params = mock_get.call_args.args[2]
+        window_days = (params["filter[orders][creationDate][$le]"] - params["filter[orders][creationDate][$ge]"]) / (1000 * 60 * 60 * 24)
+        self.assertLessEqual(window_days, 14.0)
 
     @patch("backend.kaspi_wrapper.KaspiAPI._get")
     @patch("backend.kaspi_wrapper.KaspiAPI.get_point_of_services")

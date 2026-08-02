@@ -189,9 +189,14 @@ class KaspiAPI:
             print(f"[KaspiAPI] get_merchant_id (pointofservices failed): {e}")
 
         # 2. Фаллбек через первый заказ из истории (если pointofservices вернул 500)
+        # Kaspi ограничивает filter[orders][creationDate] максимум 14 днями —
+        # раньше здесь стояло 30, из-за чего Kaspi всегда отвечал 400
+        # "Exceeded the maximum difference... max [14]" и этот фоллбек НИКОГДА
+        # не срабатывал ни для одного магазина (тихо проглатывалось except
+        # ниже и падало в синтетический m_<hash>).
         try:
             now = datetime.datetime.now()
-            ge = int((now - datetime.timedelta(days=30)).timestamp() * 1000)
+            ge = int((now - datetime.timedelta(days=14)).timestamp() * 1000)
             le = int(now.timestamp() * 1000)
             params = {
                 "page[number]": 0,

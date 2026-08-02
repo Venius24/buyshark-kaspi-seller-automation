@@ -1,6 +1,5 @@
 import base64
 import logging
-import requests
 from dataclasses import dataclass
 from typing import Optional
 
@@ -8,42 +7,27 @@ logger = logging.getLogger(__name__)
 
 def discover_merchant_id(token: str) -> Optional[str]:
     """
-    Автоматически определяет Merchant ID (ID кабинета) по API-токену через
-    GET-запрос к /pointofservices.
+    Определяет numeric Merchant ID (ID кабинета) по API-токену.
 
-    Слайс 7: раньше сперва проверялся merchant_id из общего states/session.json
-    — общий на все магазины кэш, который для стора B мог вернуть merchant_id
-    стора A (если тот когда-либо залогинился через legacy-поток first). Токен
-    уже однозначно указывает, чей это запрос — резолвим напрямую по нему.
-
-    Возвращает None, если определить не удалось (НЕ хардкодим чужой ID —
-    раньше здесь был fallback "20186986" (реальный numeric merchant_id
-    Barkhan), из-за чего любой другой магазин с недоступным /pointofservices
-    или без истории заказов молча начинал работать под личностью Barkhan и
-    ловил 403 от Kaspi. Вызывающий код обязан сам решить, что делать при
-    None — как правило, пропустить эту операцию для стора и залогировать).
+    Делегирует в KaspiAPI.get_merchant_id (kaspi_wrapper.py), у которого
+    полная цепочка резолвинга: /pointofservices -> история заказов (если
+    pointofservices недоступен/500) -> синтетический m_<hash> как последний
+    резерв (см. get_merchant_id). Здесь синтетический хэш ЦЕЛЕНАПРАВЛЕННО
+    отбрасывается в None — вызывающий код в этом модуле ожидает "не
+    удалось определить" именно как None, а не как непригодный для Kaspi
+    API non-digit ID (раньше здесь был отдельный урезанный вариант БЕЗ
+    фоллбека через заказы вообще — из-за чего для магазинов с недоступным
+    /pointofservices ID никогда не резолвился, даже если заказы были).
     """
-    url = "https://kaspi.kz/shop/api/v2/pointofservices"
-    headers = {
-        "Content-Type": "application/vnd.api+json",
-        "X-Auth-Token": token,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    }
+    from backend.kaspi_wrapper import KaspiAPI
     try:
-        resp = requests.get(url, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json().get("data", [])
-            if data:
-                pos_id = data[0].get("id", "")
-                if "_" in pos_id:
-                    merchant_id = pos_id.split("_")[0]
-                    if merchant_id.isdigit():
-                        logger.info(f"🎯 Успешно определен Merchant ID: {merchant_id}")
-                        return merchant_id
-                elif pos_id and pos_id.isdigit():
-                    return pos_id
+        merchant_id = KaspiAPI.get_merchant_id(token)
     except Exception as e:
         logger.debug(f"Запрос Merchant ID пропущен: {e}")
+        return None
+    if merchant_id and merchant_id.isdigit():
+        logger.info(f"🎯 Успешно определен Merchant ID: {merchant_id}")
+        return merchant_id
     return None
 
 def _decode_base64_if_needed(val: str) -> str:
