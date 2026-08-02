@@ -154,7 +154,9 @@ async def connect_full_store(
     if req.email and req.password:
         email_clean = req.email.strip()
         password_plain = req.password
-        success, msg, login_cookies = worker.send_cmd(Command.LOGIN, {"email": email_clean, "password": password_plain})
+        success, msg, login_cookies = await asyncio.to_thread(
+            worker.send_cmd, Command.LOGIN, {"email": email_clean, "password": password_plain}
+        )
         if not success:
             raise HTTPException(status_code=400, detail=f"Ошибка входа в Kaspi MC: {msg}")
 
@@ -295,7 +297,7 @@ async def verify_store_cookies(
     # Куки этого магазина просрочены — пробуем обновить сессию ЕГО СОБСТВЕННЫМИ
     # email/паролем. Никакого фоллбека на общую систему/другой магазин: если
     # своих кредов нет или вход не удался, пользователь должен войти заново.
-    if not is_valid and _refresh_mc_session(store_id=store_id):
+    if not is_valid and await asyncio.to_thread(_refresh_mc_session, store_id=store_id):
         await db.refresh(store)
         decrypted_cookies = decrypt_data(store.encrypted_cookies) if store.encrypted_cookies else None
         is_valid = await asyncio.to_thread(_check_cookie_str, decrypted_cookies)
@@ -344,7 +346,7 @@ async def sync_store_cookies(
 
     store, role = row
 
-    if not _refresh_mc_session(store_id=store_id):
+    if not await asyncio.to_thread(_refresh_mc_session, store_id=store_id):
         raise HTTPException(
             status_code=400,
             detail="Не удалось обновить сессию Kaspi MC: для этого магазина нет сохранённых email/пароля, "
