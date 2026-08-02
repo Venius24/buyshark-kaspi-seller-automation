@@ -131,7 +131,14 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
 
     cookies = _load_mc_cookies(store_id=store_id)
     has_cookies = bool(cookies and "mc-session" in cookies and "mc-sid" in cookies)
-    merchant_id = discover_merchant_id(token) or "20186986"
+    merchant_id = discover_merchant_id(token)
+    if not merchant_id:
+        # НЕ подставляем чужой merchant_id (раньше был хардкод "20186986" —
+        # реальный ID Barkhan: магазин без резолвящегося ID тихо слал бы
+        # обновления остатка под его личностью и ловил 403 от Kaspi на
+        # каждом SKU). Локальные оверрайды (см. _save_override ниже) всё
+        # равно сохранятся — не дойдёт только реальный push в Kaspi MC.
+        logger.warning(f"🔄 [Broadcast Sync] Не удалось определить merchant_id для группы '{group_name}' — обновления остатка сохранятся локально, но не уйдут в Kaspi MC.")
 
     success_count = 0
     fail_count = 0

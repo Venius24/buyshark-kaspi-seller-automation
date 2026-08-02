@@ -38,7 +38,10 @@ def authenticate(req: AuthRequest):
     try:
         merchant_id = KaspiAPI.get_merchant_id(token)
     except Exception:
-        merchant_id = "20186986"
+        # НЕ подставляем чужой merchant_id (раньше был хардкод "20186986" —
+        # реальный ID Barkhan). Синтетический хэш от токена, как в stores_v1.py.
+        import hashlib
+        merchant_id = f"m_{hashlib.md5(token.encode('utf-8')).hexdigest()[:8]}"
     _save_session({"token": token, "merchant_id": merchant_id})
     return {"success": True, "verified": True, "message": "Токен верифицирован и сохранён."}
 

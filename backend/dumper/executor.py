@@ -186,7 +186,7 @@ class RateLimitExecutorWorker:
         update_queue: List[dict],
         save_override_func,
         rate_limit_delay: float = 0.5,
-        merchant_id: str = "20186986",
+        merchant_id: Optional[str] = None,
         store_id=None,
         max_workers: int = 3,
     ) -> dict:

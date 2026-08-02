@@ -117,9 +117,14 @@ class TestRunChatbotCycle(unittest.IsolatedAsyncioTestCase):
     @patch("backend.chatbot.worker.list_active_stores", new_callable=AsyncMock)
     @patch("backend.chatbot.worker.load_chat_cookies")
     @patch("backend.chatbot.worker.config")
-    async def test_unresolvable_merchant_id_falls_back_to_config_default(
+    async def test_unresolvable_merchant_id_skips_store_not_another_stores_id(
         self, mock_config, mock_load_cookies, mock_list_stores, mock_pass, mock_discover
     ):
+        # Раньше при неудачном discover_merchant_id код тихо подставлял
+        # cfg["merchant_id"] (который сам мог по умолчанию быть "20186986" —
+        # реальным ID Barkhan) — чужой стор начинал работать под его личностью.
+        # Теперь при неопределённом merchant_id стор просто пропускается в
+        # этом тике (следующий тик может определить его успешно).
         mock_config.load_chatbot_config.return_value = {"enabled": True, "merchant_id": "20186986"}
         mock_load_cookies.return_value = {"mc-session": "s", "mc-sid": "sid"}
         mock_list_stores.return_value = [
@@ -130,7 +135,7 @@ class TestRunChatbotCycle(unittest.IsolatedAsyncioTestCase):
 
         await worker.run_chatbot_cycle()
 
-        self.assertEqual(mock_pass.await_args_list[0].args[1], "20186986")
+        mock_pass.assert_not_awaited()
 
     @patch("backend.chatbot.worker.discover_merchant_id")
     @patch("backend.chatbot.worker._run_chatbot_pass", new_callable=AsyncMock)

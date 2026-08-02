@@ -825,9 +825,15 @@ class KaspiAPI:
         try:
             m_id = KaspiAPI.get_merchant_id(token)
         except Exception:
-            m_id = "20186986"
-        if not str(m_id).isdigit():
-            m_id = "20186986"
+            m_id = None
+        if not m_id or not str(m_id).isdigit():
+            # НЕ подставляем чужой merchant_id (раньше был хардкод "20186986" —
+            # реальный ID Barkhan: любой другой магазин без резолвящегося
+            # numeric ID тихо синхронизировался под его личностью и получал
+            # 403 от Kaspi на каждой странице). Честно пропускаем синхронизацию —
+            # следующий периодический тик (products_sync_worker) попробует снова.
+            print(f"[BFF Sync] Не удалось определить numeric Merchant ID (got: {m_id!r}) — пропускаем синхронизацию ассортимента.")
+            return []
         merchant_id = str(m_id)
 
         cookies = KaspiAPI._load_mc_cookies(store_id=store_id)

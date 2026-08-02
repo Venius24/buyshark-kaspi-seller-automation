@@ -130,8 +130,8 @@ def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(get_st
 
         cookies = _load_mc_cookies(store_id=ctx.store_id)
         mc_info = ""
-        if cookies and "mc-session" in cookies and "mc-sid" in cookies:
-            merchant_id = discover_merchant_id(token) or "20186986"
+        merchant_id = discover_merchant_id(token) if (cookies and "mc-session" in cookies and "mc-sid" in cookies) else None
+        if merchant_id:
             master_sku = target_p.get("kaspiSku") or target_p.get("sku")
             decoded_master = _decode_base64_if_needed(master_sku)
 
@@ -153,9 +153,14 @@ def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(get_st
                 mc_info = f" и успешно отправлен в Kaspi MC (ID: {val})"
             else:
                 mc_info = f" (локально, ошибка MC: {val})"
+        elif cookies and "mc-session" in cookies and "mc-sid" in cookies:
+            # НЕ подставляем чужой merchant_id (раньше был хардкод "20186986" —
+            # реальный ID Barkhan, из-за чего push для другого магазина уходил
+            # под его личностью и ловил 403 от Kaspi).
+            mc_info = " (локально, не удалось определить Merchant ID)"
         else:
             mc_info = " (локально, куки MC отсутствуют)"
-            
+
         return {"success": True, "message": f"Товар {req.sku} успешно обновлен{mc_info}."}
     except HTTPException:
         raise

@@ -26,8 +26,13 @@ async def run_price_dumping_job(
     """
     merchant_id = discover_merchant_id(token)
     if not merchant_id:
-        merchant_id = "20186986"
-        logger.warning(f"Не удалось получить динамический merchant_id. Используем fallback: {merchant_id}")
+        # НЕ подставляем чужой merchant_id (раньше был хардкод "20186986" —
+        # реальный ID Barkhan, из-за чего демпинг для любого другого магазина
+        # с недоступным /pointofservices тихо работал под его личностью и
+        # ловил 403 от Kaspi на каждом шаге). Честно пропускаем цикл для
+        # этого стора — следующий тик может определить merchant_id успешно.
+        logger.warning("Не удалось определить merchant_id — пропускаем цикл демпинга для этого магазина.")
+        return {"success": False, "message": "Не удалось определить Merchant ID магазина (Kaspi API недоступен). Попробуйте позже.", "logs": []}
 
     from backend.state_helpers import _load_master_stock_groups
     master_groups = _load_master_stock_groups(store_id=store_id)

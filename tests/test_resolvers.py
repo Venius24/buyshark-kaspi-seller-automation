@@ -45,9 +45,14 @@ class TestDiscoverMerchantIdConfigModule(unittest.TestCase):
         self.assertEqual(discover_merchant_id("tok"), "98765")
 
     @patch("backend.dumper.config.requests.get")
-    def test_total_failure_falls_back_to_hardcoded_default(self, mock_get):
+    def test_total_failure_returns_none_not_another_stores_id(self, mock_get):
+        # Раньше здесь был хардкод-фоллбек "20186986" (реальный numeric
+        # merchant_id магазина Barkhan) — при недоступном /pointofservices
+        # ЛЮБОЙ другой магазин тихо начинал резолвиться как Barkhan. Теперь
+        # неопределённость явно возвращается как None — вызывающий код сам
+        # решает, пропустить операцию или залогировать предупреждение.
         mock_get.side_effect = Exception("network down")
-        self.assertEqual(discover_merchant_id("tok"), "20186986")
+        self.assertIsNone(discover_merchant_id("tok"))
 
 
 class TestGetMerchantIdKaspiWrapper(unittest.TestCase):

@@ -130,7 +130,7 @@ def register_handlers():
             store_line = f"🏪 **Ваши магазины:** {store_names}\n\n"
         else:
             cfg = config.load_chatbot_config()
-            merchant_id = cfg.get("merchant_id", "20186986")
+            merchant_id = cfg.get("merchant_id") or "неизвестен"
             store_line = f"🏪 **Merchant ID:** `{merchant_id}`\n\n"
 
         history_count = len(load_printed_history())
@@ -174,7 +174,7 @@ def register_handlers():
             return
 
         cfg = config.load_chatbot_config()
-        merchant_id = cfg.get("merchant_id", "20186986")
+        merchant_id = cfg.get("merchant_id") or "неизвестен"
         blocked_count = config.count_blocked_chats()  # фоллбек: не привязан ни к одному стору — сводка по всем
 
         await message.reply(

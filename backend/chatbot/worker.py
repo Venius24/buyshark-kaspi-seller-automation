@@ -232,7 +232,14 @@ async def run_chatbot_cycle():
                     logger.warning(f"[Chatbot] Store {store.store_id}: куки Kaspi MC отсутствуют/истекли, пропускаем проход.")
                     continue
                 any_cookies = True
-                merchant_id = await asyncio.to_thread(discover_merchant_id, store.token) or store_cfg.get("merchant_id", "20186986")
+                merchant_id = await asyncio.to_thread(discover_merchant_id, store.token)
+                if not merchant_id:
+                    # НЕ подставляем чужой merchant_id (раньше был хардкод
+                    # "20186986" — реальный ID Barkhan, из-за чего чат-проход
+                    # для другого магазина тихо уходил под его личностью и
+                    # ловил отказ от Kaspi). Пропускаем этот стор в этом тике.
+                    logger.warning(f"[Chatbot] Store {store.store_id}: не удалось определить merchant_id, пропускаем проход.")
+                    continue
                 ok = await _run_chatbot_pass(cookies, merchant_id, store.store_id)
                 if not ok:
                     return 10
@@ -249,7 +256,10 @@ async def run_chatbot_cycle():
         if not cookies:
             await notify_cookie_expired("Куки отсутствуют или истекли в states/session.json", store_id=None)
             return 10
-        merchant_id = cfg.get("merchant_id", "20186986")
+        merchant_id = cfg.get("merchant_id")
+        if not merchant_id:
+            logger.warning("[Chatbot] Легаси-режим: не удалось определить merchant_id, пропускаем проход.")
+            return 10
         ok = await _run_chatbot_pass(cookies, merchant_id, None)
         if not ok:
             return 10

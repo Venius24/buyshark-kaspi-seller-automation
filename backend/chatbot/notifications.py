@@ -77,7 +77,7 @@ async def notify_startup():
         return
 
     cfg = config.load_chatbot_config()
-    merchant_id = cfg.get("merchant_id", "20186986")
+    merchant_id = cfg.get("merchant_id") or "неизвестен"
     alert_text = (
         f"🚀 **Бот успешно запущен и начал работу!**\n"
         f"----------------------------------------\n"

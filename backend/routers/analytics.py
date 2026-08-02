@@ -114,7 +114,12 @@ def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
             # Кэшируем на _WIDGET_OFFERS_CACHE_TTL_SECONDS — см. комментарий у кэша выше
             raw_offers = _get_cached_offers(kaspi_master_sku, city_code)
             if raw_offers:
-                my_merchant_id = ctx.merchant_id or "20186986"
+                # НЕ подставляем чужой merchant_id (раньше был хардкод "20186986" —
+                # реальный ID Barkhan: если у ctx нет merchant_id, конкурентный
+                # оффер САМОГО Barkhan мог бы ошибочно подсветиться как "Мой
+                # Магазин (Вы)" в дашборде другого пользователя). Пустая
+                # строка не совпадёт ни с одним реальным merchantId.
+                my_merchant_id = ctx.merchant_id or ""
                 
                 sorted_offers = []
                 for offer in raw_offers:

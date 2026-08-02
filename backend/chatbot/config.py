@@ -239,7 +239,10 @@ def load_chatbot_config(store_id: Optional[str] = None) -> dict:
     deepseek_api = os.environ.get("DEEPSEEK_API", os.environ.get("DEEPSEEK_API_KEY", "")).strip()
     tg_bot_token = os.environ.get("TG_BOT_TOKEN", "").strip()
     tg_bot_proxy = os.environ.get("TG_BOT_PROXY", os.environ.get("TG_PROXY", "")).strip()
-    merchant_id = os.environ.get("MERCHANT_ID", "20186986").strip()
+    # НЕ дефолтим на "20186986" (реальный numeric ID Barkhan) — легаси
+    # однотенантный конфиг без явно заданного MERCHANT_ID должен явно
+    # остаться пустым, а не тихо выдавать себя за Barkhan.
+    merchant_id = os.environ.get("MERCHANT_ID", "").strip()
 
     config_data = {
         "enabled": True,

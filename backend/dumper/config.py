@@ -2,10 +2,11 @@ import base64
 import logging
 import requests
 from dataclasses import dataclass
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-def discover_merchant_id(token: str) -> str:
+def discover_merchant_id(token: str) -> Optional[str]:
     """
     Автоматически определяет Merchant ID (ID кабинета) по API-токену через
     GET-запрос к /pointofservices.
@@ -14,6 +15,13 @@ def discover_merchant_id(token: str) -> str:
     — общий на все магазины кэш, который для стора B мог вернуть merchant_id
     стора A (если тот когда-либо залогинился через legacy-поток first). Токен
     уже однозначно указывает, чей это запрос — резолвим напрямую по нему.
+
+    Возвращает None, если определить не удалось (НЕ хардкодим чужой ID —
+    раньше здесь был fallback "20186986" (реальный numeric merchant_id
+    Barkhan), из-за чего любой другой магазин с недоступным /pointofservices
+    или без истории заказов молча начинал работать под личностью Barkhan и
+    ловил 403 от Kaspi. Вызывающий код обязан сам решить, что делать при
+    None — как правило, пропустить эту операцию для стора и залогировать).
     """
     url = "https://kaspi.kz/shop/api/v2/pointofservices"
     headers = {
@@ -36,7 +44,7 @@ def discover_merchant_id(token: str) -> str:
                     return pos_id
     except Exception as e:
         logger.debug(f"Запрос Merchant ID пропущен: {e}")
-    return "20186986"
+    return None
 
 def _decode_base64_if_needed(val: str) -> str:
     """Декодирует Base64 строку в числовой Kaspi Master SKU, если необходимо."""
