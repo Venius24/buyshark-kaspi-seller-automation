@@ -1,11 +1,11 @@
 import asyncio
 import logging
-import requests
 from datetime import datetime
 from sqlalchemy import select
 from backend.db.database import AsyncSessionLocal
 from backend.db.models import Store, UserStore, User
-from backend.security.crypto import decrypt_data
+from backend.state_helpers import _load_mc_cookies
+from backend.services.playwright_worker import worker, Command
 from backend.chatbot.notifications import notify_cookie_expired
 
 logger = logging.getLogger(__name__)
@@ -25,25 +25,26 @@ async def check_all_stores_health():
         active_stores = res.scalars().all()
 
         for store in active_stores:
-            decrypted_cookies = decrypt_data(store.encrypted_cookies)
-            if not decrypted_cookies:
+            mc_cookies = _load_mc_cookies(store_id=store.id)
+            if not mc_cookies:
                 continue
 
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Cookie": decrypted_cookies
-            }
-
+            # Раньше здесь был GET .../merchantcab/api/user/current — этот
+            # эндпоинт у Kaspi отдаёт 404 ВСЕГДА, независимо от валидности
+            # куков (проверено вживую: BFF-запросы теми же куками работают,
+            # этот "health-check" — нет). Из-за этого этот воркер раз в час
+            # помечал COOKIE_EXPIRED и слал ложную Telegram-тревогу для
+            # ЛЮБОГО магазина, даже с полностью рабочими куками. Заменено на
+            # тот же реальный browser-based VERIFY_SESSION, что уже
+            # проверенно работает в /api/mc-status?verify=true.
             try:
-                r = await asyncio.to_thread(
-                    requests.get, "https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=headers, timeout=5
-                )
-                if r.status_code == 200:
+                success, is_valid, _fresh = await asyncio.to_thread(worker.send_cmd, Command.VERIFY_SESSION, mc_cookies)
+                if success and is_valid:
                     store.last_sync_at = datetime.utcnow()
                 else:
                     logger.warning(f"🚨 Сессия магазина '{store.name}' (Merchant ID: {store.merchant_id}) истекла!")
                     store.status = "COOKIE_EXPIRED"
-                    
+
                     await notify_cookie_expired(f"Сессия магазина {store.name} ({store.merchant_id}) истекла")
             except Exception as e:
                 logger.error(f"Ошибка проверки магазина {store.name}: {e}")

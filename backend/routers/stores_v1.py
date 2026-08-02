@@ -2,7 +2,6 @@ import asyncio
 import uuid
 import hashlib
 import logging
-import requests
 from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -15,7 +14,7 @@ from backend.security.crypto import encrypt_data, decrypt_data
 from backend.routers.auth_v1 import get_current_user
 from backend.kaspi_wrapper import KaspiAPI
 from backend.services.playwright_worker import worker, Command
-from backend.state_helpers import _save_session, _save_mc_credentials, _refresh_mc_session
+from backend.state_helpers import _save_session, _save_mc_credentials, _refresh_mc_session, _load_mc_cookies
 
 logger = logging.getLogger(__name__)
 
@@ -278,29 +277,28 @@ async def verify_store_cookies(
 
     store, role = row
 
-    def _check_cookie_str(cookie_str: Optional[str]) -> bool:
-        if not cookie_str:
+    def _check_cookies_valid(store_id: str) -> bool:
+        # Раньше здесь был GET https://mc.shop.kaspi.kz/merchantcab/api/user/current
+        # — этот эндпоинт у Kaspi отдаёт 404 "Not Found" ВСЕГДА, независимо
+        # от валидности куков (проверено вживую: BFF-запросы теми же куками
+        # работают, этот "health-check" — нет). Из-за этого ЛЮБОЙ магазин
+        # с рабочими куками помечался COOKIE_EXPIRED. Заменено на тот же
+        # реальный browser-based механизм, что уже проверенно работает в
+        # /api/mc-status?verify=true (playwright_worker.Command.VERIFY_SESSION —
+        # заходит в кабинет и смотрит, не редиректнуло ли на логин).
+        mc_cookies = _load_mc_cookies(store_id=store_id)
+        if not mc_cookies:
             return False
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Cookie": cookie_str
-        }
-        try:
-            r = requests.get("https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=headers, timeout=5)
-            return r.status_code == 200
-        except Exception:
-            return False
+        success, is_valid, _fresh = worker.send_cmd(Command.VERIFY_SESSION, mc_cookies)
+        return bool(success and is_valid)
 
-    decrypted_cookies = decrypt_data(store.encrypted_cookies) if store.encrypted_cookies else None
-    is_valid = await asyncio.to_thread(_check_cookie_str, decrypted_cookies)
+    is_valid = await asyncio.to_thread(_check_cookies_valid, store_id)
 
     # Куки этого магазина просрочены — пробуем обновить сессию ЕГО СОБСТВЕННЫМИ
     # email/паролем. Никакого фоллбека на общую систему/другой магазин: если
     # своих кредов нет или вход не удался, пользователь должен войти заново.
     if not is_valid and await asyncio.to_thread(_refresh_mc_session, store_id=store_id):
-        await db.refresh(store)
-        decrypted_cookies = decrypt_data(store.encrypted_cookies) if store.encrypted_cookies else None
-        is_valid = await asyncio.to_thread(_check_cookie_str, decrypted_cookies)
+        is_valid = await asyncio.to_thread(_check_cookies_valid, store_id)
 
     if is_valid:
         store.status = "ACTIVE"
@@ -353,26 +351,22 @@ async def sync_store_cookies(
                    "либо вход не удался. Войдите в Kaspi MC заново."
         )
 
-    await db.refresh(store)
-    decrypted_cookies = decrypt_data(store.encrypted_cookies) if store.encrypted_cookies else None
-    if not decrypted_cookies:
+    mc_cookies = _load_mc_cookies(store_id=store_id)
+    if not mc_cookies:
         raise HTTPException(status_code=400, detail="Сессия обновлена, но куки не были сохранены. Войдите в Kaspi MC заново.")
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Cookie": decrypted_cookies
-    }
+    # Раньше здесь был GET .../merchantcab/api/user/current — этот эндпоинт
+    # у Kaspi отдаёт 404 всегда, независимо от валидности куков (см. verify_store_cookies
+    # выше). Заменено на тот же реальный browser-based VERIFY_SESSION.
     try:
-        r = await asyncio.to_thread(
-            requests.get, "https://mc.shop.kaspi.kz/merchantcab/api/user/current", headers=headers, timeout=5
-        )
+        success, is_valid, _fresh = await asyncio.to_thread(worker.send_cmd, Command.VERIFY_SESSION, mc_cookies)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ошибка проверки куков: {e}")
 
-    if r.status_code != 200:
+    if not (success and is_valid):
         store.status = "COOKIE_EXPIRED"
         await db.commit()
-        raise HTTPException(status_code=400, detail="Куки Kaspi MC истекли (401) сразу после обновления сессии. Войдите заново.")
+        raise HTTPException(status_code=400, detail="Куки Kaspi MC истекли сразу после обновления сессии. Войдите заново.")
 
     store.status = "ACTIVE"
     store.last_sync_at = datetime.utcnow()

@@ -136,12 +136,14 @@ class TestStoresV1NoFallback(unittest.TestCase):
         self.assertIn("Войдите", resp.json()["detail"])
         mock_refresh.assert_called_once_with(store_id="store-existing-1")
 
-    @patch("backend.routers.stores_v1.requests")
+    @patch("backend.routers.stores_v1.worker")
+    @patch("backend.routers.stores_v1._load_mc_cookies")
     @patch("backend.routers.stores_v1._refresh_mc_session")
-    def test_verify_no_fallback_marks_expired_when_own_refresh_fails(self, mock_refresh, mock_requests):
+    def test_verify_no_fallback_marks_expired_when_own_refresh_fails(self, mock_refresh, mock_load_cookies, mock_worker):
         """When this store's cookies are invalid and its own refresh fails,
         /verify must mark it COOKIE_EXPIRED -- no global-cookie fallback."""
-        mock_requests.get.return_value = MagicMock(status_code=401)
+        mock_load_cookies.return_value = {"mc-session": "stale", "mc-sid": "stale"}
+        mock_worker.send_cmd.return_value = (True, False, {})  # success, is_valid=False
         mock_refresh.return_value = False
 
         store_row = Store(
