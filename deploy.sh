@@ -19,6 +19,9 @@ VENV_DIR="$APP_DIR/venv"
 FRONTEND_DIR="$APP_DIR/frontend"
 RELEASES_DIR="/var/www/kaspi-saas-releases"
 WEB_ROOT="/var/www/kaspi-saas"
+LANDING_DIR="$APP_DIR/buyshark-landing"
+LANDING_RELEASES_DIR="/var/www/buyshark-landing-releases"
+LANDING_WEB_ROOT="/var/www/buyshark-landing"
 HEALTH_URL="http://127.0.0.1:5000/"
 LAST_GOOD_FILE="$APP_DIR/.last_good_sha"
 HEALTH_RETRIES=45  # старт uvicorn (Playwright init и т.д.) занимает до ~30s
@@ -147,6 +150,51 @@ fi
 
 ln -sfn "$NEW_RELEASE" "$WEB_ROOT"
 echo "✅ Symlink $WEB_ROOT → $NEW_RELEASE (без даунтайма на статике)."
+
+# ── 4.5. Сборка + атомная публикация лендинга (buyshark-landing) ─
+# Чисто статический сайт, не завязан на backend/health-check/откат —
+# независимая публикация, не должна блокировать деплой кабинета при сбое.
+if [ -n "$PREBUILT_LANDING_DIST_DIR" ] && [ -d "$PREBUILT_LANDING_DIST_DIR" ]; then
+  echo "🦈 Шаг 4.5: Используем уже собранный лендинг из $PREBUILT_LANDING_DIST_DIR"
+  NEW_LANDING_DIST_SRC="$PREBUILT_LANDING_DIST_DIR"
+elif [ -d "$LANDING_DIR" ]; then
+  echo "🦈 Шаг 4.5: Сборка лендинга buyshark-landing (bun)..."
+  cd "$LANDING_DIR"
+  bun install --frozen-lockfile
+  bun run build
+  cd "$APP_DIR"
+  NEW_LANDING_DIST_SRC="$LANDING_DIR/dist"
+  echo "✅ Лендинг собран в buyshark-landing/dist/"
+else
+  NEW_LANDING_DIST_SRC=""
+fi
+
+if [ -n "$NEW_LANDING_DIST_SRC" ]; then
+  mkdir -p "$LANDING_RELEASES_DIR"
+  NEW_LANDING_RELEASE="$LANDING_RELEASES_DIR/$NEW_SHA"
+  rm -rf "$NEW_LANDING_RELEASE"
+  cp -r "$NEW_LANDING_DIST_SRC" "$NEW_LANDING_RELEASE"
+
+  # buyshark-landing/public/media/ (~43MB видео) в .gitignore — ни в git,
+  # ни в CI-чекауте его нет, поэтому и CI-собранный, и локально-собранный
+  # dist приезжают сюда БЕЗ media/. Донакладываем его с постоянного
+  # каталога на VPS, который не трогает git/деплой. Обновлять новые
+  # ассеты — scp'ом в /root/buyshark-landing-media/ на сервере.
+  LANDING_MEDIA_PERSIST_DIR="/root/buyshark-landing-media"
+  if [ -d "$LANDING_MEDIA_PERSIST_DIR" ]; then
+    mkdir -p "$NEW_LANDING_RELEASE/media"
+    cp -r "$LANDING_MEDIA_PERSIST_DIR"/. "$NEW_LANDING_RELEASE/media/"
+    echo "✅ media/ донакоплен из $LANDING_MEDIA_PERSIST_DIR."
+  else
+    echo "⚠️  $LANDING_MEDIA_PERSIST_DIR не найден — лендинг будет опубликован БЕЗ видео/media (404 на все сцены)."
+  fi
+
+  ln -sfn "$NEW_LANDING_RELEASE" "$LANDING_WEB_ROOT"
+  ls -1dt "$LANDING_RELEASES_DIR"/*/ 2>/dev/null | tail -n +6 | xargs -r rm -rf
+  echo "✅ Symlink $LANDING_WEB_ROOT → $NEW_LANDING_RELEASE."
+else
+  echo "⚠️  Пропускаем публикацию лендинга — нет ни $LANDING_DIR, ни PREBUILT_LANDING_DIST_DIR."
+fi
 
 # ── 5. Перезапуск бекенда через systemd ──────────────────────────
 echo "⚙️  Шаг 5: Настройка и перезапуск systemd сервиса $SERVICE_NAME..."

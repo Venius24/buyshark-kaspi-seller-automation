@@ -1,0 +1,37 @@
+:root {
+  /* BuyShark brand */
+  --shark-cyan: #00f0ff;
+  --shark-cyan-dim: #00a8b8;
+  --win-blue: #2f6bff;
+  --win-blue-dim: #1c3f99;
+  --win-green: #21e07a;
+  --win-green-dim: #0f7a45;
+  --tier-gold: #ffcf40;
+  --tier-gold-dim: #7a5a0f;
+  --abyss: #030712;
+  --abyss-soft: #070c1a;
+  --carbon: #0d1117;
+
+  /* Target / competitor environment */
+  --target-red: #e10000;
+  --target-maroon: #1f0008;
+  --target-yellow: #ffb800;
+  --target-orange: #ff7a00;
+
+  /* Neutrals */
+  --fog: #8a97a8;
+  --fog-dim: #4a5568;
+  --white: #f4fbff;
+
+  /* Type */
+  --font-display: 'Orbitron', 'Inter', sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Rhythm */
+  --section-pad-x: clamp(1.25rem, 4vw, 5rem);
+  --z-hud: 40;
+  --z-overlay: 50;
+
+  color-scheme: dark;
+}

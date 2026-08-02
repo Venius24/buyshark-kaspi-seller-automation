@@ -1,0 +1,60 @@
+.section {
+  position: relative;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--abyss);
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(to bottom, rgba(3, 7, 18, 0.25) 0%, rgba(3, 7, 18, 0.15) 45%, rgba(3, 7, 18, 0.75) 100%);
+  pointer-events: none;
+}
+
+.copy {
+  position: relative;
+  z-index: 3;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: var(--section-pad-x);
+  padding-bottom: 12vh;
+  text-align: center;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(1.7rem, 4.6vw, 3rem);
+  color: var(--white);
+  text-shadow: 0 0 30px rgba(0, 240, 255, 0.3);
+  max-width: 22ch;
+}
+
+.subtitle {
+  font-family: var(--font-body);
+  font-size: clamp(0.95rem, 1.6vw, 1.15rem);
+  color: var(--fog);
+  max-width: 40ch;
+}
+
+.hud {
+  position: absolute;
+  top: 5vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--shark-cyan);
+  opacity: 0.7;
+  text-shadow: 0 0 12px rgba(0, 240, 255, 0.5);
+}

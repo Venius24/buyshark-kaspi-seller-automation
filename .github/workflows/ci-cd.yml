@@ -62,6 +62,36 @@ jobs:
           retention-days: 1
 
   # ─────────────────────────────────────────────────────────────
+  # JOB 2b: Сборка лендинга buyshark-landing (Bun) — независимо от
+  # кабинета, не завязана на тесты бекенда (чисто статический сайт).
+  # ─────────────────────────────────────────────────────────────
+  build-landing:
+    name: 🦈 Build Landing (Cloud Bun)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install & Build Landing
+        run: |
+          cd buyshark-landing
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: landing-dist
+          path: buyshark-landing/dist/
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────────────────
   # JOB 3: Деплой на VPS — вся логика (провижининг/rollback/health-check)
-  # живёт в deploy.sh, CI лишь передаёт готовый dist и вызывает его.
+  # живёт в deploy.sh, CI лишь передаёт готовые dist'ы и вызывает его.
   # ─────────────────────────────────────────────────────────────

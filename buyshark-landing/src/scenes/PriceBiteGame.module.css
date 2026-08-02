@@ -1,0 +1,415 @@
+.section {
+  position: relative;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--abyss);
+}
+
+.bgVideo {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(to bottom, rgba(3, 7, 18, 0.55) 0%, rgba(3, 7, 18, 0.35) 40%, rgba(3, 7, 18, 0.6) 100%);
+  pointer-events: none;
+}
+
+.copy {
+  position: relative;
+  z-index: 3;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(1.5rem, 4vh, 3rem);
+  padding: var(--section-pad-x);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(1.8rem, 5vw, 3.2rem);
+  color: var(--white);
+  text-align: center;
+}
+
+.gridWrap {
+  position: relative;
+}
+
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: clamp(2rem, 4vw, 4rem);
+}
+
+/* full-scene payoff once all 3 cards have fallen — dark blurred backdrop
+   covering the whole section (not just the card grid) with a single bold
+   red plaque, mirroring Scene 2's .punch treatment. Always mounted
+   (opacity 0 / pointer-events none) and faded in via GSAP from
+   PriceBiteGame.tsx once every card is bitten, rather than conditionally
+   rendered, so there's no mount-timing race with the tween. */
+.marketOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  background: rgba(3, 7, 18, 0.5);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.marketText {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(2rem, 7vw, 4.6rem);
+  letter-spacing: 0.03em;
+  color: var(--target-red);
+  text-align: center;
+  text-shadow: 0 0 40px rgba(225, 0, 0, 0.8), 0 0 90px rgba(225, 0, 0, 0.5);
+  opacity: 0;
+  transform: translateY(20px) scale(0.7);
+}
+
+/* fast neon slash that sweeps across a card on click, then the burst of
+   fake shard fragments that fly outward while the price/badge swap under
+   them — see PriceBiteGame.tsx handleClick for the GSAP triggers. */
+.strike {
+  position: absolute;
+  top: 50%;
+  left: -60%;
+  width: 220%;
+  height: 6px;
+  z-index: 6;
+  transform: translateY(-50%) rotate(-14deg);
+  background: linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.95), transparent);
+  box-shadow: 0 0 18px 4px rgba(0, 240, 255, 0.8);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.shardWrap {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.shard {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  background: linear-gradient(155deg, rgba(0, 240, 255, 0.85), rgba(0, 168, 184, 0.4));
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.6);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.crateFloat {
+  position: relative;
+  /* slow, ominous drift — like a mine suspended in water, not a buoy bobbing
+     on waves. will-change + translateZ promote this to its own GPU layer so
+     the backdrop-filter blur on .crate underneath isn't recomputed every
+     frame of the animation. */
+  animation: levitate 6.5s ease-in-out infinite;
+  will-change: transform;
+  transform: translateZ(0);
+}
+.crateFloat[data-fallen='true'] {
+  /* the card itself has fallen away — stop the idle drift so the empty
+     slot (and the won-chip sitting in it) reads as settled, not floating */
+  animation: none;
+}
+
+.ripple {
+  position: absolute;
+  left: 50%;
+  bottom: -10px;
+  width: 140%;
+  height: 40px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(0, 240, 255, 0.16), transparent 70%);
+  animation: glowPulse 6.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes glowPulse {
+  0%,
+  100% {
+    transform: translateX(-50%) scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translateX(-50%) scale(1.08);
+    opacity: 0.25;
+  }
+}
+
+@keyframes levitate {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-0.6deg);
+  }
+  50% {
+    transform: translateY(-5px) rotate(0.6deg);
+  }
+}
+
+@keyframes crateHit {
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  30% {
+    transform: scale(0.9, 1.1) rotate(-3deg);
+  }
+  60% {
+    transform: scale(1.06, 0.92) rotate(2deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+.crate {
+  position: relative;
+  width: 268px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 2.2rem 1.6rem 1.8rem;
+  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(20, 32, 50, 0.4), rgba(6, 12, 24, 0.6));
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.4),
+    0 0 36px rgba(0, 240, 255, 0.14),
+    inset 0 0 0 1px rgba(0, 240, 255, 0.06);
+  overflow: hidden;
+  cursor: pointer;
+  transition: filter 0.3s ease;
+  will-change: transform;
+  transform: translateZ(0);
+  /* the "живой" ask — a slow breathing glow so the hologram reads as active
+     tech, not a static screenshot, even before anything is clicked */
+  animation: liveGlow 3.6s ease-in-out infinite;
+}
+.crate[data-fallen='true'] {
+  cursor: default;
+  animation: none;
+}
+
+/* one-shot "power-on" flash — fired once as each card materializes into
+   view (see PriceBiteGame.tsx's ScrollTrigger entrance), reads as the
+   hologram flaring to life rather than just fading in */
+.powerFlash {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: radial-gradient(circle at 50% 40%, rgba(255, 255, 255, 0.95), rgba(0, 240, 255, 0.4) 45%, transparent 78%);
+  pointer-events: none;
+}
+
+/* periodic diagonal glare sweeping across the glass — the second half of
+   the "живой эффект" ask, layered on top of the box's own liveGlow pulse */
+.shimmer {
+  position: absolute;
+  top: -20%;
+  left: -60%;
+  width: 40%;
+  height: 140%;
+  z-index: 1;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.16), transparent);
+  transform: rotate(8deg);
+  animation: shimmerSweep 4.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes shimmerSweep {
+  0%,
+  55%,
+  100% {
+    left: -60%;
+  }
+  75% {
+    left: 130%;
+  }
+}
+
+@keyframes liveGlow {
+  0%,
+  100% {
+    box-shadow:
+      0 8px 30px rgba(0, 0, 0, 0.4),
+      0 0 36px rgba(0, 240, 255, 0.14),
+      inset 0 0 0 1px rgba(0, 240, 255, 0.06);
+  }
+  50% {
+    box-shadow:
+      0 8px 30px rgba(0, 0, 0, 0.4),
+      0 0 52px rgba(0, 240, 255, 0.26),
+      inset 0 0 0 1px rgba(0, 240, 255, 0.12);
+  }
+}
+
+.crate.hit {
+  animation: crateHit 0.32s ease;
+}
+
+/* marketplace "chrome" bar — reads as a snatched listing UI, not a crate */
+.chromeBar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  z-index: 0;
+  background: linear-gradient(90deg, rgba(0, 240, 255, 0.35), rgba(0, 240, 255, 0.05));
+}
+.chromeDot {
+  position: absolute;
+  top: 3px;
+  right: 8px;
+  z-index: 1;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(0, 240, 255, 0.6);
+  box-shadow: 0 0 6px rgba(0, 240, 255, 0.8);
+}
+
+.name {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-body);
+  font-size: 1.05rem;
+  color: var(--white);
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+.priceStack {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+}
+
+.priceRed {
+  display: block;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 1.55rem;
+  color: var(--target-red);
+  text-shadow: 0 0 18px rgba(225, 0, 0, 0.35);
+}
+
+/* the compact "won" card that floats in above a fallen card — a small
+   glass panel (green border/glow, matching the main .crate's material but
+   in the "success" color) holding the smaller price and the blue store
+   badge, both revealed together via GSAP once PriceBiteGame.tsx's fall
+   timeline lands (see handleClick).
+
+   Split into an outer wrapper (pure-CSS centering via translate(-50%,-50%))
+   and an inner node that GSAP actually animates: GSAP's transform tweens
+   (x/y/scale) overwrite an element's ENTIRE transform with their own
+   decomposed absolute values, so if the centering translate lived on the
+   animated node itself, the first `gsap.set(..., { y: 12 })` would silently
+   replace the -50% offset and the chip would render off-center. Keeping the
+   two transforms on separate elements avoids the conflict entirely. */
+.wonChip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 10;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.wonChipInner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.9rem 1.2rem 0.8rem;
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(20, 50, 36, 0.45), rgba(6, 20, 14, 0.65));
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  border: 1px solid rgba(33, 224, 122, 0.55);
+  animation: wonGlow 2.6s ease-in-out infinite;
+  opacity: 0;
+}
+
+.wonPrice {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 1.3rem;
+  color: var(--win-green);
+  text-shadow: 0 0 18px rgba(33, 224, 122, 0.6);
+  white-space: nowrap;
+}
+
+.wonBadge {
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--win-blue), var(--win-blue-dim));
+  color: var(--white);
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  box-shadow: 0 0 20px rgba(47, 107, 255, 0.55);
+}
+
+@keyframes wonGlow {
+  0%,
+  100% {
+    box-shadow:
+      0 6px 20px rgba(0, 0, 0, 0.35),
+      0 0 24px rgba(33, 224, 122, 0.25),
+      inset 0 0 0 1px rgba(33, 224, 122, 0.1);
+  }
+  50% {
+    box-shadow:
+      0 6px 20px rgba(0, 0, 0, 0.35),
+      0 0 38px rgba(33, 224, 122, 0.45),
+      inset 0 0 0 1px rgba(33, 224, 122, 0.18);
+  }
+}
+
+.caption {
+  position: absolute;
+  bottom: 5vh;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  color: var(--fog);
+  z-index: 3;
+  text-align: center;
+  width: 100%;
+  padding-inline: 1rem;
+}

@@ -25,6 +25,12 @@ frontend/dist/
 states/*.json
 !states/.gitkeep
 
+# ── BuyShark landing (separate app) ──
+buyshark-landing/node_modules/
+buyshark-landing/dist/
+buyshark-landing/public/media/
+HIGGSFIELD/
+
 # ── Scratch & legacy ──
 scratch/
 EXAMPLE.md

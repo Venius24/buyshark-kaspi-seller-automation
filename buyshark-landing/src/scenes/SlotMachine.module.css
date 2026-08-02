@@ -1,0 +1,276 @@
+.section {
+  position: relative;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--abyss-soft);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(1.25rem, 3vh, 2.5rem);
+  padding-block: 4vh;
+}
+
+.headline {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(1.8rem, 5vw, 3.4rem);
+  letter-spacing: 0.02em;
+  color: var(--white);
+  text-align: center;
+  text-shadow: 0 0 30px rgba(0, 240, 255, 0.25);
+}
+
+/* ── mechanical drum housing ── */
+
+.drumFrame {
+  position: relative;
+  width: min(92vw, 1200px);
+  height: min(64vh, 760px);
+  border-radius: 28px;
+  padding: clamp(14px, 2vw, 28px);
+  background:
+    linear-gradient(rgba(3, 7, 18, 0.82), rgba(3, 7, 18, 0.82)),
+    url('/media/carbon-texture.webp');
+  background-size: cover;
+  border: 1px solid rgba(var(--role-glow, 0, 240, 255), 0.5);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 0 70px rgba(var(--role-glow, 0, 240, 255), 0.2),
+    inset 0 0 40px rgba(0, 0, 0, 0.6);
+}
+
+.bolt {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #cfeff2, var(--fog-dim) 70%, #0a0e14 100%);
+  box-shadow: 0 0 4px rgba(0, 240, 255, 0.4);
+}
+.bolt[data-pos='tl'] {
+  top: 14px;
+  left: 14px;
+}
+.bolt[data-pos='tr'] {
+  top: 14px;
+  right: 14px;
+}
+.bolt[data-pos='bl'] {
+  bottom: 14px;
+  left: 14px;
+}
+.bolt[data-pos='br'] {
+  bottom: 14px;
+  right: 14px;
+}
+
+.ticks {
+  position: absolute;
+  top: 8%;
+  bottom: 8%;
+  width: 3px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  z-index: 1;
+}
+.ticks[data-side='left'] {
+  left: 4px;
+}
+.ticks[data-side='right'] {
+  right: 4px;
+}
+.ticks span {
+  display: block;
+  width: 100%;
+  height: 2px;
+  background: rgba(var(--role-glow, 0, 240, 255), 0.45);
+}
+
+.window {
+  position: relative;
+  height: 100%;
+  border-radius: 18px;
+  background: var(--abyss);
+  overflow: hidden;
+  box-shadow: inset 0 12px 30px rgba(0, 0, 0, 0.8), inset 0 -12px 30px rgba(0, 0, 0, 0.8);
+}
+
+.scanline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 40%;
+  background: linear-gradient(to bottom, transparent, rgba(0, 240, 255, 0.06), transparent);
+  animation: scan 5s linear infinite;
+  pointer-events: none;
+  z-index: 2;
+}
+
+@keyframes scan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(250%);
+  }
+}
+
+.windowShade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 18%;
+  pointer-events: none;
+  z-index: 3;
+}
+.windowShade[data-edge='top'] {
+  top: 0;
+  background: linear-gradient(to bottom, var(--abyss), transparent);
+}
+.windowShade[data-edge='bottom'] {
+  bottom: 0;
+  background: linear-gradient(to top, var(--abyss), transparent);
+}
+
+/* ── the reel itself: a tall strip of items, translated as one to spin ── */
+
+.strip {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+.item {
+  width: 100%;
+}
+
+.role {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding-inline: 6%;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(1.5rem, 4.6vw, 3rem);
+  line-height: 1.15;
+  will-change: transform, opacity, filter, clip-path;
+}
+
+.centerMark {
+  position: absolute;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  transform: translateY(-50%);
+  z-index: 3;
+}
+.centerMark[data-side='left'] {
+  left: 6px;
+  border-left: 9px solid rgba(var(--role-glow, 0, 240, 255), 0.7);
+}
+.centerMark[data-side='right'] {
+  right: 6px;
+  border-right: 9px solid rgba(var(--role-glow, 0, 240, 255), 0.7);
+}
+
+.roleInner {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+}
+
+/* colored wash behind each role's text, brightening as it settles into the center —
+   `currentColor` picks up each role's own brand color so one rule covers all of them.
+   Sized and blurred generously (well past the role's own box) with a multi-stop falloff
+   so it reads as a soft cloud of light — a small box with a light blur just shows its own
+   rectangle; any bit that still reaches the window's edge is masked by .windowShade. */
+.backlight {
+  position: absolute;
+  z-index: 0;
+  /* kept comfortably smaller than the window's own height (role height + this inset must
+     stay well under the drum window's height) — the gradient needs to fully finish its own
+     fade-to-transparent BEFORE `.window`'s overflow:hidden ever reaches it, otherwise the
+     clip lands mid-fade and shows as a hard edge, no matter how blurred the gradient is. */
+  inset: -25% -15%;
+  background: radial-gradient(
+    ellipse closest-side at 50% 50%,
+    color-mix(in srgb, currentColor 40%, transparent) 0%,
+    color-mix(in srgb, currentColor 12%, transparent) 50%,
+    transparent 85%
+  );
+  filter: blur(20px);
+  pointer-events: none;
+}
+
+.roleYellow {
+  color: var(--target-yellow);
+  text-shadow: 0 0 24px rgba(255, 184, 0, 0.35);
+}
+
+.roleRed {
+  color: var(--target-red);
+  text-shadow: 0 0 24px rgba(225, 0, 0, 0.4);
+}
+
+.roleOrange {
+  color: var(--target-orange);
+  text-shadow: 0 0 24px rgba(255, 122, 0, 0.4);
+}
+
+.roleFog {
+  color: var(--fog);
+}
+
+.roleFinal {
+  color: var(--white);
+}
+
+.highlight {
+  color: var(--shark-cyan);
+  text-shadow: 0 0 28px rgba(0, 240, 255, 0.55);
+}
+
+.bloom {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  background: radial-gradient(circle at 50% 50%, rgba(0, 240, 255, 0.55), rgba(0, 240, 255, 0.08) 45%, transparent 72%);
+  pointer-events: none;
+  will-change: opacity;
+}
+
+.punch {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding-inline: 8%;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(2.2rem, 8vw, 6rem);
+  color: var(--shark-cyan);
+  text-shadow: 0 0 40px rgba(0, 240, 255, 0.8), 0 0 90px rgba(0, 240, 255, 0.5);
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.bubble {
+  position: absolute;
+  z-index: 2;
+  bottom: -10%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(0, 240, 255, 0.5);
+  opacity: 0;
+  pointer-events: none;
+}
