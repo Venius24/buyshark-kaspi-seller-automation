@@ -324,16 +324,16 @@ class BrainWorker:
                 logger.info(diag_msg)
                 calculation_logs.append(diag_msg)
 
-        buy_box_share = round((winning_count / total_scanned * 100.0), 1) if total_scanned > 0 else 0.0
+        best_price_share = round((winning_count / total_scanned * 100.0), 1) if total_scanned > 0 else 0.0
 
         analytics = {
             "total_scanned": total_scanned,
             "winning_count": winning_count,
-            "buy_box_share": buy_box_share,
+            "best_price_share": best_price_share,
             "total_saved_margin": round(total_saved_margin, 2)
         }
 
-        logger.info(f"🧠 [Brain Worker] Решений: {len(update_queue)}, Buy Box Share: {buy_box_share}%, Сохраненная маржа: {round(total_saved_margin)} ₸")
+        logger.info(f"🧠 [Brain Worker] Решений: {len(update_queue)}, доля лучшей цены: {best_price_share}%, Сохраненная маржа: {round(total_saved_margin)} ₸")
 
         return {
             "update_queue": update_queue,

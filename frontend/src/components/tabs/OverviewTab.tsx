@@ -1,13 +1,14 @@
 import { apiFetch, API_URL } from '../../api';
-import { BuyBoxGauge } from '../BuyBoxGauge';
+import { PriceLeadGauge } from '../PriceLeadGauge';
 import { SavedMarginCard } from '../SavedMarginCard';
 import { LiveTerminalStream } from '../LiveTerminalStream';
 import { PriceRadarWidget } from '../PriceRadarWidget';
-import { AiChatSentimentWidget } from '../AiChatSentimentWidget';
+import { SalesStatsWidget } from '../SalesStatsWidget';
+import { useSalesStats } from '../../hooks/useSalesStats';
 
 interface OverviewTabProps {
   analytics: {
-    buy_box_share: number;
+    best_price_share: number;
     winning_count: number;
     total_scanned: number;
     total_saved_margin: number;
@@ -37,11 +38,13 @@ export function OverviewTab({
   onOpenPackaging,
   onOpenLogs,
 }: OverviewTabProps) {
+  const salesStats = useSalesStats();
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
-        <BuyBoxGauge
-          percentage={analytics.buy_box_share}
+        <PriceLeadGauge
+          percentage={analytics.best_price_share}
           winningCount={analytics.winning_count}
           totalScanned={analytics.total_scanned}
         />
@@ -54,18 +57,13 @@ export function OverviewTab({
         />
       </div>
 
+      {/* 💰 REAL SALES STATS (from sales_orders, backfilled by sales_sync_worker) */}
+      <SalesStatsWidget data={salesStats} />
+
       {/* ⚔️ LIVE PRICE RADAR (REAL-TIME PRICE WAR MONITOR) */}
       <PriceRadarWidget
         topProduct={widgetData?.price_radar?.top_product}
         events={widgetData?.price_radar?.recent_events}
-      />
-
-      {/* 🧠 AI CHAT SENTIMENT & STORE PULSE SHELL */}
-      <AiChatSentimentWidget
-        statusLabel={widgetData?.ai_sentiment_shell?.status_label}
-        categories={widgetData?.ai_sentiment_shell?.categories}
-        hourlyHeatmap={widgetData?.ai_sentiment_shell?.hourly_heatmap}
-        pulseStatus={widgetData?.ai_sentiment_shell?.store_pulse}
       />
 
       <div className="grid-2">

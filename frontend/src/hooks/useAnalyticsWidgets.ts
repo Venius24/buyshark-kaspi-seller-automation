@@ -4,17 +4,20 @@ import { apiFetch, API_URL } from '../api';
 import { useActiveStoreId } from '../storeContext';
 
 interface Analytics {
-  buy_box_share: number;
+  best_price_share: number;
   winning_count: number;
   total_scanned: number;
   total_saved_margin: number;
 }
 
+// Честный ноль до первого реального ответа бэкенда — раньше здесь были
+// выдуманные цифры (80%, 145000 ₸), которые показывались новым пользователям
+// как будто это уже реальная статистика их магазина.
 const INITIAL_ANALYTICS: Analytics = {
-  buy_box_share: 80.0,
-  winning_count: 8,
-  total_scanned: 10,
-  total_saved_margin: 145000,
+  best_price_share: 0,
+  winning_count: 0,
+  total_scanned: 0,
+  total_saved_margin: 0,
 };
 
 const fetchWidgets = async (): Promise<any> => {
@@ -41,7 +44,7 @@ export function useAnalyticsWidgets(wsEvent: { type: string; data?: any } | null
   const analytics: Analytics = useMemo(() => {
     if (widgetData?.analytics) {
       return {
-        buy_box_share: widgetData.analytics.buy_box_share ?? INITIAL_ANALYTICS.buy_box_share,
+        best_price_share: widgetData.analytics.best_price_share ?? INITIAL_ANALYTICS.best_price_share,
         winning_count: widgetData.analytics.winning_count ?? INITIAL_ANALYTICS.winning_count,
         total_scanned: widgetData.analytics.total_scanned ?? INITIAL_ANALYTICS.total_scanned,
         total_saved_margin: widgetData.analytics.total_saved_margin ?? INITIAL_ANALYTICS.total_saved_margin,

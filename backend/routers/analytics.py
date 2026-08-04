@@ -3,11 +3,10 @@ FastAPI router for Dashboard Analytics and Widget stats.
 """
 
 from fastapi import APIRouter, Depends
-from datetime import datetime, timedelta
-import random
+from datetime import datetime
 import time
 import logging
-from backend.state_helpers import _load_dumping_configs, _load_products, _load_analytics_snapshot, _load_dumper_logs
+from backend.state_helpers import _load_dumping_configs, _load_products, _load_analytics_snapshot, _load_dumper_logs, _load_sales_summary
 from backend.dumper.config import _decode_base64_if_needed
 from backend.dumper.radar import _fetch_offers_sync
 from backend.security.store_context import StoreContext, get_store_context
@@ -55,27 +54,18 @@ def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
     analytics_data = _load_analytics_snapshot(ctx.store_id)
 
 
-    # Calculate fallback counts if states/analytics.json does not exist
+    # Реальный снэпшот пишет BrainWorker на каждом цикле демпинга (dumper/__init__.py).
+    # Если снэпшота ещё нет (демпинг ни разу не запускался для этого стора) —
+    # показываем честный ноль, а не выдуманные цифры: пользователь без активных
+    # dumping-конфигов не может иметь ни "лидерства", ни "сохранённой маржи".
     total_scanned = analytics_data.get("total_scanned", 0)
     winning_count = analytics_data.get("winning_count", 0)
-    buy_box_share = analytics_data.get("buy_box_share", 0.0)
+    best_price_share = analytics_data.get("best_price_share", 0.0)
     total_saved_margin = analytics_data.get("total_saved_margin", 0.0)
-    
+
     if not total_scanned:
-        # Count items that have dumping configs enabled
         enabled_skus = [sku for sku, cfg in configs.items() if cfg.get("enabled")]
         total_scanned = len(enabled_skus)
-        # We fallback to mock/defaults if total_scanned is zero
-        if total_scanned == 0:
-            total_scanned = len(products) if products else 10
-            winning_count = int(total_scanned * 0.8)
-            buy_box_share = round((winning_count / total_scanned) * 100.0, 1)
-            total_saved_margin = 145000.0
-        else:
-            # Estimate winning count from overrides status
-            winning_count = total_scanned  # fallback assumptions
-            buy_box_share = 100.0
-            total_saved_margin = sum(configs[sku].get("max_price", 0.0) - configs[sku].get("min_price", 0.0) for sku in enabled_skus)
     
     # 3. Find first active product for live price radar
     active_product = None
@@ -92,15 +82,12 @@ def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
         active_product = products[0]
         active_cfg = {"city_code": "750000000"}
 
-    # Default fallback competitor list
-    competitors = [
-        {"name": "Мой Магазин (Вы)", "price": 14500, "rank": 1, "is_self": True},
-        {"name": "iSpace Online", "price": 14600, "rank": 2, "diff": 100, "is_self": False},
-        {"name": "Sulpak Digital", "price": 15000, "rank": 3, "diff": 500, "is_self": False},
-    ]
-    top_product_name = "Смартфон Apple iPhone 15 128GB Black"
-    our_price = 389990
-    our_rank = 1
+    # Пусто, пока не найден реальный активный товар/оффер ниже — фронтенд
+    # должен показать честное "нет данных", а не выдуманный товар/магазины.
+    competitors = []
+    top_product_name = None
+    our_price = 0
+    our_rank = None
 
     if active_product:
         top_product_name = active_product.get("name", "Товар")
@@ -154,36 +141,15 @@ def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
                         if is_self:
                             our_rank = idx
 
-    # 4. Load recent sniper events (per-store, Слайс 5)
+    # 4. Load recent sniper events (per-store, Слайс 5) — реальные записи из dumper_logs,
+    # без выдуманного fallback-события, если демпинг ещё не сработал ни разу.
     radar_events = _load_dumper_logs(ctx.store_id, limit=5)
-
-
-    # Default fallback events if list is empty
-    if not radar_events:
-        radar_events = [
-            {
-                "timestamp": (now - timedelta(seconds=12)).strftime("%H:%M:%S"),
-                "competitor": "Shop_Kaspi_Master",
-                "old_price": our_price + 20,
-                "new_price": our_price,
-                "our_reaction_price": our_price,
-                "status": "WINNING_BUYBOX",
-                "saved_margin": 1500,
-                "message": f"Бот удерживает позицию #{our_rank} для '{top_product_name[:30]}...' по цене {our_price} ₸"
-            }
-        ]
-
-    # 5. Generate 24-hour heatmap activity levels (0 to 100%)
-    hourly_heatmap = [
-        {"hour": f"{h:02d}:00", "activity": round(15 + 75 * ((h - 6) % 12 / 12) if 8 <= h <= 22 else 5 + random.randint(0, 10))}
-        for h in range(24)
-    ]
 
     return {
         "success": True,
         "timestamp": now.isoformat(),
         "analytics": {
-            "buy_box_share": buy_box_share,
+            "best_price_share": best_price_share,
             "winning_count": winning_count,
             "total_scanned": total_scanned,
             "total_saved_margin": total_saved_margin,
@@ -198,20 +164,16 @@ def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
             },
             "recent_events": radar_events
         },
-        "ai_sentiment_shell": {
-            "is_mock_shell": True,
-            "status_label": "🔮 Оболочка будущего модуля ИИ-Чатов & CRM (Интеграция подготовлена)",
-            "categories": [
-                {"name": "Логистика & Доставка", "percentage": 40, "color": "#10B981"},
-                {"name": "Возвраты & Гарантия (CRM)", "percentage": 30, "color": "#F43F5E"},
-                {"name": "Вопросы о товарах (DeepSeek AI)", "percentage": 30, "color": "#3B82F6"}
-            ],
-            "hourly_heatmap": hourly_heatmap,
-            "store_pulse": {
-                "ai_worker_status": "ONLINE",
-                "telegram_crm_status": "READY",
-                "response_avg_sec": 1.4,
-                "equalizer_bars": [65, 80, 45, 90, 75, 60, 85, 95, 70, 50]
-            }
-        }
     }
+
+
+@router.get("/sales")
+def get_sales_stats(days: int = 30, ctx: StoreContext = Depends(get_store_context)):
+    """
+    Настоящая статистика продаж/выручки, посчитанная из sales_orders —
+    реальной истории завершённых заказов Kaspi (backend/services/sales_sync_worker.py),
+    а не выдуманных чисел. Пусто, пока воркер не сделал первый проход для этого стора.
+    """
+    days = max(1, min(days, 365))
+    summary = _load_sales_summary(ctx.store_id, days=days)
+    return {"success": True, "days": days, **summary}

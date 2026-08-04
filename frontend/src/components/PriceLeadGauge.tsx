@@ -1,13 +1,13 @@
 import React from 'react';
 import { Trophy, TrendingUp } from 'lucide-react';
 
-interface BuyBoxGaugeProps {
+interface PriceLeadGaugeProps {
   percentage: number;
   winningCount: number;
   totalScanned: number;
 }
 
-export const BuyBoxGauge: React.FC<BuyBoxGaugeProps> = ({ percentage, winningCount, totalScanned }) => {
+export const PriceLeadGauge: React.FC<PriceLeadGaugeProps> = ({ percentage, winningCount, totalScanned }) => {
   const radius = 42;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (percentage / 100) * circumference;
@@ -26,7 +26,7 @@ export const BuyBoxGauge: React.FC<BuyBoxGaugeProps> = ({ percentage, winningCou
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>
           <Trophy size={16} color="#f59e0b" />
-          <span>BUY BOX SHARE (Лидерство)</span>
+          <span>ДОЛЯ ЛУЧШЕЙ ЦЕНЫ</span>
         </div>
         <span className="badge badge-success" style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
           <TrendingUp size={12} /> Live

@@ -4,7 +4,7 @@ import logging
 import threading
 from typing import Optional
 from fastapi import HTTPException
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -1033,5 +1033,116 @@ def _save_analytics_snapshot(data: dict, store_id: str):
         session.close()
 
 
+def _upsert_sales_orders(orders: list, store_id: str) -> int:
+    """Апсертит завершённые заказы (см. KaspiAPI.get_completed_orders) в
+    sales_orders. Возвращает число реально НОВЫХ заказов (для лога воркера).
+    Идемпотентно по (store_id, order_internal_id) — безопасно перезапускать
+    с пересекающимися окнами дат."""
+    if not orders:
+        return 0
+    session = _get_sync_db_session()
+    if not session:
+        return 0
+    inserted = 0
+    try:
+        from backend.db.models import SalesOrderDB
+        import datetime as _dt
+        for o in orders:
+            internal_id = o.get("internalId")
+            if not internal_id:
+                continue
+            existing = session.get(SalesOrderDB, (store_id, internal_id))
+            created_at = _dt.datetime.utcfromtimestamp((o.get("creationDateMs") or 0) / 1000.0)
+            if existing:
+                existing.total_price = o.get("totalPrice", 0)
+                existing.status = o.get("status", "")
+                existing.state = o.get("state", "")
+                existing.entries_payload = json.dumps(o.get("entries", []), ensure_ascii=False)
+            else:
+                session.add(SalesOrderDB(
+                    store_id=store_id,
+                    order_internal_id=internal_id,
+                    order_code=o.get("code", ""),
+                    created_at=created_at,
+                    total_price=o.get("totalPrice", 0),
+                    status=o.get("status", ""),
+                    state=o.get("state", ""),
+                    entries_payload=json.dumps(o.get("entries", []), ensure_ascii=False),
+                    ingested_at=_dt.datetime.utcnow(),
+                ))
+                inserted += 1
+        session.commit()
+        return inserted
+    except Exception as e:
+        logger.error(f"Error upserting sales orders to DB: {e}")
+        session.rollback()
+        return 0
+    finally:
+        session.close()
 
+
+def _get_latest_sales_order_date(store_id: str):
+    """Дата самого свежего заказа, уже сохранённого для этого стора —
+    воркер использует её, чтобы понять, откуда продолжать инкрементальный
+    доскан (вместо полного бэкафилла на каждом тике)."""
+    session = _get_sync_db_session()
+    if not session:
+        return None
+    try:
+        from backend.db.models import SalesOrderDB
+        return session.execute(
+            select(func.max(SalesOrderDB.created_at)).where(SalesOrderDB.store_id == store_id)
+        ).scalar()
+    finally:
+        session.close()
+
+
+def _load_sales_summary(store_id: str, days: int = 30) -> dict:
+    """Реальная агрегация выручки/продаж из sales_orders за последние N дней:
+    выручка и число заказов по дням, топ-SKU по выручке, средний чек."""
+    import datetime as _dt
+    session = _get_sync_db_session()
+    if not session:
+        return {"daily": [], "top_skus": [], "total_revenue": 0.0, "total_orders": 0, "avg_order_value": 0.0}
+    try:
+        from backend.db.models import SalesOrderDB
+        since = _dt.datetime.utcnow() - _dt.timedelta(days=days)
+        rows = session.scalars(
+            select(SalesOrderDB)
+            .where(SalesOrderDB.store_id == store_id, SalesOrderDB.created_at >= since)
+            .order_by(SalesOrderDB.created_at.asc())
+        ).all()
+
+        daily: dict = {}
+        sku_revenue: dict = {}
+        total_revenue = 0.0
+        for r in rows:
+            day_key = r.created_at.strftime("%Y-%m-%d")
+            bucket = daily.setdefault(day_key, {"date": day_key, "revenue": 0.0, "orders": 0})
+            bucket["revenue"] += r.total_price
+            bucket["orders"] += 1
+            total_revenue += r.total_price
+            try:
+                entries = json.loads(r.entries_payload)
+            except Exception:
+                entries = []
+            for e in entries:
+                sku = e.get("sku") or "?"
+                name = e.get("name") or sku
+                entry = sku_revenue.setdefault(sku, {"sku": sku, "name": name, "revenue": 0.0, "quantity": 0})
+                entry["revenue"] += e.get("totalPrice", 0) or 0
+                entry["quantity"] += e.get("quantity", 0) or 0
+
+        total_orders = len(rows)
+        top_skus = sorted(sku_revenue.values(), key=lambda x: x["revenue"], reverse=True)[:10]
+
+        return {
+            "daily": sorted(daily.values(), key=lambda x: x["date"]),
+            "top_skus": top_skus,
+            "total_revenue": round(total_revenue, 2),
+            "total_orders": total_orders,
+            "avg_order_value": round(total_revenue / total_orders, 2) if total_orders else 0.0,
+        }
+    finally:
+        session.close()
 

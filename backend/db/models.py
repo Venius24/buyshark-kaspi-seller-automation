@@ -223,6 +223,25 @@ class AnalyticsSnapshotDB(Base):
     updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
 
+class SalesOrderDB(Base):
+    """Реальная история завершённых заказов Kaspi (state=ARCHIVE, status=COMPLETED),
+    подтягивается фоновым воркером (backend/services/sales_sync_worker.py) —
+    Kaspi Order API отдаёт максимум 14 дней за один запрос, поэтому это
+    единственный способ иметь настоящую выручку/тренды за период дольше 2 недель.
+    """
+    __tablename__ = "sales_orders"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    order_internal_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    order_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    total_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="")
+    state: Mapped[str] = mapped_column(String(30), nullable=False, default="")
+    entries_payload: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON [{sku,name,qty,totalPrice}]
+    ingested_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class DraftProductDB(Base):
     """Черновик фичи «Автодобавление товара» (backend/autolist/). Один ряд —
     один товар от загрузки фото+названия до отправки на модерацию Kaspi.

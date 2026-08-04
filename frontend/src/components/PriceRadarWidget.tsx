@@ -30,17 +30,8 @@ export interface PriceRadarProps {
 }
 
 export const PriceRadarWidget: React.FC<PriceRadarProps> = ({ topProduct, events = [] }) => {
-  const defaultProduct = topProduct || {
-    name: "Смартфон Apple iPhone 15 128GB Black",
-    our_price: 389990,
-    our_rank: 1,
-    competitors: [
-      { name: "Мой Магазин (Вы)", price: 389990, rank: 1, is_self: true },
-      { name: "iSpace Online", price: 390000, rank: 2, diff: 10, is_self: false },
-      { name: "Sulpak Digital", price: 392500, rank: 3, diff: 2510, "is_self": false },
-      { name: "Technodom Kaspi", price: 395000, rank: 4, diff: 5010, "is_self": false },
-    ]
-  };
+  const hasProduct = !!topProduct && topProduct.competitors?.length > 0;
+  const savedMarginFromEvents = events.reduce((sum, evt) => sum + (evt.saved_margin || 0), 0);
 
   return (
     <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '20px', position: 'relative' }}>
@@ -65,18 +56,24 @@ export const PriceRadarWidget: React.FC<PriceRadarProps> = ({ topProduct, events
 
       {/* 🎯 Position Track Visual Scale */}
       <div style={{ background: 'rgba(0, 0, 0, 0.35)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: '14px', padding: '18px' }}>
+        {!hasProduct ? (
+          <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+            Нет активных товаров в демпинге — включите демпинг хотя бы для одного SKU, чтобы увидеть реальную позицию на рынке
+          </div>
+        ) : (
+        <>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
           <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>
-            Топ-Товар войн: <strong style={{ color: '#fff' }}>{defaultProduct.name}</strong>
+            Топ-Товар войн: <strong style={{ color: '#fff' }}>{topProduct!.name}</strong>
           </span>
           <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-            🏆 1-е место на Kaspi
+            🏆 {topProduct!.our_rank}-е место на Kaspi
           </span>
         </div>
 
         {/* Visual Track */}
         <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '8px' }}>
-          {defaultProduct.competitors.map((comp, idx) => (
+          {topProduct!.competitors.map((comp, idx) => (
             <div 
               key={idx}
               style={{
@@ -119,6 +116,8 @@ export const PriceRadarWidget: React.FC<PriceRadarProps> = ({ topProduct, events
             </div>
           ))}
         </div>
+        </>
+        )}
       </div>
 
       {/* 🎯 Sniper Feed (Terminal Style Log) */}
@@ -127,9 +126,11 @@ export const PriceRadarWidget: React.FC<PriceRadarProps> = ({ topProduct, events
           <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>
             🎯 Лог Снайпера (Авто-Перерасчет)
           </span>
-          <span style={{ fontSize: '11px', color: 'var(--secondary)', fontFamily: 'var(--font-mono)' }}>
-            Спасенная маржа: +184 500 ₸
-          </span>
+          {events.length > 0 && (
+            <span style={{ fontSize: '11px', color: 'var(--secondary)', fontFamily: 'var(--font-mono)' }}>
+              За последние события: +{savedMarginFromEvents.toLocaleString('ru-RU')} ₸
+            </span>
+          )}
         </div>
 
         <div className="console-box" style={{ height: '150px', background: 'rgba(5, 7, 13, 0.8)' }}>
@@ -145,20 +146,9 @@ export const PriceRadarWidget: React.FC<PriceRadarProps> = ({ topProduct, events
               </div>
             ))
           ) : (
-            <>
-              <div className="console-line" style={{ color: '#34d399' }}>
-                <span className="console-timestamp">[15:32:01]</span>
-                <span>🎯 Конкурент "Shop_Kaspi_Master" сбросил цену до 14 480 ₸</span>
-              </div>
-              <div className="console-line" style={{ color: '#00d2ff' }}>
-                <span className="console-timestamp">[15:32:02]</span>
-                <span>🧠 Воркер-Мозг пересчитал цену: 14 478 ₸ (Защищенная маржа: +1 478 ₸)</span>
-              </div>
-              <div className="console-line" style={{ color: '#34d399' }}>
-                <span className="console-timestamp">[15:32:04]</span>
-                <span>✅ Цена 14 478 ₸ успешно обновлена на Kaspi</span>
-              </div>
-            </>
+            <div className="console-line" style={{ color: 'var(--text-muted)' }}>
+              <span>Демпинг ещё не сработал ни разу — события появятся здесь после первого реального изменения цены</span>
+            </div>
           )}
         </div>
       </div>

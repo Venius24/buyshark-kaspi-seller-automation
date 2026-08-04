@@ -427,6 +427,85 @@ class KaspiAPI:
 
         return results
 
+    # ── 5.0. completed orders (real sales history) ───────────
+
+    @staticmethod
+    def get_completed_orders(token: str, ge_ms: int, le_ms: int) -> list:
+        """
+        Завершённые заказы (state=ARCHIVE, status=COMPLETED) в явном окне дат
+        (ge_ms/le_ms — unix ms), для настоящей статистики продаж/выручки.
+
+        Kaspi ограничивает `filter[orders][creationDate]` максимум 14 днями за
+        один запрос (см. _date_range) — вызывающий код (sales_sync_worker.py)
+        сам режет более широкий диапазон на 13-дневные окна и вызывает этот
+        метод по одному на каждое окно.
+        """
+        results = []
+
+        def fetch_page(page_number: int) -> requests.Response:
+            params = {
+                "page[number]": page_number,
+                "page[size]": 100,
+                "include[orders]": "entries",
+                "filter[orders][creationDate][$ge]": ge_ms,
+                "filter[orders][creationDate][$le]": le_ms,
+                "filter[orders][state]": "ARCHIVE",
+                "filter[orders][status]": "COMPLETED",
+            }
+            return KaspiAPI._get(f"{KaspiAPI.BASE_URL}/orders", token, params)
+
+        for _page_number, resp in KaspiAPI._fetch_pages_batched(fetch_page):
+            if resp.status_code != 200:
+                return results
+
+            res_json = resp.json()
+            orders_data = res_json.get("data", [])
+            included_data = res_json.get("included", [])
+            if not orders_data:
+                return results
+
+            included_entries = {
+                item.get("id"): item for item in included_data if item.get("type") == "orderentries"
+            }
+
+            for order in orders_data:
+                attr = order.get("attributes", {})
+                internal_id = order.get("id")
+                code = attr.get("code")
+                if not internal_id or not code:
+                    continue
+
+                entry_refs = order.get("relationships", {}).get("entries", {}).get("data", [])
+                entries_enriched = []
+                for ref in entry_refs:
+                    entry_data = included_entries.get(ref.get("id"))
+                    if not entry_data:
+                        continue
+                    e_attr = entry_data.get("attributes", {})
+                    offer = e_attr.get("offer", {})
+                    sku = str(offer.get("code", "")).strip()
+                    entries_enriched.append({
+                        "sku": sku,
+                        "name": offer.get("name") or offer.get("title") or "Товар",
+                        "quantity": e_attr.get("quantity", 1),
+                        "totalPrice": e_attr.get("totalPrice") or e_attr.get("entryTotalPrice", 0),
+                    })
+
+                results.append({
+                    "internalId": internal_id,
+                    "code": code,
+                    "creationDateMs": attr.get("creationDate", 0),
+                    "totalPrice": attr.get("totalPrice", 0),
+                    "status": attr.get("status", ""),
+                    "state": attr.get("state", ""),
+                    "entries": entries_enriched,
+                })
+
+            if len(orders_data) < 100:
+                return results
+
+        return results
+
     # ── 5.1. packaging orders by SKU prefix ─────────────────────
 
     @staticmethod
