@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, setUnauthorizedHandler, API_URL, getWsUrl } from './api';
+import { clearPersistedQueryCache } from './queryClient';
 import { useActiveStoreId } from './storeContext';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useLogs } from './hooks/useLogs';
@@ -40,6 +41,7 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
+    clearPersistedQueryCache();
     setIsAuthed(false);
   };
 
@@ -278,6 +280,7 @@ export default function App() {
   // Register global 401 handler
   useEffect(() => {
     setUnauthorizedHandler(() => {
+      clearPersistedQueryCache();
       setIsAuthed(false);
     });
   }, []);
@@ -304,10 +307,12 @@ export default function App() {
             loadDumpingStatus();
           } else {
             localStorage.removeItem('access_token');
+            clearPersistedQueryCache();
             setIsAuthed(false);
           }
         } else {
           localStorage.removeItem('access_token');
+          clearPersistedQueryCache();
           setIsAuthed(false);
         }
       } catch {

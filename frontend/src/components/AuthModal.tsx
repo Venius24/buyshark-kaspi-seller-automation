@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { API_URL } from '../api';
+import { clearPersistedQueryCache } from '../queryClient';
 
 interface AuthModalProps {
   onSuccess: () => void;
@@ -52,6 +53,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
         throw new Error('Некорректный ответ от сервера (не JSON)');
       }
       if (data.access_token) {
+        // Кэш react-query персистится в общий localStorage-ключ, не привязан
+        // к пользователю -- без сброса новый логин мог унаследовать чужой/
+        // устаревший снимок (напр. "магазинов нет" от прошлой сессии на
+        // этом устройстве) до фонового refetch.
+        clearPersistedQueryCache();
         localStorage.setItem('access_token', data.access_token);
         onSuccess();
       }

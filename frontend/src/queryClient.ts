@@ -20,7 +20,20 @@ export const queryClient = new QueryClient({
 // аккаунт список магазинов/групп/товаров рисуется мгновенно из последнего
 // известного состояния (stale), а не с пустого экрана в ожидании round-trip
 // к бэкенду — обновление приходит следом в фоне благодаря staleTime выше.
+const PERSISTED_CACHE_KEY = 'buyshark-query-cache';
+
 export const queryPersister = createSyncStoragePersister({
   storage: window.localStorage,
-  key: 'buyshark-query-cache',
+  key: PERSISTED_CACHE_KEY,
 });
+
+// Кэш не привязан к пользователю (ключ в localStorage один на всех). При
+// смене аккаунта на одном устройстве (логаут/логин другим email, или
+// логаут по протухшему токену -> повторный вход) react-query иначе рисует
+// экран из чужого/устаревшего снимка (напр. пустой список магазинов
+// прошлого аккаунта), пока фоновый refetch его не перезапишет — на глаз
+// выглядит как "магазин не подключён". Звать при каждой смене сессии.
+export function clearPersistedQueryCache() {
+  queryClient.clear();
+  window.localStorage.removeItem(PERSISTED_CACHE_KEY);
+}
