@@ -49,29 +49,44 @@ function buildHeaders(init: RequestInit, token: string | null): Headers {
 // (mc-status, stores, products...) начинает 401'ить молча, выглядит как
 // "магазин отключился". Бэкенд `/api/v1/auth/refresh` уже читает httpOnly
 // refresh_token-куку и живой уже 30 дней (REFRESH_TOKEN_EXPIRE_DAYS) — просто
-// никогда не вызывался с фронта. Дедуп через inFlightRefresh, чтобы 5-10
-// параллельных запросов, словивших 401 одновременно, не долбили /refresh каждый.
+// никогда не вызывался с фронта.
+//
+// Дедуп через inFlightRefresh покрывает только запросы, 401'нувшие в один
+// синхронный тик. На практике (проверено вживую на app.buyshark.kz) при
+// загрузке страницы с пустым токеном ~15 react-query хуков стартуют fetch
+// одновременно, но их 401-ответы приходят не одномоментно — каждый находит
+// inFlightRefresh уже сброшенным в null и бьёт /refresh заново (15 лишних
+// запросов на один заход). REFRESH_COOLDOWN_MS держит только что полученный
+// токен ещё немного "свежим": 401, пришедший вскоре после чужого успешного
+// refresh, просто перечитывает localStorage вместо нового похода в БД.
 let inFlightRefresh: Promise<string | null> | null = null;
+let lastRefreshResolvedAt = 0;
+const REFRESH_COOLDOWN_MS = 3000;
 
 async function refreshAccessToken(): Promise<string | null> {
-  if (!inFlightRefresh) {
-    inFlightRefresh = (async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/v1/auth/refresh`, { method: 'POST' });
-        if (!res.ok) return null;
-        const data = await res.json();
-        if (data.access_token) {
-          localStorage.setItem('access_token', data.access_token);
-          return data.access_token as string;
-        }
-        return null;
-      } catch {
-        return null;
-      } finally {
-        inFlightRefresh = null;
-      }
-    })();
+  if (inFlightRefresh) return inFlightRefresh;
+
+  if (Date.now() - lastRefreshResolvedAt < REFRESH_COOLDOWN_MS) {
+    return localStorage.getItem('access_token');
   }
+
+  inFlightRefresh = (async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/auth/refresh`, { method: 'POST' });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data.access_token) {
+        localStorage.setItem('access_token', data.access_token);
+        return data.access_token as string;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      inFlightRefresh = null;
+      lastRefreshResolvedAt = Date.now();
+    }
+  })();
   return inFlightRefresh;
 }
 
