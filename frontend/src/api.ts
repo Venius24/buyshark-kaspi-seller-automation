@@ -110,11 +110,19 @@ export async function apiFetch(input: string | URL, init: RequestInit = {}): Pro
   if (response.status === 401 && !isAuthBootstrapEndpoint) {
     const newToken = await refreshAccessToken();
     if (newToken) {
-      response = await fetch(input, { ...init, headers: buildHeaders(init, newToken) });
+      // Токен обновился успешно -- значит сессия живая. Если конкретный
+      // эндпоинт всё равно 401'ит и со свежим токеном (напр.
+      // get_store_context в backend/security/store_context.py отдаёт 401
+      // "Требуется вход в аккаунт с подключённым магазином" просто когда
+      // магазин ещё не выбран/не подключён -- это НЕ протухший токен), это
+      // 401 не про авторизацию, и разлогинивать пользователя из-за него
+      // нельзя. Регрессия из 3.24: раньше любой такой бизнес-401 молча
+      // проглатывался, теперь же после ретрая он бы разлогинивал ПОСЛЕ
+      // КАЖДОГО действия. Возвращаем ответ как есть, не трогая сессию.
+      return await fetch(input, { ...init, headers: buildHeaders(init, newToken) });
     }
-  }
-
-  if (response.status === 401) {
+    // Сам /auth/refresh не смог обновить токен (refresh_token тоже мёртв
+    // или отсутствует) -- вот это уже реально означает разлогин.
     localStorage.removeItem('access_token');
     if (unauthorizedHandler) {
       unauthorizedHandler();
