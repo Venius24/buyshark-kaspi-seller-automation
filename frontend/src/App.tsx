@@ -213,6 +213,12 @@ export default function App() {
         addLog(`Настройки демпинга для ${sku} успешно сохранены.`);
         loadDumpingConfigs();
         loadProducts(currentPage, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, dumpingStatusFilter);
+        // Закрываем панель редактирования
+        setExpandedSkus(prev => {
+          const next = new Set(prev);
+          next.delete(sku);
+          return next;
+        });
       } else {
         addLog(`Ошибка сохранения настроек: ${data.detail || 'Неизвестная ошибка'}`);
       }

@@ -256,6 +256,17 @@ export function DumpingTab({
                         <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: '#ccc', border: '1px solid rgba(255,255,255,0.08)' }}>
                           Режим: {cfg.mode || 'TOP_1'}
                         </span>
+
+                        {product.url && (
+                          <a
+                            href={product.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ fontSize: '12px', color: '#3b82f6', textDecoration: 'none' }}
+                          >
+                            🔗 Карточка товара
+                          </a>
+                        )}
                       </div>
                     </div>
 
