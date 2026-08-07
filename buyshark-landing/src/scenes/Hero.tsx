@@ -1,62 +1,78 @@
-import { useRef } from 'react';
-import { ScrollScrubVideo } from '../components/ScrollScrubVideo';
+import { useRef, useState } from 'react';
 import styles from './Hero.module.css';
 
-const LOOP_IN_AT = 0.985; // scrub progress past which the frozen last frame hands off to the ambient loop
+function scrollToPricing() {
+  document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' });
+}
 
-/** Scene 1 — BuyShark hyperdrive race, scrubbed by scroll. */
 export function Hero() {
-  const titleRef = useRef<HTMLDivElement>(null);
-  const hintRef = useRef<HTMLParagraphElement>(null);
   const loopRef = useRef<HTMLVideoElement>(null);
+  const [loopActive, setLoopActive] = useState(false);
 
-  const handleProgress = (progress: number) => {
-    const title = titleRef.current;
-    if (title) {
-      const t = Math.min(1, Math.max(0, (progress - 0.72) / 0.28));
-      title.style.opacity = String(t);
-      title.style.transform = `translateY(${(1 - t) * 24}px)`;
-    }
-    const hint = hintRef.current;
-    if (hint) {
-      hint.style.opacity = String(Math.max(0, 1 - progress / 0.08));
-    }
-    const loop = loopRef.current;
-    if (loop) {
-      loop.style.opacity = progress >= LOOP_IN_AT ? '1' : '0';
-    }
+  const handleIntroEnded = () => {
+    loopRef.current?.play();
+    setLoopActive(true);
   };
 
   return (
-    <ScrollScrubVideo
-      src="/media/hero.mp4"
-      poster="/media/hero-poster.jpg"
-      scrollMultiplier={2.5}
-      onProgress={handleProgress}
-    >
+    <section className={styles.section}>
       <video
-        ref={loopRef}
-        className={styles.loopVideo}
-        src="/media/hero-loop.mp4"
+        className={styles.video}
+        style={{ opacity: loopActive ? 0 : 1 }}
+        src="/media/hero.mp4"
+        poster="/media/hero-poster.jpg"
         autoPlay
-        loop
         muted
         playsInline
-        style={{ opacity: 0 }}
+        onEnded={handleIntroEnded}
       />
-      <div className={styles.vignette} />
+      <video
+        ref={loopRef}
+        className={styles.video}
+        style={{ opacity: loopActive ? 1 : 0 }}
+        src="/media/hero-loop.mp4"
+        muted
+        loop
+        playsInline
+      />
+      <div className={styles.scrim} />
       <div className={styles.copy}>
-        <div ref={titleRef} className={styles.titleBlock} style={{ opacity: 0 }}>
-          <h1 className={styles.title}>
-            BuyShark: Управляй ценами.
-            <br />
-            Доминируй в выдаче.
-          </h1>
+        <span className={styles.badge}>
+          <span className={styles.dot} />
+          №1 автопилот для продавцов Kaspi.kz
+        </span>
+        <h1 className={styles.title}>
+          Вы продаёте.
+          <br />
+          Акула держит цену.
+        </h1>
+        <p className={styles.subtitle}>
+          Авто-демпинг с защитой маржи, ИИ чат-бот, синхронизация остатков и упаковка заказов — 24/7, без вашего
+          участия. Снимаем с вас до 80% рутины на Kaspi.kz.
+        </p>
+        <div className={styles.actions}>
+          <a className={styles.btnPrimary} href="https://app.buyshark.kz/">
+            Начать бесплатно на 3 дня
+          </a>
+          <button className={styles.btnSecondary} onClick={scrollToPricing}>
+            Смотреть тарифы ↓
+          </button>
+        </div>
+        <div className={styles.stats}>
+          <div>
+            <div className={styles.statValue}>-80%</div>
+            <div className={styles.statLabel}>ручной работы</div>
+          </div>
+          <div>
+            <div className={styles.statValue}>24/7</div>
+            <div className={styles.statLabel}>автопилот цен</div>
+          </div>
+          <div>
+            <div className={styles.statValue}>10 000+</div>
+            <div className={styles.statLabel}>проверок цен/сек</div>
+          </div>
         </div>
       </div>
-      <p ref={hintRef} className={styles.hint}>
-        скролль вниз ↓
-      </p>
-    </ScrollScrubVideo>
+    </section>
   );
 }

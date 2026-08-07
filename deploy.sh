@@ -22,6 +22,9 @@ WEB_ROOT="/var/www/kaspi-saas"
 LANDING_DIR="$APP_DIR/buyshark-landing"
 LANDING_RELEASES_DIR="/var/www/buyshark-landing-releases"
 LANDING_WEB_ROOT="/var/www/buyshark-landing"
+LANDING_TECH_DIR="$APP_DIR/buyshark-landing-tech"
+LANDING_TECH_RELEASES_DIR="/var/www/buyshark-landing-tech-releases"
+LANDING_TECH_WEB_ROOT="/var/www/buyshark-landing-tech"
 HEALTH_URL="http://127.0.0.1:5000/"
 LAST_GOOD_FILE="$APP_DIR/.last_good_sha"
 HEALTH_RETRIES=45  # старт uvicorn (Playwright init и т.д.) занимает до ~30s
@@ -194,6 +197,47 @@ if [ -n "$NEW_LANDING_DIST_SRC" ]; then
   echo "✅ Symlink $LANDING_WEB_ROOT → $NEW_LANDING_RELEASE."
 else
   echo "⚠️  Пропускаем публикацию лендинга — нет ни $LANDING_DIR, ни PREBUILT_LANDING_DIST_DIR."
+fi
+
+# ── 4.6. Сборка + атомная публикация старого лендинга (buyshark-landing-tech,
+# tech.buyshark.kz) — та же логика, что и 4.5, независимая публикация.
+if [ -n "$PREBUILT_LANDING_TECH_DIST_DIR" ] && [ -d "$PREBUILT_LANDING_TECH_DIST_DIR" ]; then
+  echo "🦈 Шаг 4.6: Используем уже собранный лендинг-tech из $PREBUILT_LANDING_TECH_DIST_DIR"
+  NEW_LANDING_TECH_DIST_SRC="$PREBUILT_LANDING_TECH_DIST_DIR"
+elif [ -d "$LANDING_TECH_DIR" ]; then
+  echo "🦈 Шаг 4.6: Сборка лендинга buyshark-landing-tech (bun)..."
+  cd "$LANDING_TECH_DIR"
+  bun install --frozen-lockfile
+  bun run build
+  cd "$APP_DIR"
+  NEW_LANDING_TECH_DIST_SRC="$LANDING_TECH_DIR/dist"
+  echo "✅ Лендинг-tech собран в buyshark-landing-tech/dist/"
+else
+  NEW_LANDING_TECH_DIST_SRC=""
+fi
+
+if [ -n "$NEW_LANDING_TECH_DIST_SRC" ]; then
+  mkdir -p "$LANDING_TECH_RELEASES_DIR"
+  NEW_LANDING_TECH_RELEASE="$LANDING_TECH_RELEASES_DIR/$NEW_SHA"
+  rm -rf "$NEW_LANDING_TECH_RELEASE"
+  cp -r "$NEW_LANDING_TECH_DIST_SRC" "$NEW_LANDING_TECH_RELEASE"
+
+  # Тот же трюк с media/, что и для buyshark-landing — своя постоянная
+  # директория на VPS, не пересекается с /root/buyshark-landing-media.
+  LANDING_TECH_MEDIA_PERSIST_DIR="/root/buyshark-landing-tech-media"
+  if [ -d "$LANDING_TECH_MEDIA_PERSIST_DIR" ]; then
+    mkdir -p "$NEW_LANDING_TECH_RELEASE/media"
+    cp -r "$LANDING_TECH_MEDIA_PERSIST_DIR"/. "$NEW_LANDING_TECH_RELEASE/media/"
+    echo "✅ media/ донакоплен из $LANDING_TECH_MEDIA_PERSIST_DIR."
+  else
+    echo "⚠️  $LANDING_TECH_MEDIA_PERSIST_DIR не найден — лендинг-tech будет опубликован БЕЗ видео/media (404 на все сцены)."
+  fi
+
+  ln -sfn "$NEW_LANDING_TECH_RELEASE" "$LANDING_TECH_WEB_ROOT"
+  ls -1dt "$LANDING_TECH_RELEASES_DIR"/*/ 2>/dev/null | tail -n +6 | xargs -r rm -rf
+  echo "✅ Symlink $LANDING_TECH_WEB_ROOT → $NEW_LANDING_TECH_RELEASE."
+else
+  echo "⚠️  Пропускаем публикацию лендинга-tech — нет ни $LANDING_TECH_DIR, ни PREBUILT_LANDING_TECH_DIST_DIR."
 fi
 
 # ── 5. Перезапуск бекенда через systemd ──────────────────────────

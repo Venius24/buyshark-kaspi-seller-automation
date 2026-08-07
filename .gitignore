@@ -29,6 +29,11 @@ states/*.json
 buyshark-landing/node_modules/
 buyshark-landing/dist/
 buyshark-landing/public/media/
+
+# ── BuyShark landing — tech.buyshark.kz (old cinematic version) ──
+buyshark-landing-tech/node_modules/
+buyshark-landing-tech/dist/
+buyshark-landing-tech/public/media/
 HIGGSFIELD/
 
 # ── Scratch & legacy ──

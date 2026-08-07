@@ -1,0 +1,82 @@
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px clamp(1.25rem, 4vw, 3.5rem);
+  background: linear-gradient(180deg, rgba(3, 7, 18, 0.92), rgba(3, 7, 18, 0.55) 70%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 19px;
+  color: var(--white);
+  letter-spacing: -0.01em;
+}
+
+.links {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  font-size: 14px;
+  color: var(--fog);
+}
+
+.links a:hover {
+  color: var(--white);
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+}
+
+.btn {
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 18px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btnGhost {
+  composes: btn;
+  background: transparent;
+  color: var(--white);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.btnPrimary {
+  composes: btn;
+  background: var(--target-red);
+  color: var(--white);
+  border: 1px solid transparent;
+}
+
+@media (max-width: 860px) {
+  .links {
+    display: none;
+  }
+}

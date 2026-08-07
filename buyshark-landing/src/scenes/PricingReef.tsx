@@ -88,10 +88,10 @@ const TIERS: Tier[] = [
 ];
 
 function scrollToCta() {
-  document.getElementById('cta')?.scrollIntoView({ behavior: 'smooth' });
+  document.getElementById('final-cta')?.scrollIntoView({ behavior: 'smooth' });
 }
 
-/** Scene 5 — the pricing reef: 5 tiers laid out left-to-right, escalating in glow/saturation as price climbs. */
+/** Pricing section — 5 tiers laid out left-to-right, escalating in glow/saturation as price climbs. */
 export function PricingReef() {
   const sectionRef = useRef<HTMLElement>(null);
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -123,7 +123,7 @@ export function PricingReef() {
   }, []);
 
   return (
-    <section ref={sectionRef} className={styles.section}>
+    <section id="pricing" ref={sectionRef} className={styles.section}>
       <video className={styles.bgVideo} src="/media/scene5-bg.mp4" autoPlay loop muted playsInline />
       <div className={styles.scrim} />
       <div className={styles.absurdityGradient} />

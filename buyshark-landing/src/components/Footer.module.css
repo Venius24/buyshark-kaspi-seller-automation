@@ -1,0 +1,38 @@
+.footer {
+  padding: 36px clamp(1.25rem, 4vw, 3.5rem);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: var(--abyss-soft);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.copy {
+  color: var(--fog);
+  font-size: 13px;
+}
+
+.links {
+  display: flex;
+  gap: 24px;
+  font-size: 13px;
+  color: var(--fog);
+}
+
+.links a:hover {
+  color: var(--white);
+}
