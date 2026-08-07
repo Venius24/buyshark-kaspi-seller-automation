@@ -137,6 +137,66 @@ class TestTelegramLinkRouter(unittest.TestCase):
         resp = self.client.delete("/api/v1/telegram/members/42")
         self.assertEqual(resp.status_code, 403)
 
+    def test_notification_prefs_unlinked_returns_linked_false(self):
+        self._as("user-1")
+        resp = self.client.get("/api/v1/telegram/notification-prefs")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        data = resp.json()
+        self.assertFalse(data["linked"])
+        self.assertEqual(data["store_id"], "store-1")
+
+    def test_notification_prefs_get_returns_defaults_once_linked(self):
+        self._as("user-1")
+        from backend.chatbot import telegram_identity as ti
+        token = ti.generate_link_token(store_id="store-1", created_by="user-1", self_user_id="user-1")
+        ti.consume_link_token(token, tg_user_id=777, tg_username="owner", tg_first_name="Owner")
+
+        resp = self.client.get("/api/v1/telegram/notification-prefs")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        data = resp.json()
+        self.assertTrue(data["linked"])
+        self.assertTrue(data["chats"])
+        self.assertTrue(data["problems"])
+        self.assertFalse(data["money"])
+        self.assertIsNone(data["new_order_min_sum"])
+
+    def test_notification_prefs_put_updates_only_provided_fields(self):
+        self._as("user-1")
+        from backend.chatbot import telegram_identity as ti
+        token = ti.generate_link_token(store_id="store-1", created_by="user-1", self_user_id="user-1")
+        ti.consume_link_token(token, tg_user_id=778, tg_username="owner", tg_first_name="Owner")
+
+        resp = self.client.put("/api/v1/telegram/notification-prefs", json={"money": True, "new_order_min_sum": 5000})
+        self.assertEqual(resp.status_code, 200, resp.text)
+        data = resp.json()
+        self.assertTrue(data["money"])
+        self.assertEqual(data["new_order_min_sum"], 5000)
+        self.assertTrue(data["chats"])  # не тронуто
+
+        from backend.chatbot import notification_prefs
+        prefs = notification_prefs.get_prefs(778, "store-1")
+        self.assertTrue(prefs["money"])
+        self.assertEqual(prefs["new_order_min_sum"], 5000)
+
+    def test_notification_prefs_put_can_clear_quiet_hours(self):
+        self._as("user-1")
+        from backend.chatbot import telegram_identity as ti
+        from backend.chatbot import notification_prefs
+        token = ti.generate_link_token(store_id="store-1", created_by="user-1", self_user_id="user-1")
+        ti.consume_link_token(token, tg_user_id=779, tg_username="owner", tg_first_name="Owner")
+        notification_prefs.set_quiet_hours(779, "store-1", "23:00", "08:00")
+
+        resp = self.client.put("/api/v1/telegram/notification-prefs", json={"quiet_from": None, "quiet_to": None})
+        self.assertEqual(resp.status_code, 200, resp.text)
+        data = resp.json()
+        self.assertIsNone(data["quiet_from"])
+        self.assertIsNone(data["quiet_to"])
+
+    def test_notification_prefs_put_rejects_unlinked(self):
+        self._as("user-1")
+        resp = self.client.put("/api/v1/telegram/notification-prefs", json={"money": True})
+        self.assertEqual(resp.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

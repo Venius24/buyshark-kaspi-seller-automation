@@ -7,7 +7,7 @@ from backend.chatbot import config, bot_instance
 from backend.chatbot.kaspi import load_chat_cookies, format_time, check_logistics_question, get_chat_history, http_session
 from backend.chatbot.ai import generate_ai_reply
 from backend.chatbot.notifications import notify_startup, notify_cookie_expired, notify_manager_and_block, reset_cookie_alert
-from backend.chatbot.handlers import register_handlers
+from backend.chatbot.handlers import register_handlers, register_bot_commands
 from backend.dumper.config import discover_merchant_id
 from backend.security.store_context import list_active_stores
 
@@ -28,6 +28,7 @@ async def start_telegram_bot_polling():
     bot, dp = bot_instance.init_bot()
     if bot and dp:
         register_handlers()
+        await register_bot_commands()
         await notify_startup()
         logger.info("🤖 [Telegram Bot] Polling запущен...")
         try:

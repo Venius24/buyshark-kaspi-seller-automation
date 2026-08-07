@@ -12,11 +12,24 @@ config.load_admin_ids()/notify_cookie_expired — они продолжают с
 import asyncio
 import datetime
 import logging
+from pathlib import Path
 from typing import Optional, List
 
 from backend.chatbot import bot_instance, notification_prefs
 
 logger = logging.getLogger(__name__)
+
+_CARDS_DIR = Path(__file__).parent / "assets" / "notification_cards"
+CARD_FILES = {
+    "welcome": _CARDS_DIR / "welcome.png",
+    "new_order": _CARDS_DIR / "new_order.png",
+    "dumping": _CARDS_DIR / "dumping.png",
+    "money_digest": _CARDS_DIR / "money_digest.png",
+    "chat_alert": _CARDS_DIR / "chat_alert.png",
+    "cookie_expired": _CARDS_DIR / "cookie_expired.png",
+    "assembly_failed": _CARDS_DIR / "assembly_failed.png",
+    "startup": _CARDS_DIR / "startup.png",
+}
 
 _dedup_sent: dict = {}  # (store_id, dedup_key) -> datetime отправки
 _DEDUP_WINDOW = datetime.timedelta(minutes=10)
@@ -66,9 +79,26 @@ def _in_quiet_hours(quiet_from: Optional[str], quiet_to: Optional[str], now: dat
     return now >= start or now < end  # окно через полночь, напр. 23:00–08:00
 
 
-async def _send(tg_user_id: int, text: str, reply_markup=None):
+async def send_card(tg_user_id: int, card: str):
+    """Шлёт Higgsfield-карточку картинкой без подписи (подпись не шлём, чтобы
+    не упереться в лимит caption у Telegram и не дублировать текст алерта) —
+    best-effort, отдельно от текстового уведомления: сбой картинки не должен
+    заблокировать сам алерт."""
+    path = CARD_FILES.get(card)
+    if not path or not bot_instance.bot or not bot_instance.HAS_AIOGRAM or not path.exists():
+        return
+    try:
+        from aiogram.types import FSInputFile
+        await bot_instance.bot.send_photo(chat_id=tg_user_id, photo=FSInputFile(str(path)))
+    except Exception as e:
+        logger.error(f"[NotifyDispatch] Не удалось отправить карточку {card} {tg_user_id}: {e}")
+
+
+async def _send(tg_user_id: int, text: str, reply_markup=None, card: Optional[str] = None):
     if not bot_instance.bot:
         return
+    if card:
+        await send_card(tg_user_id, card)
     try:
         await bot_instance.bot.send_message(
             chat_id=tg_user_id, text=text, parse_mode="Markdown",
@@ -81,12 +111,15 @@ async def _send(tg_user_id: int, text: str, reply_markup=None):
 async def dispatch(
     store_id: str, group: str, text: str, *,
     urgent: bool = False, reply_markup=None, dedup_key: Optional[str] = None,
-    amount: Optional[float] = None,
+    amount: Optional[float] = None, card: Optional[str] = None,
 ):
     """group: 'chats' | 'problems' | 'money'. urgent=True — игнорирует тихие
     часы и батчинг (Express-заказы, «сессия протухла» — по плану §6 всегда
     приходят сразу). amount — сумма заказа для сравнения с персональным
-    порогом new_order_min_sum (только для не-urgent money-уведомлений)."""
+    порогом new_order_min_sum (только для не-urgent money-уведомлений).
+    card — ключ из CARD_FILES: отправляется картинкой перед текстом (не
+    применяется к money-буферу — там дайджест из нескольких строк одним
+    сообщением, картинка шлётся один раз при флаше, см. _flush_money_buffers)."""
     now = datetime.datetime.now()
     if dedup_key:
         key = (store_id, dedup_key)
@@ -117,7 +150,7 @@ async def dispatch(
             _quiet_queue.setdefault((store_id, tg_user_id), []).append(text)
             continue
 
-        await _send(tg_user_id, text, reply_markup)
+        await _send(tg_user_id, text, reply_markup, card=card)
 
 
 async def _flush_money_buffers():
@@ -131,9 +164,11 @@ async def _flush_money_buffers():
         lines = buf["lines"]
         if len(lines) == 1:
             text = lines[0]
+            card = "new_order"
         else:
             text = f"💰 **{len(lines)} событий за последнюю минуту:**\n" + "\n".join(f"• {l}" for l in lines)
-        await _send(tg_user_id, text)
+            card = "money_digest"
+        await _send(tg_user_id, text, card=card)
 
 
 async def _flush_quiet_queues():
@@ -188,7 +223,7 @@ async def _flush_evening_summaries():
             f"Заказов: {orders}\n"
             f"Выручка: {revenue:,.0f} ₸".replace(",", " ")
         )
-        await dispatch(store_id, "money", text, urgent=True)
+        await dispatch(store_id, "money", text, urgent=True, card="money_digest")
 
 
 async def flush_loop():

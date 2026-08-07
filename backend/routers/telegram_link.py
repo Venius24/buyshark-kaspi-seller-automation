@@ -12,6 +12,7 @@ from backend.routers.auth_v1 import get_current_user
 from backend.security.store_context import _resolve_store_for_user
 from backend.chatbot import telegram_identity as ti
 from backend.chatbot import bot_instance
+from backend.chatbot import notification_prefs
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/telegram", tags=["Telegram Link"])
@@ -44,6 +45,15 @@ async def _resolve_store_id(request: Request, db: AsyncSession, user_id: str) ->
 class InviteTokenRequest(BaseModel):
     role: str  # 'MANAGER' | 'VIEWER'
     max_uses: int = 1
+
+
+class NotificationPrefsUpdate(BaseModel):
+    chats: Optional[bool] = None
+    problems: Optional[bool] = None
+    money: Optional[bool] = None
+    new_order_min_sum: Optional[int] = None
+    quiet_from: Optional[str] = None
+    quiet_to: Optional[str] = None
 
 
 class TokenResponse(BaseModel):
@@ -128,3 +138,35 @@ async def remove_member(
     if not ok:
         raise HTTPException(status_code=403, detail="Нет прав отвязать этого сотрудника, либо он не найден.")
     return {"success": True}
+
+
+@router.get("/notification-prefs")
+async def get_notification_prefs(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Настройки уведомлений — то же самое, что бот показывает в /notif,
+    зеркально доступно из кабинета (единая таблица TelegramNotificationPrefDB)."""
+    store_id = await _resolve_store_id(request, db, user.id)
+    tg_user_id = await asyncio.to_thread(ti.get_tg_user_id_for_user, user.id)
+    if not tg_user_id:
+        return {"linked": False, "store_id": store_id}
+    prefs = await asyncio.to_thread(notification_prefs.get_prefs, tg_user_id, store_id)
+    return {"linked": True, "store_id": store_id, **prefs}
+
+
+@router.put("/notification-prefs")
+async def update_notification_prefs(
+    req: NotificationPrefsUpdate,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    store_id = await _resolve_store_id(request, db, user.id)
+    tg_user_id = await asyncio.to_thread(ti.get_tg_user_id_for_user, user.id)
+    if not tg_user_id:
+        raise HTTPException(status_code=400, detail="Сначала привяжите свой Telegram к этому магазину.")
+    updates = req.model_dump(exclude_unset=True)
+    prefs = await asyncio.to_thread(notification_prefs.update_prefs, tg_user_id, store_id, updates)
+    return {"success": True, "store_id": store_id, **prefs}

@@ -67,11 +67,12 @@ async def notify_cookie_expired(reason: str, store_id: Optional[str] = None):
     )
 
     if store_id is not None:
-        await notify_dispatch.dispatch(store_id, "problems", alert_text, urgent=True)
+        await notify_dispatch.dispatch(store_id, "problems", alert_text, urgent=True, card="cookie_expired")
 
     legacy_ids = await _unlinked_legacy_admin_ids(store_id)
     logger.warning(f"🚨 [COOKIE ALERT] {reason}. Отправка уведомления (легаси-фоллбек) на Telegram IDs: {legacy_ids}")
     for admin_id in legacy_ids:
+        await notify_dispatch.send_card(admin_id, "cookie_expired")
         try:
             await bot_instance.bot.send_message(
                 chat_id=admin_id,
@@ -101,6 +102,7 @@ async def notify_startup():
 
     logger.info(f"🚀 Отправка уведомления о запуске бота на Telegram IDs: {admin_ids}")
     for admin_id in admin_ids:
+        await notify_dispatch.send_card(admin_id, "startup")
         try:
             await bot_instance.bot.send_message(
                 chat_id=admin_id,
@@ -182,10 +184,11 @@ async def notify_manager_and_block(
             ])
 
             if store_id is not None:
-                await notify_dispatch.dispatch(store_id, "chats", alert_text, urgent=True, reply_markup=keyboard)
+                await notify_dispatch.dispatch(store_id, "chats", alert_text, urgent=True, reply_markup=keyboard, card="chat_alert")
 
             legacy_ids = await _unlinked_legacy_admin_ids(store_id)
             for admin_id in legacy_ids:
+                await notify_dispatch.send_card(admin_id, "chat_alert")
                 try:
                     await bot_instance.bot.send_message(
                         chat_id=admin_id,

@@ -137,6 +137,30 @@ def _recent_auto_assembly_failures(store_id: str, limit: int = 3) -> List[str]:
         session.close()
 
 
+async def register_bot_commands():
+    """Публикует список команд в нативное Telegram-меню (кнопка "/" рядом с
+    полем ввода) — без этого /reset, /stats, /unlink, /switch были видны
+    только тем, кто уже знал их названия из текста /start."""
+    bot = bot_instance.bot
+    if not bot or not bot_instance.HAS_AIOGRAM:
+        return
+    from aiogram.types import BotCommand
+    commands = [
+        BotCommand(command="start", description="🏠 Главное меню"),
+        BotCommand(command="status", description="📊 Статус автоответчика и куков"),
+        BotCommand(command="settings", description="⚙️ Настройки печати и уведомлений"),
+        BotCommand(command="notif", description="🔔 Настройки уведомлений (быстрый доступ)"),
+        BotCommand(command="switch", description="🏪 Сменить активный магазин"),
+        BotCommand(command="stats", description="📈 Статистика напечатанного за сегодня"),
+        BotCommand(command="reset", description="♻️ Сбросить историю печати за сегодня"),
+        BotCommand(command="unlink", description="🔓 Отвязать этот Telegram от кабинета"),
+    ]
+    try:
+        await bot.set_my_commands(commands)
+    except Exception as e:
+        logger.error(f"❌ Не удалось зарегистрировать команды бота: {e}")
+
+
 def register_handlers():
     """Регистрирует хэндлеры команд, документов, инлайн-кнопок и настроек для Telegram бота."""
     dp = bot_instance.dp
@@ -449,6 +473,8 @@ def register_handlers():
                 return
             role_title = {"OWNER": "владелец", "MANAGER": "менеджер", "VIEWER": "наблюдатель"}.get(result["role"], result["role"])
             greeting = "🎉 Добро пожаловать! " if result["is_new_employee"] else "✅ "
+            if result["is_new_employee"]:
+                await notify_dispatch.send_card(message.from_user.id, "welcome")
             await message.reply(
                 f"{greeting}Telegram привязан к магазину **{_esc_md(result['store_name'])}** как *{role_title}*.",
                 reply_markup=get_main_reply_keyboard(lang),
@@ -478,13 +504,7 @@ def register_handlers():
             f"🖨 **Печать** — накопленные накладные из автосборки, либо пришлите ZIP/PDF вручную.\n"
             f"💬 **Чаты** — диалоги, где нужен человек; 📊 **Магазин** — сводка за сегодня.\n"
             f"• Уже напечатано сегодня: `{history_count}` шт\n\n"
-            f"📋 **Команды бота:**\n"
-            f"• `/status` — Статус автоответчика и куков\n"
-            f"• `/settings` — Настройки печати этого магазина\n"
-            f"• `/reset` — Сбросить историю печати за сегодня\n"
-            f"• `/stats` — Статистика напечатанных заказов за сегодня\n"
-            f"• `/switch` — Сменить активный магазин\n"
-            f"• `/unlink` — Отвязать этот Telegram от кабинета",
+            f"Ещё команды — по кнопке ⌨️ рядом с полем ввода.",
             reply_markup=get_main_reply_keyboard(lang),
         )
 
@@ -560,6 +580,17 @@ def register_handlers():
         if not access:
             return
         text, kb = get_settings_view(access["store_id"])
+        await message.reply(text, reply_markup=kb)
+
+    @dp.message(F.text == "/notif")
+    async def cmd_notif(message: types.Message):
+        """Прямой доступ к уведомлениям, минуя /settings — раньше это было
+        закопано на 2 уровня (Настройки → Уведомления), хотя используется не
+        реже основных переключателей печати."""
+        access = await _require_access(message)
+        if not access:
+            return
+        text, kb = await asyncio.to_thread(get_notification_settings_view, access["store_id"], message.from_user.id)
         await message.reply(text, reply_markup=kb)
 
     @dp.message(F.text.in_({"/print"} | i18n.all_variants("print")))

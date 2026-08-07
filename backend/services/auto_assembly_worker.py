@@ -169,7 +169,7 @@ async def _notify_new_order(store_id: str, order: dict):
         is_express = snap.delivery_type == "Express"
         icon = "⚡" if is_express else "🆕"
         text = f"{icon} Заказ #{code} ({snap.delivery_type}) принят автоматически, сумма {snap.price:,.0f} ₸".replace(",", " ")
-        await notify_dispatch.dispatch(store_id, "money", text, urgent=is_express, amount=snap.price)
+        await notify_dispatch.dispatch(store_id, "money", text, urgent=is_express, amount=snap.price, card="new_order")
     except Exception as e:
         logger.error(f"[AutoAssembly] Не удалось отправить уведомление о новом заказе: {e}")
 
@@ -180,7 +180,7 @@ async def _notify_stage_failed(store_id: str, stage: str, order_code: str, error
         text = f"🚨 Автосборка: этап «{stage}» упал на заказе #{order_code}\n{error[:300]}"
         await notify_dispatch.dispatch(
             store_id, "problems", text, urgent=True,
-            dedup_key=f"aa_fail:{stage}:{order_code}",
+            dedup_key=f"aa_fail:{stage}:{order_code}", card="assembly_failed",
         )
     except Exception as e:
         logger.error(f"[AutoAssembly] Не удалось отправить уведомление об ошибке этапа: {e}")

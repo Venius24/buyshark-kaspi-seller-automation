@@ -297,6 +297,25 @@ def set_active_store(tg_user_id: int, store_id: str) -> bool:
         session.close()
 
 
+def get_tg_user_id_for_user(user_id: str) -> Optional[int]:
+    """Обратный резолв: по веб-User → его привязанный Telegram-аккаунт (если
+    есть). Нужен кабинету, чтобы читать/писать personal notification prefs
+    (keyed по tg_user_id) от лица залогиненного веб-пользователя."""
+    from backend.state_helpers import _get_sync_db_session
+    session = _get_sync_db_session()
+    if not session:
+        return None
+    try:
+        from backend.db.models import TelegramLinkDB
+        from sqlalchemy import select
+        row = session.execute(
+            select(TelegramLinkDB).where(TelegramLinkDB.user_id == user_id)
+        ).scalars().first()
+        return row.tg_user_id if row else None
+    finally:
+        session.close()
+
+
 def get_role(user_id: str, store_id: str) -> Optional[str]:
     from backend.state_helpers import _get_sync_db_session
     session = _get_sync_db_session()

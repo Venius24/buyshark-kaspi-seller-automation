@@ -1,5 +1,6 @@
 import { apiFetch, API_URL } from '../../api';
 import { TelegramLinkPanel } from '../TelegramLinkPanel';
+import { NotificationSettingsPanel } from '../NotificationSettingsPanel';
 
 interface SettingsTabProps {
   mcHasSession: boolean;
@@ -62,6 +63,7 @@ export function SettingsTab({ mcHasSession, addLog, onOpenMcAuth, onCheckMcStatu
       </div>
 
       <TelegramLinkPanel />
+      <NotificationSettingsPanel />
     </div>
   );
 }
