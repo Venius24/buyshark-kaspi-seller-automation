@@ -242,6 +242,25 @@ class SalesOrderDB(Base):
     ingested_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
+class AnalyticsDailyHistoryDB(Base):
+    """Один снапшот в день на магазин (upsert по (store_id, date)) — в отличие
+    от AnalyticsSnapshotDB (перезаписывается каждый цикл демпинга, хранит
+    только "сейчас"), эта таблица копит историю по дням. Нужна для честного
+    графика динамики доли лучшей цены и streak-счётчиков на дашборде —
+    начинает копиться с момента деплоя этой фичи, задним числом не восстанавливается.
+    """
+    __tablename__ = "analytics_daily_history"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    date: Mapped[str] = mapped_column(String(10), primary_key=True)  # 'YYYY-MM-DD' (UTC)
+
+    best_price_share: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    winning_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_scanned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_saved_margin: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class AutoAssemblyRuleDB(Base):
     """Правило «Автосборки» — одно на (store_id, вид доставки). Три стадии
     конвейера включаются независимо: accept (принять заказ) -> assemble

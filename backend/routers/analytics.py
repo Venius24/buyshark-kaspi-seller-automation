@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends
 from datetime import datetime
 import time
 import logging
-from backend.state_helpers import _load_dumping_configs, _load_products, _load_analytics_snapshot, _load_dumper_logs, _load_sales_summary
+from backend.state_helpers import (
+    _load_dumping_configs, _load_products, _load_analytics_snapshot, _load_dumper_logs,
+    _load_sales_summary, _load_analytics_history,
+)
 from backend.dumper.config import _decode_base64_if_needed
 from backend.dumper.radar import _fetch_offers_sync
 from backend.security.store_context import StoreContext, get_store_context
@@ -177,3 +180,86 @@ def get_sales_stats(days: int = 30, ctx: StoreContext = Depends(get_store_contex
     days = max(1, min(days, 365))
     summary = _load_sales_summary(ctx.store_id, days=days)
     return {"success": True, "days": days, **summary}
+
+
+def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
+    return max(lo, min(hi, value))
+
+
+@router.get("/score")
+def get_score_stats(ctx: StoreContext = Depends(get_store_context)):
+    """
+    Композитный "score" магазина (в духе Oura Readiness / WHOOP Recovery) +
+    streak-счётчики + данные для heatmap выручки. Всё считается из реальных
+    таблиц (sales_orders, analytics_daily_history) — если истории ещё нет
+    (фича только что задеплоена / стор новый), возвращаем честные нули/пустые
+    списки, а не выдуманные тренды.
+    """
+    import datetime as _dt
+
+    snapshot = _load_analytics_snapshot(ctx.store_id)
+    best_price_share = float(snapshot.get("best_price_share", 0.0))
+
+    history = _load_analytics_history(ctx.store_id, days=180)
+    sales_180 = _load_sales_summary(ctx.store_id, days=180)
+    daily_revenue = {d["date"]: d for d in sales_180.get("daily", [])}
+
+    # --- Компонент 2: динамика продаж (последние 7 дней vs предыдущие 7) ---
+    today = _dt.datetime.utcnow().date()
+    last7 = sum(
+        daily_revenue.get((today - _dt.timedelta(days=i)).strftime("%Y-%m-%d"), {}).get("revenue", 0.0)
+        for i in range(7)
+    )
+    prev7 = sum(
+        daily_revenue.get((today - _dt.timedelta(days=i)).strftime("%Y-%m-%d"), {}).get("revenue", 0.0)
+        for i in range(7, 14)
+    )
+    if prev7 > 0:
+        pct_change = (last7 - prev7) / prev7
+        revenue_trend_score = _clamp(50 + pct_change * 50)
+    else:
+        revenue_trend_score = 100.0 if last7 > 0 else 0.0
+
+    # --- Компонент 3: стабильность потока заказов (активных дней из 30) ---
+    active_days_30 = sum(
+        1 for i in range(30)
+        if daily_revenue.get((today - _dt.timedelta(days=i)).strftime("%Y-%m-%d"), {}).get("orders", 0) > 0
+    )
+    activity_score = _clamp((active_days_30 / 30.0) * 100)
+
+    composite_score = round((best_price_share + revenue_trend_score + activity_score) / 3)
+
+    # --- Streaks ---
+    price_leadership_streak = 0
+    for i in range(len(history) - 1, -1, -1):
+        if history[i]["best_price_share"] >= 50.0:
+            price_leadership_streak += 1
+        else:
+            break
+
+    sales_streak = 0
+    for i in range(0, 90):
+        day_key = (today - _dt.timedelta(days=i)).strftime("%Y-%m-%d")
+        orders_that_day = daily_revenue.get(day_key, {}).get("orders", 0)
+        if orders_that_day > 0:
+            sales_streak += 1
+        else:
+            break
+
+    return {
+        "success": True,
+        "score": {
+            "composite": composite_score,
+            "components": {
+                "price_leadership": round(best_price_share),
+                "revenue_trend": round(revenue_trend_score),
+                "activity_consistency": round(activity_score),
+            },
+        },
+        "streaks": {
+            "price_leadership_days": price_leadership_streak,
+            "sales_days": sales_streak,
+        },
+        "heatmap": sales_180.get("daily", []),
+        "history_points": len(history),
+    }

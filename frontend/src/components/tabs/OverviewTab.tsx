@@ -1,10 +1,12 @@
 import { apiFetch, API_URL } from '../../api';
 import { PriceLeadGauge } from '../PriceLeadGauge';
 import { SavedMarginCard } from '../SavedMarginCard';
-import { LiveTerminalStream } from '../LiveTerminalStream';
 import { PriceRadarWidget } from '../PriceRadarWidget';
 import { SalesStatsWidget } from '../SalesStatsWidget';
+import { ScoreRing } from '../ScoreRing';
+import { RevenueHeatmap } from '../RevenueHeatmap';
 import { useSalesStats } from '../../hooks/useSalesStats';
+import { useScoreStats } from '../../hooks/useScoreStats';
 
 interface OverviewTabProps {
   analytics: {
@@ -14,8 +16,6 @@ interface OverviewTabProps {
     total_saved_margin: number;
   };
   widgetData: any;
-  logs: string[];
-  isWsConnected: boolean;
   addLog: (message: string) => void;
   mcHasSession: boolean;
   onOpenMcAuth: () => void;
@@ -28,8 +28,6 @@ interface OverviewTabProps {
 export function OverviewTab({
   analytics,
   widgetData,
-  logs,
-  isWsConnected,
   addLog,
   mcHasSession,
   onOpenMcAuth,
@@ -39,9 +37,13 @@ export function OverviewTab({
   onOpenLogs,
 }: OverviewTabProps) {
   const salesStats = useSalesStats();
+  const scoreStats = useScoreStats();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      {/* 🎯 COMPOSITE SCORE RING — "здоровье" магазина одним числом, разворачивается в разбивку */}
+      <ScoreRing data={scoreStats} />
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
         <PriceLeadGauge
           percentage={analytics.best_price_share}
@@ -51,11 +53,10 @@ export function OverviewTab({
         <SavedMarginCard
           totalSavedMargin={analytics.total_saved_margin}
         />
-        <LiveTerminalStream
-          logs={logs}
-          isConnected={isWsConnected}
-        />
       </div>
+
+      {/* 🗓️ GITHUB-STYLE КАРТА АКТИВНОСТИ ПРОДАЖ */}
+      <RevenueHeatmap heatmap={scoreStats.heatmap} />
 
       {/* 💰 REAL SALES STATS (from sales_orders, backfilled by sales_sync_worker) */}
       <SalesStatsWidget data={salesStats} />

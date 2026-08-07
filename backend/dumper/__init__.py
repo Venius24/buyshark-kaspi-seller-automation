@@ -70,8 +70,9 @@ async def run_price_dumping_job(
 
     # Сохраняем агрегированную аналитику в стейт (per-store, Слайс 5)
     try:
-        from backend.state_helpers import _save_analytics_snapshot
+        from backend.state_helpers import _save_analytics_snapshot, _upsert_analytics_daily_history
         _save_analytics_snapshot(analytics, store_id=store_id)
+        _upsert_analytics_daily_history(analytics, store_id=store_id)
     except Exception:
         pass
 

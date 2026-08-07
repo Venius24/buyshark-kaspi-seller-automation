@@ -1097,6 +1097,65 @@ def _get_latest_sales_order_date(store_id: str):
         session.close()
 
 
+def _upsert_analytics_daily_history(data: dict, store_id: str):
+    """Пишет/обновляет ОДНУ строку на (store_id, сегодняшняя дата UTC) —
+    вызывается на каждом цикле демпинга (backend/dumper/__init__.py), но
+    идемпотентно: повторные вызовы в тот же день просто перезаписывают
+    сегодняшний снапшот последним значением, не плодя дубликаты."""
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import AnalyticsDailyHistoryDB
+        import datetime as _dt
+        today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+        row = session.get(AnalyticsDailyHistoryDB, (store_id, today))
+        if not row:
+            row = AnalyticsDailyHistoryDB(store_id=store_id, date=today)
+            session.add(row)
+        row.best_price_share = float(data.get("best_price_share", 0.0))
+        row.winning_count = int(data.get("winning_count", 0))
+        row.total_scanned = int(data.get("total_scanned", 0))
+        row.total_saved_margin = float(data.get("total_saved_margin", 0.0))
+        row.updated_at = _dt.datetime.utcnow()
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting analytics daily history to DB: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
+
+def _load_analytics_history(store_id: str, days: int = 90) -> list:
+    """Дневная история best_price_share/winning_count этого магазина за
+    последние N дней — копится только с момента деплоя этой фичи, поэтому
+    для новых сторов список может быть коротким/пустым."""
+    import datetime as _dt
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import AnalyticsDailyHistoryDB
+        since = (_dt.datetime.utcnow() - _dt.timedelta(days=days)).strftime("%Y-%m-%d")
+        rows = session.scalars(
+            select(AnalyticsDailyHistoryDB)
+            .where(AnalyticsDailyHistoryDB.store_id == store_id, AnalyticsDailyHistoryDB.date >= since)
+            .order_by(AnalyticsDailyHistoryDB.date.asc())
+        ).all()
+        return [
+            {
+                "date": r.date,
+                "best_price_share": r.best_price_share,
+                "winning_count": r.winning_count,
+                "total_scanned": r.total_scanned,
+                "total_saved_margin": r.total_saved_margin,
+            }
+            for r in rows
+        ]
+    finally:
+        session.close()
+
+
 def _load_sales_summary(store_id: str, days: int = 30) -> dict:
     """Реальная агрегация выручки/продаж из sales_orders за последние N дней:
     выручка и число заказов по дням, топ-SKU по выручке, средний чек."""

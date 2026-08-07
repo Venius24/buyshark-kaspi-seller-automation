@@ -695,8 +695,6 @@ export default function App() {
           <OverviewTab
             analytics={analytics}
             widgetData={widgetData}
-            logs={logs}
-            isWsConnected={isWsConnected}
             addLog={addLog}
             mcHasSession={mcHasSession}
             onOpenMcAuth={() => openMcAuthModal()}
