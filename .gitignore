@@ -40,3 +40,10 @@ REAL_IMPORTANT/упаковка_fetch/fetch_packaging.py
 # ── PyInstaller / dist packages ──
 ZIPS/
 bq_bot/
+
+# ── design-sync (Claude Design) ──
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
