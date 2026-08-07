@@ -1323,6 +1323,17 @@ def _load_sales_summary(store_id: str, days: int = 30) -> dict:
             .order_by(SalesOrderDB.created_at.asc())
         ).all()
 
+        # Kaspi's order-entries API иногда не отдаёт offer.name/title (пропущенный
+        # include) — kaspi_wrapper.py тогда пишет в entries_payload литерал "Товар"
+        # как заглушку. Разные SKU с этой заглушкой выглядят как один и тот же товар,
+        # заполняющий все топы. Подменяем заглушку реальным названием из каталога
+        # магазина по SKU, если оно у нас есть.
+        catalog_names = {
+            p.get("sku"): p.get("name")
+            for p in _load_products(store_id)
+            if p.get("sku") and p.get("name")
+        }
+
         daily: dict = {}
         sku_revenue: dict = {}
         total_revenue = 0.0
@@ -1338,7 +1349,7 @@ def _load_sales_summary(store_id: str, days: int = 30) -> dict:
                 entries = []
             for e in entries:
                 sku = e.get("sku") or "?"
-                name = e.get("name") or sku
+                name = catalog_names.get(sku) or e.get("name") or sku
                 entry = sku_revenue.setdefault(sku, {"sku": sku, "name": name, "revenue": 0.0, "quantity": 0})
                 entry["revenue"] += e.get("totalPrice", 0) or 0
                 entry["quantity"] += e.get("quantity", 0) or 0
