@@ -283,6 +283,15 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
             select(SalesOrderDB).where(SalesOrderDB.store_id == ctx.store_id, SalesOrderDB.created_at >= since)
         ).all()
 
+        # Kaspi иногда не отдаёт offer.name/title в entries — kaspi_wrapper.py
+        # тогда пишет заглушку "Товар". Подменяем реальным названием из каталога
+        # магазина по SKU, если оно у нас есть (см. тот же фикс в _load_sales_summary).
+        catalog_names = {
+            p.get("sku"): p.get("name")
+            for p in _load_products(ctx.store_id)
+            if p.get("sku") and p.get("name")
+        }
+
         sku_info: dict = {}
         sku_weekly_qty: dict = {}
         week_keys_seen: set = set()
@@ -296,7 +305,7 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
             week_keys_seen.add(week_key)
             for e in entries:
                 sku = e.get("sku") or "?"
-                name = e.get("name") or sku
+                name = catalog_names.get(sku) or e.get("name") or sku
                 qty = e.get("quantity", 0) or 0
                 total_price = e.get("totalPrice", 0) or 0
                 info = sku_info.setdefault(sku, {"sku": sku, "name": name, "revenue": 0.0, "quantity": 0})
