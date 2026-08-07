@@ -1,20 +1,140 @@
+import asyncio
 import logging
 import io
 import os
-from typing import Dict, Any
-from backend.chatbot import config, bot_instance
+from typing import Dict, Any, List, Optional
+from backend.chatbot import config, bot_instance, telegram_identity as ti, notification_prefs, notify_dispatch, audit, i18n
 from backend.chatbot.notifications import _esc_md
+from backend.chatbot.kaspi import load_chat_cookies
+from backend.chatbot.chat_client import send_message as kaspi_send_chat_message
 from backend.services.print_batcher_service import (
     process_zip_or_pdfs,
     get_batch_file_path,
     reset_printed_history,
     load_printed_history
 )
+from backend.services.auto_assembly_worker import (
+    get_unprinted_spool_rows,
+    build_spool_zip_bytes,
+    mark_spool_printed,
+    run_auto_assembly_cycle,
+)
+from backend.routers.auto_assembly import DELIVERY_TYPES, _default_rule_dict, _row_to_dict
+from backend.security.store_context import get_store_by_id
+from backend.state_helpers import _get_sync_db_session
 
 logger = logging.getLogger(__name__)
 
 # Хранилище загруженных файлов перед выбором формата: chat_id -> file_meta
 PENDING_FILES: Dict[int, Dict[str, Any]] = {}
+
+# Ф5 (💬 Чаты): tg_user_id -> {"group_id", "store_id"} — следующее текстовое
+# сообщение этого человека уходит клиенту в Kaspi-чат, а не обрабатывается
+# как команда/кнопка. In-memory, теряется при рестарте — тот же компромисс,
+# что и PENDING_FILES (см. HANDOFF).
+PENDING_REPLY: Dict[int, Dict[str, str]] = {}
+
+NOT_LINKED_TEXT = (
+    "⛔ Этот Telegram не привязан ни к одному магазину.\n\n"
+    "Попросите владельца магазина прислать вам ссылку-приглашение (кабинет → "
+    "Настройки → Telegram), либо, если это ваш магазин — откройте кабинет и "
+    "нажмите «Привязать Telegram»."
+)
+
+DELIVERY_ICONS = {
+    "Express": "⚡", "Postomat": "📮", "Самовывоз": "🏬",
+    "Today": "📅", "Tomorrow": "🌙", "Kaspi Доставка": "🚚",
+}
+
+ALLOWED_RULE_FIELDS = {"stage_accept", "stage_assemble", "stage_waybill", "dry_run"}
+
+
+def _load_delivery_rules(store_id: str) -> List[dict]:
+    """Полная сетка правил Автосборки по всем видам доставки (сотнный
+    список из routers/auto_assembly.py::DELIVERY_TYPES) — незаполненные
+    виды возвращаются с дефолтами, как и в вебе."""
+    session = _get_sync_db_session()
+    by_type: Dict[str, dict] = {}
+    if session:
+        try:
+            from sqlalchemy import select
+            from backend.db.models import AutoAssemblyRuleDB
+            rows = session.scalars(
+                select(AutoAssemblyRuleDB).where(AutoAssemblyRuleDB.store_id == store_id)
+            ).all()
+            by_type = {r.delivery_type: _row_to_dict(r) for r in rows}
+        finally:
+            session.close()
+    return [by_type.get(dt, _default_rule_dict(dt)) for dt in DELIVERY_TYPES]
+
+
+def _toggle_rule_enabled(store_id: str, delivery_type: str) -> bool:
+    """Переключает enabled правила, заводит запись с дефолтами, если её ещё
+    не было (например, магазин ни разу не настраивался через веб)."""
+    session = _get_sync_db_session()
+    if not session:
+        return False
+    try:
+        from backend.db.models import AutoAssemblyRuleDB
+        row = session.get(AutoAssemblyRuleDB, (store_id, delivery_type))
+        if row is None:
+            row = AutoAssemblyRuleDB(store_id=store_id, delivery_type=delivery_type, enabled=True)
+            session.add(row)
+        else:
+            row.enabled = not row.enabled
+        session.commit()
+        return row.enabled
+    finally:
+        session.close()
+
+
+def _toggle_rule_field(store_id: str, delivery_type: str, field: str) -> Optional[bool]:
+    if field not in ALLOWED_RULE_FIELDS:
+        return None
+    session = _get_sync_db_session()
+    if not session:
+        return None
+    try:
+        from backend.db.models import AutoAssemblyRuleDB
+        row = session.get(AutoAssemblyRuleDB, (store_id, delivery_type))
+        if row is None:
+            row = AutoAssemblyRuleDB(store_id=store_id, delivery_type=delivery_type)
+            session.add(row)
+        setattr(row, field, not getattr(row, field))
+        session.commit()
+        return getattr(row, field)
+    finally:
+        session.close()
+
+
+def _store_merchant_id(store_id: str) -> Optional[str]:
+    session = _get_sync_db_session()
+    if not session:
+        return None
+    try:
+        from backend.db.models import Store
+        store = session.get(Store, store_id)
+        return store.merchant_id if store else None
+    finally:
+        session.close()
+
+
+def _recent_auto_assembly_failures(store_id: str, limit: int = 3) -> List[str]:
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from sqlalchemy import select
+        from backend.db.models import AutoAssemblyLogDB
+        rows = session.scalars(
+            select(AutoAssemblyLogDB)
+            .where(AutoAssemblyLogDB.store_id == store_id, AutoAssemblyLogDB.decision == "FAILED")
+            .order_by(AutoAssemblyLogDB.id.desc())
+            .limit(limit)
+        ).all()
+        return [f"{r.stage} #{r.order_code}: {r.reason}" for r in rows]
+    finally:
+        session.close()
 
 
 def register_handlers():
@@ -24,28 +144,138 @@ def register_handlers():
         return
 
     from aiogram import types, F
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+    from aiogram.types import (
+        InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile,
+        ReplyKeyboardMarkup, KeyboardButton,
+    )
 
-    def get_layout_keyboard() -> InlineKeyboardMarkup:
+    def get_layout_keyboard(prefix: str = "pb_fmt") -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="4 на A4", callback_data="pb_fmt:a4_4"),
-                InlineKeyboardButton(text="8 на A4", callback_data="pb_fmt:a4_8"),
-                InlineKeyboardButton(text="9 на A4", callback_data="pb_fmt:a4_9"),
-                InlineKeyboardButton(text="1 на A4", callback_data="pb_fmt:a4_1")
+                InlineKeyboardButton(text="4 на A4", callback_data=f"{prefix}:a4_4"),
+                InlineKeyboardButton(text="8 на A4", callback_data=f"{prefix}:a4_8"),
+                InlineKeyboardButton(text="9 на A4", callback_data=f"{prefix}:a4_9"),
+                InlineKeyboardButton(text="1 на A4", callback_data=f"{prefix}:a4_1")
             ],
             [
-                InlineKeyboardButton(text="🏷️ Термо 75x120", callback_data="pb_fmt:thermal_75_120"),
-                InlineKeyboardButton(text="🏷️ Термо 100x150", callback_data="pb_fmt:thermal_100_150")
+                InlineKeyboardButton(text="🏷️ Термо 75x120", callback_data=f"{prefix}:thermal_75_120"),
+                InlineKeyboardButton(text="🏷️ Термо 100x150", callback_data=f"{prefix}:thermal_100_150")
             ],
             [
-                InlineKeyboardButton(text="📑 Просто объединить", callback_data="pb_fmt:just_merge"),
-                InlineKeyboardButton(text="⚡ Авто-категории", callback_data="pb_fmt:auto")
+                InlineKeyboardButton(text="📑 Просто объединить", callback_data=f"{prefix}:just_merge"),
+                InlineKeyboardButton(text="⚡ Авто-категории", callback_data=f"{prefix}:auto")
             ]
         ])
 
-    def get_settings_view() -> tuple[str, InlineKeyboardMarkup]:
-        stg = config.load_print_settings()
+    def get_main_reply_keyboard(lang: str = "ru") -> ReplyKeyboardMarkup:
+        L = lambda key: i18n.label(key, lang)
+        return ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text=L("morning"))],
+                [KeyboardButton(text=L("print")), KeyboardButton(text=L("assembly"))],
+                [KeyboardButton(text=L("chats")), KeyboardButton(text=L("store"))],
+                [KeyboardButton(text=L("status")), KeyboardButton(text=L("settings"))],
+            ],
+            resize_keyboard=True,
+        )
+
+    def get_print_menu_view(store_id: Optional[str], count: int) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+        store_line = f"🏪 **{_esc_md(config.get_store_name(store_id))}**\n\n" if store_id else ""
+        text = (
+            f"🖨 **Печать**\n\n"
+            f"{store_line}"
+            f"📥 **Накоплено в автосборке:** `{count}` накладных, ещё не напечатанных.\n\n"
+            f"Можно также прислать мне ZIP-архив или PDF вручную — обработаю тем же движком."
+        )
+        if not count:
+            return text, None
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⚡ Скачать пачку (авто-формат)", callback_data="spool_fmt:auto")],
+            [InlineKeyboardButton(text="🖼️ Выбрать формат", callback_data="spool_layout_menu")],
+            [InlineKeyboardButton(text="✅ Пометить все напечатанными", callback_data="spool_mark_all")],
+        ])
+        return text, kb
+
+    def get_assembly_view(store_id: str) -> tuple[str, InlineKeyboardMarkup]:
+        rules = _load_delivery_rules(store_id)
+        store_line = f"🏪 **{_esc_md(config.get_store_name(store_id))}**\n\n" if store_id else ""
+        lines = [f"⚙️ **Автосборка**\n\n{store_line}"]
+        kb_rows = []
+        for r in rules:
+            dt = r["delivery_type"]
+            icon = DELIVERY_ICONS.get(dt, "📦")
+            status = "🟢 ВКЛ" if r["enabled"] else "⚪ ВЫКЛ"
+            stage_bits = []
+            if r["stage_accept"]:
+                stage_bits.append("принять")
+            if r["stage_assemble"]:
+                stage_bits.append("собрать")
+            if r["stage_waybill"]:
+                stage_bits.append("накладная")
+            stages_txt = ", ".join(stage_bits) if stage_bits else "этапы не настроены"
+            dry_txt = " · тест-режим" if r["dry_run"] else ""
+            lines.append(f"{icon} **{dt}** — {status}{dry_txt}\n   {stages_txt}")
+            kb_rows.append([
+                InlineKeyboardButton(
+                    text=f"{'🔴 Выкл' if r['enabled'] else '🟢 Вкл'} {dt}",
+                    callback_data=f"aa_toggle:{dt}",
+                ),
+                InlineKeyboardButton(text="⚙️ Настроить", callback_data=f"aa_cfg:{dt}"),
+            ])
+        lines.append("\nРасписание, лимит цены и чёрный список SKU — настраиваются в кабинете (веб).")
+        return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=kb_rows)
+
+    def get_assembly_rule_config_view(store_id: str, delivery_type: str, can_edit: bool) -> tuple[str, InlineKeyboardMarkup]:
+        rules = {r["delivery_type"]: r for r in _load_delivery_rules(store_id)}
+        r = rules.get(delivery_type, _default_rule_dict(delivery_type))
+        icon = DELIVERY_ICONS.get(delivery_type, "📦")
+        text = (
+            f"⚙️ **{icon} {delivery_type}**\n\n"
+            f"Статус: {'🟢 ВКЛ' if r['enabled'] else '⚪ ВЫКЛ'}\n"
+            f"Тест-режим: {'✅ включён (ничего реально не делает)' if r['dry_run'] else '❌ выключен'}\n\n"
+            f"✅ Принять заказ: {'ВКЛ' if r['stage_accept'] else 'выкл'}\n"
+            f"📦 Собрать: {'ВКЛ' if r['stage_assemble'] else 'выкл'}\n"
+            f"🧾 Скачать накладную: {'ВКЛ' if r['stage_waybill'] else 'выкл'}\n\n"
+            f"Расписание, лимит цены, чёрный список SKU — настраиваются в кабинете."
+        )
+        if not can_edit:
+            text += "\n\n_Изменять может только владелец магазина._"
+            return text, InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="aa_back")]
+            ])
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"{'✅' if r['stage_accept'] else '⬜'} Принять", callback_data=f"aa_field:stage_accept:{delivery_type}")],
+            [InlineKeyboardButton(text=f"{'✅' if r['stage_assemble'] else '⬜'} Собрать", callback_data=f"aa_field:stage_assemble:{delivery_type}")],
+            [InlineKeyboardButton(text=f"{'✅' if r['stage_waybill'] else '⬜'} Накладная", callback_data=f"aa_field:stage_waybill:{delivery_type}")],
+            [InlineKeyboardButton(text=("🧪 Тест-режим: ВКЛ" if r['dry_run'] else "🧪 Тест-режим: ВЫКЛ"), callback_data=f"aa_field:dry_run:{delivery_type}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="aa_back")],
+        ])
+        return text, kb
+
+    async def _send_spool_batch(chat_id: int, manifest: dict) -> None:
+        """Отправляет все готовые пачки манифеста в чат — общая логика
+        между Ф2 (кнопка «Печать») и Ф3 (Утренний сбор)."""
+        bot = bot_instance.bot
+        for b_key, b_info in manifest["batches"].items():
+            batch_file_path = get_batch_file_path(manifest["batch_id"], b_info["category"])
+            if batch_file_path and batch_file_path.exists():
+                input_file = FSInputFile(path=str(batch_file_path), filename=b_info["file_name"])
+                audit_msg = b_info.get("geometry_audit", {}).get("audit_message", "")
+                caption = (
+                    f"{b_info['icon']} **{b_info['title']}**\n"
+                    f"🖨️ `{b_info['printer_type']}`\n"
+                    f"📄 Страниц: `{b_info['total_pages']}` шт | Размеры: `{b_info['sample_dimensions']}`\n"
+                    f"{audit_msg}"
+                )
+                await bot.send_document(chat_id=chat_id, document=input_file, caption=caption)
+
+        mark_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Пометить эти накладные напечатанными", callback_data="spool_mark_all")]
+        ])
+        await bot.send_message(chat_id=chat_id, text="Готово! Пометить накладные как напечатанные?", reply_markup=mark_kb)
+
+    def get_settings_view(store_id: Optional[str]) -> tuple[str, InlineKeyboardMarkup]:
+        stg = config.load_print_settings(store_id)
 
         exp_mode = stg.get("express_mode", "separate")
         sort_p = stg.get("sort_preset", "filename")
@@ -76,8 +306,10 @@ def register_handlers():
             "just_merge": "📑 Просто объединить"
         }.get(def_fmt, def_fmt)
 
+        store_line = f"🏪 **{_esc_md(config.get_store_name(store_id))}**\n\n" if store_id else ""
         text = (
-            f"⚙️ **Глобальные настройки предприятия (Print-Batcher Engine):**\n\n"
+            f"⚙️ **Настройки печати:**\n\n"
+            f"{store_line}"
             f"⚡ **Каспи Экспресс:** `{exp_title}`\n"
             f"📋 **Сортировка:** `{sort_title}`\n"
             f"🛡️ **Суточная дедупликация:** `{'Включена ✅' if dedup else 'Выключена ❌'}`\n"
@@ -109,100 +341,531 @@ def register_handlers():
             ],
             [
                 InlineKeyboardButton(text="♻️ Сбросить историю печати за сегодня", callback_data="stg_reset_hist")
+            ],
+            [
+                InlineKeyboardButton(text="🔔 Уведомления", callback_data="stg_notif_menu")
             ]
         ])
         return text, kb
 
-    @dp.message(F.text == "/start")
-    async def cmd_start(message: types.Message):
-        admin_ids = config.load_admin_ids()
-        if str(message.from_user.id) not in admin_ids:
-            await message.reply("⛔ У вас нет доступа к управлению этим ботом.")
-            return
-
-        # Бот единый на все магазины (см. HANDOFF 3.14 — полный per-store
-        # рефакторинг отложен пользователем), но каждый admin_id обычно
-        # привязан к КОНКРЕТНЫМ магазинам (ChatbotSettingsDB.admin_ids) —
-        # показываем их имена, а не общий Merchant ID из .env.
-        my_store_ids = config.get_store_ids_for_admin(str(message.from_user.id))
-        if my_store_ids:
-            store_names = ", ".join(_esc_md(config.get_store_name(sid)) for sid in my_store_ids)
-            store_line = f"🏪 **Ваши магазины:** {store_names}\n\n"
-        else:
-            cfg = config.load_chatbot_config()
-            merchant_id = cfg.get("merchant_id") or "неизвестен"
-            store_line = f"🏪 **Merchant ID:** `{merchant_id}`\n\n"
-
-        history_count = len(load_printed_history())
-        await message.reply(
-            f"👋 Привет! Я бот автоответчик Kaspi.\n"
-            f"{store_line}"
-            f"🖨️ **Print-Batcher Engine — Автосборщик печати**\n"
-            f"Отправьте мне любой **ZIP-архив** или **PDF-файл** с накладными Kaspi / 1С.\n"
-            f"• Уже напечатано сегодня: `{history_count}` шт\n\n"
-            f"📋 **Команды бота:**\n"
-            f"• `/status` — Статус автоответчика и куков\n"
-            f"• `/settings` — Глобальные настройки печати предприятия\n"
-            f"• `/reset` — Сбросить историю печати за сегодня\n"
-            f"• `/stats` — Статистика напечатанных заказов за сегодня"
+    def get_notification_settings_view(store_id: str, tg_user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+        prefs = notification_prefs.get_prefs(tg_user_id, store_id)
+        quiet_line = f"{prefs['quiet_from']}–{prefs['quiet_to']}" if prefs["quiet_from"] else "выключены"
+        text = (
+            f"🔔 **Уведомления** (лично для вас в этом магазине)\n\n"
+            f"💬 Чаты: {'ВКЛ ✅' if prefs['chats'] else 'ВЫКЛ ❌'}\n"
+            f"🚨 Проблемы: {'ВКЛ ✅' if prefs['problems'] else 'ВЫКЛ ❌'}\n"
+            f"💰 Деньги и заказы: {'ВКЛ ✅' if prefs['money'] else 'ВЫКЛ ❌'}\n"
+            f"🌙 Тихие часы: `{quiet_line}`\n\n"
+            f"Express-заказы и «сессия истекла» приходят всегда, даже в тихие часы."
         )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"💬 Чаты {'✅' if prefs['chats'] else '❌'}", callback_data="stg_notif_toggle:chats")],
+            [InlineKeyboardButton(text=f"🚨 Проблемы {'✅' if prefs['problems'] else '❌'}", callback_data="stg_notif_toggle:problems")],
+            [InlineKeyboardButton(text=f"💰 Деньги {'✅' if prefs['money'] else '❌'}", callback_data="stg_notif_toggle:money")],
+            [
+                InlineKeyboardButton(text="🌙 23:00–08:00", callback_data="stg_notif_quiet:on"),
+                InlineKeyboardButton(text="☀️ Без тихих часов", callback_data="stg_notif_quiet:off"),
+            ],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="stg_notif_back")],
+        ])
+        return text, kb
 
-    @dp.message(F.text == "/status")
-    async def cmd_status(message: types.Message):
-        admin_ids = config.load_admin_ids()
-        if str(message.from_user.id) not in admin_ids:
+    def get_chats_view(store_id: str) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+        blocked = config.list_blocked_chat_ids(store_id)
+        store_line = f"🏪 **{_esc_md(config.get_store_name(store_id))}**\n\n" if store_id else ""
+        if not blocked:
+            return f"💬 **Чаты**\n\n{store_line}Нет диалогов, ожидающих ответа человека — ИИ справляется сам.", None
+        lines = [f"💬 **Чаты**\n\n{store_line}Ожидают ответа: `{len(blocked)}`"]
+        kb_rows = []
+        for gid in blocked[:10]:
+            kb_rows.append([
+                InlineKeyboardButton(text=f"✍️ Ответить ({gid[:10]})", callback_data=f"chat_open:{gid}"),
+                InlineKeyboardButton(text="🤖 Вернуть ИИ", callback_data=f"chat_ai:{gid}"),
+            ])
+        return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=kb_rows)
+
+    async def _require_access(message: types.Message) -> Optional[dict]:
+        """Проверяет доступ вызывающего, отвечает отказом/подсказкой если
+        доступа нет или нужно сначала выбрать магазин. Возвращает access-dict
+        (см. telegram_identity.resolve_bot_access) или None, если отвечать
+        дальше не нужно (сообщение уже отправлено)."""
+        access = await asyncio.to_thread(ti.resolve_bot_access, message.from_user.id)
+        if not access["authorized"]:
+            await message.reply(NOT_LINKED_TEXT)
+            return None
+        if access["needs_store_selection"]:
+            lines = ["🏪 У вас несколько магазинов, выберите активный командой /switch:\n"]
+            for s in access["store_choices"]:
+                lines.append(f"• `{_esc_md(s['name'])}`")
+            await message.reply("\n".join(lines))
+            return None
+        return access
+
+    @dp.message(lambda m: bool(m.text) and not m.text.startswith("/") and m.from_user and m.from_user.id in PENDING_REPLY)
+    async def handle_chat_reply(message: types.Message):
+        """Ф5 (💬 Чаты): следующее обычное сообщение после «✍️ Ответить»
+        уходит клиенту в Kaspi-чат напрямую, минуя ИИ. Зарегистрирован
+        раньше остальных текстовых хэндлеров, чтобы перехватывать ответ
+        даже если он текстуально совпал бы с подписью кнопки меню."""
+        pending = PENDING_REPLY.pop(message.from_user.id, None)
+        if not pending:
+            return
+        store_id = pending["store_id"]
+        group_id = pending["group_id"]
+
+        merchant_id = await asyncio.to_thread(_store_merchant_id, store_id)
+        cookies = await asyncio.to_thread(load_chat_cookies, store_id)
+        if not merchant_id or not cookies:
+            await message.reply("⚠️ Не удалось отправить — сессия Kaspi-чата недоступна для этого магазина.")
             return
 
-        # Персонализация по вызывающему (см. cmd_start выше): у админа,
-        # привязанного к конкретным магазинам, статус показывается ПО
-        # КАЖДОМУ из них отдельно, а не общей цифрой по всем сразу — иначе
-        # заблокированный чат чужого магазина неотличим от своего.
-        my_store_ids = config.get_store_ids_for_admin(str(message.from_user.id))
-        if my_store_ids:
-            lines = ["🤖 **Статус автоответчика по вашим магазинам:**"]
-            for store_id in my_store_ids:
-                store_cfg = config.load_chatbot_config(store_id)
-                blocked = len(config.list_blocked_chat_ids(store_id))
-                cookie_bad = config.is_cookie_alert_sent(store_id)
-                lines.append(
-                    f"\n🏪 **{_esc_md(config.get_store_name(store_id))}**\n"
-                    f"{'🟢 Работает' if store_cfg.get('enabled', True) else '⏸️ Приостановлен'}\n"
-                    f"🔒 Заблокировано чатов: `{blocked}`\n"
-                    f"🔑 Куки: {'🚨 Требуется обновление' if cookie_bad else '✅ Валидны'}"
-                )
+        result = await kaspi_send_chat_message(group_id, message.text, cookies, merchant_id)
+        if result.get("success"):
+            await asyncio.to_thread(config.mark_chat_replied, store_id, group_id, "telegram_manual")
+            await asyncio.to_thread(audit.log_action, store_id, message.from_user.id, "chat_reply", group_id)
+            await message.reply("✅ Отправлено клиенту.")
+        else:
+            await message.reply(f"❌ Ошибка отправки: `{result.get('error')}`")
+
+    @dp.message(F.text.startswith("/start"))
+    async def cmd_start(message: types.Message):
+        parts = message.text.split(maxsplit=1)
+        token = parts[1].strip() if len(parts) > 1 else None
+
+        lang = i18n.resolve_lang(message.from_user.language_code or "ru")
+
+        if token:
+            result = await asyncio.to_thread(
+                ti.consume_link_token,
+                token,
+                message.from_user.id,
+                message.from_user.username,
+                message.from_user.first_name,
+                lang,
+            )
+            if not result["success"]:
+                await message.reply(f"⚠️ {result['error']}")
+                return
+            role_title = {"OWNER": "владелец", "MANAGER": "менеджер", "VIEWER": "наблюдатель"}.get(result["role"], result["role"])
+            greeting = "🎉 Добро пожаловать! " if result["is_new_employee"] else "✅ "
+            await message.reply(
+                f"{greeting}Telegram привязан к магазину **{_esc_md(result['store_name'])}** как *{role_title}*.",
+                reply_markup=get_main_reply_keyboard(lang),
+            )
+            return
+
+        access = await asyncio.to_thread(ti.resolve_bot_access, message.from_user.id)
+        if not access["authorized"]:
+            await message.reply(NOT_LINKED_TEXT)
+            return
+        if access["needs_store_selection"]:
+            lines = ["👋 Привет! У вас несколько магазинов, выберите активный командой /switch:\n"]
+            for s in access["store_choices"]:
+                lines.append(f"• `{_esc_md(s['name'])}`")
             await message.reply("\n".join(lines))
             return
 
-        cfg = config.load_chatbot_config()
-        merchant_id = cfg.get("merchant_id") or "неизвестен"
-        blocked_count = config.count_blocked_chats()  # фоллбек: не привязан ни к одному стору — сводка по всем
+        await asyncio.to_thread(ti.touch_last_seen, message.from_user.id, message.from_user.username, message.from_user.first_name, lang)
 
+        store_id = access["store_id"]
+        store_line = f"🏪 **Магазин:** {_esc_md(config.get_store_name(store_id))}\n\n" if store_id else ""
+        history_count = len(await asyncio.to_thread(load_printed_history, store_id))
         await message.reply(
-            f"🤖 **Статус автоответчика:** {'🟢 Работает' if cfg.get('enabled', True) else '⏸️ Приостановлен'}\n"
-            f"🏪 **Merchant ID:** `{merchant_id}`\n"
-            f"🔒 **Заблокировано чатов (Human Override):** {blocked_count}\n"
-            f"🔑 **Cookie статус:** {'🚨 Требуется обновление' if config.any_cookie_alert_sent() else '✅ Валидны'}"
+            f"👋 Привет! Я бот-помощник магазина Kaspi.\n"
+            f"{store_line}"
+            f"☀️ **Утренний сбор** — одна кнопка: включает автосборку, собирает и присылает всю печать.\n"
+            f"🖨 **Печать** — накопленные накладные из автосборки, либо пришлите ZIP/PDF вручную.\n"
+            f"💬 **Чаты** — диалоги, где нужен человек; 📊 **Магазин** — сводка за сегодня.\n"
+            f"• Уже напечатано сегодня: `{history_count}` шт\n\n"
+            f"📋 **Команды бота:**\n"
+            f"• `/status` — Статус автоответчика и куков\n"
+            f"• `/settings` — Настройки печати этого магазина\n"
+            f"• `/reset` — Сбросить историю печати за сегодня\n"
+            f"• `/stats` — Статистика напечатанных заказов за сегодня\n"
+            f"• `/switch` — Сменить активный магазин\n"
+            f"• `/unlink` — Отвязать этот Telegram от кабинета",
+            reply_markup=get_main_reply_keyboard(lang),
         )
 
-    @dp.message(F.text == "/settings")
+    @dp.message(F.text == "/switch")
+    async def cmd_switch(message: types.Message):
+        link = await asyncio.to_thread(ti.get_link, message.from_user.id)
+        if not link:
+            await message.reply(NOT_LINKED_TEXT)
+            return
+        stores = await asyncio.to_thread(ti.list_user_stores, link["user_id"])
+        if not stores:
+            await message.reply(NOT_LINKED_TEXT)
+            return
+        if len(stores) == 1:
+            await message.reply(f"У вас только один магазин: **{_esc_md(stores[0]['name'])}**.")
+            return
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=s["name"], callback_data=f"switch_store:{s['store_id']}")]
+            for s in stores
+        ])
+        await message.reply("🏪 Выберите активный магазин:", reply_markup=kb)
+
+    @dp.callback_query(F.data.startswith("switch_store:"))
+    async def process_switch_store(callback_query: types.CallbackQuery):
+        store_id = callback_query.data.split(":", 1)[1]
+        ok = await asyncio.to_thread(ti.set_active_store, callback_query.from_user.id, store_id)
+        if ok:
+            store_name = await asyncio.to_thread(config.get_store_name, store_id)
+            await callback_query.answer(f"Активный магазин: {store_name}", show_alert=True)
+            try:
+                await callback_query.message.edit_text(f"🏪 Активный магазин: **{_esc_md(store_name)}**")
+            except Exception:
+                pass
+        else:
+            await callback_query.answer("Не удалось переключить магазин.", show_alert=True)
+
+    @dp.message(F.text == "/unlink")
+    async def cmd_unlink(message: types.Message):
+        access_before = await asyncio.to_thread(ti.resolve_bot_access, message.from_user.id)
+        ok = await asyncio.to_thread(ti.unlink_self, message.from_user.id)
+        if ok and access_before.get("store_id"):
+            await asyncio.to_thread(audit.log_action, access_before["store_id"], message.from_user.id, "unlink_self", "")
+        if ok:
+            await message.reply("🔌 Telegram отвязан от кабинета. Чтобы привязать заново — запросите новую ссылку в кабинете.")
+        else:
+            await message.reply("Этот Telegram и так не был привязан через кабинет (либо вы всё ещё на легаси-списке администраторов из .env).")
+
+    @dp.message(F.text.in_({"/status"} | i18n.all_variants("status")))
+    async def cmd_status(message: types.Message):
+        access = await _require_access(message)
+        if not access:
+            return
+        store_id = access["store_id"]
+
+        store_cfg = await asyncio.to_thread(config.load_chatbot_config, store_id)
+        blocked = len(await asyncio.to_thread(config.list_blocked_chat_ids, store_id))
+        cookie_bad = config.is_cookie_alert_sent(store_id) if store_id else config.any_cookie_alert_sent()
+        store_line = f"🏪 **Магазин:** {_esc_md(config.get_store_name(store_id))}\n" if store_id else ""
+        role_line = f"👤 **Ваша роль:** {access['role']}\n" if access["role"] else ""
+
+        await message.reply(
+            f"🤖 **Статус автоответчика:** {'🟢 Работает' if store_cfg.get('enabled', True) else '⏸️ Приостановлен'}\n"
+            f"{store_line}"
+            f"{role_line}"
+            f"🔒 **Заблокировано чатов (Human Override):** {blocked}\n"
+            f"🔑 **Cookie статус:** {'🚨 Требуется обновление' if cookie_bad else '✅ Валидны'}"
+        )
+
+    @dp.message(F.text.in_({"/settings"} | i18n.all_variants("settings")))
     async def cmd_settings(message: types.Message):
-        text, kb = get_settings_view()
+        access = await _require_access(message)
+        if not access:
+            return
+        text, kb = get_settings_view(access["store_id"])
         await message.reply(text, reply_markup=kb)
+
+    @dp.message(F.text.in_({"/print"} | i18n.all_variants("print")))
+    async def cmd_print_menu(message: types.Message):
+        access = await _require_access(message)
+        if not access:
+            return
+        rows = await asyncio.to_thread(get_unprinted_spool_rows, access["store_id"])
+        text, kb = get_print_menu_view(access["store_id"], len(rows))
+        await message.reply(text, reply_markup=kb)
+
+    @dp.callback_query(F.data == "spool_layout_menu")
+    async def process_spool_layout_menu(callback_query: types.CallbackQuery):
+        await callback_query.answer()
+        try:
+            await callback_query.message.edit_reply_markup(reply_markup=get_layout_keyboard(prefix="spool_fmt"))
+        except Exception:
+            pass
+
+    @dp.callback_query(F.data.startswith("spool_fmt:") | F.data.startswith("spool_force:"))
+    async def process_spool_print(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте меню печати заново: /start", show_alert=True)
+            return
+        store_id = access["store_id"]
+
+        data_parts = callback_query.data.split(":")
+        action_type = data_parts[0]  # 'spool_fmt' или 'spool_force'
+        layout_mode = data_parts[1]
+        force_reprint = (action_type == "spool_force")
+
+        await callback_query.answer()
+        try:
+            await callback_query.message.edit_text("⏳ **Собираю накопленные накладные в пачку...**")
+        except Exception:
+            pass
+
+        rows = await asyncio.to_thread(get_unprinted_spool_rows, store_id)
+        if not rows:
+            try:
+                await callback_query.message.edit_text("📭 Нет накопленных накладных для печати.")
+            except Exception:
+                pass
+            return
+
+        try:
+            zip_bytes = await asyncio.to_thread(build_spool_zip_bytes, store_id)
+            # sort_preset/express_mode/auto_rotate фиксированы (не читаем
+            # per-store print_settings) — та же раскладка, что и в вебе
+            # (routers/auto_assembly.py::download_spool), спул это отдельный
+            # от ручной загрузки в PrintBatcher поток.
+            manifest = await asyncio.to_thread(
+                process_zip_or_pdfs,
+                file_bytes=zip_bytes,
+                original_filename="auto_assembly_spool.zip",
+                sort_preset="order_id",
+                auto_rotate=True,
+                express_mode="separate",
+                deduplicate_history=True,
+                force_reprint=force_reprint,
+                output_layout=layout_mode,
+                store_id=store_id,
+            )
+
+            if manifest["all_duplicates"]:
+                force_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🖨️ Напечатать заново принудительно", callback_data=f"spool_force:{layout_mode}")]
+                ])
+                await callback_query.message.edit_text(
+                    "⚠️ **Все накопленные накладные уже были напечатаны сегодня.**\n\n"
+                    "Нажмите кнопку ниже, если хотите принудительно перепечатать:",
+                    reply_markup=force_kb
+                )
+                return
+
+            await callback_query.message.edit_text(
+                f"✅ **Пачка готова, отправляю файлы...**\n"
+                f"🧾 Накладных в пачке: `{len(rows)}` шт"
+            )
+            await _send_spool_batch(callback_query.message.chat.id, manifest)
+
+        except Exception as e:
+            logger.error(f"Ошибка при сборке пачки спула в Telegram: {e}", exc_info=True)
+            await callback_query.message.answer(f"❌ **Ошибка при сборке пачки:** `{str(e)}`")
+
+    @dp.callback_query(F.data == "spool_mark_all")
+    async def process_spool_mark_all(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте /start заново.", show_alert=True)
+            return
+        count = await asyncio.to_thread(mark_spool_printed, access["store_id"])
+        if count:
+            await asyncio.to_thread(audit.log_action, access["store_id"], callback_query.from_user.id, "spool_mark_printed", str(count))
+        await callback_query.answer(f"Помечено напечатанными: {count}", show_alert=True)
+        try:
+            await callback_query.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+    @dp.message(F.text.in_({"/assembly"} | i18n.all_variants("assembly")))
+    async def cmd_assembly_menu(message: types.Message):
+        access = await _require_access(message)
+        if not access:
+            return
+        text, kb = await asyncio.to_thread(get_assembly_view, access["store_id"])
+        await message.reply(text, reply_markup=kb)
+
+    @dp.callback_query(F.data == "aa_back")
+    async def process_aa_back(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте /start заново.", show_alert=True)
+            return
+        text, kb = await asyncio.to_thread(get_assembly_view, access["store_id"])
+        try:
+            await callback_query.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+        await callback_query.answer()
+
+    @dp.callback_query(F.data.startswith("aa_toggle:"))
+    async def process_aa_toggle(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте /start заново.", show_alert=True)
+            return
+        if access["role"] != "OWNER":
+            await callback_query.answer("Включать/выключать автосборку может только владелец магазина.", show_alert=True)
+            return
+        delivery_type = callback_query.data.split(":", 1)[1]
+        new_state = await asyncio.to_thread(_toggle_rule_enabled, access["store_id"], delivery_type)
+        await asyncio.to_thread(
+            audit.log_action, access["store_id"], callback_query.from_user.id,
+            "aa_toggle", f"{delivery_type} -> {'ON' if new_state else 'OFF'}",
+        )
+        await callback_query.answer("Готово")
+        text, kb = await asyncio.to_thread(get_assembly_view, access["store_id"])
+        try:
+            await callback_query.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+
+    @dp.callback_query(F.data.startswith("aa_cfg:"))
+    async def process_aa_cfg(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте /start заново.", show_alert=True)
+            return
+        delivery_type = callback_query.data.split(":", 1)[1]
+        text, kb = await asyncio.to_thread(
+            get_assembly_rule_config_view, access["store_id"], delivery_type, access["role"] == "OWNER"
+        )
+        try:
+            await callback_query.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+        await callback_query.answer()
+
+    @dp.callback_query(F.data.startswith("aa_field:"))
+    async def process_aa_field(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте /start заново.", show_alert=True)
+            return
+        if access["role"] != "OWNER":
+            await callback_query.answer("Изменять правила автосборки может только владелец магазина.", show_alert=True)
+            return
+        _, field, delivery_type = callback_query.data.split(":", 2)
+        if field not in ALLOWED_RULE_FIELDS:
+            await callback_query.answer("Неизвестное поле настройки.", show_alert=True)
+            return
+        new_state = await asyncio.to_thread(_toggle_rule_field, access["store_id"], delivery_type, field)
+        await asyncio.to_thread(
+            audit.log_action, access["store_id"], callback_query.from_user.id,
+            "aa_field", f"{delivery_type}.{field} -> {'ON' if new_state else 'OFF'}",
+        )
+        await callback_query.answer("Сохранено")
+        text, kb = await asyncio.to_thread(get_assembly_rule_config_view, access["store_id"], delivery_type, True)
+        try:
+            await callback_query.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+
+    @dp.message(F.text.in_({"/morning"} | i18n.all_variants("morning")))
+    async def cmd_morning_routine(message: types.Message):
+        access = await _require_access(message)
+        if not access:
+            return
+        store_id = access["store_id"]
+        is_owner_role = access["role"] == "OWNER"
+
+        status_msg = await message.reply("☀️ **Утренний сбор запущен...**")
+        enabled_now: List[str] = []
+
+        if is_owner_role:
+            # Шаги 1-2 плана (§5.2): включить простаивающие правила и сразу
+            # прогнать цикл автосборки, не дожидаясь фонового тика. Только
+            # владелец — сотрудник (шаги 3-5) просто забирает уже готовое.
+            rules = await asyncio.to_thread(_load_delivery_rules, store_id)
+            disabled_with_stages = [
+                r for r in rules
+                if not r["enabled"] and (r["stage_accept"] or r["stage_assemble"] or r["stage_waybill"])
+            ]
+            for r in disabled_with_stages:
+                await asyncio.to_thread(_toggle_rule_enabled, store_id, r["delivery_type"])
+                enabled_now.append(r["delivery_type"])
+
+            if enabled_now:
+                try:
+                    await status_msg.edit_text(f"🟢 Включил автосборку: {', '.join(enabled_now)}\n⏳ Запускаю цикл...")
+                except Exception:
+                    pass
+            else:
+                try:
+                    await status_msg.edit_text("⏳ Запускаю цикл автосборки...")
+                except Exception:
+                    pass
+
+            store_ctx = await get_store_by_id(store_id)
+            if store_ctx:
+                try:
+                    await run_auto_assembly_cycle(store_ctx.token, store_id)
+                except Exception as e:
+                    logger.error(f"Ошибка цикла автосборки из утреннего сбора: {e}", exc_info=True)
+
+        try:
+            await status_msg.edit_text(
+                ("🟢 Включил: " + ", ".join(enabled_now) + "\n" if enabled_now else "")
+                + "📦 Собираю накопленные накладные в пачку..."
+            )
+        except Exception:
+            pass
+
+        rows = await asyncio.to_thread(get_unprinted_spool_rows, store_id)
+        if not rows:
+            try:
+                await status_msg.edit_text(
+                    "☀️ **Утренний сбор завершён.**\n\n"
+                    + ("🟢 Включил: " + ", ".join(enabled_now) + "\n" if enabled_now else "")
+                    + "📭 Накладных к печати пока нет."
+                )
+            except Exception:
+                pass
+            return
+
+        try:
+            zip_bytes = await asyncio.to_thread(build_spool_zip_bytes, store_id)
+            manifest = await asyncio.to_thread(
+                process_zip_or_pdfs,
+                file_bytes=zip_bytes,
+                original_filename="morning_routine_spool.zip",
+                sort_preset="order_id",
+                auto_rotate=True,
+                express_mode="separate",
+                deduplicate_history=True,
+                force_reprint=False,
+                output_layout="auto",
+                store_id=store_id,
+            )
+
+            if manifest["all_duplicates"]:
+                try:
+                    await status_msg.edit_text("⚠️ Все накопленные накладные уже были напечатаны сегодня.")
+                except Exception:
+                    pass
+                return
+
+            await status_msg.edit_text(
+                "☀️ **Утренний сбор завершён.**\n\n"
+                + ("🟢 Включил: " + ", ".join(enabled_now) + "\n" if enabled_now else "")
+                + f"🧾 Накладных в пачке: `{len(rows)}` шт\n📤 Отправляю файлы..."
+            )
+            await _send_spool_batch(message.chat.id, manifest)
+
+        except Exception as e:
+            logger.error(f"Ошибка сборки пачки в утреннем сборе: {e}", exc_info=True)
+            await message.answer(f"❌ **Ошибка при сборке пачки:** `{str(e)}`")
 
     @dp.message(F.text == "/reset")
     async def cmd_reset(message: types.Message):
-        reset_printed_history()
+        access = await _require_access(message)
+        if not access:
+            return
+        await asyncio.to_thread(reset_printed_history, access["store_id"])
         await message.reply("♻️ **История напечатанных заказов за сегодня успешно сброшена!**")
 
     @dp.message(F.text == "/stats")
     async def cmd_stats(message: types.Message):
-        count = len(load_printed_history())
+        access = await _require_access(message)
+        if not access:
+            return
+        count = len(await asyncio.to_thread(load_printed_history, access["store_id"]))
         await message.reply(f"🏷️ **Напечатано заказов за сегодня:** `{count}` шт")
 
-    @dp.callback_query(F.data.startswith("stg_"))
+    @dp.callback_query(F.data.startswith("stg_") & ~F.data.startswith("stg_notif_"))
     async def process_settings_toggle(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Доступ недоступен в этом контексте, откройте /settings заново.", show_alert=True)
+            return
+        store_id = access["store_id"]
+
         data = callback_query.data
-        stg = config.load_print_settings()
+        stg = await asyncio.to_thread(config.load_print_settings, store_id)
 
         if data.startswith("stg_exp:"):
             stg["express_mode"] = data.split(":")[1]
@@ -214,26 +877,156 @@ def register_handlers():
             key = data.split(":")[1]
             stg[key] = not stg.get(key, True)
         elif data == "stg_reset_hist":
-            reset_printed_history()
+            await asyncio.to_thread(reset_printed_history, store_id)
             await callback_query.answer("♻️ История печати за сегодня сброшена!", show_alert=True)
-            text, kb = get_settings_view()
+            text, kb = get_settings_view(store_id)
             try:
                 await callback_query.message.edit_text(text, reply_markup=kb)
             except Exception:
                 pass
             return
 
-        config.save_print_settings(stg)
+        await asyncio.to_thread(config.save_print_settings, stg, store_id)
         await callback_query.answer("⚙️ Настройка сохранена!")
 
-        text, kb = get_settings_view()
+        text, kb = get_settings_view(store_id)
         try:
             await callback_query.message.edit_text(text, reply_markup=kb)
         except Exception:
             pass
 
+    @dp.callback_query(F.data == "stg_notif_menu")
+    async def process_notif_menu(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте /settings заново.", show_alert=True)
+            return
+        text, kb = await asyncio.to_thread(get_notification_settings_view, access["store_id"], callback_query.from_user.id)
+        try:
+            await callback_query.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+        await callback_query.answer()
+
+    @dp.callback_query(F.data == "stg_notif_back")
+    async def process_notif_back(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer()
+            return
+        text, kb = get_settings_view(access["store_id"])
+        try:
+            await callback_query.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+        await callback_query.answer()
+
+    @dp.callback_query(F.data.startswith("stg_notif_toggle:"))
+    async def process_notif_toggle(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте /settings заново.", show_alert=True)
+            return
+        group = callback_query.data.split(":", 1)[1]
+        await asyncio.to_thread(notification_prefs.toggle_group, callback_query.from_user.id, access["store_id"], group)
+        await asyncio.to_thread(audit.log_action, access["store_id"], callback_query.from_user.id, "notif_toggle", group)
+        await callback_query.answer("Сохранено")
+        text, kb = await asyncio.to_thread(get_notification_settings_view, access["store_id"], callback_query.from_user.id)
+        try:
+            await callback_query.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+
+    @dp.callback_query(F.data.startswith("stg_notif_quiet:"))
+    async def process_notif_quiet(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте /settings заново.", show_alert=True)
+            return
+        mode = callback_query.data.split(":", 1)[1]
+        if mode == "on":
+            await asyncio.to_thread(notification_prefs.set_quiet_hours, callback_query.from_user.id, access["store_id"], "23:00", "08:00")
+        else:
+            await asyncio.to_thread(notification_prefs.set_quiet_hours, callback_query.from_user.id, access["store_id"], None, None)
+        await asyncio.to_thread(audit.log_action, access["store_id"], callback_query.from_user.id, "notif_quiet_hours", mode)
+        await callback_query.answer("Сохранено")
+        text, kb = await asyncio.to_thread(get_notification_settings_view, access["store_id"], callback_query.from_user.id)
+        try:
+            await callback_query.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+
+    @dp.message(F.text.in_({"/chats"} | i18n.all_variants("chats")))
+    async def cmd_chats_menu(message: types.Message):
+        access = await _require_access(message)
+        if not access:
+            return
+        text, kb = await asyncio.to_thread(get_chats_view, access["store_id"])
+        await message.reply(text, reply_markup=kb)
+
+    @dp.callback_query(F.data.startswith("chat_open:"))
+    async def process_chat_open(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте /start заново.", show_alert=True)
+            return
+        group_id = callback_query.data.split(":", 1)[1]
+        PENDING_REPLY[callback_query.from_user.id] = {"group_id": group_id, "store_id": access["store_id"]}
+        await callback_query.answer()
+        await callback_query.message.answer(f"✍️ Напишите ответ клиенту следующим сообщением (диалог `{group_id}`).")
+
+    @dp.callback_query(F.data.startswith("chat_ai:"))
+    async def process_chat_return_ai(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте /start заново.", show_alert=True)
+            return
+        group_id = callback_query.data.split(":", 1)[1]
+        ok = await asyncio.to_thread(config.clear_chat_human_override, access["store_id"], group_id)
+        if ok:
+            await asyncio.to_thread(audit.log_action, access["store_id"], callback_query.from_user.id, "chat_return_ai", group_id)
+        await callback_query.answer("🤖 Вернул ИИ" if ok else "Уже не заблокирован", show_alert=True)
+        text, kb = await asyncio.to_thread(get_chats_view, access["store_id"])
+        try:
+            await callback_query.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+
+    @dp.message(F.text.in_({"/store"} | i18n.all_variants("store")))
+    async def cmd_store_status(message: types.Message):
+        access = await _require_access(message)
+        if not access:
+            return
+        store_id = access["store_id"]
+
+        from backend.state_helpers import _load_sales_summary, _load_dumper_logs
+
+        cookie_bad = config.is_cookie_alert_sent(store_id)
+        summary = await asyncio.to_thread(_load_sales_summary, store_id, 1)
+        spool_rows = await asyncio.to_thread(get_unprinted_spool_rows, store_id)
+        failures = await asyncio.to_thread(_recent_auto_assembly_failures, store_id)
+        dumper_logs = await asyncio.to_thread(_load_dumper_logs, store_id, 1)
+
+        lines = [
+            f"📊 **{_esc_md(config.get_store_name(store_id))}**\n",
+            f"🔑 Сессия Kaspi: {'🚨 истекла' if cookie_bad else '🟢 ОК'}",
+            f"📦 Заказов сегодня: `{summary.get('total_orders', 0)}` · выручка `{summary.get('total_revenue', 0):,.0f} ₸`".replace(",", " "),
+            f"🖨 В очереди на печать: `{len(spool_rows)}`",
+        ]
+        if dumper_logs:
+            lines.append(f"📉 Демпинг: последнее событие — _{_esc_md(dumper_logs[0].get('message', 'н/д'))}_")
+        if failures:
+            lines.append("\n🚨 **Последние ошибки автосборки:**")
+            lines.extend(f"• {_esc_md(f)}" for f in failures)
+
+        await message.reply("\n".join(lines))
+
     @dp.message(F.document)
     async def handle_document(message: types.Message):
+        access = await _require_access(message)
+        if not access:
+            return
+
         doc = message.document
         if not doc or not doc.file_name:
             return
@@ -247,11 +1040,12 @@ def register_handlers():
         PENDING_FILES[chat_id] = {
             "file_id": doc.file_id,
             "file_name": doc.file_name,
-            "file_size": doc.file_size
+            "file_size": doc.file_size,
+            "store_id": access["store_id"],
         }
 
         size_mb = (doc.file_size or 0) / (1024 * 1024)
-        stg = config.load_print_settings()
+        stg = await asyncio.to_thread(config.load_print_settings, access["store_id"])
         def_fmt = stg.get("output_layout", "auto")
 
         await message.reply(
@@ -288,9 +1082,16 @@ def register_handlers():
             await bot.download_file(file_info.file_path, destination=file_stream)
             file_bytes = file_stream.getvalue()
 
-            stg = config.load_print_settings()
+            store_id = pending.get("store_id")
+            stg = await asyncio.to_thread(config.load_print_settings, store_id)
 
-            manifest = process_zip_or_pdfs(
+            # PyMuPDF-обработка — синхронная и CPU-тяжёлая (обрезка полей,
+            # рендер N-up сеток на десятках страниц). Вызов напрямую в
+            # async-хэндлере блокировал бы весь event loop процесса — а это
+            # тот же процесс, что обслуживает веб-кабинет и API всех
+            # магазинов (см. docs/TELEGRAM_BOT_PLAN.md §7.1).
+            manifest = await asyncio.to_thread(
+                process_zip_or_pdfs,
                 file_bytes=file_bytes,
                 original_filename=pending["file_name"],
                 sort_preset=stg.get("sort_preset", "filename"),
@@ -298,7 +1099,8 @@ def register_handlers():
                 express_mode=stg.get("express_mode", "separate"),
                 deduplicate_history=stg.get("deduplicate_history", True),
                 force_reprint=force_reprint,
-                output_layout=layout_mode
+                output_layout=layout_mode,
+                store_id=store_id,
             )
 
             total_files = manifest["total_files"]
@@ -331,7 +1133,7 @@ def register_handlers():
                 batch_file_path = get_batch_file_path(manifest["batch_id"], b_info["category"])
                 if batch_file_path and batch_file_path.exists():
                     input_file = FSInputFile(path=str(batch_file_path), filename=b_info["file_name"])
-                    
+
                     audit_msg = b_info.get("geometry_audit", {}).get("audit_message", "")
                     caption = (
                         f"{b_info['icon']} **{b_info['title']}**\n"
@@ -358,12 +1160,12 @@ def register_handlers():
         # несёт store_id (единый бот на все магазины), поэтому ищем и
         # разблокируем чат с этим group_id независимо от того, какому
         # магазину он принадлежит.
-        unblocked_store_id = config.clear_human_override_any_store(group_id)
+        unblocked_store_id = await asyncio.to_thread(config.clear_human_override_any_store, group_id)
 
         if unblocked_store_id is not None:
             original_text = callback_query.message.text or ""
             updated_text = original_text + "\n\n✅ **Чат разблокирован менеджером для ИИ.**"
-            
+
             try:
                 await callback_query.message.edit_text(
                     text=updated_text,
@@ -371,7 +1173,7 @@ def register_handlers():
                 )
             except Exception as e:
                 logger.error(f"⚠️ Не удалось обновить сообщение в Telegram: {e}")
-                
+
             await callback_query.answer("Чат разблокирован для ИИ.")
         else:
             await callback_query.answer("Этот чат уже активен или не заблокирован.", show_alert=True)

@@ -169,6 +169,13 @@ async def login_user(
     res = await db.execute(stmt)
     user = res.scalar_one_or_none()
 
+    # Сотрудники, заведённые через Telegram-приглашение (is_telegram_only),
+    # не имеют реального пароля (password_hash="") — verify_password упала бы
+    # на невалидном формате хеша вместо честного 401/403, если бы кто-то
+    # угадал их синтетический email tg<id>@telegram.local.
+    if user and user.is_telegram_only:
+        raise HTTPException(status_code=403, detail="Этот аккаунт создан через Telegram и не имеет входа в веб-кабинет.")
+
     if not user or not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=400, detail="Неверный Email или пароль")
 

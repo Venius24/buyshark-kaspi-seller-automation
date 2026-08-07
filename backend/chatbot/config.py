@@ -411,7 +411,28 @@ DEFAULT_PRINT_SETTINGS = {
     "auto_rotate": True
 }
 
-def load_print_settings() -> dict:
+def load_print_settings(store_id: Optional[str] = None) -> dict:
+    """
+    store_id given: настройки печати этого магазина (StorePrintSettingsDB).
+    store_id=None (легаси, dev-бутстрап без Store в БД): старый общий файл.
+    """
+    if store_id is not None:
+        from backend.state_helpers import _get_sync_db_session
+        session = _get_sync_db_session()
+        merged = DEFAULT_PRINT_SETTINGS.copy()
+        if session:
+            try:
+                from backend.db.models import StorePrintSettingsDB
+                row = session.get(StorePrintSettingsDB, store_id)
+                if row:
+                    try:
+                        merged.update(json.loads(row.payload))
+                    except Exception:
+                        pass
+            finally:
+                session.close()
+        return merged
+
     if os.path.exists(PRINT_SETTINGS_FILE):
         try:
             with open(PRINT_SETTINGS_FILE, "r", encoding="utf-8") as f:
@@ -423,10 +444,31 @@ def load_print_settings() -> dict:
             pass
     return DEFAULT_PRINT_SETTINGS.copy()
 
-def save_print_settings(settings: dict) -> dict:
-    os.makedirs(STATES_DIR, exist_ok=True)
-    current = load_print_settings()
+def save_print_settings(settings: dict, store_id: Optional[str] = None) -> dict:
+    current = load_print_settings(store_id=store_id)
     current.update(settings)
+
+    if store_id is not None:
+        from backend.state_helpers import _get_sync_db_session
+        session = _get_sync_db_session()
+        if session:
+            try:
+                from backend.db.models import StorePrintSettingsDB
+                payload = json.dumps(current, ensure_ascii=False)
+                row = session.get(StorePrintSettingsDB, store_id)
+                if not row:
+                    session.add(StorePrintSettingsDB(store_id=store_id, payload=payload))
+                else:
+                    row.payload = payload
+                session.commit()
+            except Exception as e:
+                logger.error(f"Error persisting print settings to DB for store {store_id}: {e}")
+                session.rollback()
+            finally:
+                session.close()
+        return current
+
+    os.makedirs(STATES_DIR, exist_ok=True)
     with open(PRINT_SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(current, f, ensure_ascii=False, indent=2)
     return current

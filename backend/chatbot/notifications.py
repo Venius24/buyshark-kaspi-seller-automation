@@ -5,9 +5,21 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from backend.chatbot import config, bot_instance
+from backend.chatbot import config, bot_instance, notify_dispatch
 
 logger = logging.getLogger(__name__)
+
+
+async def _unlinked_legacy_admin_ids(store_id: Optional[str]) -> list:
+    """admin_ids из легаси .env/ChatbotSettingsDB-фоллбека, которых ЕЩЁ нет
+    среди per-user привязок (telegram_links) этого магазина — чтобы не
+    слать один и тот же алерт дважды тому, кто уже привязался по-новому
+    (docs/TELEGRAM_BOT_PLAN.md §4.4)."""
+    admin_ids = config.load_admin_ids(store_id)
+    if store_id is None:
+        return admin_ids
+    linked = set(str(x) for x in await asyncio.to_thread(notify_dispatch._recipients_for_store, store_id))
+    return [a for a in admin_ids if str(a) not in linked]
 
 def _esc_md(text) -> str:
     """
@@ -36,7 +48,6 @@ async def notify_cookie_expired(reason: str, store_id: Optional[str] = None):
     if config.is_cookie_alert_sent(store_id):
         return
 
-    admin_ids = config.load_admin_ids(store_id)
     if not bot_instance.bot:
         logger.warning(f"🚨 [COOKIE ALERT] {reason}. (Telegram-бот выключен/не настроен)")
         config.set_cookie_alert_sent(store_id, True)
@@ -55,9 +66,12 @@ async def notify_cookie_expired(reason: str, store_id: Optional[str] = None):
         f"Это отдельный вход от основного кабинета — email/пароль тут не поможет."
     )
 
-    logger.warning(f"🚨 [COOKIE ALERT] {reason}. Отправка уведомления на Telegram IDs: {admin_ids}")
+    if store_id is not None:
+        await notify_dispatch.dispatch(store_id, "problems", alert_text, urgent=True)
 
-    for admin_id in admin_ids:
+    legacy_ids = await _unlinked_legacy_admin_ids(store_id)
+    logger.warning(f"🚨 [COOKIE ALERT] {reason}. Отправка уведомления (легаси-фоллбек) на Telegram IDs: {legacy_ids}")
+    for admin_id in legacy_ids:
         try:
             await bot_instance.bot.send_message(
                 chat_id=admin_id,
@@ -160,14 +174,18 @@ async def notify_manager_and_block(
         f"📱 [Открыть через Pay-ссылку]({pay_link})\n"
     )
 
-    admin_ids = config.load_admin_ids(store_id)
     if bot_instance.bot and bot_instance.HAS_AIOGRAM:
         try:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="✅ Разблокировать для ИИ", callback_data=f"unblock_{group_id}")]
             ])
-            for admin_id in admin_ids:
+
+            if store_id is not None:
+                await notify_dispatch.dispatch(store_id, "chats", alert_text, urgent=True, reply_markup=keyboard)
+
+            legacy_ids = await _unlinked_legacy_admin_ids(store_id)
+            for admin_id in legacy_ids:
                 try:
                     await bot_instance.bot.send_message(
                         chat_id=admin_id,

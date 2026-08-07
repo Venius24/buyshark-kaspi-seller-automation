@@ -73,8 +73,18 @@ async def run_scheduled_dumping_cycle() -> dict:
     for store in stores:
         try:
             res = await _run_dumping_cycle(store.token, store.store_id)
-            total_updated += res.get("updated_count", 0)
+            updated = res.get("updated_count", 0)
+            total_updated += updated
             _get_scheduler_state(store.store_id).last_run_timestamp = time.time()
+            if updated > 0:
+                try:
+                    from backend.chatbot import notify_dispatch
+                    await notify_dispatch.dispatch(
+                        store.store_id, "money",
+                        f"📉 Демпинг подвинул цену у {updated} товар(ов)",
+                    )
+                except Exception as notif_ex:
+                    logger.error(f"[Dumping] Не удалось отправить уведомление о демпинге: {notif_ex}")
         except Exception as e:
             logger.error(f"Scheduled dumper run failed for store {store.store_id}: {e}")
 

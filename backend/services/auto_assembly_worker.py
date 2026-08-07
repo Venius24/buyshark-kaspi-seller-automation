@@ -156,6 +156,36 @@ def _snapshot(order: dict) -> OrderSnapshot:
     )
 
 
+async def _notify_new_order(store_id: str, order: dict):
+    """Уведомление money-группы (Ф4, docs/TELEGRAM_BOT_PLAN.md §6): заказ
+    автоматически принят движком автосборки. Express — всегда urgent
+    (обходит батчинг и тихие часы), остальные проверяются на порог суммы
+    per-recipient уже внутри notify_dispatch.dispatch (prefs.new_order_min_sum
+    здесь не фильтруется централизованно — упрощение, см. HANDOFF)."""
+    try:
+        from backend.chatbot import notify_dispatch
+        snap = _snapshot(order)
+        code = str(order.get("id"))
+        is_express = snap.delivery_type == "Express"
+        icon = "⚡" if is_express else "🆕"
+        text = f"{icon} Заказ #{code} ({snap.delivery_type}) принят автоматически, сумма {snap.price:,.0f} ₸".replace(",", " ")
+        await notify_dispatch.dispatch(store_id, "money", text, urgent=is_express, amount=snap.price)
+    except Exception as e:
+        logger.error(f"[AutoAssembly] Не удалось отправить уведомление о новом заказе: {e}")
+
+
+async def _notify_stage_failed(store_id: str, stage: str, order_code: str, error: str):
+    try:
+        from backend.chatbot import notify_dispatch
+        text = f"🚨 Автосборка: этап «{stage}» упал на заказе #{order_code}\n{error[:300]}"
+        await notify_dispatch.dispatch(
+            store_id, "problems", text, urgent=True,
+            dedup_key=f"aa_fail:{stage}:{order_code}",
+        )
+    except Exception as e:
+        logger.error(f"[AutoAssembly] Не удалось отправить уведомление об ошибке этапа: {e}")
+
+
 async def _evaluate_and_log(
     store_id: str, order: dict, stage: str, rules: Dict[str, AutoAssemblyRule], excluded: Set[str],
     groups: dict, now: datetime.datetime, per_rule_counts: Dict[str, int],
@@ -212,8 +242,10 @@ async def _run_accept_stage(token: str, store_id: str, rules, excluded, groups, 
         try:
             await asyncio.to_thread(KaspiAPI.update_order_status, token, internal_id, "ACCEPTED_BY_MERCHANT")
             await asyncio.to_thread(_log, store_id, code, "accept", "DONE", "Заказ автоматически принят")
+            await _notify_new_order(store_id, order)
         except Exception as e:
             await asyncio.to_thread(_log, store_id, code, "accept", "FAILED", str(e))
+            await _notify_stage_failed(store_id, "accept", code, str(e))
 
 
 async def _run_assemble_stage(token: str, store_id: str, rules, excluded, groups, now, per_rule_counts):
@@ -241,6 +273,7 @@ async def _run_assemble_stage(token: str, store_id: str, rules, excluded, groups
             await asyncio.to_thread(_log, store_id, code, "assemble", "DONE", "Заказ автоматически упакован")
         except Exception as e:
             await asyncio.to_thread(_log, store_id, code, "assemble", "FAILED", str(e))
+            await _notify_stage_failed(store_id, "assemble", code, str(e))
 
 
 def _already_spooled(store_id: str, order_code: str) -> bool:
@@ -315,6 +348,7 @@ async def _run_waybill_stage(token: str, store_id: str, rules, excluded, groups,
             await asyncio.to_thread(_log, store_id, code, "waybill", "DONE", "Накладная скачана в пачку на печать")
         except Exception as e:
             await asyncio.to_thread(_log, store_id, code, "waybill", "FAILED", str(e))
+            await _notify_stage_failed(store_id, "waybill", code, str(e))
 
 
 async def run_auto_assembly_cycle(token: str, store_id: str):

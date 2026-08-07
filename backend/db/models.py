@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Boolean, Integer, Float, Text, DateTime, ForeignKey, Column
+from sqlalchemy import String, Boolean, Integer, BigInteger, Float, Text, DateTime, ForeignKey, Column
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.db.database import Base
 
@@ -16,6 +16,11 @@ class User(Base):
     phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Пользователь создан через приглашение сотрудника в Telegram-боте (см.
+    # TelegramLinkDB/TelegramLinkTokenDB) — не имеет реального пароля, вход в
+    # веб-кабинет для него заблокирован на уровне auth_v1.py, существует
+    # только для того, чтобы иметь UserStore-запись (роль в конкретном сторе).
+    is_telegram_only: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -400,4 +405,92 @@ class DraftProductDB(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TelegramLinkDB(Base):
+    """Привязка одного Telegram-аккаунта к одному пользователю кабинета.
+    tg_user_id — BigInteger (не Integer): реальные Telegram user ID давно
+    превышают 2^31, обычный Integer их бы переполнил/усёк.
+
+    active_store_id — какой из магазинов пользователя сейчас выбран в боте
+    (см. /switch в handlers.py); может быть NULL сразу после привязки, если
+    у пользователя больше одного магазина и он ещё не выбирал.
+    """
+    __tablename__ = "telegram_links"
+
+    tg_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    active_store_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("stores.id", ondelete="SET NULL"), nullable=True)
+    tg_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    tg_first_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    language_code: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)  # 'ru'/'kk'/др. из Telegram, Ф5 частичная локализация
+    linked_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TelegramLinkTokenDB(Base):
+    """Одноразовый (или max_uses-разовый) токен для deep-link привязки
+    Telegram к магазину (t.me/<bot>?start=<token>).
+
+    user_id=None + invite_role заданы => приглашение НОВОГО сотрудника: бот
+    сам заведёт telegram-only User при первом использовании токена.
+    user_id задан + invite_role=None => владелец привязывает СЕБЯ (уже
+    существующий User) к своему Telegram.
+    """
+    __tablename__ = "telegram_link_tokens"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    invite_role: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # 'MANAGER' | 'VIEWER'
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    max_uses: Mapped[int] = mapped_column(Integer, default=1)
+    used_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class StorePrintSettingsDB(Base):
+    """Настройки Print-Batcher (раскладка по умолчанию, сортировка,
+    экспресс-режим и т.д.) per-store. Раньше это был один общий JSON-файл
+    (states/print_settings.json) на все магазины — баг, найденный при
+    планировании Telegram-бота (docs/TELEGRAM_BOT_PLAN.md §7.2): второй
+    клиент молча делил бы настройки печати с первым."""
+    __tablename__ = "store_print_settings"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")  # JSON-stringified dict
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TelegramNotificationPrefDB(Base):
+    """Персональные настройки уведомлений (docs/TELEGRAM_BOT_PLAN.md §4.1, §6)
+    — на каждую пару (человек, магазин), не на человека целиком: один и тот
+    же Telegram-аккаунт может быть OWNER в одном магазине и MANAGER в другом
+    с разными предпочтениями. quiet_from/quiet_to — 'HH:MM' или NULL (тихие
+    часы выключены)."""
+    __tablename__ = "telegram_notification_prefs"
+
+    tg_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("telegram_links.tg_user_id", ondelete="CASCADE"), primary_key=True)
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    chats: Mapped[bool] = mapped_column(Boolean, default=True)
+    problems: Mapped[bool] = mapped_column(Boolean, default=True)
+    money: Mapped[bool] = mapped_column(Boolean, default=False)  # самый спамный канал — выкл по умолчанию
+    new_order_min_sum: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    quiet_from: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
+    quiet_to: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
+
+
+class TelegramAuditLogDB(Base):
+    """Аудит действий, совершённых из бота и меняющих состояние магазина
+    (docs/TELEGRAM_BOT_PLAN.md §4.4) — вкл/выкл автосборки, смена настроек
+    уведомлений, отвязка сотрудника, ответ клиенту из Telegram и т.д."""
+    __tablename__ = "telegram_audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    tg_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
