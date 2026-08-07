@@ -246,27 +246,42 @@ class TestExecuteUpdatesLogPersistence(ExecutorTestBase):
         super().tearDown()
 
     @patch("backend.dumper.executor._load_mc_cookies")
-    def test_default_saved_margin_is_hardcoded_1500(self, mock_cookies):
+    def test_saved_margin_is_computed_honestly_from_price_diff(self, mock_cookies):
+        # Раньше saved_margin была захардкожена (1500/2500 ₸ по совпадению
+        # подстроки в тексте лога) — теперь это реальная разница new_price - min_price.
         mock_cookies.return_value = {}
-        task = make_task()
+        task = make_task(new_price=990)
+        task["config"] = make_config(min_price=800.0)
         RateLimitExecutorWorker.execute_updates(
             [task], self.save_override, rate_limit_delay=0, merchant_id="999",
             store_id="store-test",
         )
         from backend.state_helpers import _load_dumper_logs
         logs = _load_dumper_logs("store-test", limit=5)
-        self.assertEqual(logs[0]["saved_margin"], 1500)
+        self.assertEqual(logs[0]["saved_margin"], 190)
+
+    def test_saved_margin_is_zero_without_min_price_floor(self):
+        # Без настроенной минималки честная маржа — 0, а не выдуманное число.
+        task = make_task(new_price=990)
+        RateLimitExecutorWorker.execute_updates(
+            [task], self.save_override, rate_limit_delay=0, merchant_id="999",
+            store_id="store-test",
+        )
+        from backend.state_helpers import _load_dumper_logs
+        logs = _load_dumper_logs("store-test", limit=5)
+        self.assertEqual(logs[0]["saved_margin"], 0)
 
     @patch("backend.state_helpers._load_master_stock_groups")
     @patch("backend.dumper.executor.RateLimitExecutorWorker._update_kaspi_price_sync")
     @patch("backend.dumper.executor._load_mc_cookies")
-    def test_pull_up_action_bumps_saved_margin_to_2500(
+    def test_pull_up_action_saved_margin_matches_price_diff(
         self, mock_cookies, mock_update, mock_groups
     ):
         mock_cookies.return_value = {"mc-session": "s", "mc-sid": "sid"}
         mock_groups.return_value = {}
         mock_update.return_value = (True, "tx-1")
-        task = make_task()
+        task = make_task(new_price=990)
+        task["config"] = make_config(min_price=800.0)
         task["calculation_result"]["action"] = "PULL_UP_PRICE"
         RateLimitExecutorWorker.execute_updates(
             [task], self.save_override, rate_limit_delay=0, merchant_id="999",
@@ -274,7 +289,7 @@ class TestExecuteUpdatesLogPersistence(ExecutorTestBase):
         )
         from backend.state_helpers import _load_dumper_logs
         logs = _load_dumper_logs("store-test", limit=5)
-        self.assertEqual(logs[0]["saved_margin"], 2500)
+        self.assertEqual(logs[0]["saved_margin"], 190)
 
 
 if __name__ == "__main__":

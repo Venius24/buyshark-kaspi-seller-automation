@@ -76,6 +76,15 @@ async def run_price_dumping_job(
     except Exception:
         pass
 
+    # Piggyback: расклад демпинг-войны по каждому SKU + кто нас обходит —
+    # из уже загруженных в этом цикле offers, без лишних запросов к Kaspi.
+    try:
+        from backend.state_helpers import _upsert_price_war_snapshot, _append_competitor_encounters
+        _upsert_price_war_snapshot(brain_result.get("price_war_items", []), store_id=store_id)
+        _append_competitor_encounters(brain_result.get("competitor_encounters", []), store_id=store_id)
+    except Exception:
+        pass
+
     # Бродкаст аналитики в WebSocket
     from backend.dumper.telemetry import telemetry_manager
     await telemetry_manager.broadcast("analytics_update", analytics, store_id=store_id)

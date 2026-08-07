@@ -161,6 +161,9 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
 
                 await asyncio.to_thread(send_logistics)
                 logger.info(f"✅ [Chatbot] Логистический шаблон отправлен клиенту {client_name}.")
+                if store_id:
+                    from backend.state_helpers import _append_chat_response_log
+                    _append_chat_response_log(store_id, group_id)
                 continue
 
             config.mark_chat_replied(store_id, group_id, msg_id)
@@ -203,6 +206,9 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
             send_resp = await asyncio.to_thread(send_ai_response)
             if send_resp.status_code == 200 and send_resp.json().get("StatusCode") == 0:
                 logger.info(f"✅ [Chatbot] ИИ-ответ успешно отправлен клиенту {client_name}!")
+                if store_id:
+                    from backend.state_helpers import _append_chat_response_log
+                    _append_chat_response_log(store_id, group_id)
             else:
                 logger.error(f"❌ [Chatbot] Сбой отправки ответа клиенту {client_name}: {send_resp.text}")
 

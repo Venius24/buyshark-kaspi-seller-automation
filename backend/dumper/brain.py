@@ -256,6 +256,11 @@ class BrainWorker:
         total_scanned = len(market_snapshot)
         winning_count = 0
         total_saved_margin = 0.0
+        # Piggyback: собираем расклад по каждому SKU из уже загруженных offers
+        # (никаких лишних запросов к Kaspi) — используется для сводки
+        # "война по всем товарам" и лидерборда конкурентов на дашборде.
+        price_war_items = []
+        competitor_encounters = []
 
         for sku_key, snap in market_snapshot.items():
             cfg_data = configs.get(sku_key, {})
@@ -295,6 +300,35 @@ class BrainWorker:
 
             if res["dumping_status"] in ("WINNING_1ST", "MAX_PRICE_SINGLE"):
                 winning_count += 1
+
+            # --- Piggyback: расклад по этому SKU для сводки войны/лидерборда ---
+            raw_offers = snap.get("offers", []) or []
+            rival_offers = []
+            for o in raw_offers:
+                if str(o.get("merchantId", "")) == str(merchant_id):
+                    continue
+                price_val = o.get("price")
+                if price_val is None:
+                    continue
+                try:
+                    price_num = float(str(price_val).replace(" ₸", "").replace(" ", "").strip())
+                except ValueError:
+                    continue
+                rival_offers.append({"name": o.get("merchantName") or "Конкурент", "price": price_num})
+            rival_offers.sort(key=lambda x: x["price"])
+            best_rival = rival_offers[0] if rival_offers else None
+
+            price_war_items.append({
+                "sku": sku_key,
+                "name": p.get("name", sku_key),
+                "our_price": float(config.my_current_price),
+                "our_rank": res["currentPos"],
+                "competitors_count": len(rival_offers),
+                "best_competitor_price": best_rival["price"] if best_rival else None,
+                "best_competitor_name": best_rival["name"] if best_rival else None,
+            })
+            if res["dumping_status"] not in ("WINNING_1ST", "MAX_PRICE_SINGLE") and best_rival:
+                competitor_encounters.append({"sku": sku_key, "competitor_name": best_rival["name"]})
 
             if config.min_price > 0 and new_price > config.min_price:
                 total_saved_margin += (new_price - config.min_price)
@@ -338,5 +372,7 @@ class BrainWorker:
         return {
             "update_queue": update_queue,
             "analytics": analytics,
-            "calculation_logs": calculation_logs
+            "calculation_logs": calculation_logs,
+            "price_war_items": price_war_items,
+            "competitor_encounters": competitor_encounters
         }

@@ -5,8 +5,15 @@ import { PriceRadarWidget } from '../PriceRadarWidget';
 import { SalesStatsWidget } from '../SalesStatsWidget';
 import { ScoreRing } from '../ScoreRing';
 import { RevenueHeatmap } from '../RevenueHeatmap';
+import { AbcXyzWidget } from '../AbcXyzWidget';
+import { CompetitorLeaderboard } from '../CompetitorLeaderboard';
+import { CatalogCoverageGauge } from '../CatalogCoverageGauge';
+import { HourlyHeatmap } from '../HourlyHeatmap';
+import { ChatActivityHeatmap } from '../ChatActivityHeatmap';
 import { useSalesStats } from '../../hooks/useSalesStats';
 import { useScoreStats } from '../../hooks/useScoreStats';
+import { useAbcXyzStats } from '../../hooks/useAbcXyzStats';
+import { useInsightsStats } from '../../hooks/useInsightsStats';
 
 interface OverviewTabProps {
   analytics: {
@@ -38,6 +45,8 @@ export function OverviewTab({
 }: OverviewTabProps) {
   const salesStats = useSalesStats();
   const scoreStats = useScoreStats();
+  const abcXyzStats = useAbcXyzStats();
+  const insightsStats = useInsightsStats();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -66,6 +75,21 @@ export function OverviewTab({
         topProduct={widgetData?.price_radar?.top_product}
         events={widgetData?.price_radar?.recent_events}
       />
+
+      {/* 📊 ABC/XYZ-АНАЛИЗ ТОВАРОВ */}
+      <AbcXyzWidget data={abcXyzStats} />
+
+      {/* 🏆 ЛИДЕРБОРД КОНКУРЕНТОВ + 🛡️ ПОКРЫТИЕ КАТАЛОГА */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+        <CompetitorLeaderboard data={insightsStats.competitor_leaderboard} />
+        <CatalogCoverageGauge data={insightsStats.catalog_coverage} />
+      </div>
+
+      {/* 🕐 ПРОДАЖИ ПО ЧАСАМ/ДНЯМ НЕДЕЛИ */}
+      <HourlyHeatmap grid={insightsStats.hourly_heatmap} />
+
+      {/* 💬 АКТИВНОСТЬ АВТО-ЧАТА */}
+      <ChatActivityHeatmap data={insightsStats.chat_activity} />
 
       <div className="grid-2">
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

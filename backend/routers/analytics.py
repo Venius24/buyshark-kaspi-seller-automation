@@ -3,12 +3,15 @@ FastAPI router for Dashboard Analytics and Widget stats.
 """
 
 from fastapi import APIRouter, Depends
-from datetime import datetime
+from datetime import datetime, timedelta
+from sqlalchemy import select
+import json
 import time
 import logging
 from backend.state_helpers import (
     _load_dumping_configs, _load_products, _load_analytics_snapshot, _load_dumper_logs,
-    _load_sales_summary, _load_analytics_history,
+    _load_sales_summary, _load_analytics_history, _load_price_war_snapshot,
+    _load_competitor_leaderboard, _load_chat_activity, _get_sync_db_session,
 )
 from backend.dumper.config import _decode_base64_if_needed
 from backend.dumper.radar import _fetch_offers_sync
@@ -180,6 +183,183 @@ def get_sales_stats(days: int = 30, ctx: StoreContext = Depends(get_store_contex
     days = max(1, min(days, 365))
     summary = _load_sales_summary(ctx.store_id, days=days)
     return {"success": True, "days": days, **summary}
+
+
+@router.get("/price-war")
+def get_price_war_summary(ctx: StoreContext = Depends(get_store_context)):
+    """
+    Сводка демпинг-войны по ВСЕМ отслеживаемым SKU (не только первому) —
+    данные из price_war_snapshots, которые пишутся piggyback'ом на обычный
+    ~5-минутный цикл демпинга (backend/dumper/brain.py), без единого лишнего
+    запроса к Kaspi. Пусто, пока демпинг не отработал ни один цикл.
+    """
+    items = _load_price_war_snapshot(ctx.store_id)
+    ranked = [it["our_rank"] for it in items if it.get("our_rank")]
+    winning_count = sum(1 for it in items if it.get("our_rank") == 1)
+    total_in_war = len(items)
+
+    items_sorted = sorted(items, key=lambda it: (it.get("our_rank") is None, -(it.get("our_rank") or 0)))
+
+    return {
+        "success": True,
+        "summary": {
+            "total_in_war": total_in_war,
+            "avg_rank": round(sum(ranked) / len(ranked), 1) if ranked else 0,
+            "winning_count": winning_count,
+            "losing_count": total_in_war - winning_count,
+        },
+        "products": items_sorted,
+    }
+
+
+@router.get("/insights")
+def get_insights(ctx: StoreContext = Depends(get_store_context)):
+    """
+    Пакет из нескольких второстепенных метрик дашборда в одном запросе, чтобы
+    не плодить лишний polling: лидерборд конкурентов, покрытие каталога
+    демпингом, активность продаж по часам/дням недели, активность авто-чата.
+    Всё честно посчитано из реальных таблиц; пусто/ноль, пока история не накопилась.
+    """
+    import datetime as _dt
+
+    # Лидерборд конкурентов (накапливается с деплоя price_war piggyback'а)
+    leaderboard = _load_competitor_leaderboard(ctx.store_id, days=30, limit=10)
+
+    # Покрытие каталога демпингом
+    products = _load_products(ctx.store_id)
+    configs = _load_dumping_configs(store_id=ctx.store_id)
+    enabled_count = sum(1 for c in configs.values() if c.get("enabled"))
+    total_products = len(products)
+    catalog_coverage = {
+        "total_products": total_products,
+        "dumping_enabled": enabled_count,
+        "coverage_pct": round((enabled_count / total_products * 100.0), 1) if total_products else 0.0,
+    }
+
+    # Продажи по часам/дням недели (за последние 90 дней, из sales_orders)
+    session = _get_sync_db_session()
+    hourly_grid = [[0] * 24 for _ in range(7)]  # [day_of_week 0=Пн..6=Вс][hour]
+    if session:
+        try:
+            from backend.db.models import SalesOrderDB
+            since = _dt.datetime.utcnow() - _dt.timedelta(days=90)
+            rows = session.scalars(
+                select(SalesOrderDB)
+                .where(SalesOrderDB.store_id == ctx.store_id, SalesOrderDB.created_at >= since)
+            ).all()
+            for r in rows:
+                hourly_grid[r.created_at.weekday()][r.created_at.hour] += 1
+        finally:
+            session.close()
+
+    # Активность авто-чата
+    chat_activity = _load_chat_activity(ctx.store_id, days=180)
+
+    return {
+        "success": True,
+        "competitor_leaderboard": leaderboard,
+        "catalog_coverage": catalog_coverage,
+        "hourly_heatmap": hourly_grid,
+        "chat_activity": chat_activity,
+    }
+
+
+@router.get("/abc-xyz")
+def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_context)):
+    """
+    ABC (доля в выручке) / XYZ (стабильность спроса по неделям) анализ —
+    считается живьём из sales_orders, новых таблиц не требует. XYZ-класс
+    честно не проставляется (null), если в периоде меньше 4 полных недель
+    истории — иначе коэффициент вариации на короткой выборке вводит в заблуждение.
+    """
+    days = max(28, min(days, 365))
+    session = _get_sync_db_session()
+    if not session:
+        return {"success": True, "items": [], "matrix": {}, "weeks_covered": 0, "total_revenue": 0.0}
+    try:
+        from backend.db.models import SalesOrderDB
+        since = datetime.utcnow() - timedelta(days=days)
+        rows = session.scalars(
+            select(SalesOrderDB).where(SalesOrderDB.store_id == ctx.store_id, SalesOrderDB.created_at >= since)
+        ).all()
+
+        sku_info: dict = {}
+        sku_weekly_qty: dict = {}
+        week_keys_seen: set = set()
+
+        for r in rows:
+            try:
+                entries = json.loads(r.entries_payload)
+            except Exception:
+                entries = []
+            week_key = r.created_at.strftime("%G-W%V")
+            week_keys_seen.add(week_key)
+            for e in entries:
+                sku = e.get("sku") or "?"
+                name = e.get("name") or sku
+                qty = e.get("quantity", 0) or 0
+                total_price = e.get("totalPrice", 0) or 0
+                info = sku_info.setdefault(sku, {"sku": sku, "name": name, "revenue": 0.0, "quantity": 0})
+                info["revenue"] += total_price
+                info["quantity"] += qty
+                weekly = sku_weekly_qty.setdefault(sku, {})
+                weekly[week_key] = weekly.get(week_key, 0) + qty
+
+        weeks_covered = len(week_keys_seen)
+        total_revenue = sum(v["revenue"] for v in sku_info.values())
+
+        items_sorted = sorted(sku_info.values(), key=lambda x: x["revenue"], reverse=True)
+        cumulative = 0.0
+        items = []
+        for it in items_sorted:
+            share = (it["revenue"] / total_revenue * 100.0) if total_revenue > 0 else 0.0
+            cumulative += share
+            if cumulative <= 80.0:
+                abc_class = "A"
+            elif cumulative <= 95.0:
+                abc_class = "B"
+            else:
+                abc_class = "C"
+
+            xyz_class = None
+            cv_pct = None
+            if weeks_covered >= 4:
+                weekly = sku_weekly_qty.get(it["sku"], {})
+                series = [weekly.get(wk, 0) for wk in week_keys_seen]
+                mean = sum(series) / len(series)
+                if mean > 0:
+                    variance = sum((x - mean) ** 2 for x in series) / len(series)
+                    cv_pct = round((variance ** 0.5) / mean * 100.0, 1)
+                    xyz_class = "X" if cv_pct <= 10.0 else ("Y" if cv_pct <= 25.0 else "Z")
+                else:
+                    xyz_class = "Z"
+
+            items.append({
+                "sku": it["sku"],
+                "name": it["name"],
+                "revenue": round(it["revenue"], 2),
+                "revenue_share": round(share, 2),
+                "quantity": it["quantity"],
+                "abc_class": abc_class,
+                "xyz_class": xyz_class,
+                "cv_pct": cv_pct,
+            })
+
+        matrix = {f"{a}{x}": 0 for a in ("A", "B", "C") for x in ("X", "Y", "Z")}
+        for it in items:
+            if it["xyz_class"]:
+                key = f"{it['abc_class']}{it['xyz_class']}"
+                matrix[key] = matrix.get(key, 0) + 1
+
+        return {
+            "success": True,
+            "items": items,
+            "matrix": matrix,
+            "weeks_covered": weeks_covered,
+            "total_revenue": round(total_revenue, 2),
+        }
+    finally:
+        session.close()
 
 
 def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:

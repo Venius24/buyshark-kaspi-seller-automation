@@ -220,6 +220,7 @@ class RateLimitExecutorWorker:
                 cookies = _load_mc_cookies(store_id=store_id)
 
         log_messages = []
+        price_change_events = []  # реальные события реакции на конкурента (msg + честная saved_margin), см. фикс ниже
         if not cookies or "mc-session" not in cookies or "mc-sid" not in cookies:
             warn_msg = "⚠️ [Executor] Внимание: Отсутствуют или недействительны mc-session / mc-sid куки, автообновление сессии не удалось. Обновление цен в Kaspi MC пропущено (запись только в локальный фид). Требуется повторный вход в Kaspi MC."
             logger.warning(warn_msg)
@@ -345,8 +346,16 @@ class RateLimitExecutorWorker:
                 p.get("status")
             )
 
+            # Честная сохранённая маржа — та же формула, что и total_saved_margin
+            # в brain.py (new_price - min_price), а не выдуманные 1500/2500 ₸,
+            # которые раньше подставлялись по совпадению подстроки в тексте лога.
+            real_saved_margin = 0
+            if config.min_price > 0 and new_price > config.min_price:
+                real_saved_margin = int(new_price - config.min_price)
+
             with results_lock:
                 log_messages.append(msg)
+                price_change_events.append({"message": msg, "saved_margin": real_saved_margin})
                 updated_count += 1
 
             # 3. Jitter & Micro-delays: случайная задержка 1.2 - 2.8 сек на
@@ -366,17 +375,10 @@ class RateLimitExecutorWorker:
             from backend.state_helpers import _append_dumper_logs
 
             now_str = datetime.datetime.now().strftime("%H:%M:%S")
-            formatted_new = []
-            for m in log_messages:
-                # Извлечение сохраненной маржи
-                saved_val = 1500
-                if "1-м месте" in m or "PULL_UP" in m:
-                    saved_val = 2500
-                formatted_new.append({
-                    "timestamp": now_str,
-                    "message": m,
-                    "saved_margin": saved_val
-                })
+            formatted_new = [
+                {"timestamp": now_str, "message": evt["message"], "saved_margin": evt["saved_margin"]}
+                for evt in price_change_events
+            ]
 
             _append_dumper_logs(formatted_new, store_id=store_id)
         except Exception as e:

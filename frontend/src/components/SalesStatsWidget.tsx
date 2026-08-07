@@ -1,12 +1,36 @@
-import React from 'react';
-import { TrendingUp, Package } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { TrendingUp, TrendingDown, Package } from 'lucide-react';
 import type { SalesSummary } from '../hooks/useSalesStats';
 
 const fmt = (n: number) => new Intl.NumberFormat('ru-RU').format(Math.round(n));
 
+type SortKey = 'revenue_desc' | 'revenue_asc' | 'qty_desc' | 'qty_asc';
+
+const SORT_OPTIONS: [SortKey, string][] = [
+  ['revenue_desc', 'Больше выручки'],
+  ['revenue_asc', 'Меньше выручки'],
+  ['qty_desc', 'Больше продаж'],
+  ['qty_asc', 'Меньше продаж'],
+];
+
 export const SalesStatsWidget: React.FC<{ data: SalesSummary }> = ({ data }) => {
+  const [sort, setSort] = useState<SortKey>('revenue_desc');
   const hasData = data.daily.length > 0;
   const maxRevenue = Math.max(1, ...data.daily.map((d) => d.revenue));
+
+  const sortedSkus = useMemo(() => {
+    const copy = [...data.top_skus];
+    switch (sort) {
+      case 'revenue_asc':
+        return copy.sort((a, b) => a.revenue - b.revenue);
+      case 'qty_desc':
+        return copy.sort((a, b) => b.quantity - a.quantity);
+      case 'qty_asc':
+        return copy.sort((a, b) => a.quantity - b.quantity);
+      default:
+        return copy.sort((a, b) => b.revenue - a.revenue);
+    }
+  }, [data.top_skus, sort]);
 
   return (
     <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -62,23 +86,43 @@ export const SalesStatsWidget: React.FC<{ data: SalesSummary }> = ({ data }) => 
           </div>
 
           {data.top_skus.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Package size={13} /> Топ товаров по выручке
-              </span>
-              {data.top_skus.slice(0, 5).map((sku) => (
-                <div key={sku.sku} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                  <span style={{ color: '#e5e7eb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>
-                    {sku.name}
-                  </span>
-                  <span style={{ display: 'flex', gap: '10px', color: 'var(--text-muted)' }}>
-                    <span>{sku.quantity} шт</span>
-                    <span style={{ color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '2px' }}>
-                      <TrendingUp size={11} /> {fmt(sku.revenue)} ₸
-                    </span>
-                  </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Package size={13} /> Товары ({data.top_skus.length})
+                </span>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {SORT_OPTIONS.map(([key, label]) => (
+                    <button
+                      key={key}
+                      className="btn btn-secondary"
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '11px',
+                        ...(sort === key ? { background: 'var(--secondary)', color: '#000', fontWeight: 700 } : {}),
+                      }}
+                      onClick={() => setSort(key)}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-              ))}
+              </div>
+              <div style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                {sortedSkus.map((sku) => (
+                  <div key={sku.sku} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '6px 4px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                    <span style={{ color: '#e5e7eb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>
+                      {sku.name}
+                    </span>
+                    <span style={{ display: 'flex', gap: '10px', color: 'var(--text-muted)' }}>
+                      <span>{sku.quantity} шт</span>
+                      <span style={{ color: sku.revenue > 0 ? '#10b981' : 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '2px' }}>
+                        {sku.revenue > 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />} {fmt(sku.revenue)} ₸
+                      </span>
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </>

@@ -1156,6 +1156,157 @@ def _load_analytics_history(store_id: str, days: int = 90) -> list:
         session.close()
 
 
+def _upsert_price_war_snapshot(items: list, store_id: str):
+    """Пишет по одной строке на SKU за цикл демпинга — piggyback на уже
+    идущий запрос конкурентов в brain.py (см. коммент в price-war роутере),
+    без единого лишнего похода в Kaspi API. items: [{sku, name, our_price,
+    our_rank, competitors_count, best_competitor_price, best_competitor_name}]."""
+    if not items:
+        return
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import PriceWarSnapshotDB
+        import datetime as _dt
+        now = _dt.datetime.utcnow()
+        for it in items:
+            sku = it["sku"]
+            row = session.get(PriceWarSnapshotDB, (store_id, sku))
+            if not row:
+                row = PriceWarSnapshotDB(store_id=store_id, sku=sku)
+                session.add(row)
+            row.name = str(it.get("name") or sku)[:500]
+            row.our_price = float(it.get("our_price") or 0.0)
+            row.our_rank = it.get("our_rank")
+            row.competitors_count = int(it.get("competitors_count") or 0)
+            row.best_competitor_price = it.get("best_competitor_price")
+            row.best_competitor_name = (str(it["best_competitor_name"])[:300] if it.get("best_competitor_name") else None)
+            row.updated_at = now
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting price war snapshot to DB: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
+
+def _load_price_war_snapshot(store_id: str) -> list:
+    """Текущий расклад демпинг-войны по всем отслеживаемым SKU этого магазина."""
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import PriceWarSnapshotDB
+        rows = session.scalars(
+            select(PriceWarSnapshotDB).where(PriceWarSnapshotDB.store_id == store_id)
+        ).all()
+        return [
+            {
+                "sku": r.sku,
+                "name": r.name,
+                "our_price": r.our_price,
+                "our_rank": r.our_rank,
+                "competitors_count": r.competitors_count,
+                "best_competitor_price": r.best_competitor_price,
+                "best_competitor_name": r.best_competitor_name,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            }
+            for r in rows
+        ]
+    finally:
+        session.close()
+
+
+def _append_competitor_encounters(encounters: list, store_id: str):
+    """encounters: [{sku, competitor_name}] — одна запись за цикл на SKU, где
+    мы не на 1-м месте. Копится с момента деплоя фичи (никакого backfill)."""
+    if not encounters:
+        return
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import CompetitorEncounterLogDB
+        import datetime as _dt
+        now = _dt.datetime.utcnow()
+        for enc in encounters:
+            session.add(CompetitorEncounterLogDB(
+                store_id=store_id,
+                sku=enc["sku"],
+                competitor_name=str(enc["competitor_name"])[:300],
+                created_at=now,
+            ))
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting competitor encounters to DB: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
+
+def _load_competitor_leaderboard(store_id: str, days: int = 30, limit: int = 10) -> list:
+    """Кто чаще всего обходит нас в демпинге за последние N дней. Пусто, пока
+    история не накопилась (фича не откатывается назад по времени)."""
+    import datetime as _dt
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import CompetitorEncounterLogDB
+        from sqlalchemy import func
+        since = _dt.datetime.utcnow() - _dt.timedelta(days=days)
+        rows = session.execute(
+            select(CompetitorEncounterLogDB.competitor_name, func.count().label("cnt"))
+            .where(CompetitorEncounterLogDB.store_id == store_id, CompetitorEncounterLogDB.created_at >= since)
+            .group_by(CompetitorEncounterLogDB.competitor_name)
+            .order_by(func.count().desc())
+            .limit(limit)
+        ).all()
+        return [{"name": name, "count": cnt} for name, cnt in rows]
+    finally:
+        session.close()
+
+
+def _append_chat_response_log(store_id: str, group_id: str):
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import ChatResponseLogDB
+        import datetime as _dt
+        session.add(ChatResponseLogDB(store_id=store_id, group_id=group_id, created_at=_dt.datetime.utcnow()))
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting chat response log to DB: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
+
+def _load_chat_activity(store_id: str, days: int = 180) -> list:
+    """Дневная агрегация числа авто-ответов чата: [{date, count}]."""
+    import datetime as _dt
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import ChatResponseLogDB
+        since = _dt.datetime.utcnow() - _dt.timedelta(days=days)
+        rows = session.scalars(
+            select(ChatResponseLogDB)
+            .where(ChatResponseLogDB.store_id == store_id, ChatResponseLogDB.created_at >= since)
+        ).all()
+        daily: dict = {}
+        for r in rows:
+            day_key = r.created_at.strftime("%Y-%m-%d")
+            daily.setdefault(day_key, {"date": day_key, "count": 0})
+            daily[day_key]["count"] += 1
+        return sorted(daily.values(), key=lambda x: x["date"])
+    finally:
+        session.close()
+
+
 def _load_sales_summary(store_id: str, days: int = 30) -> dict:
     """Реальная агрегация выручки/продаж из sales_orders за последние N дней:
     выручка и число заказов по дням, топ-SKU по выручке, средний чек."""
@@ -1193,7 +1344,9 @@ def _load_sales_summary(store_id: str, days: int = 30) -> dict:
                 entry["quantity"] += e.get("quantity", 0) or 0
 
         total_orders = len(rows)
-        top_skus = sorted(sku_revenue.values(), key=lambda x: x["revenue"], reverse=True)[:10]
+        # Полный список по каждому SKU (не топ-10) — фронтенд сам сортирует/фильтрует
+        # по выручке или количеству, лучшие/худшие товары, без доп. запросов.
+        top_skus = sorted(sku_revenue.values(), key=lambda x: x["revenue"], reverse=True)
 
         return {
             "daily": sorted(daily.values(), key=lambda x: x["date"]),

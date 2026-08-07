@@ -261,6 +261,50 @@ class AnalyticsDailyHistoryDB(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
+class PriceWarSnapshotDB(Base):
+    """Последний известный расклад демпинг-войны по каждому включённому SKU —
+    перезаписывается на каждом ~5-минутном цикле демпинга (piggyback на уже
+    идущий запрос конкурентов в brain.py, без единого лишнего похода в Kaspi API).
+    В отличие от AnalyticsSnapshotDB (агрегат по всему магазину), здесь разрез
+    по товару — нужен для сводки "война по всем товарам" на экране демпинга.
+    """
+    __tablename__ = "price_war_snapshots"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    sku: Mapped[str] = mapped_column(String(100), primary_key=True)
+    name: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    our_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    our_rank: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    competitors_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    best_competitor_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    best_competitor_name: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class CompetitorEncounterLogDB(Base):
+    """Одна запись за цикл демпинга на SKU, где мы НЕ на 1-м месте — кто именно
+    нас обошёл. Копится с момента деплоя фичи; агрегация COUNT(*) GROUP BY
+    competitor_name за период = лидерборд конкурентов."""
+    __tablename__ = "competitor_encounter_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    sku: Mapped[str] = mapped_column(String(100), nullable=False)
+    competitor_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class ChatResponseLogDB(Base):
+    """Одна запись на каждый реальный авто-ответ чат-бота — нужна для heatmap
+    активности чата (по аналогии с dumper_logs). Копится с момента деплоя фичи."""
+    __tablename__ = "chat_response_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
 class AutoAssemblyRuleDB(Base):
     """Правило «Автосборки» — одно на (store_id, вид доставки). Три стадии
     конвейера включаются независимо: accept (принять заказ) -> assemble

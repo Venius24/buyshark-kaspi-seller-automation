@@ -2,6 +2,8 @@ import type { FormEvent } from 'react';
 import type { Product, DumpingConfig } from '../../types';
 import { Pagination } from '../shared/Pagination';
 import { ProductCardHeader } from '../shared/ProductCardHeader';
+import { PriceWarSummary } from '../PriceWarSummary';
+import { usePriceWarStats } from '../../hooks/usePriceWarStats';
 
 const EMPTY_CONFIG: DumpingConfig = {
   min_price: 0, max_price: 0, dump_step: 10, enabled: false,
@@ -95,8 +97,13 @@ export function DumpingTab({
   totalPages,
   onPageChange,
 }: DumpingTabProps) {
+  const priceWarStats = usePriceWarStats();
   return (
     <>
+      <div style={{ marginBottom: '20px' }}>
+        <PriceWarSummary data={priceWarStats} />
+      </div>
+
       {/* Header with Search, Filter & Page Size */}
       <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
