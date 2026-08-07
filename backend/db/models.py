@@ -242,6 +242,67 @@ class SalesOrderDB(Base):
     ingested_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
+class AutoAssemblyRuleDB(Base):
+    """Правило «Автосборки» — одно на (store_id, вид доставки). Три стадии
+    конвейера включаются независимо: accept (принять заказ) -> assemble
+    (упаковать/собрать груз) -> waybill (скачать накладную в спул печати).
+    delivery_type — те же категории, что возвращает
+    KaspiAPI._parse_delivery_type (Express/Postomat/Самовывоз/Today/Tomorrow/
+    Kaspi Доставка).
+    """
+    __tablename__ = "auto_assembly_rules"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    delivery_type: Mapped[str] = mapped_column(String(50), primary_key=True)
+
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    dry_run: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    stage_accept: Mapped[bool] = mapped_column(Boolean, default=False)
+    stage_assemble: Mapped[bool] = mapped_column(Boolean, default=False)
+    stage_waybill: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # JSON: {"days": [0..6], "start": "09:00", "end": "19:00"} — пустой список
+    # days или null-объект целиком = круглосуточно, без ограничения.
+    schedule: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    max_order_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    sku_blacklist: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON-список SKU
+    respect_stock_groups: Mapped[bool] = mapped_column(Boolean, default=True)
+    max_per_cycle: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AutoAssemblyLogDB(Base):
+    """Журнал решений движка автосборки — по образцу DumperLogDB."""
+    __tablename__ = "auto_assembly_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    order_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    stage: Mapped[str] = mapped_column(String(20), nullable=False)  # 'accept' | 'assemble' | 'waybill'
+    decision: Mapped[str] = mapped_column(String(20), nullable=False)  # 'DONE' | 'SKIPPED' | 'FAILED'
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class WaybillSpoolDB(Base):
+    """Накопитель скачанных накладных для живой пачки на печать. unique_key
+    намеренно совпадает с get_page_unique_key('order_<code>') из
+    print_batcher_service.py — печать пачки идёт через тот же PDF-пайплайн
+    и дедуп по PrintHistoryDB, без отдельной логики.
+    """
+    __tablename__ = "waybill_spool"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    order_code: Mapped[str] = mapped_column(String(100), primary_key=True)
+    date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)  # 'YYYY-MM-DD', день скачивания
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    downloaded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    printed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class DraftProductDB(Base):
     """Черновик фичи «Автодобавление товара» (backend/autolist/). Один ряд —
     один товар от загрузки фото+названия до отправки на модерацию Kaspi.

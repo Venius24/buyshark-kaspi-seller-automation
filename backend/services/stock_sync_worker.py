@@ -553,13 +553,25 @@ async def run_packaging_sync_cycle():
 
     Слайс 7: легаси-фоллбек на общую сессию (когда в БД ещё нет ни одного
     Store) убран — нет активных сторов, нечего списывать.
+
+    Автосборка (принятие/упаковка/накладные) намеренно повешена на этот же
+    тик, а не на отдельный луп — второй независимый постраничный обход
+    /orders на Kaspi поверх и без того горячего пути не заводим (см.
+    HANDOFF.md §3.0). Для сторов без единого включённого правила
+    run_auto_assembly_cycle делает ранний выход без единого запроса к Kaspi.
     """
+    from backend.services.auto_assembly_worker import run_auto_assembly_cycle
+
     stores = await list_active_stores()
     for store in stores:
         try:
             await process_packaging_auto_deduction(store.token, store.store_id)
         except Exception as e:
             logger.error(f"[Packaging Sync Loop] Store {store.store_id} failed: {e}")
+        try:
+            await run_auto_assembly_cycle(store.token, store.store_id)
+        except Exception as e:
+            logger.error(f"[Auto Assembly] Store {store.store_id} failed: {e}")
 
 async def start_packaging_sync_loop(interval_seconds: int = 30):
     """Фоновый воркер авто-списания остатков при появлении новых заказов в Упаковке — по всем активным сторам (Phase 7)."""

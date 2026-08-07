@@ -162,6 +162,17 @@ export function Sidebar({
           </button>
 
           <button
+            className={`sidebar-item ${activeTab === 'auto-assembly' ? 'active' : ''}`}
+            onClick={() => onSelectTab('auto-assembly')}
+          >
+            <div className="sidebar-item-left">
+              <span className="sidebar-icon">🤖</span>
+              <span>Автосборка</span>
+            </div>
+            <span className="sidebar-pill" style={{ color: '#34d399' }}>Auto</span>
+          </button>
+
+          <button
             className={`sidebar-item ${activeTab === 'transfer' ? 'active' : ''}`}
             onClick={() => onSelectTab('transfer')}
           >

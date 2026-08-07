@@ -121,6 +121,39 @@ export interface AutolistDraft {
   warning?: string;
 }
 
+export interface AutoAssemblySchedule {
+  days?: number[];
+  start?: string;
+  end?: string;
+}
+
+export interface AutoAssemblyRule {
+  delivery_type: string;
+  enabled: boolean;
+  dry_run: boolean;
+  stage_accept: boolean;
+  stage_assemble: boolean;
+  stage_waybill: boolean;
+  schedule: AutoAssemblySchedule | null;
+  max_order_price: number | null;
+  sku_blacklist: string[];
+  respect_stock_groups: boolean;
+  max_per_cycle: number | null;
+}
+
+export interface AutoAssemblyLogEntry {
+  order_code: string;
+  stage: string;
+  decision: string;
+  reason: string | null;
+  created_at: string | null;
+}
+
+export interface AutoAssemblySpoolItem {
+  order_code: string;
+  date: string;
+}
+
 export type ActiveTab =
   | 'stores'
   | 'overview'
@@ -134,5 +167,6 @@ export type ActiveTab =
   | 'print-batcher'
   | 'packaging'
   | 'transfer'
+  | 'auto-assembly'
   | 'logs'
   | 'settings';

@@ -13,6 +13,7 @@ const TAB_ICON: Record<ActiveTab, string> = {
   'print-batcher': '🖨️',
   packaging: '📦',
   transfer: '🚚',
+  'auto-assembly': '🤖',
   logs: '📜',
   settings: '⚙️',
 };
@@ -30,6 +31,7 @@ const TAB_TITLE: Record<ActiveTab, string> = {
   'print-batcher': 'Автосборщик & Сортировщик Печати (Print-Batcher Engine)',
   packaging: 'Упаковка Заказов',
   transfer: 'Передача Курьеру',
+  'auto-assembly': 'Автосборка',
   logs: 'Терминал Системных Событий',
   settings: 'Статус Сессии & Настройки',
 };
@@ -47,6 +49,7 @@ const TAB_SUBTITLE: Record<ActiveTab, string> = {
   'print-batcher': 'Прием ZIP-архивов, распознавание размеров страниц и генерация единых PDF для мгновенной печати по типам принтеров',
   packaging: 'Формирование и печать упаковочных актов и маркировок',
   transfer: 'Управление актами приема-сдачи и курьерскими передачами',
+  'auto-assembly': 'Автопринятие, автоупаковка и накопление накладных по видам доставки — с расписанием и лимитами',
   logs: 'Поток событий системы в реальном времени через WebSocket',
   settings: 'Состояние авторизации Kaspi REST API и сессии Kaspi MC',
 };

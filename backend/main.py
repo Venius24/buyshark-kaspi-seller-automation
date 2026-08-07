@@ -34,7 +34,7 @@ from backend.db.seed import seed_default_admin
 from backend.routers import (
     auth, products, orders, dumping, ws, analytics,
     chatbot, stock_groups, api_keys, print_batcher,
-    auth_v1, stores_v1, chats, autolist
+    auth_v1, stores_v1, chats, autolist, auto_assembly
 )
 from backend.routers.public_api import groups as public_groups
 
@@ -113,6 +113,7 @@ app.include_router(api_keys.router)
 app.include_router(print_batcher.router)
 app.include_router(public_groups.router)
 app.include_router(autolist.router)
+app.include_router(auto_assembly.router)
 
 if _perf_enabled():
     from backend.perf.router import router as perf_router

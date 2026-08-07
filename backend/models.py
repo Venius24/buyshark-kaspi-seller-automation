@@ -35,6 +35,24 @@ class DumpingConfigRequest(BaseModel):
     blacklisted_merchants: Optional[List[str]] = []
     city_code: Optional[str] = "750000000"
 
+class AutoAssemblyRuleRequest(BaseModel):
+    delivery_type: str
+    enabled: bool = False
+    dry_run: bool = True
+    stage_accept: bool = False
+    stage_assemble: bool = False
+    stage_waybill: bool = False
+    schedule: Optional[Dict[str, Any]] = None  # {"days": [0..6], "start": "HH:MM", "end": "HH:MM"}
+    max_order_price: Optional[float] = None
+    sku_blacklist: Optional[List[str]] = []
+    respect_stock_groups: bool = True
+    max_per_cycle: Optional[int] = None
+
+
+class MarkSpoolPrintedRequest(BaseModel):
+    order_codes: Optional[List[str]] = None
+
+
 class GroupDumpingConfig(BaseModel):
     enabled: bool = True
     min_price: float

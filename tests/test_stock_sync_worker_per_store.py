@@ -125,6 +125,35 @@ class TestRunPackagingSyncCycle(unittest.IsolatedAsyncioTestCase):
             await worker.run_packaging_sync_cycle()
         self.assertEqual(mock_dedup.await_count, 2)
 
+    @patch("backend.services.stock_sync_worker.list_active_stores", new_callable=AsyncMock)
+    async def test_auto_assembly_cycle_runs_for_every_active_store(self, mock_list_stores):
+        """Автосборка повешена на тот же 30с тик, что и авто-списание —
+        отдельного лупа/опроса Kaspi не заведено (см. HANDOFF §3.0)."""
+        mock_list_stores.return_value = [
+            StoreContext(token="tok_a", merchant_id="m_a", store_id="store-a"),
+            StoreContext(token="tok_b", merchant_id="m_b", store_id="store-b"),
+        ]
+        with patch("backend.services.stock_sync_worker.process_packaging_auto_deduction", new_callable=AsyncMock), \
+             patch("backend.services.auto_assembly_worker.run_auto_assembly_cycle", new_callable=AsyncMock) as mock_aa:
+            await worker.run_packaging_sync_cycle()
+        self.assertEqual(mock_aa.await_args_list[0].args, ("tok_a", "store-a"))
+        self.assertEqual(mock_aa.await_args_list[1].args, ("tok_b", "store-b"))
+
+    @patch("backend.services.stock_sync_worker.list_active_stores", new_callable=AsyncMock)
+    async def test_auto_assembly_failure_does_not_block_other_stores(self, mock_list_stores):
+        mock_list_stores.return_value = [
+            StoreContext(token="tok_a", merchant_id="m_a", store_id="store-a"),
+            StoreContext(token="tok_b", merchant_id="m_b", store_id="store-b"),
+        ]
+        with patch("backend.services.stock_sync_worker.process_packaging_auto_deduction", new_callable=AsyncMock), \
+             patch(
+                 "backend.services.auto_assembly_worker.run_auto_assembly_cycle",
+                 new_callable=AsyncMock,
+                 side_effect=[Exception("boom"), None],
+             ) as mock_aa:
+            await worker.run_packaging_sync_cycle()
+        self.assertEqual(mock_aa.await_count, 2)
+
 
 class TestExecuteBroadcastSyncStoreScoping(unittest.IsolatedAsyncioTestCase):
     """execute_broadcast_sync() must read/write the group under the same

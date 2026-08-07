@@ -26,6 +26,7 @@ import { ChatbotTab } from './components/tabs/ChatbotTab';
 import { ChatsTab } from './components/tabs/ChatsTab';
 import { ProductsTab } from './components/tabs/ProductsTab';
 import { DumpingTab } from './components/tabs/DumpingTab';
+import { AutoAssemblyTab } from './components/tabs/AutoAssemblyTab';
 import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig } from './types';
 
 export default function App() {
@@ -874,6 +875,9 @@ export default function App() {
         )}
 
         {activeTab === 'chats' && <ChatsTab />}
+
+        {/* 🤖 TAB: AUTO-ASSEMBLY (auto-accept + auto-pack + waybill spool) */}
+        {activeTab === 'auto-assembly' && <AutoAssemblyTab />}
 
         {/* 🔗 TAB: MASTER STOCK GROUPS */}
         {activeTab === 'stock-groups' && (
