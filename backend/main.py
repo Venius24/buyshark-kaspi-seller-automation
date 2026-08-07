@@ -3,7 +3,20 @@ FastAPI backend — token-first architecture (Модульная сборка + 
 """
 
 import asyncio
+import logging
 import os
+
+# До этой правки корневой логгер оставался на дефолтном WARNING — все
+# logger.info(...) по всему приложению (старт бота/воркеров, шедулер
+# демпинга и т.д.) молча терялись в проде, journalctl показывал только
+# warning/error без "хлебных крошек" об успешном старте. Вызывается ДО
+# импорта остальных backend-модулей, чтобы их info-логи тоже не терялись.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
 import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
