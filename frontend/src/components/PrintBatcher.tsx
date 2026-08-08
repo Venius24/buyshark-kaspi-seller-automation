@@ -170,7 +170,7 @@ export const PrintBatcher: React.FC = () => {
           <div style={styles.headerTitleGroup}>
             <div style={styles.headerIcon}>🖨️</div>
             <div>
-              <h2 style={styles.headerTitle}>Print-Batcher Engine (Автосборщик печати)</h2>
+              <h2 style={styles.headerTitle}>Склейка накладных</h2>
               <p style={styles.headerSubtitle}>
                 Подгонка накладных 100% без полей, мульти-раскладка (4/8/9 на A4), суточная дедупликация и аудит MediaBox.
               </p>

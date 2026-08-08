@@ -27,7 +27,7 @@ export function Sidebar({
         <img src="/buyshark-logo.svg" alt="BuyShark" className="sidebar-logo-icon" style={{ objectFit: 'cover' }} />
         <div>
           <div className="sidebar-brand-title">BuyShark</div>
-          <div className="sidebar-brand-subtitle">Lumina Automation</div>
+          <div className="sidebar-brand-subtitle">Каспи Автопилот</div>
         </div>
       </div>
 
@@ -43,7 +43,7 @@ export function Sidebar({
               <span className="sidebar-icon">🏪</span>
               <span>Магазины Kaspi</span>
             </div>
-            <span className="sidebar-pill" style={{ color: '#34d399' }}>Multi-Store</span>
+            <span className="sidebar-pill">Multi-Store</span>
           </button>
 
           <button
@@ -76,7 +76,7 @@ export function Sidebar({
               <span className="sidebar-icon">⚡</span>
               <span>Авто-Демпинг</span>
             </div>
-            <span className="sidebar-pill" style={{ color: 'var(--secondary)' }}>Auto</span>
+            <span className="sidebar-pill">Auto</span>
           </button>
 
           <button
@@ -110,7 +110,7 @@ export function Sidebar({
               <span className="sidebar-icon">🔗</span>
               <span>Связка остатков</span>
             </div>
-            <span className="sidebar-pill" style={{ color: '#818cf8' }}>Master</span>
+            <span className="sidebar-pill">Master</span>
           </button>
 
           <button
@@ -121,7 +121,7 @@ export function Sidebar({
               <span className="sidebar-icon">✨</span>
               <span>Автодобавление</span>
             </div>
-            <span className="sidebar-pill" style={{ color: '#f472b6' }}>AI</span>
+            <span className="sidebar-pill">AI</span>
           </button>
 
           <button
@@ -132,7 +132,7 @@ export function Sidebar({
               <span className="sidebar-icon">💻</span>
               <span>Для разработчиков</span>
             </div>
-            <span className="sidebar-pill" style={{ color: '#38bdf8' }}>API</span>
+            <span className="sidebar-pill">API</span>
           </button>
         </div>
 
@@ -145,9 +145,8 @@ export function Sidebar({
           >
             <div className="sidebar-item-left">
               <span className="sidebar-icon">🖨️</span>
-              <span>Автосборщик печати</span>
+              <span>Склейка накладных</span>
             </div>
-            <span className="sidebar-pill" style={{ color: '#10b981' }}>KSTAT</span>
           </button>
 
           <button
@@ -169,7 +168,7 @@ export function Sidebar({
               <span className="sidebar-icon">🤖</span>
               <span>Автосборка</span>
             </div>
-            <span className="sidebar-pill" style={{ color: '#34d399' }}>Auto</span>
+            <span className="sidebar-pill">Auto</span>
           </button>
 
           <button
