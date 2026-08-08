@@ -389,15 +389,18 @@ def get_store_ids_for_admin(admin_id: str) -> list:
 
 def get_store_name(store_id: str) -> str:
     """Человекочитаемое имя магазина для текстов Telegram-алертов/команд —
-    merchant_id ничего не говорит владельцу, если у него несколько сторов."""
+    merchant_id ничего не говорит владельцу, если у него несколько сторов.
+    store_id=None (легаси .env-админ без Store в БД) и Store.name=NULL —
+    оба раньше рендерились в текст как буквальное "None"."""
+    fallback = store_id or "Магазин"
     from backend.state_helpers import _get_sync_db_session
     session = _get_sync_db_session()
     if not session:
-        return store_id
+        return fallback
     try:
         from backend.db.models import Store
-        store = session.get(Store, store_id)
-        return store.name if store else store_id
+        store = session.get(Store, store_id) if store_id else None
+        return (store.name if store else None) or fallback
     finally:
         session.close()
 
