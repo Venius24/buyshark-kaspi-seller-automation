@@ -35,7 +35,7 @@ export const PriceWarSummary: React.FC<{ data: PriceWarStats }> = ({ data }) => 
 
   return (
     <ExpandableCard
-      icon={<Swords size={20} color="#c92c3c" />}
+      icon={<Swords size={20} color="#17b8a6" />}
       title="Сводка демпинг-войны"
       subtitle={hasData ? `${summary.total_in_war} товаров в войне, средняя позиция ${summary.avg_rank}` : 'Пока нет данных цикла демпинга'}
       headerRight={

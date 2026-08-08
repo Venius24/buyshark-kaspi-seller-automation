@@ -84,7 +84,7 @@ export function ChatbotTab({ chatbotConfig, chatbotStatus, onSaveChatbotConfig, 
           <button
             className="btn"
             style={{
-              background: chatbotStatus.enabled ? 'linear-gradient(135deg, #ef4444, #dc2626)' : 'linear-gradient(135deg, #10b981, #059669)',
+              background: chatbotStatus.enabled ? 'linear-gradient(100deg, var(--error), #c23d47)' : 'linear-gradient(100deg, var(--secondary), var(--secondary-hover))',
               color: '#fff',
               padding: '10px 20px',
               fontSize: '13px',
@@ -150,7 +150,7 @@ export function ChatbotTab({ chatbotConfig, chatbotStatus, onSaveChatbotConfig, 
           </p>
 
           {chatbotStatus.blocked_chats.length === 0 ? (
-            <div style={{ padding: '24px 0', textAlign: 'center', color: '#888', fontSize: '13px' }}>
+            <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
               🎉 Нет заблокированных диалогов. ИИ отвечает на все входящие!
             </div>
           ) : (

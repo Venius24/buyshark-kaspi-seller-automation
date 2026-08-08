@@ -3,10 +3,10 @@ import { Flame, ChevronDown, Target, TrendingUp, Activity } from 'lucide-react';
 import type { ScoreStats } from '../hooks/useScoreStats';
 
 const getColor = (pct: number) => {
-  if (pct >= 80) return '#10b981';
-  if (pct >= 50) return '#00d2ff';
-  if (pct >= 25) return '#f59e0b';
-  return '#ef4444';
+  if (pct >= 80) return '#35c9a9';
+  if (pct >= 50) return '#2c4ef5';
+  if (pct >= 25) return '#e0a33e';
+  return '#e2545f';
 };
 
 const getLabel = (pct: number) => {
@@ -66,13 +66,16 @@ export const ScoreRing: React.FC<{ data: ScoreStats }> = ({ data }) => {
   const { price_leadership, revenue_trend, activity_consistency } = data.score.components;
 
   return (
-    <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: expanded ? '20px' : '0px', gridColumn: '1 / -1' }}>
+    <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: expanded ? '20px' : '0px', height: '100%' }}>
       <button
         onClick={() => setExpanded((v) => !v)}
         style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: '20px', flexWrap: 'wrap' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-          <div style={{ position: 'relative', width: '96px', height: '96px', flexShrink: 0 }}>
+          <div
+            className={composite >= 80 ? 'score-ring-glow' : undefined}
+            style={{ position: 'relative', width: '96px', height: '96px', flexShrink: 0, borderRadius: '50%' }}
+          >
             <Ring pct={composite} size={96} stroke={9} color={color} />
             <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
               <span style={{ fontSize: '26px', fontWeight: 800, color: '#fff', lineHeight: 1 }}>{composite}</span>
@@ -80,18 +83,18 @@ export const ScoreRing: React.FC<{ data: ScoreStats }> = ({ data }) => {
             </div>
           </div>
           <div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}>
+            <span className="bs-tag" style={{ background: 'rgba(255,255,255,0.06)', color: '#98a2b8', marginBottom: '10px', display: 'inline-block' }}>
               Общее здоровье магазина
-            </div>
-            <div style={{ fontSize: '20px', fontWeight: 700, color, marginTop: '2px' }}>{getLabel(composite)}</div>
+            </span>
+            <div style={{ fontSize: '20px', fontWeight: 700, color, marginTop: '4px' }}>{getLabel(composite)}</div>
             <div style={{ display: 'flex', gap: '14px', marginTop: '8px', flexWrap: 'wrap' }}>
               {data.streaks.price_leadership_days > 0 && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: '#f59e0b', fontWeight: 600 }}>
+                <span className="bs-tag" style={{ background: 'var(--primary-glow)', color: '#8fa5ff', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <Flame size={13} /> {data.streaks.price_leadership_days} дн. лучшей цены подряд
                 </span>
               )}
               {data.streaks.sales_days > 0 && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: '#10b981', fontWeight: 600 }}>
+                <span className="bs-tag" style={{ background: 'var(--success-glow)', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <Flame size={13} /> {data.streaks.sales_days} дн. продаж подряд
                 </span>
               )}
@@ -108,9 +111,9 @@ export const ScoreRing: React.FC<{ data: ScoreStats }> = ({ data }) => {
       <div style={{ display: 'grid', gridTemplateRows: expanded ? '1fr' : '0fr', transition: 'grid-template-rows 0.35s cubic-bezier(0.16, 1, 0.3, 1)' }}>
         <div style={{ overflow: 'hidden' }}>
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '4px 24px' }}>
-            <SubMetric icon={<Target size={13} color="#00d2ff" />} label="Ценовое лидерство" value={price_leadership} hint="Доля товаров с лучшей ценой на рынке" />
-            <SubMetric icon={<TrendingUp size={13} color="#10b981" />} label="Динамика продаж" value={revenue_trend} hint="Выручка за 7 дней к предыдущим 7 дням" />
-            <SubMetric icon={<Activity size={13} color="#f59e0b" />} label="Стабильность потока" value={activity_consistency} hint="Доля дней с заказами за 30 дней" />
+            <SubMetric icon={<Target size={13} color="var(--primary)" />} label="Ценовое лидерство" value={price_leadership} hint="Доля товаров с лучшей ценой на рынке" />
+            <SubMetric icon={<TrendingUp size={13} color="var(--success)" />} label="Динамика продаж" value={revenue_trend} hint="Выручка за 7 дней к предыдущим 7 дням" />
+            <SubMetric icon={<Activity size={13} color="var(--warning)" />} label="Стабильность потока" value={activity_consistency} hint="Доля дней с заказами за 30 дней" />
           </div>
           {data.history_points < 3 && (
             <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '10px' }}>

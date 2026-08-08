@@ -126,7 +126,7 @@ export function PackagingTab({
               <button
                 type="button"
                 className="btn btn-primary"
-                style={{ padding: '8px 14px', fontSize: '13px', background: 'linear-gradient(135deg, #10b981, #059669)', boxShadow: '0 4px 12px rgba(16, 185, 129, 0.2)' }}
+                style={{ padding: '8px 14px', fontSize: '13px', background: 'linear-gradient(100deg, var(--secondary), var(--secondary-hover))', boxShadow: '0 4px 12px var(--secondary-glow)' }}
                 onClick={onPackSelectedOrders}
               >
                 📦 Собрать выбранные ({selectedOrderIds.size})

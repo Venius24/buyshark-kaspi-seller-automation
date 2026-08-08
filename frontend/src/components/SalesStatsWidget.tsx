@@ -57,7 +57,7 @@ export const SalesStatsWidget: React.FC<{ data: SalesSummary }> = ({ data }) => 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '16px' }}>
             <div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>ВЫРУЧКА</div>
-              <div style={{ fontSize: '22px', fontWeight: 800, color: '#10b981' }}>{fmt(data.total_revenue)} ₸</div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#fff' }}>{fmt(data.total_revenue)} ₸</div>
             </div>
             <div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>ЗАКАЗОВ</div>
@@ -78,9 +78,12 @@ export const SalesStatsWidget: React.FC<{ data: SalesSummary }> = ({ data }) => 
                 style={{
                   flex: '0 0 10px',
                   height: `${Math.max(4, (d.revenue / maxRevenue) * 80)}px`,
-                  background: 'linear-gradient(180deg, #10b981, rgba(16,185,129,0.3))',
+                  background: 'linear-gradient(180deg, #35c9a9, #2c4ef5)',
                   borderRadius: '3px 3px 0 0',
+                  transition: 'filter 0.15s ease',
                 }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.filter = 'brightness(1.25)'; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.filter = 'none'; }}
               />
             ))}
           </div>
@@ -109,19 +112,30 @@ export const SalesStatsWidget: React.FC<{ data: SalesSummary }> = ({ data }) => 
                 </div>
               </div>
               <div style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                {sortedSkus.map((sku) => (
-                  <div key={sku.sku} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '6px 4px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                    <span style={{ color: '#e5e7eb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>
-                      {sku.name}
-                    </span>
-                    <span style={{ display: 'flex', gap: '10px', color: 'var(--text-muted)' }}>
-                      <span>{sku.quantity} шт</span>
-                      <span style={{ color: sku.revenue > 0 ? '#10b981' : 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '2px' }}>
-                        {sku.revenue > 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />} {fmt(sku.revenue)} ₸
+                {sortedSkus.map((sku, i) => {
+                  const rankStyle =
+                    i === 0
+                      ? { background: 'var(--primary-glow)', color: 'var(--primary)' }
+                      : i === 1
+                      ? { background: 'rgba(47,143,216,0.18)', color: '#5fb4e8' }
+                      : { background: 'rgba(255,255,255,0.08)', color: '#c9c9d0' };
+                  return (
+                    <div key={sku.sku} style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', padding: '8px 4px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <span style={{ width: '22px', height: '22px', flex: '0 0 auto', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 800, ...rankStyle }}>
+                        {i + 1}
                       </span>
-                    </span>
-                  </div>
-                ))}
+                      <span style={{ color: '#e5e7eb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                        {sku.name}
+                      </span>
+                      <span style={{ display: 'flex', gap: '10px', color: 'var(--text-muted)', flex: '0 0 auto' }}>
+                        <span>{sku.quantity} шт</span>
+                        <span style={{ color: sku.revenue > 0 ? 'var(--secondary)' : 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '2px' }}>
+                          {sku.revenue > 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />} {fmt(sku.revenue)} ₸
+                        </span>
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

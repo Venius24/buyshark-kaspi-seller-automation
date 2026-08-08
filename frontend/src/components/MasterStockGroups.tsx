@@ -337,7 +337,7 @@ export const MasterStockGroups: React.FC = () => {
   }, [products, modalProductSearch]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', color: '#f1f5f9' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', color: 'var(--text-color)' }}>
       
       {/* Toast Notification Alert */}
       {toastMessage && (
@@ -381,19 +381,19 @@ export const MasterStockGroups: React.FC = () => {
               width: '42px',
               height: '42px',
               borderRadius: '12px',
-              background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+              background: 'linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)'
+              boxShadow: '0 4px 14px var(--primary-glow)'
             }}>
               <Boxes size={24} color="#ffffff" />
             </div>
             <div>
-              <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: '#f8fafc', letterSpacing: '-0.02em' }}>
+              <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: 'var(--text-color)', letterSpacing: '-0.02em' }}>
                 Единый связный учет остатков (Master Stock Sync)
               </h1>
-              <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#94a3b8' }}>
+              <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
                 Объединение карточек товаров Kaspi в единые Мастер-Группы с автоматическим веерным списанием остатков
               </p>
             </div>
@@ -413,8 +413,8 @@ export const MasterStockGroups: React.FC = () => {
               gap: '8px',
               padding: '10px 16px',
               borderRadius: '10px',
-              background: '#1e293b',
-              border: '1px solid #334155',
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid var(--card-border)',
               color: '#cbd5e1',
               fontSize: '14px',
               fontWeight: 500,
@@ -434,7 +434,7 @@ export const MasterStockGroups: React.FC = () => {
               gap: '8px',
               padding: '10px 18px',
               borderRadius: '10px',
-              background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
+              background: 'linear-gradient(135deg, var(--primary-hover) 0%, var(--primary) 100%)',
               border: 'none',
               color: '#ffffff',
               fontSize: '14px',
@@ -466,12 +466,12 @@ export const MasterStockGroups: React.FC = () => {
           alignItems: 'center',
           gap: '16px'
         }}>
-          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(99, 102, 241, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#818cf8' }}>
+          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(99, 102, 241, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-hover)' }}>
             <Layers size={24} />
           </div>
           <div>
-            <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>Всего Мастер-Групп</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: '#f8fafc', marginTop: '2px' }}>{totalGroups}</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 500 }}>Всего Мастер-Групп</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-color)', marginTop: '2px' }}>{totalGroups}</div>
           </div>
         </div>
 
@@ -485,12 +485,12 @@ export const MasterStockGroups: React.FC = () => {
           alignItems: 'center',
           gap: '16px'
         }}>
-          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#34d399' }}>
+          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--success)' }}>
             <Package size={24} />
           </div>
           <div>
-            <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>Привязанных SKU Kaspi</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: '#f8fafc', marginTop: '2px' }}>{totalLinkedSkus}</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 500 }}>Привязанных SKU Kaspi</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-color)', marginTop: '2px' }}>{totalLinkedSkus}</div>
           </div>
         </div>
 
@@ -504,12 +504,12 @@ export const MasterStockGroups: React.FC = () => {
           alignItems: 'center',
           gap: '16px'
         }}>
-          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(245, 158, 11, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fbbf24' }}>
+          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(245, 158, 11, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--warning)' }}>
             <Zap size={24} />
           </div>
           <div>
-            <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>Активных синхронизаций</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: '#f8fafc', marginTop: '2px' }}>{activeGroupsCount}</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 500 }}>Активных синхронизаций</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-color)', marginTop: '2px' }}>{activeGroupsCount}</div>
           </div>
         </div>
 
@@ -523,12 +523,12 @@ export const MasterStockGroups: React.FC = () => {
           alignItems: 'center',
           gap: '16px'
         }}>
-          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: zeroStockGroupsCount > 0 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(100, 116, 139, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: zeroStockGroupsCount > 0 ? '#f87171' : '#94a3b8' }}>
+          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: zeroStockGroupsCount > 0 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(100, 116, 139, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: zeroStockGroupsCount > 0 ? 'var(--error)' : 'var(--text-muted)' }}>
             <ShieldAlert size={24} />
           </div>
           <div>
-            <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>Занулено / Снято с продажи</div>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: zeroStockGroupsCount > 0 ? '#f87171' : '#f8fafc', marginTop: '2px' }}>{zeroStockGroupsCount}</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 500 }}>Занулено / Снято с продажи</div>
+            <div style={{ fontSize: '22px', fontWeight: 700, color: zeroStockGroupsCount > 0 ? 'var(--error)' : 'var(--text-color)', marginTop: '2px' }}>{zeroStockGroupsCount}</div>
           </div>
         </div>
 
@@ -545,9 +545,9 @@ export const MasterStockGroups: React.FC = () => {
       }}>
 
         {/* Toolbar Filter */}
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--card-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
           <div style={{ position: 'relative', width: '320px', maxWidth: '100%' }}>
-            <Search size={18} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
+            <Search size={18} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input
               type="text"
               placeholder="Поиск по названию, ID или SKU..."
@@ -557,9 +557,9 @@ export const MasterStockGroups: React.FC = () => {
                 width: '100%',
                 padding: '10px 14px 10px 42px',
                 borderRadius: '10px',
-                background: '#0f172a',
-                border: '1px solid #334155',
-                color: '#f8fafc',
+                background: 'var(--card-bg)',
+                border: '1px solid var(--card-border)',
+                color: 'var(--text-color)',
                 fontSize: '14px',
                 outline: 'none',
                 boxSizing: 'border-box'
@@ -567,8 +567,8 @@ export const MasterStockGroups: React.FC = () => {
             />
           </div>
 
-          <div style={{ fontSize: '13px', color: '#94a3b8' }}>
-            Отображено групп: <strong style={{ color: '#f8fafc' }}>{filteredGroups.length}</strong> из {groups.length}
+          <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+            Отображено групп: <strong style={{ color: 'var(--text-color)' }}>{filteredGroups.length}</strong> из {groups.length}
           </div>
         </div>
 
@@ -576,7 +576,7 @@ export const MasterStockGroups: React.FC = () => {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
             <thead>
-              <tr style={{ background: '#0f172a', borderBottom: '1px solid #334155', color: '#94a3b8', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <tr style={{ background: 'var(--card-bg)', borderBottom: '1px solid var(--card-border)', color: 'var(--text-muted)', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 <th style={{ padding: '16px 24px' }}>Мастер-Группа</th>
                 <th style={{ padding: '16px 24px' }}>Общий остаток</th>
                 <th style={{ padding: '16px 24px' }}>Привязанные SKU (Kaspi)</th>
@@ -588,9 +588,9 @@ export const MasterStockGroups: React.FC = () => {
             <tbody>
               {filteredGroups.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: '48px 24px', textAlign: 'center', color: '#64748b' }}>
+                  <td colSpan={6} style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
                     <Layers size={40} style={{ marginBottom: '12px', opacity: 0.5 }} />
-                    <div style={{ fontSize: '16px', fontWeight: 600, color: '#94a3b8' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-muted)' }}>
                       {searchQuery ? 'Мастер-Группы не найдены по запросу' : 'Мастер-Группы пока не созданы'}
                     </div>
                     <p style={{ margin: '6px 0 0 0', fontSize: '13px' }}>
@@ -607,13 +607,13 @@ export const MasterStockGroups: React.FC = () => {
                       
                       {/* Group Name & ID */}
                       <td style={{ padding: '18px 24px' }}>
-                        <div style={{ fontWeight: 600, color: '#f8fafc', fontSize: '15px' }}>
+                        <div style={{ fontWeight: 600, color: 'var(--text-color)', fontSize: '15px' }}>
                           {group.group_name}
                         </div>
-                        <div style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span>ID: {group.group_id}</span>
                           {group.external_code && (
-                            <span style={{ color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                            <span style={{ color: 'var(--primary-hover)', background: 'rgba(56, 189, 248, 0.12)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
                               1C: {group.external_code}
                             </span>
                           )}
@@ -622,7 +622,7 @@ export const MasterStockGroups: React.FC = () => {
                           <div style={{ marginTop: '4px' }}>
                             <span style={{
                               fontSize: '11px',
-                              color: '#fbbf24',
+                              color: 'var(--warning)',
                               background: 'rgba(245, 158, 11, 0.12)',
                               padding: '2px 8px',
                               borderRadius: '6px',
@@ -651,8 +651,8 @@ export const MasterStockGroups: React.FC = () => {
                                 width: '80px',
                                 padding: '6px 10px',
                                 borderRadius: '8px',
-                                background: '#0f172a',
-                                border: '1px solid #6366f1',
+                                background: 'var(--card-bg)',
+                                border: '1px solid var(--primary)',
                                 color: '#ffffff',
                                 fontSize: '15px',
                                 fontWeight: 700,
@@ -666,7 +666,7 @@ export const MasterStockGroups: React.FC = () => {
                               style={{
                                 padding: '6px',
                                 borderRadius: '8px',
-                                background: '#10b981',
+                                background: 'var(--success)',
                                 border: 'none',
                                 color: '#ffffff',
                                 cursor: 'pointer',
@@ -682,7 +682,7 @@ export const MasterStockGroups: React.FC = () => {
                               style={{
                                 padding: '6px',
                                 borderRadius: '8px',
-                                background: '#334155',
+                                background: 'var(--card-border)',
                                 border: 'none',
                                 color: '#cbd5e1',
                                 cursor: 'pointer',
@@ -698,7 +698,7 @@ export const MasterStockGroups: React.FC = () => {
                             <span style={{
                               fontSize: '18px',
                               fontWeight: 700,
-                              color: group.shared_stock === 0 ? '#ef4444' : '#38bdf8',
+                              color: group.shared_stock === 0 ? 'var(--error)' : 'var(--primary-hover)',
                               padding: '4px 12px',
                               borderRadius: '8px',
                               background: group.shared_stock === 0 ? 'rgba(239, 68, 68, 0.12)' : 'rgba(56, 189, 248, 0.12)',
@@ -712,7 +712,7 @@ export const MasterStockGroups: React.FC = () => {
                               style={{
                                 background: 'none',
                                 border: 'none',
-                                color: '#94a3b8',
+                                color: 'var(--text-muted)',
                                 cursor: 'pointer',
                                 padding: '4px',
                                 borderRadius: '6px',
@@ -740,8 +740,8 @@ export const MasterStockGroups: React.FC = () => {
                                 style={{
                                   padding: '4px 10px',
                                   borderRadius: '20px',
-                                  background: '#1e293b',
-                                  border: '1px solid #334155',
+                                  background: 'rgba(255,255,255,0.05)',
+                                  border: '1px solid var(--card-border)',
                                   color: '#cbd5e1',
                                   fontSize: '12px',
                                   fontWeight: 500,
@@ -751,7 +751,7 @@ export const MasterStockGroups: React.FC = () => {
                                   gap: '4px'
                                 }}
                               >
-                                <Package size={12} color="#818cf8" />
+                                <Package size={12} color="var(--primary-hover)" />
                                 {hasDistinctMSku ? `${sku} (${mSku})` : sku}
                               </span>
                             );
@@ -763,22 +763,22 @@ export const MasterStockGroups: React.FC = () => {
                       {/* Sync Status Badge */}
                       <td style={{ padding: '18px 24px' }}>
                         {group.status === 'updating' ? (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)', color: '#60a5fa', fontSize: '13px', fontWeight: 600 }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)', color: 'var(--primary-hover)', fontSize: '13px', fontWeight: 600 }}>
                             <RefreshCw size={14} className="spin" />
                             <span>Обновление...</span>
                           </div>
                         ) : group.status === 'synced' ? (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#34d399', fontSize: '13px', fontWeight: 600 }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', color: 'var(--success)', fontSize: '13px', fontWeight: 600 }}>
                             <CheckCircle2 size={15} />
                             <span>Синхронизировано</span>
                           </div>
                         ) : group.status === 'warning' ? (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#fbbf24', fontSize: '13px', fontWeight: 600 }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', color: 'var(--warning)', fontSize: '13px', fontWeight: 600 }}>
                             <AlertTriangle size={15} />
                             <span>Частично</span>
                           </div>
                         ) : (
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', fontSize: '13px', fontWeight: 600 }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: 'var(--error)', fontSize: '13px', fontWeight: 600 }}>
                             <ShieldAlert size={15} />
                             <span>Ошибка sync</span>
                           </div>
@@ -786,13 +786,13 @@ export const MasterStockGroups: React.FC = () => {
                       </td>
 
                       {/* Last Sync Log */}
-                      <td style={{ padding: '18px 24px', fontSize: '13px', color: '#94a3b8' }}>
+                      <td style={{ padding: '18px 24px', fontSize: '13px', color: 'var(--text-muted)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <Clock size={14} color="#64748b" />
+                          <Clock size={14} color="var(--text-muted)" />
                           <span>{group.last_synced_at || 'Еще не запускалась'}</span>
                         </div>
                         {group.last_sync_log && (
-                          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '3px', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '180px' }}>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '180px' }}>
                             {group.last_sync_log}
                           </div>
                         )}
@@ -807,9 +807,9 @@ export const MasterStockGroups: React.FC = () => {
                             style={{
                               padding: '8px',
                               borderRadius: '8px',
-                              background: '#1e293b',
-                              border: '1px solid #334155',
-                              color: '#38bdf8',
+                              background: 'rgba(255,255,255,0.05)',
+                              border: '1px solid var(--card-border)',
+                              color: 'var(--primary-hover)',
                               cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'center'
@@ -825,9 +825,9 @@ export const MasterStockGroups: React.FC = () => {
                             style={{
                               padding: '8px',
                               borderRadius: '8px',
-                              background: '#1e293b',
-                              border: '1px solid #334155',
-                              color: '#6366f1',
+                              background: 'rgba(255,255,255,0.05)',
+                              border: '1px solid var(--card-border)',
+                              color: 'var(--primary)',
                               cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'center'
@@ -842,8 +842,8 @@ export const MasterStockGroups: React.FC = () => {
                             style={{
                               padding: '8px',
                               borderRadius: '8px',
-                              background: '#1e293b',
-                              border: '1px solid #334155',
+                              background: 'rgba(255,255,255,0.05)',
+                              border: '1px solid var(--card-border)',
                               color: '#cbd5e1',
                               cursor: 'pointer',
                               display: 'flex',
@@ -861,7 +861,7 @@ export const MasterStockGroups: React.FC = () => {
                               borderRadius: '8px',
                               background: 'rgba(239, 68, 68, 0.1)',
                               border: '1px solid rgba(239, 68, 68, 0.2)',
-                              color: '#f87171',
+                              color: 'var(--error)',
                               cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'center'
@@ -902,8 +902,8 @@ export const MasterStockGroups: React.FC = () => {
             width: '100%',
             maxWidth: '680px',
             maxHeight: '90vh',
-            background: '#1e293b',
-            border: '1px solid #334155',
+            background: 'rgba(255,255,255,0.05)',
+            border: '1px solid var(--card-border)',
             borderRadius: '20px',
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
             display: 'flex',
@@ -912,18 +912,18 @@ export const MasterStockGroups: React.FC = () => {
           }}>
             
             {/* Modal Header */}
-            <div style={{ padding: '24px 28px', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ padding: '24px 28px', borderBottom: '1px solid var(--card-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#f8fafc' }}>
+                <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: 'var(--text-color)' }}>
                   {editingGroupId ? 'Редактирование Мастер-Группы' : 'Создание новой Мастер-Группы'}
                 </h2>
-                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#94a3b8' }}>
+                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
                   Укажите название, доступный складской остаток и свяжите SKU товаров Kaspi
                 </p>
               </div>
               <button
                 onClick={() => setIsModalOpen(false)}
-                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '6px', borderRadius: '8px' }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '6px', borderRadius: '8px' }}
               >
                 <X size={20} />
               </button>
@@ -947,8 +947,8 @@ export const MasterStockGroups: React.FC = () => {
                     width: '100%',
                     padding: '12px 16px',
                     borderRadius: '10px',
-                    background: '#0f172a',
-                    border: '1px solid #334155',
+                    background: 'var(--card-bg)',
+                    border: '1px solid var(--card-border)',
                     color: '#ffffff',
                     fontSize: '14px',
                     outline: 'none',
@@ -973,9 +973,9 @@ export const MasterStockGroups: React.FC = () => {
                       width: '100%',
                       padding: '10px 14px',
                       borderRadius: '10px',
-                      background: '#0f172a',
-                      border: '1px solid #334155',
-                      color: '#f8fafc',
+                      background: 'var(--card-bg)',
+                      border: '1px solid var(--card-border)',
+                      color: 'var(--text-color)',
                       fontSize: '14px',
                       boxSizing: 'border-box'
                     }}
@@ -996,9 +996,9 @@ export const MasterStockGroups: React.FC = () => {
                       width: '100%',
                       padding: '10px 14px',
                       borderRadius: '10px',
-                      background: '#0f172a',
-                      border: '1px solid #334155',
-                      color: '#38bdf8',
+                      background: 'var(--card-bg)',
+                      border: '1px solid var(--card-border)',
+                      color: 'var(--primary-hover)',
                       fontFamily: 'monospace',
                       fontSize: '14px',
                       boxSizing: 'border-box'
@@ -1011,14 +1011,14 @@ export const MasterStockGroups: React.FC = () => {
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' }}>
                     Статус активности
                   </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', background: '#0f172a', padding: '10px 16px', borderRadius: '10px', border: '1px solid #334155' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', background: 'var(--card-bg)', padding: '10px 16px', borderRadius: '10px', border: '1px solid var(--card-border)' }}>
                     <input
                       type="checkbox"
                       checked={formIsActive}
                       onChange={e => setFormIsActive(e.target.checked)}
-                      style={{ width: '18px', height: '18px', accentColor: '#6366f1', cursor: 'pointer' }}
+                      style={{ width: '18px', height: '18px', accentColor: 'var(--primary)', cursor: 'pointer' }}
                     />
-                    <span style={{ fontSize: '14px', fontWeight: 500, color: formIsActive ? '#34d399' : '#94a3b8' }}>
+                    <span style={{ fontSize: '14px', fontWeight: 500, color: formIsActive ? 'var(--success)' : 'var(--text-muted)' }}>
                       {formIsActive ? 'Активна (Синхронизировать)' : 'Пауза'}
                     </span>
                   </label>
@@ -1026,16 +1026,16 @@ export const MasterStockGroups: React.FC = () => {
               </div>
 
               {/* Group Dumping Config Section */}
-              <div style={{ background: '#020617', padding: '16px', borderRadius: '12px', border: '1px solid #1e293b' }}>
+              <div style={{ background: 'var(--bg-color)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontWeight: 600, fontSize: '14px', color: formDumpingEnabled ? '#fbbf24' : '#cbd5e1' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontWeight: 600, fontSize: '14px', color: formDumpingEnabled ? 'var(--warning)' : '#cbd5e1' }}>
                     <input
                       type="checkbox"
                       checked={formDumpingEnabled}
                       onChange={e => setFormDumpingEnabled(e.target.checked)}
-                      style={{ width: '18px', height: '18px', accentColor: '#f59e0b', cursor: 'pointer' }}
+                      style={{ width: '18px', height: '18px', accentColor: 'var(--warning)', cursor: 'pointer' }}
                     />
-                    <Zap size={18} color={formDumpingEnabled ? '#f59e0b' : '#64748b'} />
+                    <Zap size={18} color={formDumpingEnabled ? 'var(--warning)' : 'var(--text-muted)'} />
                     <span>Включить авто-демпинг на уровне группы</span>
                   </label>
                 </div>
@@ -1043,11 +1043,11 @@ export const MasterStockGroups: React.FC = () => {
                 {formDumpingEnabled && (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px', marginTop: '14px' }}>
                     <div>
-                      <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Режим демпинга</label>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Режим демпинга</label>
                       <select
                         value={formDumpingMode}
                         onChange={e => setFormDumpingMode(e.target.value)}
-                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: '#0f172a', border: '1px solid #334155', color: '#fff', fontSize: '12px' }}
+                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: '#fff', fontSize: '12px' }}
                       >
                         <option value="TOP_1">🏆 1-е место</option>
                         <option value="TOP_2">🥈 2-е место</option>
@@ -1057,32 +1057,32 @@ export const MasterStockGroups: React.FC = () => {
                     </div>
 
                     <div>
-                      <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Мин. цена (₸)</label>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Мин. цена (₸)</label>
                       <input
                         type="number"
                         value={formMinPrice}
                         onChange={e => setFormMinPrice(parseFloat(e.target.value) || 0)}
-                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: '#0f172a', border: '1px solid #334155', color: '#fff', fontSize: '12px' }}
+                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: '#fff', fontSize: '12px' }}
                       />
                     </div>
 
                     <div>
-                      <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Макс. цена (₸)</label>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Макс. цена (₸)</label>
                       <input
                         type="number"
                         value={formMaxPrice}
                         onChange={e => setFormMaxPrice(parseFloat(e.target.value) || 0)}
-                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: '#0f172a', border: '1px solid #334155', color: '#fff', fontSize: '12px' }}
+                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: '#fff', fontSize: '12px' }}
                       />
                     </div>
 
                     <div>
-                      <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Шаг демпинга (₸)</label>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Шаг демпинга (₸)</label>
                       <input
                         type="number"
                         value={formDumpStep}
                         onChange={e => setFormDumpStep(parseFloat(e.target.value) || 10)}
-                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: '#0f172a', border: '1px solid #334155', color: '#fff', fontSize: '12px' }}
+                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: '#fff', fontSize: '12px' }}
                       />
                     </div>
                   </div>
@@ -1095,14 +1095,14 @@ export const MasterStockGroups: React.FC = () => {
                   <label style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1' }}>
                     Привязать товары Kaspi (Multi-Select SKU) *
                   </label>
-                  <span style={{ fontSize: '12px', color: '#6366f1', fontWeight: 600 }}>
+                  <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: 600 }}>
                     Выбрано: {formSelectedSkus.length} SKU
                   </span>
                 </div>
 
                 {/* Modal SKU Search */}
                 <div style={{ position: 'relative', marginBottom: '10px' }}>
-                  <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
+                  <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                   <input
                     type="text"
                     placeholder="Поиск товара в вашем каталоге по имени или SKU..."
@@ -1112,9 +1112,9 @@ export const MasterStockGroups: React.FC = () => {
                       width: '100%',
                       padding: '8px 12px 8px 36px',
                       borderRadius: '8px',
-                      background: '#0f172a',
-                      border: '1px solid #334155',
-                      color: '#f8fafc',
+                      background: 'var(--card-bg)',
+                      border: '1px solid var(--card-border)',
+                      color: 'var(--text-color)',
                       fontSize: '13px',
                       outline: 'none',
                       boxSizing: 'border-box'
@@ -1126,13 +1126,13 @@ export const MasterStockGroups: React.FC = () => {
                 <div style={{
                   maxHeight: '220px',
                   overflowY: 'auto',
-                  background: '#0f172a',
-                  border: '1px solid #334155',
+                  background: 'var(--card-bg)',
+                  border: '1px solid var(--card-border)',
                   borderRadius: '10px',
                   padding: '8px'
                 }}>
                   {modalFilteredProducts.length === 0 ? (
-                    <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                    <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
                       Товары не найдены в кэше ассортимента
                     </div>
                   ) : (
@@ -1162,16 +1162,16 @@ export const MasterStockGroups: React.FC = () => {
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => {}} // handled by parent div onClick
-                              style={{ width: '16px', height: '16px', accentColor: '#6366f1' }}
+                              style={{ width: '16px', height: '16px', accentColor: 'var(--primary)' }}
                             />
                             <div>
-                              <div style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc' }}>
+                              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-color)' }}>
                                 {p.name}
                               </div>
-                              <div style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace', marginTop: '2px' }}>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '2px' }}>
                                 Kaspi SKU: {skuVal}
                                 {p.merchantSku && p.merchantSku !== skuVal && (
-                                  <span style={{ color: '#818cf8', marginLeft: '8px' }}>
+                                  <span style={{ color: 'var(--primary-hover)', marginLeft: '8px' }}>
                                     • Merchant SKU: {p.merchantSku}
                                   </span>
                                 )}
@@ -1183,7 +1183,7 @@ export const MasterStockGroups: React.FC = () => {
 
                           <div style={{ textAlign: 'right', fontSize: '12px' }}>
                             <div style={{ fontWeight: 600, color: '#cbd5e1' }}>{p.price || (p.price_num ? `${p.price_num} ₸` : 'N/A')}</div>
-                            <div style={{ fontSize: '11px', color: '#94a3b8' }}>Остаток: {p.stock ?? 10} шт</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Остаток: {p.stock ?? 10} шт</div>
                           </div>
                         </div>
                       );
@@ -1200,7 +1200,7 @@ export const MasterStockGroups: React.FC = () => {
                   style={{
                     padding: '10px 20px',
                     borderRadius: '10px',
-                    background: '#334155',
+                    background: 'var(--card-border)',
                     border: 'none',
                     color: '#cbd5e1',
                     fontSize: '14px',
@@ -1216,7 +1216,7 @@ export const MasterStockGroups: React.FC = () => {
                   style={{
                     padding: '10px 24px',
                     borderRadius: '10px',
-                    background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
+                    background: 'linear-gradient(135deg, var(--primary-hover) 0%, var(--primary) 100%)',
                     border: 'none',
                     color: '#ffffff',
                     fontSize: '14px',
@@ -1249,36 +1249,36 @@ export const MasterStockGroups: React.FC = () => {
           padding: '16px'
         }}>
           <div style={{
-            background: '#0f172a',
-            border: '1px solid #334155',
+            background: 'var(--card-bg)',
+            border: '1px solid var(--card-border)',
             borderRadius: '16px',
             padding: '24px',
             maxWidth: '680px',
             width: '100%',
-            color: '#f8fafc',
+            color: 'var(--text-color)',
             boxShadow: '0 20px 40px rgba(0,0,0,0.5)'
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #1e293b', paddingBottom: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '12px' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <FileText size={20} color="#38bdf8" />
+                  <FileText size={20} color="var(--primary-hover)" />
                   <span>Пошаговый лог синхронизации</span>
                 </h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#94a3b8' }}>
-                  Группа: <strong style={{ color: '#f8fafc' }}>{viewLogGroup.group_name}</strong> (ID: <code>{viewLogGroup.group_id}</code>)
+                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Группа: <strong style={{ color: 'var(--text-color)' }}>{viewLogGroup.group_name}</strong> (ID: <code>{viewLogGroup.group_id}</code>)
                 </p>
               </div>
               <button
                 onClick={() => setViewLogGroup(null)}
-                style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '20px', cursor: 'pointer', padding: '4px' }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '20px', cursor: 'pointer', padding: '4px' }}
               >
                 <X size={20} />
               </button>
             </div>
 
-            <div style={{ marginBottom: '12px', fontSize: '13px', color: '#94a3b8', display: 'flex', justifyContent: 'space-between' }}>
+            <div style={{ marginBottom: '12px', fontSize: '13px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>
               <span>Время запуска: <strong>{viewLogGroup.last_synced_at || 'Еще не синхронизировалась'}</strong></span>
-              <span>Итог: <strong style={{ color: viewLogGroup.status === 'synced' ? '#34d399' : '#f87171' }}>{viewLogGroup.last_sync_log || viewLogGroup.status}</strong></span>
+              <span>Итог: <strong style={{ color: viewLogGroup.status === 'synced' ? 'var(--success)' : 'var(--error)' }}>{viewLogGroup.last_sync_log || viewLogGroup.status}</strong></span>
             </div>
 
             <div style={{
@@ -1286,16 +1286,16 @@ export const MasterStockGroups: React.FC = () => {
               overflowY: 'auto',
               fontFamily: 'Consolas, Monaco, "Andale Mono", monospace',
               fontSize: '12px',
-              background: '#020617',
+              background: 'var(--bg-color)',
               padding: '14px',
               borderRadius: '10px',
-              border: '1px solid #1e293b',
+              border: '1px solid rgba(255,255,255,0.05)',
               lineHeight: 1.6
             }}>
               {viewLogGroup.sync_logs && viewLogGroup.sync_logs.length > 0 ? (
                 viewLogGroup.sync_logs.map((line, i) => (
                   <div key={i} style={{
-                    color: line.includes('❌') ? '#f87171' : line.includes('⚠️') ? '#fbbf24' : '#34d399',
+                    color: line.includes('❌') ? 'var(--error)' : line.includes('⚠️') ? 'var(--warning)' : 'var(--success)',
                     marginBottom: '6px',
                     wordBreak: 'break-word'
                   }}>
@@ -1303,7 +1303,7 @@ export const MasterStockGroups: React.FC = () => {
                   </div>
                 ))
               ) : (
-                <div style={{ color: '#94a3b8', fontStyle: 'italic', padding: '12px 0' }}>
+                <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', padding: '12px 0' }}>
                   {viewLogGroup.last_sync_log || 'Детальный лог пока пуст.'}
                 </div>
               )}
@@ -1315,7 +1315,7 @@ export const MasterStockGroups: React.FC = () => {
                 style={{
                   padding: '8px 20px',
                   borderRadius: '8px',
-                  background: '#334155',
+                  background: 'var(--card-border)',
                   border: 'none',
                   color: '#ffffff',
                   cursor: 'pointer',

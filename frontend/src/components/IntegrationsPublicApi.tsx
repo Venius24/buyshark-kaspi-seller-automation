@@ -183,7 +183,7 @@ export const IntegrationsPublicApi: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', color: '#f1f5f9' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', color: 'var(--text-color)' }}>
 
       {/* Toast Alert */}
       {toast && (
@@ -194,7 +194,7 @@ export const IntegrationsPublicApi: React.FC = () => {
           zIndex: 9999,
           padding: '12px 20px',
           borderRadius: '10px',
-          background: toast.type === 'success' ? '#059669' : toast.type === 'error' ? '#dc2626' : '#2563eb',
+          background: toast.type === 'success' ? 'var(--success)' : toast.type === 'error' ? 'var(--error)' : 'var(--primary)',
           color: '#ffffff',
           fontWeight: 600,
           boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
@@ -211,10 +211,10 @@ export const IntegrationsPublicApi: React.FC = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ fontSize: '22px', fontWeight: 700, margin: 0, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Code size={26} color="#6366f1" />
+            <Code size={26} color="var(--primary)" />
             Раздел для разработчиков (API & Webhooks)
           </h2>
-          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#94a3b8' }}>
+          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
             Управление ключами доступа (X-API-Key), входящими запросами и исходящими Webhooks для интеграции 1С, МойСклад и внешней ERP
           </p>
         </div>
@@ -224,19 +224,17 @@ export const IntegrationsPublicApi: React.FC = () => {
           href={`${API_URL}/docs`}
           target="_blank"
           rel="noopener noreferrer"
+          className="bs-tag"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: '8px',
             padding: '10px 18px',
-            borderRadius: '10px',
-            background: 'rgba(99, 102, 241, 0.15)',
-            border: '1px solid rgba(99, 102, 241, 0.4)',
-            color: '#818cf8',
+            background: 'var(--primary-glow)',
+            border: '1px solid rgba(44, 78, 245, 0.4)',
+            color: '#8fa2ff',
             fontSize: '13px',
-            fontWeight: 600,
             textDecoration: 'none',
-            transition: 'all 0.2s'
           }}
         >
           <FileCode size={16} />
@@ -249,48 +247,31 @@ export const IntegrationsPublicApi: React.FC = () => {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '24px' }}>
 
         {/* API Keys Panel */}
-        <div style={{
-          background: 'rgba(30, 41, 59, 0.7)',
-          border: '1px solid rgba(51, 65, 85, 0.6)',
-          borderRadius: '16px',
-          padding: '24px',
-          backdropFilter: 'blur(10px)'
-        }}>
+        <div className="glass-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <h3 style={{ fontSize: '16px', fontWeight: 600, margin: 0, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Key size={20} color="#818cf8" />
+              <Key size={20} color="var(--primary-hover)" />
               Публичные API-Ключи (X-API-Key)
             </h3>
             <button
               type="button"
               onClick={() => setIsKeyModalOpen(true)}
-              style={{
-                padding: '8px 14px',
-                borderRadius: '8px',
-                background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
-                border: 'none',
-                color: '#fff',
-                fontSize: '13px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
+              className="btn btn-primary"
+              style={{ padding: '8px 14px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
             >
               <Plus size={16} />
               Сгенерировать ключ
             </button>
           </div>
 
-          <p style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '20px' }}>
-            Используйте API-ключ в заголовке <code style={{ color: '#818cf8', background: '#0f172a', padding: '2px 6px', borderRadius: '4px' }}>X-API-Key</code> при вызове <code style={{ color: '#38bdf8' }}>POST /api/v1/public/stocks/update</code> из 1С.
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px' }}>
+            Используйте API-ключ в заголовке <code style={{ color: 'var(--primary-hover)', background: 'var(--input-bg)', padding: '2px 6px', borderRadius: '4px' }}>X-API-Key</code> при вызове <code style={{ color: 'var(--secondary)' }}>POST /api/v1/public/stocks/update</code> из 1С.
           </p>
 
           {/* Key List */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {keys.length === 0 ? (
-              <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', background: 'rgba(15, 23, 42, 0.4)', borderRadius: '10px' }}>
+              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.03)', borderRadius: '10px' }}>
                 Активных API-ключей не найдено. Нажмите «Сгенерировать ключ».
               </div>
             ) : (
@@ -303,16 +284,16 @@ export const IntegrationsPublicApi: React.FC = () => {
                     justifyContent: 'space-between',
                     padding: '12px 16px',
                     borderRadius: '10px',
-                    background: '#0f172a',
-                    border: '1px solid #1e293b'
+                    background: 'var(--input-bg)',
+                    border: '1px solid var(--input-border)'
                   }}
                 >
                   <div>
                     <div style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc' }}>{k.name}</div>
-                    <div style={{ fontSize: '11px', color: '#818cf8', fontFamily: 'monospace', marginTop: '2px' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--primary-hover)', fontFamily: 'monospace', marginTop: '2px' }}>
                       {k.prefix}
                     </div>
-                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <Clock size={12} />
                       Создан: {k.created_at} {k.last_used ? `• Посл. вход: ${k.last_used}` : ''}
                     </div>
@@ -324,9 +305,9 @@ export const IntegrationsPublicApi: React.FC = () => {
                     style={{
                       padding: '8px',
                       borderRadius: '8px',
-                      background: 'rgba(239, 68, 68, 0.12)',
-                      border: '1px solid rgba(239, 68, 68, 0.3)',
-                      color: '#f87171',
+                      background: 'rgba(226, 84, 95, 0.12)',
+                      border: '1px solid rgba(226, 84, 95, 0.3)',
+                      color: '#f3a2a8',
                       cursor: 'pointer'
                     }}
                   >
@@ -339,20 +320,14 @@ export const IntegrationsPublicApi: React.FC = () => {
         </div>
 
         {/* Webhook Panel */}
-        <div style={{
-          background: 'rgba(30, 41, 59, 0.7)',
-          border: '1px solid rgba(51, 65, 85, 0.6)',
-          borderRadius: '16px',
-          padding: '24px',
-          backdropFilter: 'blur(10px)'
-        }}>
+        <div className="glass-card">
           <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 16px 0', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Webhook size={20} color="#38bdf8" />
+            <Webhook size={20} color="var(--secondary)" />
             Исходящие Webhooks (SaaS → 1С/ERP)
           </h3>
 
-          <p style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '20px' }}>
-            SaaS отправляет HTTP POST запросы на ваш сервер при заказах на Kaspi (<code style={{ color: '#38bdf8' }}>order.created</code>) или списании остатков.
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px' }}>
+            SaaS отправляет HTTP POST запросы на ваш сервер при заказах на Kaspi (<code style={{ color: 'var(--secondary)' }}>order.created</code>) или списании остатков.
           </p>
 
           <form onSubmit={handleSaveWebhook} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -365,16 +340,7 @@ export const IntegrationsPublicApi: React.FC = () => {
                 value={webhookConfig.url}
                 onChange={e => setWebhookConfig({ ...webhookConfig, url: e.target.value })}
                 placeholder="https://1c.seller-store.kz/hs/kaspi_sync/webhook"
-                style={{
-                  width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: '8px',
-                  background: '#0f172a',
-                  border: '1px solid #334155',
-                  color: '#f8fafc',
-                  fontSize: '13px',
-                  boxSizing: 'border-box'
-                }}
+                className="form-input"
               />
             </div>
 
@@ -387,16 +353,7 @@ export const IntegrationsPublicApi: React.FC = () => {
                 value={webhookConfig.secret}
                 onChange={e => setWebhookConfig({ ...webhookConfig, secret: e.target.value })}
                 placeholder="Ввести секретный ключ подписи..."
-                style={{
-                  width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: '8px',
-                  background: '#0f172a',
-                  border: '1px solid #334155',
-                  color: '#f8fafc',
-                  fontSize: '13px',
-                  boxSizing: 'border-box'
-                }}
+                className="form-input"
               />
             </div>
 
@@ -405,19 +362,8 @@ export const IntegrationsPublicApi: React.FC = () => {
                 type="button"
                 onClick={handleTestWebhook}
                 disabled={testingWebhook || !webhookConfig.url}
-                style={{
-                  padding: '10px 16px',
-                  borderRadius: '8px',
-                  background: 'rgba(56, 189, 248, 0.15)',
-                  border: '1px solid rgba(56, 189, 248, 0.4)',
-                  color: '#38bdf8',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  cursor: testingWebhook || !webhookConfig.url ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px'
-                }}
+                className="btn btn-secondary"
+                style={{ padding: '10px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}
               >
                 <Send size={15} />
                 {testingWebhook ? 'Отправка...' : 'Отправить тест 1С'}
@@ -426,16 +372,8 @@ export const IntegrationsPublicApi: React.FC = () => {
               <button
                 type="submit"
                 disabled={savingWebhook}
-                style={{
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
-                  border: 'none',
-                  color: '#fff',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
+                className="btn btn-primary"
+                style={{ padding: '10px 20px', fontSize: '13px' }}
               >
                 {savingWebhook ? 'Сохранение...' : 'Сохранить настройки'}
               </button>
@@ -447,29 +385,8 @@ export const IntegrationsPublicApi: React.FC = () => {
 
       {/* Generate API Key Modal */}
       {isKeyModalOpen && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(15, 23, 42, 0.85)',
-          backdropFilter: 'blur(8px)',
-          zIndex: 9999,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '20px'
-        }}>
-          <div style={{
-            background: '#1e293b',
-            border: '1px solid #334155',
-            borderRadius: '16px',
-            width: '100%',
-            maxWidth: '480px',
-            padding: '24px',
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
-          }}>
+        <div className="modal-overlay">
+          <div className="glass-card" style={{ width: '100%', maxWidth: '480px' }}>
 
             <h3 style={{ fontSize: '18px', fontWeight: 700, margin: '0 0 16px 0', color: '#f8fafc' }}>
               {createdSecret ? '🔑 API-Ключ успешно создан' : 'Сгенерировать новый API-ключ'}
@@ -487,16 +404,7 @@ export const IntegrationsPublicApi: React.FC = () => {
                     onChange={e => setNewKeyName(e.target.value)}
                     placeholder="1С:Управление Торговлей..."
                     required
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      background: '#0f172a',
-                      border: '1px solid #334155',
-                      color: '#f8fafc',
-                      fontSize: '13px',
-                      boxSizing: 'border-box'
-                    }}
+                    className="form-input"
                   />
                 </div>
 
@@ -504,13 +412,15 @@ export const IntegrationsPublicApi: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setIsKeyModalOpen(false)}
-                    style={{ padding: '10px 16px', borderRadius: '8px', background: '#334155', border: 'none', color: '#cbd5e1', cursor: 'pointer' }}
+                    className="btn btn-secondary"
+                    style={{ padding: '10px 16px' }}
                   >
                     Отмена
                   </button>
                   <button
                     type="submit"
-                    style={{ padding: '10px 20px', borderRadius: '8px', background: '#6366f1', border: 'none', color: '#fff', fontWeight: 600, cursor: 'pointer' }}
+                    className="btn btn-primary"
+                    style={{ padding: '10px 20px' }}
                   >
                     Сгенерировать
                   </button>
@@ -518,37 +428,32 @@ export const IntegrationsPublicApi: React.FC = () => {
               </form>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div style={{ padding: '12px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', color: '#fbbf24', fontSize: '12px' }}>
+                <div style={{ padding: '12px', background: 'rgba(224, 163, 62, 0.15)', border: '1px solid rgba(224, 163, 62, 0.3)', borderRadius: '8px', color: 'var(--warning)', fontSize: '12px' }}>
                   ⚠️ <strong>Внимание!</strong> Скопируйте этот секрет прямо сейчас. Он сохраняется в зашифрованном виде (SHA-256) и больше никогда не будет показан!
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '4px' }}>Секретный API Key:</label>
+                  <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>Секретный API Key:</label>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <input
                       type="text"
                       readOnly
                       value={createdSecret}
+                      className="form-input"
                       style={{
                         flexGrow: 1,
-                        padding: '10px',
-                        borderRadius: '8px',
-                        background: '#0f172a',
-                        border: '1px solid #38bdf8',
-                        color: '#38bdf8',
+                        border: '1px solid var(--secondary)',
+                        color: 'var(--secondary)',
                         fontFamily: 'monospace',
-                        fontSize: '13px'
                       }}
                     />
                     <button
                       onClick={() => copyToClipboard(createdSecret)}
+                      className="btn"
                       style={{
                         padding: '10px 14px',
-                        borderRadius: '8px',
-                        background: copied ? '#10b981' : '#4f46e5',
-                        border: 'none',
+                        background: copied ? 'var(--success)' : 'var(--primary)',
                         color: '#fff',
-                        cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '6px'
@@ -566,7 +471,8 @@ export const IntegrationsPublicApi: React.FC = () => {
                     setIsKeyModalOpen(false);
                     setCreatedSecret(null);
                   }}
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', background: '#334155', border: 'none', color: '#fff', fontWeight: 600, cursor: 'pointer', marginTop: '12px' }}
+                  className="btn btn-secondary"
+                  style={{ width: '100%', padding: '10px', marginTop: '12px' }}
                 >
                   Понятно, я сохранил ключ
                 </button>

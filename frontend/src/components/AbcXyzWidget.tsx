@@ -5,14 +5,14 @@ import type { AbcXyzStats } from '../hooks/useAbcXyzStats';
 
 const fmt = (n: number) => new Intl.NumberFormat('ru-RU').format(Math.round(n));
 
-const ABC_COLORS: Record<string, string> = { A: '#10b981', B: '#00d2ff', C: '#f59e0b' };
+const ABC_COLORS: Record<string, string> = { A: '#10b981', B: '#22bdea', C: '#f59e0b' };
 const XYZ_LABELS: Record<string, string> = { X: 'стабильный', Y: 'колеблется', Z: 'нестабильный' };
 
 // Классика ABC/XYZ: AX — лучшая ячейка (высокая выручка + стабильный спрос),
 // CZ — худшая (низкая выручка + хаотичный спрос). Цвет матрицы — от зелёного к красному по диагонали.
 const CELL_TONE: Record<string, string> = {
   AX: '#10b981', AY: '#34d399', AZ: '#f59e0b',
-  BX: '#34d399', BY: '#00d2ff', BZ: '#f59e0b',
+  BX: '#34d399', BY: '#22bdea', BZ: '#f59e0b',
   CX: '#f59e0b', CY: '#f59e0b', CZ: '#ef4444',
 };
 
@@ -28,7 +28,7 @@ export const AbcXyzWidget: React.FC<{ data: AbcXyzStats }> = ({ data }) => {
 
   return (
     <ExpandableCard
-      icon={<Grid3x3 size={20} color="#00d2ff" />}
+      icon={<Grid3x3 size={20} color="#22bdea" />}
       title="ABC/XYZ-анализ товаров"
       subtitle={
         !hasData
@@ -44,6 +44,29 @@ export const AbcXyzWidget: React.FC<{ data: AbcXyzStats }> = ({ data }) => {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {(data.matrix['AX'] || 0) > 0 && (
+            <div
+              style={{
+                borderRadius: '12px',
+                padding: '14px 18px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                backgroundImage: 'radial-gradient(300px 160px at 90% 0%, rgba(255,255,255,.2), transparent 70%), linear-gradient(150deg, #35c9a9, #14513f)',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '10.5px', letterSpacing: '0.05em', textTransform: 'uppercase', color: 'rgba(255,255,255,.85)', fontWeight: 700 }}>
+                  Звёзды каталога
+                </div>
+                <div style={{ fontSize: '12px', color: 'rgba(255,255,255,.85)', marginTop: '2px' }}>
+                  AX — высокая выручка + стабильный спрос
+                </div>
+              </div>
+              <div style={{ fontSize: '30px', fontWeight: 800, color: '#fff' }}>{data.matrix['AX']}</div>
+            </div>
+          )}
           <div>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>
               A/B/C — доля в выручке (80% / 15% / 5%), X/Y/Z — стабильность спроса по неделям

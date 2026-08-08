@@ -24,9 +24,9 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <div className="sidebar-logo-icon">K</div>
+        <img src="/buyshark-logo.svg" alt="BuyShark" className="sidebar-logo-icon" style={{ objectFit: 'cover' }} />
         <div>
-          <div className="sidebar-brand-title">Kaspi SaaS</div>
+          <div className="sidebar-brand-title">BuyShark</div>
           <div className="sidebar-brand-subtitle">Lumina Automation</div>
         </div>
       </div>

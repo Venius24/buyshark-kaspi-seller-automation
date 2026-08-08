@@ -69,10 +69,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
   };
 
   return (
-    <div style={styles.overlay}>
-      <div style={styles.card}>
+    <div className="modal-overlay">
+      <div className="glass-card" style={styles.card}>
+        <div style={styles.logoRow}>
+          <img src="/buyshark-logo.svg" alt="BuyShark" style={styles.logoIcon} />
+        </div>
         <h2 style={styles.title}>
-          {isRegister ? '🚀 Регистрация в Kaspi SaaS' : '🔐 Вход в личный кабинет'}
+          {isRegister ? 'Регистрация в BuyShark' : 'Вход в личный кабинет'}
         </h2>
 
         {error && <div style={styles.errorBox}>⚠️ {error}</div>}
@@ -87,7 +90,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
                   placeholder="Иван Иванов"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  style={styles.input}
+                  className="form-input"
                   required
                 />
               </div>
@@ -99,7 +102,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
                   placeholder="+7 (707) 000-0000"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  style={styles.input}
+                  className="form-input"
                 />
               </div>
             </>
@@ -112,7 +115,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
               placeholder="name@company.kz"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              style={styles.input}
+              className="form-input"
               required
             />
           </div>
@@ -124,12 +127,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              style={styles.input}
+              className="form-input"
               required
             />
           </div>
 
-          <button type="submit" disabled={loading} style={styles.submitBtn}>
+          <button type="submit" disabled={loading} className="btn btn-primary" style={styles.submitBtn}>
             {loading ? '⏳ Проверка...' : isRegister ? 'Зарегистрироваться' : 'Войти в кабинет'}
           </button>
         </form>
@@ -146,26 +149,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
 };
 
 const styles: Record<string, React.CSSProperties> = {
-  overlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(15, 23, 42, 0.95)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10000,
-  },
   card: {
-    background: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: '16px',
     padding: '32px',
     width: '400px',
     maxWidth: '90%',
     boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+  },
+  logoRow: {
+    display: 'flex',
+    justifyContent: 'center',
+    marginBottom: '16px',
+  },
+  logoIcon: {
+    width: '44px',
+    height: '44px',
+    borderRadius: '12px',
+    objectFit: 'cover',
   },
   title: {
     margin: '0 0 20px 0',
@@ -175,9 +174,9 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'center',
   },
   errorBox: {
-    background: '#451a1a',
-    border: '1px solid #991b1b',
-    color: '#fca5a5',
+    background: 'rgba(226, 84, 95, 0.12)',
+    border: '1px solid rgba(226, 84, 95, 0.35)',
+    color: '#f3a2a8',
     padding: '10px 14px',
     borderRadius: '8px',
     fontSize: '13px',
@@ -197,36 +196,22 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '13px',
     color: '#cbd5e1',
   },
-  input: {
-    background: '#0f172a',
-    border: '1px solid #334155',
-    borderRadius: '8px',
-    padding: '10px 14px',
-    color: '#ffffff',
-    fontSize: '14px',
-    outline: 'none',
-  },
   submitBtn: {
     marginTop: '10px',
-    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '10px',
+    width: '100%',
     padding: '12px',
     fontSize: '15px',
-    fontWeight: 700,
-    cursor: 'pointer',
   },
   toggleRow: {
     marginTop: '20px',
     fontSize: '13px',
-    color: '#94a3b8',
+    color: 'var(--text-muted)',
     textAlign: 'center',
   },
   toggleBtn: {
     background: 'transparent',
     border: 'none',
-    color: '#6366f1',
+    color: 'var(--secondary)',
     fontWeight: 700,
     marginLeft: '6px',
     cursor: 'pointer',

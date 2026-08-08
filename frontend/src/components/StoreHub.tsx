@@ -180,7 +180,7 @@ export const StoreHub: React.FC = () => {
   return (
     <div style={styles.hubContainer}>
       {/* Header Context Switcher Bar */}
-      <div style={styles.topContextBar}>
+      <div className="glass-card" style={styles.topContextBar}>
         <div style={styles.contextLeft}>
           <span style={{ fontSize: '20px' }}>🏪</span>
           <div>
@@ -188,6 +188,7 @@ export const StoreHub: React.FC = () => {
             <select
               value={activeStoreId}
               onChange={(e) => selectStoreContext(e.target.value)}
+              className="form-input"
               style={styles.storeSelect}
             >
               {stores.map((s) => (
@@ -201,12 +202,12 @@ export const StoreHub: React.FC = () => {
         </div>
 
         {profile && (
-          <div style={styles.planBadge}>
-            Тариф: <strong style={{ color: '#6366f1' }}>{profile.subscription.plan_type}</strong> | Подключено: {stores.length}/{profile.subscription.max_stores} магазинов
+          <div className="bs-tag" style={styles.planBadge}>
+            Тариф: <strong style={{ color: 'var(--secondary)' }}>{profile.subscription.plan_type}</strong> | Подключено: {stores.length}/{profile.subscription.max_stores} магазинов
           </div>
         )}
 
-        <button onClick={() => { resetModalState(); setShowAddModal(true); }} style={styles.addStoreBtn}>
+        <button onClick={() => { resetModalState(); setShowAddModal(true); }} className="btn btn-primary">
           ➕ Подключить магазин Kaspi
         </button>
       </div>
@@ -216,14 +217,14 @@ export const StoreHub: React.FC = () => {
         <h3 style={styles.sectionHeader}>🏬 Ваши магазины Kaspi:</h3>
 
         {loading ? (
-          <div style={{ color: '#94a3b8' }}>⏳ Загрузка списка магазинов...</div>
+          <div style={{ color: 'var(--text-muted)' }}>⏳ Загрузка списка магазинов...</div>
         ) : stores.length === 0 ? (
-          <div style={styles.emptyState}>
-            <div style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc' }}>🛍️ У вас пока нет подключенных магазинов Kaspi.</div>
-            <p style={{ fontSize: '13px', color: '#94a3b8', margin: '8px 0 16px 0' }}>
+          <div className="glass-card" style={styles.emptyState}>
+            <div style={{ fontSize: '18px', fontWeight: 600, color: '#fff' }}>🛍️ У вас пока нет подключенных магазинов Kaspi.</div>
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '8px 0 16px 0' }}>
               Подключите ваш магазин Kaspi по API-токену и email/паролю для автопечати, демпинга и заказов.
             </p>
-            <button onClick={() => { resetModalState(); setShowAddModal(true); }} style={styles.addStoreBtn}>
+            <button onClick={() => { resetModalState(); setShowAddModal(true); }} className="btn btn-primary">
               🚀 Подключить первый магазин Kaspi
             </button>
           </div>
@@ -232,6 +233,7 @@ export const StoreHub: React.FC = () => {
             {stores.map((s) => (
               <div
                 key={s.id}
+                className="glass-card"
                 style={{
                   ...styles.card,
                   ...(s.id === activeStoreId ? styles.activeCard : {}),
@@ -239,12 +241,7 @@ export const StoreHub: React.FC = () => {
               >
                 <div style={styles.cardHeader}>
                   <div style={styles.storeTitle}>{s.name}</div>
-                  <span
-                    style={{
-                      ...styles.statusBadge,
-                      ...(s.status === 'ACTIVE' ? styles.statusActive : styles.statusExpired),
-                    }}
-                  >
+                  <span className={`badge ${s.status === 'ACTIVE' ? 'badge-success' : 'badge-error'}`}>
                     {s.status === 'ACTIVE' ? '🟢 Подключен' : '🔴 Требуется вход'}
                   </span>
                 </div>
@@ -260,13 +257,13 @@ export const StoreHub: React.FC = () => {
                 </div>
 
                 <div style={styles.cardActions}>
-                  <button onClick={() => handleVerifyStore(s.id)} style={styles.verifyBtn}>
+                  <button onClick={() => handleVerifyStore(s.id)} className="btn btn-secondary" style={{ flex: 1, padding: '8px', fontSize: '12px' }}>
                     🔄 Проверить статус
                   </button>
-                  <button onClick={() => handleSyncCookies(s)} style={styles.syncBtn}>
+                  <button onClick={() => handleSyncCookies(s)} className="btn btn-primary" style={{ padding: '8px 12px', fontSize: '12px' }}>
                     🔑 Обновить куки
                   </button>
-                  <button onClick={() => handleDeleteStore(s.id)} style={styles.deleteBtn}>
+                  <button onClick={() => handleDeleteStore(s.id)} className="btn" style={styles.deleteBtn}>
                     🗑️ Удалить
                   </button>
                 </div>
@@ -278,8 +275,8 @@ export const StoreHub: React.FC = () => {
 
       {/* Onboarding Wizard Modal — Single Unified Form */}
       {showAddModal && (
-        <div style={styles.modalOverlay} onClick={() => setShowAddModal(false)}>
-          <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
+          <div className="glass-card modal-content" style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHeader}>
               <span>✨ Подключение магазина Kaspi</span>
               <button onClick={() => setShowAddModal(false)} style={styles.closeBtn}>
@@ -298,7 +295,7 @@ export const StoreHub: React.FC = () => {
                   placeholder="Barkhan"
                   value={storeName}
                   onChange={(e) => setStoreName(e.target.value)}
-                  style={styles.input}
+                  className="form-input"
                   required
                 />
               </div>
@@ -311,7 +308,7 @@ export const StoreHub: React.FC = () => {
                   placeholder="Вставьте ваш токен из кабинета Kaspi"
                   value={apiToken}
                   onChange={(e) => setApiToken(e.target.value)}
-                  style={styles.input}
+                  className="form-input"
                   required
                 />
               </div>
@@ -324,7 +321,7 @@ export const StoreHub: React.FC = () => {
                   placeholder="you@example.com"
                   value={mcEmail}
                   onChange={(e) => setMcEmail(e.target.value)}
-                  style={styles.input}
+                  className="form-input"
                 />
               </div>
 
@@ -336,12 +333,12 @@ export const StoreHub: React.FC = () => {
                   placeholder="••••••••"
                   value={mcPassword}
                   onChange={(e) => setMcPassword(e.target.value)}
-                  style={styles.input}
+                  className="form-input"
                 />
               </div>
 
               <div style={{ marginTop: '24px' }}>
-                <button type="submit" disabled={submitting} style={styles.submitBtn}>
+                <button type="submit" disabled={submitting} className="btn btn-primary" style={{ width: '100%', padding: '14px 24px', fontSize: '15px' }}>
                   {submitting ? '⏳ Подключение магазина и проверка данных...' : '🚀 Подключить магазин Kaspi'}
                 </button>
               </div>
@@ -355,13 +352,10 @@ export const StoreHub: React.FC = () => {
 
 const styles: Record<string, React.CSSProperties> = {
   hubContainer: {
-    color: '#f8fafc',
-    fontFamily: 'Inter, system-ui, sans-serif',
+    color: 'var(--text-color)',
+    fontFamily: 'var(--font-sans)',
   },
   topContextBar: {
-    background: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: '14px',
     padding: '16px 24px',
     display: 'flex',
     alignItems: 'center',
@@ -376,37 +370,18 @@ const styles: Record<string, React.CSSProperties> = {
   },
   contextLabel: {
     fontSize: '12px',
-    color: '#94a3b8',
+    color: 'var(--text-muted)',
     marginBottom: '4px',
   },
   storeSelect: {
-    background: '#0f172a',
-    color: '#f8fafc',
-    border: '1px solid #475569',
-    borderRadius: '8px',
-    padding: '8px 12px',
-    fontSize: '14px',
     fontWeight: 600,
-    outline: 'none',
+    width: 'auto',
   },
   planBadge: {
-    background: '#0f172a',
-    border: '1px solid #334155',
+    background: 'rgba(255,255,255,0.06)',
+    color: '#98a2b8',
     padding: '8px 16px',
-    borderRadius: '8px',
     fontSize: '13px',
-    color: '#cbd5e1',
-  },
-  addStoreBtn: {
-    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '10px',
-    padding: '10px 20px',
-    fontSize: '14px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)',
   },
   sectionHeader: {
     fontSize: '18px',
@@ -415,12 +390,9 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#ffffff',
   },
   emptyState: {
-    background: '#0f172a',
-    border: '1px solid #334155',
-    borderRadius: '14px',
     padding: '40px',
     textAlign: 'center',
-    color: '#94a3b8',
+    color: 'var(--text-muted)',
   },
   grid: {
     display: 'grid',
@@ -428,17 +400,13 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '20px',
   },
   card: {
-    background: '#0f172a',
-    border: '1px solid #334155',
-    borderRadius: '14px',
-    padding: '20px',
     display: 'flex',
     flexDirection: 'column',
     gap: '12px',
   },
   activeCard: {
-    borderColor: '#6366f1',
-    boxShadow: '0 0 16px rgba(99, 102, 241, 0.25)',
+    borderColor: 'var(--primary)',
+    boxShadow: '0 0 16px var(--primary-glow)',
   },
   cardHeader: {
     display: 'flex',
@@ -450,20 +418,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     color: '#ffffff',
   },
-  statusBadge: {
-    padding: '4px 10px',
-    borderRadius: '6px',
-    fontSize: '12px',
-    fontWeight: 600,
-  },
-  statusActive: {
-    background: '#064e3b',
-    color: '#6ee7b7',
-  },
-  statusExpired: {
-    background: '#451a1a',
-    color: '#fca5a5',
-  },
   cardDetail: {
     fontSize: '13px',
     color: '#cbd5e1',
@@ -473,70 +427,33 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '10px',
     marginTop: '12px',
   },
-  verifyBtn: {
-    flex: 1,
-    background: '#334155',
-    color: '#f8fafc',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '8px',
-    fontSize: '12px',
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  syncBtn: {
-    background: '#2563eb',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '8px 12px',
-    fontSize: '12px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  },
   deleteBtn: {
-    background: 'rgba(239, 68, 68, 0.15)',
-    color: '#fca5a5',
-    border: '1px solid rgba(239, 68, 68, 0.3)',
-    borderRadius: '8px',
+    background: 'rgba(226, 84, 95, 0.15)',
+    color: '#f3a2a8',
+    border: '1px solid rgba(226, 84, 95, 0.3)',
     padding: '8px 12px',
     fontSize: '12px',
-    cursor: 'pointer',
-  },
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0,0,0,0.8)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 9999,
   },
   modalContent: {
-    background: '#0f172a',
-    border: '1px solid #334155',
-    borderRadius: '16px',
     width: '520px',
     maxWidth: '92%',
+    padding: 0,
     overflow: 'hidden',
   },
   modalHeader: {
-    background: '#1e293b',
+    background: 'rgba(255,255,255,0.03)',
     padding: '16px 20px',
     fontSize: '16px',
     fontWeight: 700,
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    borderBottom: '1px solid var(--card-border)',
   },
   closeBtn: {
     background: 'transparent',
     border: 'none',
-    color: '#94a3b8',
+    color: 'var(--text-muted)',
     fontSize: '18px',
     cursor: 'pointer',
   },
@@ -551,34 +468,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     color: '#cbd5e1',
   },
-  input: {
-    background: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: '8px',
-    padding: '10px 14px',
-    color: '#f8fafc',
-    fontSize: '14px',
-    outline: 'none',
-  },
   errorBox: {
-    background: '#451a1a',
-    border: '1px solid #991b1b',
-    color: '#fca5a5',
+    background: 'rgba(226, 84, 95, 0.12)',
+    border: '1px solid rgba(226, 84, 95, 0.35)',
+    color: '#f3a2a8',
     padding: '10px 14px',
     borderRadius: '8px',
     fontSize: '13px',
     marginBottom: '16px',
-  },
-  submitBtn: {
-    width: '100%',
-    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '10px',
-    padding: '14px 24px',
-    fontSize: '15px',
-    fontWeight: 700,
-    cursor: 'pointer',
-    boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)',
   },
 };

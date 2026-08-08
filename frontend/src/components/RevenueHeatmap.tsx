@@ -42,10 +42,10 @@ const intensity = (revenue: number, max: number) => {
 
 const CELL_COLORS = [
   'rgba(255,255,255,0.05)',
-  'rgba(16,185,129,0.25)',
-  'rgba(16,185,129,0.48)',
-  'rgba(16,185,129,0.72)',
-  'rgba(16,185,129,1)',
+  '#1b2a6e',
+  '#2c4ef5',
+  '#2f8fd8',
+  '#35c9a9',
 ];
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -61,7 +61,7 @@ export const RevenueHeatmap: React.FC<{ heatmap: SalesDailyPoint[] }> = ({ heatm
     <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <CalendarDays size={18} color="#00d2ff" />
+          <CalendarDays size={18} color="#22bdea" />
           <div>
             <h2 style={{ fontSize: '16px', fontWeight: 700 }}>Карта активности продаж</h2>
             <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Яркость = выручка за день, наведите на клетку для деталей</p>
@@ -104,8 +104,8 @@ export const RevenueHeatmap: React.FC<{ heatmap: SalesDailyPoint[] }> = ({ heatm
                         borderRadius: '3px',
                         background: isFuture ? 'transparent' : CELL_COLORS[level],
                         cursor: isFuture ? 'default' : 'pointer',
-                        transition: 'transform 0.15s ease, outline 0.15s ease',
-                        outline: hovered?.date === day.date ? '1.5px solid #00d2ff' : 'none',
+                        transition: 'transform 0.12s ease',
+                        transform: hovered?.date === day.date ? 'scale(1.45)' : 'scale(1)',
                       }}
                     />
                   );

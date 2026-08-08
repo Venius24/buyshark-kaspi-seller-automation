@@ -28,7 +28,7 @@ export const HourlyHeatmap: React.FC<{ grid: number[][] }> = ({ grid }) => {
     <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Clock size={18} color="#00d2ff" />
+          <Clock size={18} color="#22bdea" />
           <div>
             <h2 style={{ fontSize: '16px', fontWeight: 700 }}>Продажи по часам и дням недели</h2>
             <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>За последние 90 дней, из реальной истории заказов</p>
@@ -69,7 +69,7 @@ export const HourlyHeatmap: React.FC<{ grid: number[][] }> = ({ grid }) => {
                       borderRadius: '4px',
                       background: CELL_COLORS[intensity(count, maxCount)],
                       cursor: 'pointer',
-                      outline: hovered?.day === day && hovered?.hour === hour ? '1.5px solid #00d2ff' : 'none',
+                      outline: hovered?.day === day && hovered?.hour === hour ? '1.5px solid #22bdea' : 'none',
                     }}
                   />
                 ))}

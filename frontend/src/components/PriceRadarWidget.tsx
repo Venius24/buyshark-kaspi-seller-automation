@@ -66,7 +66,7 @@ export const PriceRadarWidget: React.FC<PriceRadarProps> = ({ topProduct, events
           <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>
             Топ-Товар войн: <strong style={{ color: '#fff' }}>{topProduct!.name}</strong>
           </span>
-          <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+          <span className="bs-tag" style={{ background: 'linear-gradient(100deg, var(--primary), var(--secondary))', color: '#fff', boxShadow: '0 4px 12px var(--primary-glow)' }}>
             🏆 {topProduct!.our_rank}-е место на Kaspi
           </span>
         </div>
@@ -80,20 +80,20 @@ export const PriceRadarWidget: React.FC<PriceRadarProps> = ({ topProduct, events
                 flex: '1 0 140px',
                 padding: '12px 14px',
                 borderRadius: '12px',
-                background: comp.is_self 
-                  ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(0, 210, 255, 0.1))' 
+                background: comp.is_self
+                  ? 'linear-gradient(150deg, #2c4ef5, #16246b)'
                   : 'rgba(255, 255, 255, 0.03)',
-                border: comp.is_self 
-                  ? '1px solid rgba(16, 185, 129, 0.5)' 
+                border: comp.is_self
+                  ? '1px solid rgba(255, 255, 255, 0.2)'
                   : '1px solid rgba(255, 255, 255, 0.06)',
-                boxShadow: comp.is_self ? '0 0 16px rgba(16, 185, 129, 0.2)' : 'none',
+                boxShadow: comp.is_self ? '0 8px 20px var(--primary-glow)' : 'none',
                 position: 'relative'
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <span className="badge" style={{ 
-                  background: comp.is_self ? '#10b981' : 'rgba(255,255,255,0.1)', 
-                  color: comp.is_self ? '#000' : '#fff',
+                <span className="badge" style={{
+                  background: comp.is_self ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.1)',
+                  color: '#fff',
                   fontSize: '10px',
                   fontWeight: 800
                 }}>
@@ -110,7 +110,7 @@ export const PriceRadarWidget: React.FC<PriceRadarProps> = ({ topProduct, events
                 {comp.name}
               </div>
 
-              <div style={{ fontSize: '15px', fontWeight: 700, color: comp.is_self ? '#34d399' : '#e5e7eb', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
+              <div style={{ fontSize: '15px', fontWeight: 700, color: comp.is_self ? '#fff' : '#e5e7eb', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
                 {comp.price.toLocaleString('ru-RU')} ₸
               </div>
             </div>

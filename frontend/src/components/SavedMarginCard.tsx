@@ -1,5 +1,4 @@
 import React from 'react';
-import { DollarSign, ShieldCheck } from 'lucide-react';
 
 interface SavedMarginCardProps {
   totalSavedMargin: number;
@@ -9,25 +8,28 @@ export const SavedMarginCard: React.FC<SavedMarginCardProps> = ({ totalSavedMarg
   const formatted = new Intl.NumberFormat('ru-RU').format(Math.round(totalSavedMargin));
 
   return (
-    <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px', position: 'relative', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>
-          <DollarSign size={16} color="#10b981" />
-          <span>СОХРАНЕННАЯ МАРЖА</span>
-        </div>
-        <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <ShieldCheck size={12} /> Margin Safe
-        </span>
-      </div>
-
-      <div style={{ marginTop: '10px' }}>
-        <div style={{ fontSize: '32px', fontWeight: 800, color: '#10b981', fontFamily: 'system-ui, sans-serif' }}>
-          +{formatted} ₸
-        </div>
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-          Спасенный доход от лишнего демпинга ниже порога min_price
-        </div>
-      </div>
+    <div
+      className="glass-card"
+      style={{
+        padding: '30px 34px',
+        position: 'relative',
+        overflow: 'hidden',
+        backgroundImage:
+          'radial-gradient(420px 260px at 85% 0%, rgba(255,255,255,.22), transparent 70%), linear-gradient(150deg, #2c4ef5, #16246b)',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+      }}
+    >
+      <p style={{ fontSize: '11.5px', letterSpacing: '0.04em', textTransform: 'uppercase', color: 'rgba(255,255,255,.85)', margin: '0 0 10px', fontWeight: 700, position: 'relative', zIndex: 1 }}>
+        Победа дня
+      </p>
+      <p style={{ fontSize: '38px', fontWeight: 800, color: '#fff', margin: '0 0 6px', letterSpacing: '-0.03em', position: 'relative', zIndex: 1 }}>
+        +{formatted} ₸
+      </p>
+      <p style={{ fontSize: '12.5px', color: 'rgba(255,255,255,.85)', margin: 0, position: 'relative', zIndex: 1 }}>
+        спасено от лишнего демпинга ниже минимальной цены
+      </p>
     </div>
   );
 };

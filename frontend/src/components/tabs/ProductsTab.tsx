@@ -160,7 +160,7 @@ export function ProductsTab({
                         <span
                           className="badge"
                           style={{
-                            background: product.status === 'Активен' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
+                            background: product.status === 'Активен' ? 'var(--success-glow)' : 'rgba(255,255,255,0.05)',
                             color: product.status === 'Активен' ? 'var(--success)' : '#aaa',
                             border: '1px solid rgba(255,255,255,0.08)'
                           }}
@@ -184,7 +184,7 @@ export function ProductsTab({
                             href={product.url}
                             target="_blank"
                             rel="noreferrer"
-                            style={{ fontSize: '12px', color: '#3b82f6', textDecoration: 'none' }}
+                            style={{ fontSize: '12px', color: 'var(--secondary)', textDecoration: 'none' }}
                           >
                             🔗 Карточка товара
                           </a>

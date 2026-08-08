@@ -49,23 +49,22 @@ export function OverviewTab({
   const insightsStats = useInsightsStats();
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* 🎯 COMPOSITE SCORE RING — "здоровье" магазина одним числом, разворачивается в разбивку */}
-      <ScoreRing data={scoreStats} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      {/* 🎯 HERO ROW — composite score + "победа дня" (сохранённая маржа) */}
+      <div className="grid-hero">
+        <ScoreRing data={scoreStats} />
+        <SavedMarginCard totalSavedMargin={analytics.total_saved_margin} />
+      </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+      {/* 🥇 ДОЛЯ ЛУЧШЕЙ ЦЕНЫ + 🗓️ GITHUB-STYLE КАРТА АКТИВНОСТИ ПРОДАЖ */}
+      <div className="grid-hero grid-hero-rev">
         <PriceLeadGauge
           percentage={analytics.best_price_share}
           winningCount={analytics.winning_count}
           totalScanned={analytics.total_scanned}
         />
-        <SavedMarginCard
-          totalSavedMargin={analytics.total_saved_margin}
-        />
+        <RevenueHeatmap heatmap={scoreStats.heatmap} />
       </div>
-
-      {/* 🗓️ GITHUB-STYLE КАРТА АКТИВНОСТИ ПРОДАЖ */}
-      <RevenueHeatmap heatmap={scoreStats.heatmap} />
 
       {/* 💰 REAL SALES STATS (from sales_orders, backfilled by sales_sync_worker) */}
       <SalesStatsWidget data={salesStats} />

@@ -416,12 +416,12 @@ export const PrintBatcher: React.FC = () => {
                 ✅ Обработано архивов: <strong>{resultManifest.total_files} файлов</strong> (Всего в архиве: {resultManifest.total_pages} листов)
               </div>
               <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px' }}>
-                🛑 Исключено ранее напечатанных дубликатов: <strong style={{ color: '#f87171' }}>{resultManifest.deduplicated_pages} страниц</strong> | 
-                ✨ Новых листов в PDF: <strong style={{ color: '#34d399' }}>{resultManifest.new_pages} страниц</strong> | 
+                🛑 Исключено ранее напечатанных дубликатов: <strong style={{ color: 'var(--error)' }}>{resultManifest.deduplicated_pages} страниц</strong> |
+                ✨ Новых листов в PDF: <strong style={{ color: 'var(--secondary)' }}>{resultManifest.new_pages} страниц</strong> |
                 Раскладка: <code>{resultManifest.output_layout}</code>
               </div>
             </div>
-            <div style={{ fontSize: '12px', color: '#94a3b8', textAlign: 'right' }}>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'right' }}>
               Батч-ID: <code>{resultManifest.batch_id.substring(0, 8)}</code>
             </div>
           </div>
@@ -429,10 +429,10 @@ export const PrintBatcher: React.FC = () => {
           {/* All duplicates warning banner */}
           {resultManifest.all_duplicates && (
             <div style={styles.allDuplicatesBanner}>
-              <div style={{ fontSize: '16px', fontWeight: 700, color: '#fef08a' }}>
+              <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--warning)' }}>
                 ⚠️ Все {resultManifest.total_pages} заказов из этого архива уже были напечатаны ранее!
               </div>
-              <p style={{ fontSize: '13px', margin: '6px 0 14px 0', color: '#fef3c7' }}>
+              <p style={{ fontSize: '13px', margin: '6px 0 14px 0', color: 'rgba(255,255,255,.75)' }}>
                 Система отфильтровала все старые накладные. Если вы хотите принудительно перепечатать весь этот архив заново — нажмите кнопку ниже:
               </p>
               <button
@@ -498,7 +498,7 @@ export const PrintBatcher: React.FC = () => {
                           onClick={() => handlePrint(batch.preview_url)}
                           style={{
                             ...styles.printBtn,
-                            ...(isExpress ? { background: '#f59e0b', color: '#0f172a' } : {}),
+                            ...(isExpress ? { background: 'var(--warning)', color: '#1a1305' } : {}),
                           }}
                         >
                           🖨️ Предпросмотр / Печать
@@ -545,16 +545,14 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '24px',
     maxWidth: '1200px',
     margin: '0 auto',
-    color: '#f8fafc',
-    fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+    color: 'var(--text-color)',
+    fontFamily: 'var(--font-sans)',
   },
   header: {
-    background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)',
-    borderRadius: '16px',
+    backgroundImage: 'radial-gradient(420px 260px at 85% 0%, rgba(255,255,255,.12), transparent 70%), linear-gradient(150deg, #2c4ef5, #16246b)',
+    borderRadius: '18px',
     padding: '24px 32px',
     marginBottom: '24px',
-    border: '1px solid #4338ca33',
-    boxShadow: '0 10px 30px -10px rgba(49, 46, 129, 0.4)',
   },
   headerTitleGroup: {
     display: 'flex',
@@ -563,7 +561,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   headerIcon: {
     fontSize: '42px',
-    background: '#3730a3',
+    background: 'rgba(255,255,255,0.15)',
     padding: '12px 16px',
     borderRadius: '14px',
   },
@@ -575,22 +573,22 @@ const styles: Record<string, React.CSSProperties> = {
   },
   headerSubtitle: {
     margin: '6px 0 0 0',
-    color: '#c7d2fe',
+    color: 'rgba(255,255,255,.85)',
     fontSize: '14px',
     lineHeight: 1.5,
   },
   historyStatBadge: {
-    background: '#312e81',
-    border: '1px solid #6366f166',
+    background: 'rgba(255,255,255,0.12)',
+    border: '1px solid rgba(255,255,255,0.2)',
     padding: '8px 14px',
     borderRadius: '8px',
     fontSize: '13px',
-    color: '#e0e7ff',
+    color: '#fff',
   },
   resetHistoryBtn: {
-    background: 'rgba(239, 68, 68, 0.15)',
-    border: '1px solid rgba(239, 68, 68, 0.3)',
-    color: '#fca5a5',
+    background: 'rgba(226, 84, 95, 0.15)',
+    border: '1px solid rgba(226, 84, 95, 0.3)',
+    color: '#f3a2a8',
     padding: '8px 14px',
     borderRadius: '8px',
     fontSize: '12px',
@@ -598,15 +596,15 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
   },
   card: {
-    background: '#0f172a',
-    borderRadius: '16px',
+    background: 'var(--card-bg)',
+    borderRadius: '18px',
     padding: '24px',
-    border: '1px solid #1e293b',
+    border: '1px solid var(--card-border)',
     boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)',
   },
   layoutSelectorCard: {
-    background: '#1e293b80',
-    border: '1px solid #334155',
+    background: 'rgba(255,255,255,0.03)',
+    border: '1px solid var(--card-border)',
     borderRadius: '12px',
     padding: '20px',
     marginBottom: '20px',
@@ -623,7 +621,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '12px',
   },
   layoutBtn: {
-    background: '#475569',
+    background: 'rgba(255,255,255,0.06)',
     color: '#ffffff',
     border: 'none',
     borderRadius: '10px',
@@ -636,7 +634,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   layoutBtnFull: {
     gridColumn: 'span 2',
-    background: '#334155',
+    background: 'rgba(255,255,255,0.04)',
     color: '#ffffff',
     border: 'none',
     borderRadius: '10px',
@@ -648,8 +646,8 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'all 0.2s ease',
   },
   layoutBtnActive: {
-    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-    boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)',
+    background: 'linear-gradient(100deg, var(--secondary), var(--secondary-hover))',
+    boxShadow: '0 4px 14px var(--secondary-glow)',
     transform: 'scale(1.02)',
   },
   settingsGrid: {
@@ -666,12 +664,12 @@ const styles: Record<string, React.CSSProperties> = {
   settingLabel: {
     fontSize: '13px',
     fontWeight: 600,
-    color: '#94a3b8',
+    color: 'var(--text-muted)',
   },
   selectInput: {
-    background: '#1e293b',
-    color: '#f8fafc',
-    border: '1px solid #334155',
+    background: 'var(--input-bg)',
+    color: 'var(--text-color)',
+    border: '1px solid var(--input-border)',
     borderRadius: '8px',
     padding: '10px 14px',
     fontSize: '13px',
@@ -682,33 +680,33 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: '10px',
-    background: '#1e293b',
+    background: 'var(--input-bg)',
     padding: '10px 14px',
     borderRadius: '8px',
-    border: '1px solid #334155',
+    border: '1px solid var(--input-border)',
   },
   checkbox: {
     width: '18px',
     height: '18px',
-    accentColor: '#10b981',
+    accentColor: 'var(--secondary)',
     cursor: 'pointer',
   },
   dropzone: {
-    border: '2px dashed #334155',
+    border: '2px dashed var(--input-border)',
     borderRadius: '12px',
     padding: '40px 20px',
     textAlign: 'center',
     cursor: 'pointer',
-    background: '#1e293b40',
+    background: 'rgba(255,255,255,0.02)',
     transition: 'all 0.2s ease',
   },
   dropzoneActive: {
-    borderColor: '#6366f1',
-    background: '#6366f115',
+    borderColor: 'var(--primary)',
+    background: 'var(--primary-glow)',
   },
   dropzoneFilled: {
-    borderColor: '#10b981',
-    background: '#10b98110',
+    borderColor: 'var(--secondary)',
+    background: 'var(--secondary-glow)',
   },
   dropzoneContent: {
     display: 'flex',
@@ -726,30 +724,30 @@ const styles: Record<string, React.CSSProperties> = {
   },
   dropzoneSub: {
     fontSize: '13px',
-    color: '#64748b',
+    color: 'var(--text-muted)',
     marginTop: '4px',
   },
   fileName: {
     fontSize: '16px',
     fontWeight: 600,
-    color: '#10b981',
+    color: 'var(--secondary)',
   },
   fileSize: {
     fontSize: '13px',
-    color: '#94a3b8',
+    color: 'var(--text-muted)',
     marginTop: '2px',
   },
   errorBox: {
     marginTop: '16px',
-    background: '#451a1a',
-    border: '1px solid #991b1b',
-    color: '#fca5a5',
+    background: 'rgba(226, 84, 95, 0.12)',
+    border: '1px solid rgba(226, 84, 95, 0.35)',
+    color: '#f3a2a8',
     padding: '12px 16px',
     borderRadius: '8px',
     fontSize: '14px',
   },
   primaryBtn: {
-    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+    background: 'linear-gradient(100deg, var(--primary), var(--primary-hover))',
     color: '#ffffff',
     border: 'none',
     borderRadius: '10px',
@@ -757,7 +755,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '15px',
     fontWeight: 600,
     cursor: 'pointer',
-    boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)',
+    boxShadow: '0 6px 16px var(--primary-glow)',
     transition: 'transform 0.1s ease',
   },
   btnDisabled: {
@@ -769,26 +767,26 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    background: '#1e293b',
+    background: 'var(--card-bg)',
     padding: '16px 20px',
     borderRadius: '12px',
     marginBottom: '20px',
-    border: '1px solid #334155',
+    border: '1px solid var(--card-border)',
   },
   summaryBadge: {
     fontSize: '15px',
-    color: '#10b981',
+    color: 'var(--secondary)',
   },
   allDuplicatesBanner: {
-    background: 'linear-gradient(135deg, #451a03 0%, #78350f 100%)',
-    border: '2px solid #f59e0b',
+    background: 'rgba(224, 163, 62, 0.12)',
+    border: '2px solid var(--warning)',
     borderRadius: '12px',
     padding: '20px',
     marginBottom: '20px',
   },
   forceReprintBtn: {
-    background: '#f59e0b',
-    color: '#0f172a',
+    background: 'var(--warning)',
+    color: '#1a1305',
     border: 'none',
     borderRadius: '8px',
     padding: '10px 18px',
@@ -800,7 +798,7 @@ const styles: Record<string, React.CSSProperties> = {
     margin: '0 0 16px 0',
     fontSize: '18px',
     fontWeight: 600,
-    color: '#f8fafc',
+    color: 'var(--text-color)',
   },
   cardsGrid: {
     display: 'grid',
@@ -808,8 +806,8 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '20px',
   },
   batchCard: {
-    background: '#0f172a',
-    border: '1px solid #1e293b',
+    background: 'var(--card-bg)',
+    border: '1px solid var(--card-border)',
     borderRadius: '14px',
     padding: '20px',
     display: 'flex',
@@ -819,13 +817,13 @@ const styles: Record<string, React.CSSProperties> = {
     position: 'relative',
   },
   expressBatchCard: {
-    background: 'linear-gradient(135deg, #2a1600 0%, #1e1b4b 100%)',
-    border: '2px solid #f59e0b',
-    boxShadow: '0 4px 20px rgba(245, 158, 11, 0.3)',
+    backgroundImage: 'radial-gradient(300px 160px at 90% 0%, rgba(255,255,255,.14), transparent 70%), linear-gradient(150deg, rgba(224,163,62,0.35), #16246b)',
+    border: '2px solid var(--warning)',
+    boxShadow: '0 4px 20px rgba(224, 163, 62, 0.3)',
   },
   expressBadge: {
-    background: '#f59e0b',
-    color: '#0f172a',
+    background: 'var(--warning)',
+    color: '#1a1305',
     fontWeight: 800,
     fontSize: '11px',
     padding: '4px 10px',
@@ -834,18 +832,18 @@ const styles: Record<string, React.CSSProperties> = {
     alignSelf: 'flex-start',
   },
   auditBadge: {
-    background: '#064e3b',
-    border: '1px solid #059669',
-    color: '#6ee7b7',
+    background: 'var(--success-glow)',
+    border: '1px solid var(--success)',
+    color: '#8ee6bd',
     padding: '8px 12px',
     borderRadius: '8px',
     fontSize: '12px',
     fontWeight: 600,
   },
   auditBadgeError: {
-    background: '#451a1a',
-    border: '1px solid #991b1b',
-    color: '#fca5a5',
+    background: 'rgba(226, 84, 95, 0.12)',
+    border: '1px solid rgba(226, 84, 95, 0.35)',
+    color: '#f3a2a8',
   },
   batchHeader: {
     display: 'flex',
@@ -854,7 +852,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   batchIcon: {
     fontSize: '32px',
-    background: '#1e293b',
+    background: 'rgba(255,255,255,0.05)',
     padding: '8px 12px',
     borderRadius: '10px',
   },
@@ -867,14 +865,14 @@ const styles: Record<string, React.CSSProperties> = {
   batchSubtitle: {
     margin: '2px 0 0 0',
     fontSize: '12px',
-    color: '#94a3b8',
+    color: 'var(--text-muted)',
   },
   batchMetrics: {
     display: 'flex',
     gap: '10px',
   },
   metricBadge: {
-    background: '#1e293b',
+    background: 'rgba(255,255,255,0.05)',
     padding: '6px 12px',
     borderRadius: '6px',
     fontSize: '12px',
@@ -887,7 +885,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   printBtn: {
     flex: 1,
-    background: '#3b82f6',
+    background: 'var(--primary)',
     color: '#ffffff',
     border: 'none',
     borderRadius: '8px',
@@ -899,7 +897,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   downloadBtn: {
     flex: 1,
-    background: '#10b981',
+    background: 'var(--secondary)',
     color: '#ffffff',
     borderRadius: '8px',
     padding: '10px',
@@ -924,7 +922,7 @@ const styles: Record<string, React.CSSProperties> = {
   modalContent: {
     width: '90%',
     height: '90%',
-    background: '#0f172a',
+    background: 'var(--card-bg)',
     borderRadius: '12px',
     display: 'flex',
     flexDirection: 'column',
@@ -932,7 +930,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   modalHeader: {
     padding: '16px 20px',
-    background: '#1e293b',
+    background: 'rgba(255,255,255,0.03)',
     color: '#ffffff',
     display: 'flex',
     justifyContent: 'space-between',
@@ -943,7 +941,7 @@ const styles: Record<string, React.CSSProperties> = {
   modalCloseBtn: {
     background: 'transparent',
     border: 'none',
-    color: '#94a3b8',
+    color: 'var(--text-muted)',
     fontSize: '20px',
     cursor: 'pointer',
   },
