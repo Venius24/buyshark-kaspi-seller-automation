@@ -1,0 +1,386 @@
+"""
+Каркас исходящих рассылок (Фаза 3) — общая очередь+воркер под детерминированные
+кампании «Самовывоз» (Фаза 4, backend/chatbot/pickup_campaign.py) и «Отзыв»
+(Фаза 5, backend/chatbot/review_campaign.py). Сами кампании (когда и что
+поставить в очередь) живут в тех модулях — этот модуль только:
+  - enqueue_outbound() — поставить сообщение в очередь (дедуп по БД);
+  - resolve_group_id() — найти group_id заказа (кэш -> HTTP-скан getDiffGroups);
+  - run_outbound_cycle() — один тик воркера: гейты + отправка due-сообщений;
+  - outbound_loop() — фоновый цикл, аналог kaspi_chatbot_loop.
+
+Гейты (все — до отправки любого сообщения):
+  0. Бот выключен у стора (chatbot enabled=False) — run_outbound_cycle()
+     целиком пропускает стор в этом тике. НЕ помечает записи никак (не
+     'skipped', остаются 'pending') — в отличие от гейтов 2-5 ниже, это не
+     решение "не отправлять эту запись", а просто пауза всей отправки.
+     Постановка в очередь (campaigns/*.py) от этого флага НЕ зависит —
+     иначе заказы, пришедшие пока бот выключен, терялись бы навсегда (см.
+     историю правки 2026-08-09 в HANDOFF/памяти агента).
+  1. Дедуп — на уровне БД (UniqueConstraint store_id+order_id+campaign в
+     OutboundQueueDB), enqueue_outbound() просто ловит конфликт.
+  2. Тихие часы — window_start_hour/window_end_hour на самой записи (в
+     часовом поясе Asia/Almaty), если заданы. Если сейчас вне окна — запись
+     остаётся pending, воркер просто её пропускает в этом тике.
+  3. human_override — если group_id уже известен и чат заблокирован (клиент
+     попросил менеджера) — исходящее не отправляется, статус 'skipped'.
+  4. Дневной лимит на магазин — анти-спам/anti-ban, MAX_OUTBOUND_PER_DAY.
+  5. Устаревание — STALE_AFTER_DAYS. Если запись просрочена (due) больше чем
+     на этот срок, она молча уходит в status='skipped' вместо отправки.
+
+**ЗАДЕКЛАРИРОВАНО (2026-08-08, тестовый лимит, решение пользователя):**
+MAX_OUTBOUND_PER_DAY=30 — заведомо тестовое число, взятое "на глаз" под
+пробный объём, НЕ отмасштабированное под реальный объём Barkhan (счёт на
+сотни завершённых заказов в день — обнаружено на живых данных: один тик
+sales_sync_worker поставил в очередь 225 сообщений кампании «Отзыв» за раз).
+Если оставить очередь копиться без ограничения срока, "отзыв через 4 дня
+после доставки" при таком разрыве между притоком и лимитом реально уходил бы
+клиенту через 2-3 НЕДЕЛИ — бессмысленно по сути кампании. По прямому решению
+пользователя ГЕЙТ 5 (STALE_AFTER_DAYS, см. _process_store_queue) решает это
+не поднятием лимита, а срезкой очереди: то, что не успело уйти в течение
+разумного окна после планового времени, просто пропускается (`skip_reason`
+объясняет, что именно). Значит при текущем тестовом лимите БОЛЬШАЯ ЧАСТЬ
+кампании «Отзыв» у активного магазина будет уходить в 'skipped', а не
+отправляться с большим опозданием — это осознанный компромисс на время
+тестирования, а не баг. Подъём MAX_OUTBOUND_PER_DAY под реальный объём —
+отдельная будущая задача, не Фазы 6.
+
+ВАЖНО (осознанный пробел этой фазы): если group_id ещё не известен (по
+заказу никогда не было переписки — типичный случай для кампании
+«Самовывоз», которая пишет клиенту ПЕРВОЙ), resolve_group_id() не находит
+его HTTP-сканом (потому что группа физически не существует, пока никто не
+написал первым), и запись остаётся в статусе 'needs_first_contact' до
+живой Playwright-автоматизации (открыть заказ -> «Сообщения по заказу» ->
+отправить). Сам этот шаг НЕ реализован в Фазе 3 — точные селекторы страницы
+заказа не были зафиксированы во время живого теста Фазы 0 (см.
+REAL_IMPORTANT/чаты_kaspi/KASPI_CHAT_API.md, раздел "Написать клиенту
+ПЕРВЫМ..."), и гадать их вслепую против прод-кабинета реального магазина
+рискованно. Это нужно будет добить в Фазе 4 с новой живой сессией сверки
+селекторов (по аналогии с тем, как SMS-логин в чат дошлифовывался вживую).
+"""
+import logging
+import asyncio
+import random
+import datetime as _dt
+from typing import Optional
+
+from sqlalchemy import select, func
+
+from backend.chatbot import config
+from backend.chatbot import chat_client
+from backend.chatbot.kaspi import load_chat_cookies
+from backend.dumper.config import discover_merchant_id
+from backend.security.store_context import list_active_stores
+from backend.state_helpers import _get_sync_db_session
+
+logger = logging.getLogger(__name__)
+
+# Казахстан не переходит на летнее время — фиксированный UTC+5 всегда
+# корректен, без зависимости от пакета tzdata (не установлен в этом venv).
+ALMATY_TZ = _dt.timezone(_dt.timedelta(hours=5))
+MAX_OUTBOUND_PER_DAY = 30
+# Гейт 5 (см. докстринг выше) — просроченные больше этого срока записи
+# срезаются в 'skipped' вместо отправки, чтобы очередь не растягивалась
+# на недели при MAX_OUTBOUND_PER_DAY меньше реального дневного притока.
+STALE_AFTER_DAYS = 3
+
+
+def enqueue_outbound(
+    store_id: str,
+    order_id: str,
+    campaign: str,
+    message_text: str,
+    scheduled_at: _dt.datetime,
+    window_start_hour: Optional[int] = None,
+    window_end_hour: Optional[int] = None,
+    group_id: Optional[str] = None,
+) -> bool:
+    """Ставит сообщение в очередь. Возвращает False, если эта кампания для
+    этого заказа уже была поставлена в очередь ранее (дедуп по БД) — не
+    исключение, а штатный путь (заказ мог повторно попасть в триггер)."""
+    session = _get_sync_db_session()
+    if not session:
+        return False
+    try:
+        from backend.db.models import OutboundQueueDB
+        existing = session.execute(
+            select(OutboundQueueDB).where(
+                OutboundQueueDB.store_id == store_id,
+                OutboundQueueDB.order_id == order_id,
+                OutboundQueueDB.campaign == campaign,
+            )
+        ).scalar_one_or_none()
+        if existing:
+            return False
+
+        session.add(OutboundQueueDB(
+            store_id=store_id,
+            order_id=order_id,
+            campaign=campaign,
+            group_id=group_id,
+            message_text=message_text,
+            status="pending",
+            scheduled_at=scheduled_at,
+            window_start_hour=window_start_hour,
+            window_end_hour=window_end_hour,
+            created_at=_dt.datetime.utcnow(),
+        ))
+        session.commit()
+        return True
+    except Exception as e:
+        logger.error(f"[Outbound] Ошибка постановки в очередь ({campaign}/{order_id}): {e}")
+        session.rollback()
+        return False
+    finally:
+        session.close()
+
+
+def _load_cached_group_id(store_id: str, order_id: str) -> Optional[str]:
+    session = _get_sync_db_session()
+    if not session:
+        return None
+    try:
+        from backend.db.models import OrderChatLinkDB
+        link = session.get(OrderChatLinkDB, (store_id, order_id))
+        return link.group_id if link else None
+    finally:
+        session.close()
+
+
+async def resolve_group_id(store_id: str, order_id: str, cookies: dict, merchant_id: str) -> Optional[str]:
+    """Кэш order_chat_links -> HTTP-скан getDiffGroups по analytics.order_id.
+    Не запускает Playwright — если группы физически ещё нет (заказ без
+    переписки), возвращает None."""
+    cached = await asyncio.to_thread(_load_cached_group_id, store_id, order_id)
+    if cached:
+        return cached
+
+    groups = await chat_client.list_groups(cookies, merchant_id, since_days=30, limit=200)
+    for g in groups:
+        if str(g.get("analytics", {}).get("order_id")) == str(order_id):
+            group_id = g.get("id")
+            await asyncio.to_thread(_cache_order_chat_link, store_id, order_id, group_id)
+            return group_id
+    return None
+
+
+def _cache_order_chat_link(store_id: str, order_id: str, group_id: str):
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import OrderChatLinkDB
+        existing = session.get(OrderChatLinkDB, (store_id, order_id))
+        if existing:
+            existing.group_id = group_id
+            existing.resolved_at = _dt.datetime.utcnow()
+        else:
+            session.add(OrderChatLinkDB(store_id=store_id, order_id=order_id, group_id=group_id, resolved_at=_dt.datetime.utcnow()))
+        session.commit()
+    except Exception as e:
+        logger.error(f"[Outbound] Ошибка кэширования order_chat_link ({order_id}): {e}")
+        session.rollback()
+    finally:
+        session.close()
+
+
+def _is_within_window(item) -> bool:
+    if item.window_start_hour is None or item.window_end_hour is None:
+        return True
+    now_hour = _dt.datetime.now(ALMATY_TZ).hour
+    return item.window_start_hour <= now_hour < item.window_end_hour
+
+
+def _sent_today_count(store_id: str) -> int:
+    session = _get_sync_db_session()
+    if not session:
+        return 0
+    try:
+        from backend.db.models import OutboundQueueDB
+        # Полночь по Алматы (не UTC) — иначе дневная квота фактически
+        # сбрасывалась бы в 5 утра по местному времени, а не в начале суток
+        # (см. ALMATY_TZ выше, тот же оффсет что и у окна тихих часов).
+        almaty_now = _dt.datetime.now(ALMATY_TZ)
+        almaty_midnight = almaty_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = almaty_midnight.astimezone(_dt.timezone.utc).replace(tzinfo=None)
+        return session.execute(
+            select(func.count()).select_from(OutboundQueueDB).where(
+                OutboundQueueDB.store_id == store_id,
+                OutboundQueueDB.status == "sent",
+                OutboundQueueDB.sent_at >= today_start,
+            )
+        ).scalar_one()
+    finally:
+        session.close()
+
+
+def _load_due_pending(store_id: str, limit: int = 20) -> list:
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import OutboundQueueDB
+        now = _dt.datetime.utcnow()
+        rows = session.execute(
+            select(OutboundQueueDB).where(
+                OutboundQueueDB.store_id == store_id,
+                OutboundQueueDB.status.in_(("pending", "needs_first_contact")),
+                OutboundQueueDB.scheduled_at <= now,
+            ).order_by(OutboundQueueDB.scheduled_at).limit(limit)
+        ).scalars().all()
+        session.expunge_all()
+        return rows
+    finally:
+        session.close()
+
+
+def mark_replied_if_pending(store_id: str, group_id: str, at: Optional[_dt.datetime] = None):
+    """Фаза 6: помечает САМОЕ СВЕЖЕЕ отправленное исходящее в этом чате как
+    "клиент ответил" — вызывается из worker.py на КАЖДОЕ входящее сообщение
+    клиента, до ветвления на human_triggers/логистику/ИИ (в отличие от
+    chat_response_logs, который не пишется на ветке HUMAN_OVERRIDE и поэтому
+    занижал бы долю ответивших именно на самых важных, негативных ответах).
+    Идемпотентно — если уже отмечено, повторные вызовы no-op."""
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import OutboundQueueDB
+        row = session.execute(
+            select(OutboundQueueDB).where(
+                OutboundQueueDB.store_id == store_id,
+                OutboundQueueDB.group_id == group_id,
+                OutboundQueueDB.status == "sent",
+                OutboundQueueDB.replied_at.is_(None),
+            ).order_by(OutboundQueueDB.sent_at.desc()).limit(1)
+        ).scalar_one_or_none()
+        if not row:
+            return
+        row.replied_at = at or _dt.datetime.utcnow()
+        session.commit()
+    except Exception as e:
+        logger.error(f"[Outbound] Ошибка отметки ответа клиента ({group_id}): {e}")
+        session.rollback()
+    finally:
+        session.close()
+
+
+def _mark(item_id: int, status: str, skip_reason: Optional[str] = None, group_id: Optional[str] = None):
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import OutboundQueueDB
+        row = session.get(OutboundQueueDB, item_id)
+        if not row:
+            return
+        row.status = status
+        if skip_reason is not None:
+            row.skip_reason = skip_reason
+        if group_id is not None:
+            row.group_id = group_id
+        if status == "sent":
+            row.sent_at = _dt.datetime.utcnow()
+        row.attempts += 1
+        session.commit()
+    except Exception as e:
+        logger.error(f"[Outbound] Ошибка обновления статуса очереди #{item_id}: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
+
+async def _process_store_queue(store_id: str, cookies: dict, merchant_id: str):
+    due = await asyncio.to_thread(_load_due_pending, store_id)
+    if not due:
+        return
+
+    sent_today = await asyncio.to_thread(_sent_today_count, store_id)
+    now = _dt.datetime.utcnow()
+
+    for item in due:
+        # Гейт 5 (см. докстринг модуля): просрочка больше STALE_AFTER_DAYS —
+        # не спамим клиенту "с опозданием на пару недель", просто пропускаем.
+        # Не тратит дневной лимит — освобождает его для более свежих записей.
+        if now - item.scheduled_at > _dt.timedelta(days=STALE_AFTER_DAYS):
+            await asyncio.to_thread(
+                _mark, item.id, "skipped",
+                f"устарело — не отправлено в течение {STALE_AFTER_DAYS} дн. после планового времени (дневной лимит {MAX_OUTBOUND_PER_DAY}/день не успевал)",
+            )
+            continue
+
+        if sent_today >= MAX_OUTBOUND_PER_DAY:
+            logger.info(f"[Outbound] Стор {store_id}: дневной лимит {MAX_OUTBOUND_PER_DAY} исходящих достигнут, откладываю остальное.")
+            break
+
+        if not _is_within_window(item):
+            continue
+
+        group_id = item.group_id
+        if not group_id:
+            group_id = await resolve_group_id(store_id, item.order_id, cookies, merchant_id)
+            if not group_id:
+                await asyncio.to_thread(_mark, item.id, "needs_first_contact", "group_id не найден (нужен первый контакт — не реализовано в Фазе 3)")
+                continue
+
+        if config.is_chat_human_override(store_id, group_id):
+            await asyncio.to_thread(_mark, item.id, "skipped", "human_override", group_id)
+            continue
+
+        result = await chat_client.send_message(group_id, item.message_text, cookies, merchant_id)
+        if result.get("success"):
+            await asyncio.to_thread(_mark, item.id, "sent", group_id=group_id)
+            sent_today += 1
+            logger.info(f"✅ [Outbound] {item.campaign} отправлено по заказу {item.order_id} (стор {store_id}).")
+            if item.campaign == "review":
+                # Фаза 5: одноразовый флаг — снимается на первом же ответе
+                # клиента в _run_chatbot_pass (backend/chatbot/worker.py).
+                await asyncio.to_thread(config.set_awaiting_review_reply, store_id, group_id)
+        else:
+            await asyncio.to_thread(_mark, item.id, "failed", str(result.get("error")), group_id)
+            logger.error(f"❌ [Outbound] Сбой отправки {item.campaign} по заказу {item.order_id}: {result.get('error')}")
+
+        # Пауза между реальными отправками разным клиентам (не после
+        # staleness/лимита/окна/human_override — там Kaspi не трогали) —
+        # без неё несколько due-записей на одном тике улетали бы клиентам
+        # практически одновременно, что для анти-спам защиты Kaspi выглядит
+        # как бот сильнее, чем естественная переписка человека.
+        await asyncio.sleep(random.uniform(2.5, 6.0))
+
+
+async def run_outbound_cycle():
+    """Один тик по всем активным сторам — вызывается из outbound_loop().
+
+    "enabled" стора проверяется ИМЕННО тут (не на моменте постановки в
+    очередь campaigns/*.py) — единая точка паузы отправки. Пока бот выключен,
+    due-записи просто копятся в очереди (см. pickup_campaign.py/
+    review_campaign.py), а не теряются молча; включение бота в любой момент
+    подхватывает всё накопленное на следующем же тике (что не успело
+    устареть по Гейту 5 — см. _process_store_queue)."""
+    stores = await list_active_stores()
+    for store in stores:
+        try:
+            cfg = await asyncio.to_thread(config.load_chatbot_config, store.store_id)
+            if not cfg.get("enabled", True):
+                continue
+
+            cookies = await asyncio.to_thread(load_chat_cookies, store_id=store.store_id)
+            if not cookies:
+                continue
+            merchant_id = await asyncio.to_thread(discover_merchant_id, store.token)
+            if not merchant_id:
+                continue
+            await _process_store_queue(store.store_id, cookies, merchant_id)
+        except Exception as e:
+            logger.error(f"[Outbound] Стор {store.store_id}: сбой тика рассылок: {e}")
+
+
+async def outbound_loop():
+    """Фоновый цикл (аналог kaspi_chatbot_loop) — реже, чем чат-поллинг: у
+    исходящих нет требования "ответить быстро", в отличие от входящих."""
+    logger.info("📤 [Outbound] Фоновый воркер очереди рассылок инициализирован.")
+    while True:
+        try:
+            await run_outbound_cycle()
+        except Exception as e:
+            logger.error(f"💥 [Outbound] Ошибка в фоновом цикле рассылок: {e}")
+        await asyncio.sleep(60)

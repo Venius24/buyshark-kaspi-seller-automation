@@ -46,15 +46,19 @@ def format_time(ts_ms) -> str:
     except Exception:
         return "--:--"
 
-def check_logistics_question(text: str) -> str | None:
-    """Проверяет текст на ключевые слова доставки и возвращает готовый шаблон."""
+def check_logistics_question(text: str, profile: dict | None = None) -> str | None:
+    """Проверяет текст на ключевые слова доставки и возвращает готовый шаблон.
+    Триггерные слова общие (kk/ru), сам текст ответа берётся из профиля этого
+    магазина (backend/chatbot/prompt.py), если он передан — иначе дефолт."""
     if not text:
         return None
     clean_text = text.lower()
+    reply_kk = (profile or {}).get("logistics_reply_kk") or LOGISTICS_TRIGGERS["kk"]["reply"]
+    reply_ru = (profile or {}).get("logistics_reply_ru") or LOGISTICS_TRIGGERS["ru"]["reply"]
     if any(word in clean_text for word in LOGISTICS_TRIGGERS["kk"]["keywords"]):
-        return LOGISTICS_TRIGGERS["kk"]["reply"]
+        return reply_kk
     if any(word in clean_text for word in LOGISTICS_TRIGGERS["ru"]["keywords"]):
-        return LOGISTICS_TRIGGERS["ru"]["reply"]
+        return reply_ru
     return None
 
 async def get_chat_history(group_id: str, cookies: dict, headers: dict) -> list:

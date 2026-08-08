@@ -53,6 +53,7 @@ from backend.routers.public_api import groups as public_groups
 
 from backend.routers.dumping import background_dumping_loop
 from backend.chatbot.worker import kaspi_chatbot_loop, start_telegram_bot_polling
+from backend.chatbot.outbound import outbound_loop
 from backend.chatbot.notify_dispatch import flush_loop as notification_flush_loop
 from backend.services.stock_sync_worker import master_stock_radar_loop, start_packaging_sync_loop
 from backend.services.products_sync_worker import start_products_sync_loop
@@ -79,6 +80,7 @@ async def startup_event():
     # Фоновые процессы
     asyncio.create_task(background_dumping_loop())
     asyncio.create_task(kaspi_chatbot_loop())
+    asyncio.create_task(outbound_loop())
     asyncio.create_task(start_telegram_bot_polling())
     asyncio.create_task(notification_flush_loop())
     asyncio.create_task(master_stock_radar_loop())

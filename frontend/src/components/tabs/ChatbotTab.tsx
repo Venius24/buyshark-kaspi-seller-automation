@@ -1,6 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useChatAuth } from '../../hooks/useChatAuth';
 import { ChatSmsAuthModal } from '../ChatSmsAuthModal';
+import { BotProfileCard } from './BotProfileCard';
+import { OutboundTestCard } from './OutboundTestCard';
+import { OutboundStatsCard } from './OutboundStatsCard';
 import { fetchChatbotHasSession } from '../../queries';
 import { useActiveStoreId } from '../../storeContext';
 import type { ChatbotConfig, ChatbotStatus } from '../../types';
@@ -97,6 +100,12 @@ export function ChatbotTab({ chatbotConfig, chatbotStatus, onSaveChatbotConfig, 
           </button>
         </div>
       </div>
+
+      <BotProfileCard />
+
+      <OutboundStatsCard />
+
+      <OutboundTestCard />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
         {/* 📢 Настройки рассылки Telegram Admin IDs */}

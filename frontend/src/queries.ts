@@ -1,6 +1,7 @@
 import { apiFetch, API_URL } from './api';
 import type { StoreItem, UserProfile } from './components/StoreHub';
 import type { MasterStockGroup, ProductItem } from './components/MasterStockGroups';
+import type { BotProfile, BotUsageSummary, OutboundQueueItem, OutboundStats } from './types';
 
 export const fetchProfile = async (): Promise<UserProfile | null> => {
   const res = await apiFetch(`${API_URL}/api/v1/auth/me`);
@@ -34,4 +35,78 @@ export const fetchChatbotHasSession = async (): Promise<boolean> => {
   } catch {
     return false;
   }
+};
+
+export const fetchBotProfile = async (): Promise<BotProfile | null> => {
+  try {
+    const res = await apiFetch(`${API_URL}/api/chatbot/profile`);
+    const data = await res.json();
+    return res.ok && data.success ? data.profile : null;
+  } catch {
+    return null;
+  }
+};
+
+export const saveBotProfile = async (updates: Partial<BotProfile>): Promise<BotProfile | null> => {
+  const res = await apiFetch(`${API_URL}/api/chatbot/profile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  const data = await res.json();
+  return res.ok && data.success ? data.profile : null;
+};
+
+export const fetchBotUsage = async (): Promise<BotUsageSummary | null> => {
+  try {
+    const res = await apiFetch(`${API_URL}/api/chatbot/usage`);
+    const data = await res.json();
+    if (!res.ok || !data.success) return null;
+    return { total_billed_units: data.total_billed_units, by_kind: data.by_kind, period_days: data.period_days };
+  } catch {
+    return null;
+  }
+};
+
+export const fetchOutboundQueue = async (): Promise<OutboundQueueItem[]> => {
+  try {
+    const res = await apiFetch(`${API_URL}/api/chatbot/outbound/queue`);
+    const data = await res.json();
+    return res.ok && data.success ? data.items : [];
+  } catch {
+    return [];
+  }
+};
+
+export const fetchOutboundStats = async (days: number = 30): Promise<OutboundStats | null> => {
+  try {
+    const res = await apiFetch(`${API_URL}/api/chatbot/outbound/stats?days=${days}`);
+    const data = await res.json();
+    if (!res.ok || !data.success) return null;
+    return { period_days: data.period_days, by_campaign: data.by_campaign };
+  } catch {
+    return null;
+  }
+};
+
+export const testSendOutbound = async (order_id: string, message_text: string): Promise<{ success: boolean; message: string }> => {
+  const res = await apiFetch(`${API_URL}/api/chatbot/outbound/test-send`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order_id, message_text }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { success: false, message: data.detail || 'Ошибка отправки' };
+  return { success: true, message: data.message || 'OK' };
+};
+
+export const testFirstContact = async (order_id: string, message_text: string, status = 'PICKUP'): Promise<{ success: boolean; message: string }> => {
+  const res = await apiFetch(`${API_URL}/api/chatbot/outbound/first-contact-test?status=${encodeURIComponent(status)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order_id, message_text }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { success: false, message: data.detail || 'Ошибка отправки' };
+  return { success: true, message: data.message || 'OK' };
 };

@@ -90,6 +90,17 @@ async def send_message(group_id: str, text: str, cookies: dict, merchant_id: str
     return {"success": True, "message": data.get("data")}
 
 
+async def send_typing(group_id: str, text: str, cookies: dict, merchant_id: str) -> None:
+    """Показывает клиенту индикатор набора текста (best-effort, ошибки не пробрасывает)."""
+    def send():
+        return http_session.post(f"{BASE_URL}/typing/sendText", headers=_headers(merchant_id), cookies=cookies, json={"groupId": group_id, "text": text}, timeout=5)
+
+    try:
+        await asyncio.to_thread(send)
+    except Exception as e:
+        logger.warning(f"[ChatClient] send_typing не удался для {group_id}: {e}")
+
+
 async def mark_read(group_id: str, message_ids: list[dict], cookies: dict, merchant_id: str) -> bool:
     """message_ids: [{'id': ..., 'created': ...}, ...]"""
     def send():

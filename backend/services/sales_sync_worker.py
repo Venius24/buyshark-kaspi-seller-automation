@@ -5,6 +5,7 @@ import logging
 from backend.kaspi_wrapper import KaspiAPI
 from backend.state_helpers import _upsert_sales_orders, _get_latest_sales_order_date
 from backend.security.store_context import list_active_stores
+from backend.chatbot.review_campaign import maybe_trigger_review_campaign
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,13 @@ def _windows_since(since: datetime.datetime, now: datetime.datetime) -> list:
 async def _sync_store_sales(token: str, store_id: str) -> int:
     now = datetime.datetime.utcnow()
     latest = await asyncio.to_thread(_get_latest_sales_order_date, store_id)
+    # Холодный старт (новый стор, ещё нет ни одного сохранённого заказа) —
+    # уходим в 90-дневный бэкафилл. Фаза 5 (кампания «Отзыв») намеренно НЕ
+    # триггерится на этом проходе: иначе все старые завершённые заказы разом
+    # получат запрос на отзыв "через 4 дня от сейчас" — и поздно, и похоже на
+    # спам. Со следующего тика latest уже будет известен, и триггер заработает
+    # как обычно для реально новых завершённых заказов.
+    is_cold_start = latest is None
     # Пересканируем последний день заново на случай заказов, изменивших статус
     # на COMPLETED уже после нашего предыдущего прохода.
     since = (latest - datetime.timedelta(days=1)) if latest else (now - datetime.timedelta(days=_BACKFILL_DAYS))
@@ -40,8 +48,13 @@ async def _sync_store_sales(token: str, store_id: str) -> int:
     total_new = 0
     for ge_ms, le_ms in _windows_since(since, now):
         orders = await asyncio.to_thread(KaspiAPI.get_completed_orders, token, ge_ms, le_ms)
-        if orders:
-            total_new += await asyncio.to_thread(_upsert_sales_orders, orders, store_id)
+        if not orders:
+            continue
+        new_orders = await asyncio.to_thread(_upsert_sales_orders, orders, store_id)
+        total_new += len(new_orders)
+        if not is_cold_start:
+            for o in new_orders:
+                asyncio.create_task(maybe_trigger_review_campaign(store_id, o))
 
     if total_new:
         logger.info(f"💰 [Sales Sync Worker] Стор {store_id}: сохранено {total_new} новых заказов.")

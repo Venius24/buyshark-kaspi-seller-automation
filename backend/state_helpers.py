@@ -1033,17 +1033,18 @@ def _save_analytics_snapshot(data: dict, store_id: str):
         session.close()
 
 
-def _upsert_sales_orders(orders: list, store_id: str) -> int:
+def _upsert_sales_orders(orders: list, store_id: str) -> list:
     """Апсертит завершённые заказы (см. KaspiAPI.get_completed_orders) в
-    sales_orders. Возвращает число реально НОВЫХ заказов (для лога воркера).
-    Идемпотентно по (store_id, order_internal_id) — безопасно перезапускать
-    с пересекающимися окнами дат."""
+    sales_orders. Возвращает список реально НОВЫХ (не int — Фаза 5 использует
+    сами объекты заказов, чтобы поставить кампанию «Отзыв» в очередь для
+    каждого впервые увиденного). Идемпотентно по (store_id, order_internal_id) —
+    безопасно перезапускать с пересекающимися окнами дат."""
     if not orders:
-        return 0
+        return []
     session = _get_sync_db_session()
     if not session:
-        return 0
-    inserted = 0
+        return []
+    inserted = []
     try:
         from backend.db.models import SalesOrderDB
         import datetime as _dt
@@ -1070,13 +1071,13 @@ def _upsert_sales_orders(orders: list, store_id: str) -> int:
                     entries_payload=json.dumps(o.get("entries", []), ensure_ascii=False),
                     ingested_at=_dt.datetime.utcnow(),
                 ))
-                inserted += 1
+                inserted.append(o)
         session.commit()
         return inserted
     except Exception as e:
         logger.error(f"Error upserting sales orders to DB: {e}")
         session.rollback()
-        return 0
+        return []
     finally:
         session.close()
 
@@ -1268,18 +1269,128 @@ def _load_competitor_leaderboard(store_id: str, days: int = 30, limit: int = 10)
         session.close()
 
 
-def _append_chat_response_log(store_id: str, group_id: str):
+def _append_chat_response_log(
+    store_id: str,
+    group_id: str,
+    kind: str = "inbound_reply",
+    prompt_tier: str = "",
+    model: str = "",
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    billed_units: int = 1,
+):
     session = _get_sync_db_session()
     if not session:
         return
     try:
         from backend.db.models import ChatResponseLogDB
         import datetime as _dt
-        session.add(ChatResponseLogDB(store_id=store_id, group_id=group_id, created_at=_dt.datetime.utcnow()))
+        session.add(ChatResponseLogDB(
+            store_id=store_id,
+            group_id=group_id,
+            kind=kind,
+            prompt_tier=prompt_tier,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            billed_units=billed_units,
+            created_at=_dt.datetime.utcnow(),
+        ))
         session.commit()
     except Exception as e:
         logger.error(f"Error persisting chat response log to DB: {e}")
         session.rollback()
+    finally:
+        session.close()
+
+
+def _load_bot_usage_summary(store_id: str, days: int = 30) -> dict:
+    """Сводка тарификации ИИ-бота за период: сколько было реальных вызовов ИИ
+    (billed_units), сколько бесплатных логистических шаблонов, разбивка по kind.
+    Фаза 2 — счётчик пока просто цифра в кабинете, без реального инвойса."""
+    import datetime as _dt
+    session = _get_sync_db_session()
+    if not session:
+        return {"total_billed_units": 0, "by_kind": {}, "period_days": days}
+    try:
+        from backend.db.models import ChatResponseLogDB
+        from sqlalchemy import func
+        since = _dt.datetime.utcnow() - _dt.timedelta(days=days)
+        rows = session.execute(
+            select(ChatResponseLogDB.kind, func.count().label("cnt"), func.sum(ChatResponseLogDB.billed_units).label("units"))
+            .where(ChatResponseLogDB.store_id == store_id, ChatResponseLogDB.created_at >= since)
+            .group_by(ChatResponseLogDB.kind)
+        ).all()
+        by_kind = {kind: {"count": cnt, "units": int(units or 0)} for kind, cnt, units in rows}
+        total_billed_units = sum(v["units"] for v in by_kind.values())
+        return {"total_billed_units": total_billed_units, "by_kind": by_kind, "period_days": days}
+    finally:
+        session.close()
+
+
+def _load_outbound_stats(store_id: str, days: int = 30) -> dict:
+    """Сводка по кампаниям рассылок (Фаза 6) за период: по каждой campaign —
+    сколько в каждом статусе, и "доля ответивших" среди реально отправленных
+    (replied_at IS NOT NULL / sent). Честная метка, НЕ "конверсия в отзывы" —
+    Kaspi не даёт связку "оставлен ли отзыв" с конкретным заказом/чатом, так
+    что дальше факта ответа клиента в чате идти нельзя."""
+    import datetime as _dt
+    session = _get_sync_db_session()
+    if not session:
+        return {"period_days": days, "by_campaign": {}}
+    try:
+        from backend.db.models import OutboundQueueDB
+        from sqlalchemy import func
+        since = _dt.datetime.utcnow() - _dt.timedelta(days=days)
+
+        status_rows = session.execute(
+            select(OutboundQueueDB.campaign, OutboundQueueDB.status, func.count().label("cnt"))
+            .where(OutboundQueueDB.store_id == store_id, OutboundQueueDB.created_at >= since)
+            .group_by(OutboundQueueDB.campaign, OutboundQueueDB.status)
+        ).all()
+
+        replied_rows = session.execute(
+            select(OutboundQueueDB.campaign, func.count().label("cnt"))
+            .where(
+                OutboundQueueDB.store_id == store_id,
+                OutboundQueueDB.created_at >= since,
+                OutboundQueueDB.status == "sent",
+                OutboundQueueDB.replied_at.isnot(None),
+            )
+            .group_by(OutboundQueueDB.campaign)
+        ).all()
+        replied_by_campaign = {campaign: cnt for campaign, cnt in replied_rows}
+
+        skip_reason_rows = session.execute(
+            select(OutboundQueueDB.campaign, OutboundQueueDB.skip_reason, func.count().label("cnt"))
+            .where(
+                OutboundQueueDB.store_id == store_id,
+                OutboundQueueDB.created_at >= since,
+                OutboundQueueDB.status == "skipped",
+            )
+            .group_by(OutboundQueueDB.campaign, OutboundQueueDB.skip_reason)
+        ).all()
+        skip_reasons_by_campaign: dict = {}
+        for campaign, reason, cnt in skip_reason_rows:
+            skip_reasons_by_campaign.setdefault(campaign, {})[reason or "неизвестно"] = cnt
+
+        by_campaign: dict = {}
+        for campaign, status, cnt in status_rows:
+            entry = by_campaign.setdefault(campaign, {
+                "total": 0, "sent": 0, "replied": 0, "reply_rate": 0.0,
+                "pending": 0, "needs_first_contact": 0, "skipped": 0, "failed": 0,
+                "skip_reasons": {},
+            })
+            entry["total"] += cnt
+            if status in entry:
+                entry[status] = cnt
+
+        for campaign, entry in by_campaign.items():
+            entry["replied"] = replied_by_campaign.get(campaign, 0)
+            entry["reply_rate"] = round(entry["replied"] / entry["sent"], 3) if entry["sent"] else 0.0
+            entry["skip_reasons"] = skip_reasons_by_campaign.get(campaign, {})
+
+        return {"period_days": days, "by_campaign": by_campaign}
     finally:
         session.close()
 

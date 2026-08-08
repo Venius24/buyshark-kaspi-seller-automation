@@ -61,6 +61,65 @@ export interface ChatbotConfig {
   merchant_id: string;
 }
 
+export interface PickupPoint {
+  name: string;
+  address: string;
+  map_url: string;
+  hours: string;
+  notes: string;
+}
+
+export interface BotProfile {
+  ai_name: string;
+  store_display_name: string;
+  specialization: string;
+  return_policy: string;
+  shipping_days: string;
+  shipping_cutoff_time: string;
+  pickup_points: PickupPoint[];
+  logistics_reply_ru: string;
+  logistics_reply_kk: string;
+  custom_instructions: string;
+  custom_enabled: boolean;
+  prompt_tier: 'base' | 'plus' | 'pro' | 'max';
+}
+
+export interface OutboundQueueItem {
+  id: number;
+  order_id: string;
+  campaign: string;
+  status: string;
+  group_id: string | null;
+  message_text: string;
+  scheduled_at: string | null;
+  sent_at: string | null;
+  skip_reason: string | null;
+  attempts: number;
+}
+
+export interface BotUsageSummary {
+  total_billed_units: number;
+  by_kind: Record<string, { count: number; units: number }>;
+  period_days: number;
+}
+
+export interface OutboundCampaignStats {
+  total: number;
+  sent: number;
+  replied: number;
+  reply_rate: number;
+  pending: number;
+  needs_first_contact: number;
+  skipped: number;
+  failed: number;
+  skip_reasons: Record<string, number>;
+}
+
+export interface OutboundStats {
+  period_days: number;
+  by_campaign: Record<string, OutboundCampaignStats>;
+}
+
 export interface ChatbotStatus {
   enabled: boolean;
   has_session: boolean;

@@ -184,6 +184,22 @@ class ChatbotSettingsDB(Base):
     updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
 
+class StoreBotProfileDB(Base):
+    """Профиль ИИ-менеджера чат-бота этого магазина — имя, адрес самовывоза,
+    график, ассортимент и т.д., подставляются в универсальный систем-промпт
+    (backend/chatbot/prompt.py). Раньше всё это было хардкодом под BARKHAN
+    прямо в chatbot/ai.py. custom_instructions — свободный доп.-блок от
+    владельца, prompt_tier — кэш тарифа, посчитанного по его длине."""
+    __tablename__ = "store_bot_profiles"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    profile_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    custom_instructions: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    custom_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    prompt_tier: Mapped[str] = mapped_column(String(20), nullable=False, default="base")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class ChatStateDB(Base):
     __tablename__ = "chat_states"
 
@@ -191,6 +207,9 @@ class ChatStateDB(Base):
     group_id: Mapped[str] = mapped_column(String(100), primary_key=True)
     last_replied_msg_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     human_override: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Фаза 5 (кампания «Отзыв»): ставится при отправке campaign='review',
+    # снимается на первом же ответе клиента после этого — см. миграцию 022.
+    awaiting_review_reply: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
 
@@ -301,13 +320,67 @@ class CompetitorEncounterLogDB(Base):
 
 class ChatResponseLogDB(Base):
     """Одна запись на каждый реальный авто-ответ чат-бота — нужна для heatmap
-    активности чата (по аналогии с dumper_logs). Копится с момента деплоя фичи."""
+    активности чата (по аналогии с dumper_logs), а с Фазы 2 и для тарификации.
+    kind различает платный вызов ИИ (inbound_reply) от бесплатного
+    логистического шаблона (inbound_logistics_template) и будущих исходящих
+    рассылок (outbound_review/outbound_pickup, которые в счётчик не идут —
+    billed_units=0). prompt_tier/model/токены фиксируются на момент ответа,
+    т.к. тариф магазина может измениться позже. Копится с момента деплоя фичи."""
     __tablename__ = "chat_response_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
     group_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False, default="inbound_reply")
+    prompt_tier: Mapped[str] = mapped_column(String(20), nullable=False, default="")
+    model: Mapped[str] = mapped_column(String(50), nullable=False, default="")
+    prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    billed_units: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class OutboundQueueDB(Base):
+    """Очередь исходящих сообщений (Фаза 3) — общий каркас под кампании
+    «Самовывоз» (Фаза 4) и «Отзыв» (Фаза 5). Одна запись = одно запланированное
+    сообщение по заказу. Уникальность (store_id, order_id, campaign) — дедуп на
+    уровне БД, повторный enqueue той же кампании для того же заказа не создаст
+    дубликат. message_text рендерится один раз при enqueue (кампании
+    детерминированные, шаблон не должен "уехать", если профиль магазина
+    изменится между постановкой в очередь и отправкой)."""
+    __tablename__ = "outbound_queue"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    order_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    campaign: Mapped[str] = mapped_column(String(30), nullable=False)
+    group_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    message_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    window_start_hour: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    window_end_hour: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    skip_reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Фаза 6: когда клиент впервые ответил ПОСЛЕ этого исходящего — для
+    # честной статистики "доля ответивших", см. миграцию 023.
+    replied_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class OrderChatLinkDB(Base):
+    """Кэш order_id -> group_id (Фаза 3). Как только Playwright-первый-контакт
+    (или обычный HTTP-скан getDiffGroups) один раз находит group_id заказа —
+    он кэшируется тут, и все последующие сообщения по этому заказу (включая
+    другие кампании и обычные ИИ-ответы) идут быстрым HTTP путём без повторного
+    открытия браузера."""
+    __tablename__ = "order_chat_links"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    order_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    group_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    resolved_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class AutoAssemblyRuleDB(Base):

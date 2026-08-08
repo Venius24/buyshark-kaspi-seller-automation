@@ -72,7 +72,11 @@ def get_chat_state(store_id: Optional[str], group_id: str) -> Optional[dict]:
         row = session.get(ChatStateDB, (store_id, group_id))
         if not row:
             return None
-        return {"last_replied_msg_id": row.last_replied_msg_id, "human_override": row.human_override}
+        return {
+            "last_replied_msg_id": row.last_replied_msg_id,
+            "human_override": row.human_override,
+            "awaiting_review_reply": row.awaiting_review_reply,
+        }
     finally:
         session.close()
 
@@ -175,6 +179,32 @@ def clear_human_override_any_store(group_id: str) -> Optional[str]:
         return None
     finally:
         session.close()
+
+_legacy_awaiting_review_reply: set = set()
+
+def is_awaiting_review_reply(store_id: Optional[str], group_id: str) -> bool:
+    if store_id is None:
+        return group_id in _legacy_awaiting_review_reply
+    st = get_chat_state(store_id, group_id)
+    return bool(st and st.get("awaiting_review_reply"))
+
+def set_awaiting_review_reply(store_id: Optional[str], group_id: str):
+    if store_id is None:
+        _legacy_awaiting_review_reply.add(group_id)
+        return
+    _upsert_chat_state(store_id, group_id, awaiting_review_reply=True)
+
+def clear_awaiting_review_reply(store_id: Optional[str], group_id: str) -> bool:
+    """Возвращает True, если флаг реально был установлен (и теперь снят)."""
+    if store_id is None:
+        if group_id in _legacy_awaiting_review_reply:
+            _legacy_awaiting_review_reply.discard(group_id)
+            return True
+        return False
+    if not is_awaiting_review_reply(store_id, group_id):
+        return False
+    _upsert_chat_state(store_id, group_id, awaiting_review_reply=False)
+    return True
 
 def count_blocked_chats(store_id: Optional[str] = None) -> int:
     return len(list_blocked_chat_ids(store_id))

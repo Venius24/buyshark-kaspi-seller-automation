@@ -1,20 +1,27 @@
 import logging
 import httpx
 from backend.chatbot.config import load_chatbot_config
+from backend.chatbot.prompt import get_profile, render_system_prompt
 
 logger = logging.getLogger(__name__)
 
-async def generate_ai_reply(client_name: str, item_title: str, history: list) -> tuple[str, bool]:
+async def generate_ai_reply(client_name: str, item_title: str, history: list, store_id: str | None = None, awaiting_review_reply: bool = False) -> tuple[str, bool, dict]:
     """
     Асинхронно генерирует ответ клиенту через DeepSeek API с помощью httpx.AsyncClient.
-    Возвращает (reply_text, is_human_override).
+    Систем-промпт собирается из профиля этого магазина (backend/chatbot/prompt.py),
+    а не хардкодится под конкретный магазин.
+    awaiting_review_reply (Фаза 5) — прокидывается в систем-промпт, чтобы модель
+    распознала негативный ответ на кампанию «Отзыв» и поставила [HUMAN_OVERRIDE].
+    Возвращает (reply_text, is_human_override, usage) — usage = {"model", "prompt_tokens",
+    "completion_tokens"} для тарификации (Фаза 2), пустой dict если вызов до DeepSeek не дошёл.
     """
     cfg = load_chatbot_config()
     api_key = (cfg.get("deepseek_api") or cfg.get("deepseek_api_key") or "").strip()
+    model = "deepseek-chat"
 
     if not api_key:
         logger.warning("⚠️ DEEPSEEK_API не установлен в .env. Автоматический вызов менеджера.")
-        return "Здравствуйте! Приняли ваше обращение. Сейчас менеджер проверит детали заказа и ответит вам.", True
+        return "Здравствуйте! Приняли ваше обращение. Сейчас менеджер проверит детали заказа и ответит вам.", True, {}
 
     url = "https://api.deepseek.com/chat/completions"
     headers = {
@@ -24,50 +31,11 @@ async def generate_ai_reply(client_name: str, item_title: str, history: list) ->
 
     history_str = "\n".join(history)
 
-    system_prompt = (
-        f"Ты — крутой, дружелюбный и вежливый старший менеджер казахстанского магазина 'BARKHAN' на Kaspi.kz.\n"
-        f"Сейчас ты ведешь диалог с клиентом по имени {client_name} по поводу товара: '{item_title}'.\n\n"
-        
-        f"⚠️ СТРОГИЕ ПРАВИЛА ОБЩЕНИЯ:\n"
-        f"1. Отвечай емко (1-3 предложения), строго по существу ПОСЛЕДНЕГО сообщения клиента. Общайся естественно.\n"
-        f"2. 🛑 СТРОГИЙ ЗАПРЕТ НА СПАМ ИМЕНЕМ: НЕ ПИШИ имя клиента '{client_name}' в каждом сообщении! "
-        f"Если в истории чата Магазин уже обращения по имени делал, то в текущем ответе упоминать имя ЗАПРЕЩЕНО.\n"
-        f"3. ПРАВИЛО ПРИВЕТСТВИЯ: Посмотри на историю чата. Если Магазин уже здоровался ранее — НЕ пиши 'Здравствуйте' заново! Сразу переходи к ответу.\n"
-        f"4. ЖЕСТКОЕ ТАБУ: Никаких 'Привет' и панибратства.\n"
-        f"5. Пиши строго на языке клиента. Пишут на казахском - отвечай по-казахски, пишут на русском - отвечай по-русски\n"
-        f"6. Никакой душноты и канцеляризмов.\n\n"
-
-        f"7. Если присылают аудиозвонки и/или аудиосообщения/фото/видео - Проси текстом описание проблемы, якобы сломана аудиокарта или нет динамиков, чтобы клиент не понимал, что он общается с чат-ботом'\n\n"
-
-        f"🚨 ПРАВИЛО ВЫЗОВА МЕНЕДЖЕРА [HUMAN_OVERRIDE]:\n"
-        f"- Если в запросе клиента речь идет о возврате, замене товара, докомплектации, браке, разбитом/сломанном товаре, "
-        f"просьбе дать скидку, вызове человека/менеджера или любой нестандартной ситуации, требующей решения сотрудника: "
-        f"ОБЯЗАТЕЛЬНО ДОБАВЬ МЕТКУ `[HUMAN_OVERRIDE]` в конце своего ответа.\n\n"
-
-        f"📦 БЛОК 1: ЛОГИСТИКА И СРОКИ ДОСТАВКИ:\n"
-        f"- Если клиент просит привезти заказ раньше или изменить дату доставки курьером — вежливо ответь, что графиком курьеров управляет исключительно Kaspi, они могут обратиться в Kaspi Гид, и мы технически не можем сдвинуть сроки.\n\n"
-        
-        f"🕒 БЛОК 2: САМОВЫВОЗ И ЗАБРАТЬ ЗАКАЗ САМОМУ:\n"
-        f"- ЕСЛИ КЛИЕНТ СПРАШИВАЕТ 'МОЖНО ЛИ ЗАБРАТЬ СЕГОДНЯ/САМОМУ/В 17:00' или где забрать:\n"
-        f"  1. Если заказ оформлен с курьерской доставкой Kaspi: вежливо объясни, что изменить способ на самовывоз нельзя, так как товар уже передан в курьерскую службу Kaspi.\n"
-        f"  2. Если это покупка напрямую или они хотят приехать к нам на склад: дай наш точный адрес, ссылку на карту и укажи, что склад работает строго по будням (пн-пт) до 16:00, а в выходные закрыт.\n"
-        f"  📍 НАШ АДРЕС: ЖК City Plus, Улица Толе би, 285/8, цокольный этаж (подвал).\n"
-        f"  🔗 Ссылка на 2ГИС: https://go.2gis.com/RxcFE\n\n"
-
-        f"🕒 БЛОК 3: ГРАФИК РАБОТЫ И СКЛАД:\n"
-        f"- Мы обрабатываем и отправляем заказы по будням до 16:00. Выходные — суббота и воскресенье.\n"
-        f"- Если клиент пишет в нерабочее время, дружелюбно сориентируй его по графику, чтобы он не приехал к закрытым дверям\n\n"
-         
-        f"🔄 БЛОК 4: ВОЗВРАТЫ:\n"
-        f"- Одобрение возвратов без проблем, если товар не использован, а упаковка не вскрыта. Всегда ставь `[HUMAN_OVERRIDE]` при вопросах о возврате/замене.\n\n"
-        f"Обмена нет. Только возврат.\n"
-        
-        f"🏪 БЛОК 5: АССОРТИМЕНТ И НАЛИЧИЕ ТОВАРОВ:\n"
-        f"- Назови наши 4 основных направления: Хозяйственные товары, Спортивные товары, Праздничные товары, а также товары для Дачи и Сада."
-    )
+    profile = get_profile(store_id)
+    system_prompt = render_system_prompt(profile, client_name, item_title, awaiting_review_reply=awaiting_review_reply)
 
     payload = {
-        "model": "deepseek-chat",
+        "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Вся история диалога (последнее сообщение в самом низу):\n{history_str}\n\nНапиши точный ответ Магазина на последнее сообщение:"}
@@ -79,14 +47,21 @@ async def generate_ai_reply(client_name: str, item_title: str, history: list) ->
         async with httpx.AsyncClient(timeout=12.0) as client:
             resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code == 200:
-                content = resp.json()["choices"][0]["message"]["content"].strip()
+                body = resp.json()
+                content = body["choices"][0]["message"]["content"].strip()
+                usage_raw = body.get("usage") or {}
+                usage = {
+                    "model": model,
+                    "prompt_tokens": usage_raw.get("prompt_tokens"),
+                    "completion_tokens": usage_raw.get("completion_tokens"),
+                }
                 if "[HUMAN_OVERRIDE]" in content:
                     content = content.replace("[HUMAN_OVERRIDE]", "").strip()
-                    return content, True
-                return content, False
+                    return content, True, usage
+                return content, False, usage
             else:
                 logger.error(f"💥 Ошибка DeepSeek API: HTTP {resp.status_code} - {resp.text}")
     except Exception as e:
         logger.error(f"💥 Сбой при асинхронном вызове DeepSeek API: {e}")
 
-    return "Здравствуйте! Приняли ваше обращение. Сейчас менеджер проверит детали заказа и ответит вам.", True
+    return "Здравствуйте! Приняли ваше обращение. Сейчас менеджер проверит детали заказа и ответит вам.", True, {}

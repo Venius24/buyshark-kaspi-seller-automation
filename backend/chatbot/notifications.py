@@ -1,11 +1,9 @@
-import time
-import uuid
 import asyncio
 import logging
 from datetime import datetime
 from typing import Optional
 
-from backend.chatbot import config, bot_instance, notify_dispatch
+from backend.chatbot import config, bot_instance, notify_dispatch, chat_client
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +113,7 @@ async def notify_startup():
 
 async def notify_manager_and_block(
     group_id: str, client_name: str, item_title: str, client_text: str,
-    cookies: dict, headers: dict, msg_id: str, last_msg_created: int,
+    cookies: dict, merchant_id: str, msg_id: str, last_msg_created: int,
     store_id: Optional[str] = None
 ):
     """
@@ -131,30 +129,11 @@ async def notify_manager_and_block(
     else:
         hold_reply = "Приняли ваше обращение. Сейчас менеджер магазина уточнит ваш запрос и во всем разберется. Пожалуйста, ожидайте."
 
-    status_url = "https://mc.shop.kaspi.kz/chats/api/mobile/api/v1/messageStatus/changeStatus"
-    typing_url = "https://mc.shop.kaspi.kz/chats/api/mobile/api/v1/typing/sendText"
-    send_url = "https://mc.shop.kaspi.kz/chats/api/mobile/api/v1/messages/sendMessage"
-
     try:
-        def send_kaspi_hold():
-            from backend.chatbot.kaspi import http_session
-            http_session.post(typing_url, headers=headers, cookies=cookies, json={"groupId": group_id, "text": hold_reply + "\n"}, timeout=5)
-            time.sleep(1)
-            
-            send_payload = {
-                "created": int(time.time() * 1000),
-                "data": {"text": hold_reply},
-                "messageId": str(uuid.uuid4()).upper(),
-                "groupId": group_id,
-                "transitionContextUrl": f"https://pay.kaspi.kz/chat?threadId={group_id}&isWeb=true"
-            }
-            http_session.post(send_url, headers=headers, cookies=cookies, json=send_payload, timeout=5)
-            
-            http_session.post(status_url, headers=headers, cookies=cookies, json={
-                "groupId": group_id, "messages": [{"id": msg_id, "created": last_msg_created}]
-            }, timeout=5)
-
-        await asyncio.to_thread(send_kaspi_hold)
+        await chat_client.send_typing(group_id, hold_reply + "\n", cookies, merchant_id)
+        await asyncio.sleep(1)
+        await chat_client.send_message(group_id, hold_reply, cookies, merchant_id)
+        await chat_client.mark_read(group_id, [{"id": msg_id, "created": last_msg_created}], cookies, merchant_id)
         logger.info(f"💬 Клиенту {client_name} отправлен Hold-ответ: \"{hold_reply[:30]}...\"")
     except Exception as e:
         logger.error(f"⚠️ Ошибка отправки Hold-ответа в Kaspi: {e}")

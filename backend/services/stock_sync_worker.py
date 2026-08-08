@@ -21,6 +21,7 @@ from backend.dumper.config import discover_merchant_id, _decode_base64_if_needed
 from backend.dumper.telemetry import telemetry_manager
 from backend.services.webhook_dispatcher import dispatch_webhook_event
 from backend.security.store_context import list_active_stores
+from backend.chatbot.pickup_campaign import maybe_trigger_pickup_campaign
 
 
 logger = logging.getLogger(__name__)
@@ -263,7 +264,14 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
     """
     groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
     active_groups = {gid: g for gid, g in groups.items() if g.get("is_active", True)}
-    if not active_groups:
+    # Фаза 4 (кампания «Самовывоз»): этот проход — единственный, что уже
+    # опрашивает NEW/APPROVED_BY_BANK заказы per-store каждые 20с, поэтому
+    # триггер рассылки повешен сюда, а не на отдельный поллер (не плодим
+    # второй независимый /orders запрос). Значит для store_id != None нельзя
+    # выходить рано просто потому что нет активных Мастер-Групп — легаси
+    # (store_id=None, dev-однотенантный фоллбек) исходящих не имеет и ведёт
+    # себя как раньше.
+    if not active_groups and not store_id:
         return
 
     # Получаем свежие новые заказы через Kaspi API
@@ -283,7 +291,7 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
         return
 
     # Загружаем товары из кэша для резолва алиасов ключей (per-store, Слайс 1)
-    all_products_cache = await asyncio.to_thread(_load_products, store_id)
+    all_products_cache = await asyncio.to_thread(_load_products, store_id) if active_groups else []
 
     processed_orders = await asyncio.to_thread(_load_processed_orders, store_id)
     order_dedup_changed = False
@@ -291,6 +299,15 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
     for order in orders_resp:
         order_id = str(order.get("id") or order.get("internalId") or "")
         if not order_id or order_id in processed_orders:
+            continue
+
+        # Фаза 4: кампания «Самовывоз» — независимо от Мастер-Групп остатков.
+        if store_id and order.get("deliveryType") == "Самовывоз":
+            asyncio.create_task(maybe_trigger_pickup_campaign(store_id, token, order))
+
+        if not active_groups:
+            processed_orders[order_id] = {"processed_at": datetime.datetime.now().isoformat(), "matched_groups": []}
+            order_dedup_changed = True
             continue
 
         entries = order.get("entries", [])

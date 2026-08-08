@@ -1,11 +1,12 @@
 import time
-import uuid
 import asyncio
 import logging
 
-from backend.chatbot import config, bot_instance
+from backend.chatbot import config, bot_instance, chat_client
+from backend.chatbot import outbound as bot_outbound
 from backend.chatbot.kaspi import load_chat_cookies, format_time, check_logistics_question, get_chat_history, http_session
 from backend.chatbot.ai import generate_ai_reply
+from backend.chatbot.prompt import get_profile as get_bot_profile, match_human_trigger
 from backend.chatbot.notifications import notify_startup, notify_cookie_expired, notify_manager_and_block, reset_cookie_alert
 from backend.chatbot.handlers import register_handlers, register_bot_commands
 from backend.dumper.config import discover_merchant_id
@@ -115,11 +116,21 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
             item_title = group.get("title", "Товар")
             client_text = last_msg.get("text", "")
 
-            human_triggers = [
-                'брак', 'сломан', 'не работает', 'суд', 'жалоба', 'гид', 'ошибка', 'человек', 'менеджер', 'верните', 'разбит',
-                'есть ли', 'в наличии', 'остаток', 'остатки', 'количество', 'штук', 'шт', 'бар ма', 'бар ма?', 'қалды', 'обмен'
-            ]
-            need_human = any(word in client_text.lower() for word in human_triggers)
+            # Фаза 5 (кампания «Отзыв»): флаг одноразовый — снимаем сразу на
+            # первом же ответе клиента, независимо от того, какой веткой
+            # (human_triggers/логистика/ИИ) он в итоге обработается ниже.
+            was_awaiting_review = config.is_awaiting_review_reply(store_id, group_id)
+            if was_awaiting_review:
+                await asyncio.to_thread(config.clear_awaiting_review_reply, store_id, group_id)
+
+            # Фаза 6 (статистика рассылок): "клиент ответил" фиксируется тут,
+            # ДО ветвления на human_triggers/логистику/ИИ — иначе негативные
+            # ответы, уходящие в HUMAN_OVERRIDE, не попали бы в долю ответивших.
+            if store_id:
+                await asyncio.to_thread(bot_outbound.mark_replied_if_pending, store_id, group_id)
+
+            bot_profile = await asyncio.to_thread(get_bot_profile, store_id)
+            need_human = match_human_trigger(client_text, bot_profile.get("human_triggers"))
 
             if need_human:
                 await notify_manager_and_block(
@@ -128,48 +139,32 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
                     item_title=item_title,
                     client_text=client_text,
                     cookies=cookies,
-                    headers=headers,
+                    merchant_id=merchant_id,
                     msg_id=msg_id,
                     last_msg_created=msg_created,
                     store_id=store_id
                 )
                 continue
 
-            logistics_reply = check_logistics_question(client_text)
-
-            status_url = "https://mc.shop.kaspi.kz/chats/api/mobile/api/v1/messageStatus/changeStatus"
-            typing_url = "https://mc.shop.kaspi.kz/chats/api/mobile/api/v1/typing/sendText"
-            send_url = "https://mc.shop.kaspi.kz/chats/api/mobile/api/v1/messages/sendMessage"
+            logistics_reply = check_logistics_question(client_text, bot_profile)
 
             if logistics_reply:
                 config.mark_chat_replied(store_id, group_id, msg_id)
-                def send_logistics():
-                    http_session.post(typing_url, headers=headers, cookies=cookies, json={"groupId": group_id, "text": logistics_reply + "\n"}, timeout=5)
-                    time.sleep(1.5)
-
-                    send_payload = {
-                        "created": int(time.time() * 1000),
-                        "data": {"text": logistics_reply},
-                        "messageId": str(uuid.uuid4()).upper(),
-                        "groupId": group_id,
-                        "transitionContextUrl": f"https://pay.kaspi.kz/chat?threadId={group_id}&isWeb=true"
-                    }
-                    http_session.post(send_url, headers=headers, cookies=cookies, json=send_payload, timeout=5)
-
-                    http_session.post(status_url, headers=headers, cookies=cookies, json={
-                        "groupId": group_id, "messages": [{"id": msg_id, "created": last_msg.get("created")}]
-                    }, timeout=5)
-
-                await asyncio.to_thread(send_logistics)
+                await chat_client.send_typing(group_id, logistics_reply + "\n", cookies, merchant_id)
+                await asyncio.sleep(1.5)
+                await chat_client.send_message(group_id, logistics_reply, cookies, merchant_id)
+                await chat_client.mark_read(group_id, [{"id": msg_id, "created": last_msg.get("created")}], cookies, merchant_id)
                 logger.info(f"✅ [Chatbot] Логистический шаблон отправлен клиенту {client_name}.")
                 if store_id:
                     from backend.state_helpers import _append_chat_response_log
-                    _append_chat_response_log(store_id, group_id)
+                    _append_chat_response_log(store_id, group_id, kind="inbound_logistics_template", billed_units=0)
                 continue
 
             config.mark_chat_replied(store_id, group_id, msg_id)
             history = await get_chat_history(group_id, cookies, headers)
-            ai_reply, is_human_override = await generate_ai_reply(client_name, item_title, history)
+            ai_reply, is_human_override, ai_usage = await generate_ai_reply(
+                client_name, item_title, history, store_id=store_id, awaiting_review_reply=was_awaiting_review
+            )
 
             if is_human_override:
                 await notify_manager_and_block(
@@ -178,40 +173,32 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
                     item_title=item_title,
                     client_text=client_text,
                     cookies=cookies,
-                    headers=headers,
+                    merchant_id=merchant_id,
                     msg_id=msg_id,
                     last_msg_created=msg_created,
                     store_id=store_id
                 )
                 continue
 
-            def send_ai_response():
-                http_session.post(status_url, headers=headers, cookies=cookies, json={
-                    "groupId": group_id,
-                    "messages": [{"id": msg_id, "created": last_msg.get("created")}]
-                }, timeout=5)
-
-                http_session.post(typing_url, headers=headers, cookies=cookies, json={"groupId": group_id, "text": ai_reply + "\n"}, timeout=5)
-                time.sleep(2)
-
-                send_payload = {
-                    "created": int(time.time() * 1000),
-                    "data": {"text": ai_reply},
-                    "messageId": str(uuid.uuid4()).upper(),
-                    "groupId": group_id,
-                    "transitionContextUrl": f"https://pay.kaspi.kz/chat?threadId={group_id}&isWeb=true"
-                }
-
-                return http_session.post(send_url, headers=headers, cookies=cookies, json=send_payload, timeout=5)
-
-            send_resp = await asyncio.to_thread(send_ai_response)
-            if send_resp.status_code == 200 and send_resp.json().get("StatusCode") == 0:
+            await chat_client.mark_read(group_id, [{"id": msg_id, "created": last_msg.get("created")}], cookies, merchant_id)
+            await chat_client.send_typing(group_id, ai_reply + "\n", cookies, merchant_id)
+            await asyncio.sleep(2)
+            send_result = await chat_client.send_message(group_id, ai_reply, cookies, merchant_id)
+            if send_result.get("success"):
                 logger.info(f"✅ [Chatbot] ИИ-ответ успешно отправлен клиенту {client_name}!")
                 if store_id:
                     from backend.state_helpers import _append_chat_response_log
-                    _append_chat_response_log(store_id, group_id)
+                    _append_chat_response_log(
+                        store_id, group_id,
+                        kind="inbound_reply",
+                        prompt_tier=bot_profile.get("prompt_tier", ""),
+                        model=ai_usage.get("model", ""),
+                        prompt_tokens=ai_usage.get("prompt_tokens"),
+                        completion_tokens=ai_usage.get("completion_tokens"),
+                        billed_units=1,
+                    )
             else:
-                logger.error(f"❌ [Chatbot] Сбой отправки ответа клиенту {client_name}: {send_resp.text}")
+                logger.error(f"❌ [Chatbot] Сбой отправки ответа клиенту {client_name}: {send_result.get('error')}")
 
     return True
 

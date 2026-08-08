@@ -417,6 +417,11 @@ class KaspiAPI:
                         "phone": customer.get("cellPhone", ""),
                     },
                     "address": delivery_addr.get("formattedAddress") or delivery_addr.get("town", ""),
+                    # Фаза 4 (кампания «Самовывоз»): точка выдачи, которую выбрал
+                    # клиент — тот же формат id, что и в pointofservices (см.
+                    # get_merchant_id выше). Нужен, чтобы понять КОТОРУЮ из
+                    # нескольких точек магазина написать клиенту.
+                    "pickupPointId": attr.get("pickupPointId"),
                 })
 
                 if len(results) >= limit:
@@ -484,11 +489,18 @@ class KaspiAPI:
                     e_attr = entry_data.get("attributes", {})
                     offer = e_attr.get("offer", {})
                     sku = str(offer.get("code", "")).strip()
+                    # productCode для review-диплинка (Kaspi "оцените заказ" ссылка,
+                    # см. [[project_kaspi_review_deeplink]]) — Kaspi отдаёт его в
+                    # relationships.product.data.id, обычно base64 (не сам merchant
+                    # SKU — тот в offer.code и почти всегда нечисловой).
+                    product_ref = entry_data.get("relationships", {}).get("product", {}).get("data", {}) or {}
+                    product_code = KaspiAPI._decode_base64_if_needed(product_ref.get("id", ""))
                     entries_enriched.append({
                         "sku": sku,
                         "name": offer.get("name") or offer.get("title") or "Товар",
                         "quantity": e_attr.get("quantity", 1),
                         "totalPrice": e_attr.get("totalPrice") or e_attr.get("entryTotalPrice", 0),
+                        "productCode": product_code if product_code.isdigit() else "",
                     })
 
                 results.append({
