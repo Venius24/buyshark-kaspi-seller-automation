@@ -473,12 +473,13 @@ def register_handlers():
                 return
             role_title = {"OWNER": "владелец", "MANAGER": "менеджер", "VIEWER": "наблюдатель"}.get(result["role"], result["role"])
             greeting = "🎉 Добро пожаловать! " if result["is_new_employee"] else "✅ "
+            welcome_text = f"{greeting}Telegram привязан к магазину *{_esc_md(result['store_name'])}* как _{role_title}_."
             if result["is_new_employee"]:
-                await notify_dispatch.send_card(message.from_user.id, "welcome")
-            await message.reply(
-                f"{greeting}Telegram привязан к магазину **{_esc_md(result['store_name'])}** как *{role_title}*.",
-                reply_markup=get_main_reply_keyboard(lang),
-            )
+                await notify_dispatch.send_with_card(
+                    message.from_user.id, welcome_text, card="welcome", reply_markup=get_main_reply_keyboard(lang),
+                )
+            else:
+                await message.reply(welcome_text, reply_markup=get_main_reply_keyboard(lang))
             return
 
         access = await asyncio.to_thread(ti.resolve_bot_access, message.from_user.id)

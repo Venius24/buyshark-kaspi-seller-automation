@@ -79,11 +79,14 @@ def _in_quiet_hours(quiet_from: Optional[str], quiet_to: Optional[str], now: dat
     return now >= start or now < end  # окно через полночь, напр. 23:00–08:00
 
 
+_CAPTION_LIMIT = 1024  # лимит Telegram на caption у фото, у текста сообщения — 4096
+
+
 async def send_card(tg_user_id: int, card: str):
-    """Шлёт Higgsfield-карточку картинкой без подписи (подпись не шлём, чтобы
-    не упереться в лимит caption у Telegram и не дублировать текст алерта) —
-    best-effort, отдельно от текстового уведомления: сбой картинки не должен
-    заблокировать сам алерт."""
+    """Шлёт Higgsfield-карточку картинкой без подписи — используется там, где
+    текст алерта неизвестен на месте вызова (легаси-фоллбек лупы в
+    notifications.py собирают текст отдельно). Предпочитай send_with_card,
+    который клеит текст в подпись одним сообщением."""
     path = CARD_FILES.get(card)
     if not path or not bot_instance.bot or not bot_instance.HAS_AIOGRAM or not path.exists():
         return
@@ -94,9 +97,24 @@ async def send_card(tg_user_id: int, card: str):
         logger.error(f"[NotifyDispatch] Не удалось отправить карточку {card} {tg_user_id}: {e}")
 
 
-async def _send(tg_user_id: int, text: str, reply_markup=None, card: Optional[str] = None):
+async def send_with_card(tg_user_id: int, text: str, card: Optional[str] = None, reply_markup=None):
+    """Шлёт текст и карточку ОДНИМ сообщением (текст — caption у фото), чтобы
+    в чате не было двух разрозненных сообщений подряд. Если текст не влезает
+    в лимит caption (1024 симв., напр. money-дайджест из многих строк) —
+    падаем назад на картинку и текст раздельно, как было раньше."""
     if not bot_instance.bot:
         return
+    path = CARD_FILES.get(card) if card else None
+    if path and bot_instance.HAS_AIOGRAM and path.exists() and len(text) <= _CAPTION_LIMIT:
+        try:
+            from aiogram.types import FSInputFile
+            await bot_instance.bot.send_photo(
+                chat_id=tg_user_id, photo=FSInputFile(str(path)), caption=text,
+                parse_mode="Markdown", reply_markup=reply_markup,
+            )
+            return
+        except Exception as e:
+            logger.error(f"[NotifyDispatch] Не удалось отправить карточку+текст {card} {tg_user_id}: {e}")
     if card:
         await send_card(tg_user_id, card)
     try:
@@ -106,6 +124,10 @@ async def _send(tg_user_id: int, text: str, reply_markup=None, card: Optional[st
         )
     except Exception as e:
         logger.error(f"[NotifyDispatch] Не удалось отправить {tg_user_id}: {e}")
+
+
+async def _send(tg_user_id: int, text: str, reply_markup=None, card: Optional[str] = None):
+    await send_with_card(tg_user_id, text, card=card, reply_markup=reply_markup)
 
 
 async def dispatch(
@@ -166,7 +188,7 @@ async def _flush_money_buffers():
             text = lines[0]
             card = "new_order"
         else:
-            text = f"💰 **{len(lines)} событий за последнюю минуту:**\n" + "\n".join(f"• {l}" for l in lines)
+            text = f"💰 *{len(lines)} событий за последнюю минуту:*\n" + "\n".join(f"• {l}" for l in lines)
             card = "money_digest"
         await _send(tg_user_id, text, card=card)
 
@@ -181,7 +203,7 @@ async def _flush_quiet_queues():
         lines = _quiet_queue.pop(key, None)
         if not lines:
             continue
-        text = f"🌙 **Пока вы спали ({len(lines)}):**\n" + "\n".join(f"• {l}" for l in lines)
+        text = f"🌙 *Пока вы спали ({len(lines)}):*\n" + "\n".join(f"• {l}" for l in lines)
         await _send(tg_user_id, text)
 
 
@@ -219,7 +241,7 @@ async def _flush_evening_summaries():
             continue
         revenue = summary.get("total_revenue") or 0.0
         text = (
-            f"🌆 **Итоги дня**\n"
+            f"🌆 *Итоги дня*\n"
             f"Заказов: {orders}\n"
             f"Выручка: {revenue:,.0f} ₸".replace(",", " ")
         )

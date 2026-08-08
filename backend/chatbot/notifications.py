@@ -52,15 +52,15 @@ async def notify_cookie_expired(reason: str, store_id: Optional[str] = None):
         return
 
     store_name = config.get_store_name(store_id) if store_id else None
-    store_line = f"🏪 **Магазин:** {_esc_md(store_name)}\n" if store_name else ""
+    store_line = f"🏪 *Магазин:* {_esc_md(store_name)}\n" if store_name else ""
     alert_text = (
-        f"🚨 **ВНИМАНИЕ: СЕССИЯ ЧАТА KASPI ИСТЕКЛА!**\n"
+        f"🚨 *ВНИМАНИЕ: СЕССИЯ ЧАТА KASPI ИСТЕКЛА!*\n"
         f"----------------------------------------\n"
         f"{store_line}"
-        f"⚠️ **Причина:** {_esc_md(reason)}\n"
-        f"⏰ **Время:** {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
+        f"⚠️ *Причина:* {_esc_md(reason)}\n"
+        f"⏰ *Время:* {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
         f"----------------------------------------\n"
-        f"🛠 **Действие:** Зайдите в дашборд → вкладка «ИИ-Автоответчик» и повторно войдите по номеру телефона (SMS-код). "
+        f"🛠 *Действие:* Зайдите в дашборд → вкладка «ИИ-Автоответчик» и повторно войдите по номеру телефона (SMS-код). "
         f"Это отдельный вход от основного кабинета — email/пароль тут не поможет."
     )
 
@@ -70,16 +70,7 @@ async def notify_cookie_expired(reason: str, store_id: Optional[str] = None):
     legacy_ids = await _unlinked_legacy_admin_ids(store_id)
     logger.warning(f"🚨 [COOKIE ALERT] {reason}. Отправка уведомления (легаси-фоллбек) на Telegram IDs: {legacy_ids}")
     for admin_id in legacy_ids:
-        await notify_dispatch.send_card(admin_id, "cookie_expired")
-        try:
-            await bot_instance.bot.send_message(
-                chat_id=admin_id,
-                text=alert_text,
-                parse_mode="Markdown",
-                disable_web_page_preview=True
-            )
-        except Exception as e:
-            logger.error(f"⚠️ Ошибка отправки алерта админу {admin_id}: {e}")
+        await notify_dispatch.send_with_card(admin_id, alert_text, card="cookie_expired")
 
     config.set_cookie_alert_sent(store_id, True)
 
@@ -92,24 +83,15 @@ async def notify_startup():
     cfg = config.load_chatbot_config()
     merchant_id = cfg.get("merchant_id") or "неизвестен"
     alert_text = (
-        f"🚀 **Бот успешно запущен и начал работу!**\n"
+        f"🚀 *Бот успешно запущен и начал работу!*\n"
         f"----------------------------------------\n"
-        f"⏰ **Время:** {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
-        f"🏪 **Merchant ID:** `{_esc_md(merchant_id)}`"
+        f"⏰ *Время:* {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
+        f"🏪 *Merchant ID:* `{_esc_md(merchant_id)}`"
     )
 
     logger.info(f"🚀 Отправка уведомления о запуске бота на Telegram IDs: {admin_ids}")
     for admin_id in admin_ids:
-        await notify_dispatch.send_card(admin_id, "startup")
-        try:
-            await bot_instance.bot.send_message(
-                chat_id=admin_id,
-                text=alert_text,
-                parse_mode="Markdown",
-                disable_web_page_preview=True
-            )
-        except Exception as e:
-            logger.error(f"⚠️ Не удалось отправить сообщение о запуске админу {admin_id}: {e}")
+        await notify_dispatch.send_with_card(admin_id, alert_text, card="startup")
 
 async def notify_manager_and_block(
     group_id: str, client_name: str, item_title: str, client_text: str,
@@ -142,14 +124,14 @@ async def notify_manager_and_block(
     pay_link = f"https://pay.kaspi.kz/chat?threadId={group_id}&isWeb=true"
 
     store_name = config.get_store_name(store_id) if store_id else None
-    store_line = f"🏪 **Магазин:** {_esc_md(store_name)}\n" if store_name else ""
+    store_line = f"🏪 *Магазин:* {_esc_md(store_name)}\n" if store_name else ""
     alert_text = (
-        f"🚨 **СРОЧНЫЙ ВЫЗОВ МЕНЕДЖЕРА В КАСПИ!**\n"
+        f"🚨 *СРОЧНЫЙ ВЫЗОВ МЕНЕДЖЕРА В КАСПИ!*\n"
         f"----------------------------------------\n"
         f"{store_line}"
-        f"👤 **Клиент:** {_esc_md(client_name)}\n"
-        f"📦 **Товар:** {_esc_md(item_title)}\n"
-        f"💬 **Проблема/Запрос:** \"{_esc_md(client_text)}\"\n"
+        f"👤 *Клиент:* {_esc_md(client_name)}\n"
+        f"📦 *Товар:* {_esc_md(item_title)}\n"
+        f"💬 *Проблема/Запрос:* \"{_esc_md(client_text)}\"\n"
         f"----------------------------------------\n"
         f"🔗 [Открыть в ЛК Веб]({web_link})\n"
         f"📱 [Открыть через Pay-ссылку]({pay_link})\n"
@@ -167,17 +149,7 @@ async def notify_manager_and_block(
 
             legacy_ids = await _unlinked_legacy_admin_ids(store_id)
             for admin_id in legacy_ids:
-                await notify_dispatch.send_card(admin_id, "chat_alert")
-                try:
-                    await bot_instance.bot.send_message(
-                        chat_id=admin_id,
-                        text=alert_text,
-                        parse_mode="Markdown",
-                        disable_web_page_preview=True,
-                        reply_markup=keyboard
-                    )
-                except Exception as e:
-                    logger.error(f"⚠️ Не удалось отправить алерт вызова менеджеру админу {admin_id}: {e}")
+                await notify_dispatch.send_with_card(admin_id, alert_text, card="chat_alert", reply_markup=keyboard)
         except Exception as e:
             logger.error(f"⚠️ Ошибка формирования Telegram клавиатуры: {e}")
 
