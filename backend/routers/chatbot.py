@@ -18,7 +18,6 @@ router = APIRouter(prefix="/api/chatbot", tags=["chatbot"])
 
 class ChatbotConfigRequest(BaseModel):
     enabled: Optional[bool] = True
-    admin_ids: Optional[List[str]] = None
 
 class UnblockChatRequest(BaseModel):
     group_id: str
@@ -58,25 +57,21 @@ class BotProfileRequest(BaseModel):
 def get_chatbot_config(ctx: StoreContext = Depends(get_store_context)):
     """Получить конфигурацию ИИ-автоответчика этого магазина."""
     cfg = config.load_chatbot_config(ctx.store_id)
-    admin_ids = config.load_admin_ids(ctx.store_id)
 
     return {
         "success": True,
         "config": {
             "enabled": cfg.get("enabled", True),
-            "admin_ids": admin_ids,
             "merchant_id": cfg.get("merchant_id", "")
         }
     }
 
 @router.post("/config")
 def save_chatbot_config(req: ChatbotConfigRequest, ctx: StoreContext = Depends(get_store_context)):
-    """Сохранить пользовательские настройки чат-бота (admin_ids, enabled) этого магазина."""
+    """Сохранить пользовательские настройки чат-бота (enabled) этого магазина."""
     update_data = {}
     if req.enabled is not None:
         update_data["enabled"] = req.enabled
-    if req.admin_ids is not None:
-        update_data["admin_ids"] = req.admin_ids
 
     updated = config.save_chatbot_config(update_data, ctx.store_id)
     return {

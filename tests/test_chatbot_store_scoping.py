@@ -74,13 +74,6 @@ class ChatbotStoreScopingTest(unittest.TestCase):
         self.assertFalse(self.config.load_chatbot_config(store_id="store-A")["enabled"])
         self.assertTrue(self.config.load_chatbot_config(store_id="store-B")["enabled"])
 
-    def test_admin_ids_are_independent_per_store(self):
-        self.config.save_chatbot_config({"admin_ids": ["111"]}, store_id="store-A")
-        self.config.save_chatbot_config({"admin_ids": ["222"]}, store_id="store-B")
-
-        self.assertEqual(self.config.load_admin_ids(store_id="store-A"), ["111"])
-        self.assertEqual(self.config.load_admin_ids(store_id="store-B"), ["222"])
-
     def test_cookie_alert_sent_is_independent_per_store(self):
         self.config.set_cookie_alert_sent("store-A", True)
         self.assertTrue(self.config.is_cookie_alert_sent("store-A"))

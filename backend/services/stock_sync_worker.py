@@ -2,7 +2,6 @@ import asyncio
 import logging
 import random
 import datetime
-import requests
 from typing import Optional, List
 
 from backend.state_helpers import (
@@ -37,20 +36,21 @@ def get_stock_lock(store_id=None) -> asyncio.Lock:
         _stock_locks[store_id] = asyncio.Lock()
     return _stock_locks[store_id]
 
-async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus: List[str], trigger_order_info: Optional[dict] = None):
-    """Отправка Push/Telegram уведомления при обнулении остатка группы с деталями о заказе-триггере."""
+async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus: List[str], store_id: Optional[str] = None, trigger_order_info: Optional[dict] = None):
+    """Уведомление при обнулении остатка группы с деталями о заказе-триггере
+    — реальным привязанным через deep-link пользователям магазина (группа
+    'problems'), через notify_dispatch. Раньше слало напрямую по легаси
+    admin_ids (см. HANDOFF, вырезано 2026-08-09)."""
     try:
-        from backend.chatbot.config import load_chatbot_config
-        cfg = load_chatbot_config()
-        tg_token = cfg.get("tg_bot_token")
-        admin_ids = cfg.get("admin_ids", [])
-        
-        if not tg_token or not admin_ids:
-            logger.info(f"Zero Stock Telegram notify skipped: token or admin_ids missing.")
+        from backend.chatbot import notify_dispatch
+        from backend.chatbot.notifications import _esc_md
+
+        if store_id is None:
+            logger.info("Zero Stock notify skipped: без store_id некому отправлять (легаси-путь без магазина).")
             return
 
         skus_str = ", ".join(linked_skus[:5]) + ("..." if len(linked_skus) > 5 else "")
-        
+
         order_section = ""
         if trigger_order_info:
             code = trigger_order_info.get("order_code") or trigger_order_info.get("code") or "N/A"
@@ -60,37 +60,24 @@ async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus
             customer = trigger_order_info.get("customer") or "Покупатель"
 
             order_section = (
-                f"🛒 <b>ПРИЧИНА СНИЖЕНИЯ ДО 0 (Новый заказ):</b>\n"
-                f"• <b>№ Заказа:</b> <code>#{code}</code>\n"
-                f"• <b>Товар:</b> {title}\n"
-                f"• <b>Артикул списания:</b> <code>{sku}</code> (-{units} шт.)\n"
-                f"• <b>Покупатель:</b> {customer}\n\n"
+                f"🛒 *ПРИЧИНА СНИЖЕНИЯ ДО 0 (Новый заказ):*\n"
+                f"• *№ Заказа:* `#{_esc_md(code)}`\n"
+                f"• *Товар:* {_esc_md(title)}\n"
+                f"• *Артикул списания:* `{_esc_md(sku)}` (-{units} шт.)\n"
+                f"• *Покупатель:* {_esc_md(customer)}\n\n"
             )
 
         text = (
-            f"🚨 <b>ВНИМАНИЕ: СНЯТО С ПРОДАЖИ (Zero Stock Protection)</b>\n\n"
-            f"📦 <b>Группа:</b> {group_name}\n"
-            f"🆔 <b>ID Группы:</b> <code>{group_id}</code>\n"
-            f"📉 <b>Доступный остаток:</b> 0 шт.\n"
-            f"🔗 <b>Привязанные SKU:</b> {skus_str}\n\n"
+            f"🚨 *ВНИМАНИЕ: СНЯТО С ПРОДАЖИ (Zero Stock Protection)*\n\n"
+            f"📦 *Группа:* {_esc_md(group_name)}\n"
+            f"🆔 *ID Группы:* `{group_id}`\n"
+            f"📉 *Доступный остаток:* 0 шт.\n"
+            f"🔗 *Привязанные SKU:* {_esc_md(skus_str)}\n\n"
             f"{order_section}"
             f"⚠️ Все карточки товаров группы занулены и временно сняты с продажи на Kaspi!"
         )
 
-        tg_proxy = cfg.get("tg_bot_proxy") or cfg.get("tg_proxy")
-        proxies = {"https": tg_proxy, "http": tg_proxy} if tg_proxy else None
-
-        for admin_id in admin_ids:
-            url = f"https://api.telegram.org/bot{tg_token}/sendMessage"
-            payload = {
-                "chat_id": admin_id,
-                "text": text,
-                "parse_mode": "HTML"
-            }
-            try:
-                await asyncio.to_thread(requests.post, url, json=payload, proxies=proxies, timeout=5)
-            except Exception as ex:
-                logger.error(f"Error sending Telegram zero-stock alert to {admin_id}: {ex}")
+        await notify_dispatch.dispatch(store_id, "problems", text, urgent=True, dedup_key=f"zero_stock:{group_id}")
     except Exception as e:
         logger.error(f"Failed to execute notify_zero_stock_telegram: {e}")
 
@@ -247,7 +234,7 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
     # Обработка Zero Stock Protection
     if shared_stock == 0:
         logger.warning(f"🚨 [Zero Stock Protection] Группа '{group_name}' занулена!")
-        await notify_zero_stock_telegram(group_name, group_id, linked_skus, trigger_order_info)
+        await notify_zero_stock_telegram(group_name, group_id, linked_skus, store_id=store_id, trigger_order_info=trigger_order_info)
         await broadcast_ws_event("zero_stock_alert", {
             "group_id": group_id,
             "group_name": group_name,
@@ -264,14 +251,23 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
     """
     groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
     active_groups = {gid: g for gid, g in groups.items() if g.get("is_active", True)}
+
     # Фаза 4 (кампания «Самовывоз»): этот проход — единственный, что уже
     # опрашивает NEW/APPROVED_BY_BANK заказы per-store каждые 20с, поэтому
-    # триггер рассылки повешен сюда, а не на отдельный поллер (не плодим
-    # второй независимый /orders запрос). Значит для store_id != None нельзя
-    # выходить рано просто потому что нет активных Мастер-Групп — легаси
-    # (store_id=None, dev-однотенантный фоллбек) исходящих не имеет и ведёт
-    # себя как раньше.
-    if not active_groups and not store_id:
+    # триггер рассылки повешен сюда, а не на отдельный поллер. НО (фикс
+    # 2026-08-09 — первая версия дёргала Kaspi /orders для ВСЕХ сторов
+    # каждые 20с безусловно, даже без единой активной Мастер-Группы и без
+    # настроенных точек самовывоза — резкий рост трафика к Kaspi, а Kaspi уже
+    # банил VPS по IP за похожий паттерн, см. HANDOFF/память): опрашиваем
+    # только если у стора ЕСТЬ причина — активные Мастер-Группы (демпинг) ИЛИ
+    # настроенные точки самовывоза (кампания реально может сработать).
+    has_pickup_points = False
+    if store_id and not active_groups:
+        from backend.chatbot.prompt import get_profile as _get_bot_profile
+        profile = await asyncio.to_thread(_get_bot_profile, store_id)
+        has_pickup_points = bool(profile.get("pickup_points"))
+
+    if not active_groups and not has_pickup_points:
         return
 
     # Получаем свежие новые заказы через Kaspi API

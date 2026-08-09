@@ -8,17 +8,6 @@ from backend.chatbot import config, bot_instance, notify_dispatch, chat_client
 logger = logging.getLogger(__name__)
 
 
-async def _unlinked_legacy_admin_ids(store_id: Optional[str]) -> list:
-    """admin_ids из легаси .env/ChatbotSettingsDB-фоллбека, которых ЕЩЁ нет
-    среди per-user привязок (telegram_links) этого магазина — чтобы не
-    слать один и тот же алерт дважды тому, кто уже привязался по-новому
-    (docs/TELEGRAM_BOT_PLAN.md §4.4)."""
-    admin_ids = config.load_admin_ids(store_id)
-    if store_id is None:
-        return admin_ids
-    linked = set(str(x) for x in await asyncio.to_thread(notify_dispatch._recipients_for_store, store_id))
-    return [a for a in admin_ids if str(a) not in linked]
-
 def _esc_md(text) -> str:
     """
     Экранирует спецсимволы legacy Telegram Markdown (_ * ` [) в значениях,
@@ -65,33 +54,22 @@ async def notify_cookie_expired(reason: str, store_id: Optional[str] = None):
     )
 
     if store_id is not None:
+        logger.warning(f"🚨 [COOKIE ALERT] {reason}.")
         await notify_dispatch.dispatch(store_id, "problems", alert_text, urgent=True, card="cookie_expired")
-
-    legacy_ids = await _unlinked_legacy_admin_ids(store_id)
-    logger.warning(f"🚨 [COOKIE ALERT] {reason}. Отправка уведомления (легаси-фоллбек) на Telegram IDs: {legacy_ids}")
-    for admin_id in legacy_ids:
-        await notify_dispatch.send_with_card(admin_id, alert_text, card="cookie_expired")
+    else:
+        logger.warning(f"🚨 [COOKIE ALERT] {reason}. (без store_id — некому отправлять, привязка per-store)")
 
     config.set_cookie_alert_sent(store_id, True)
 
 async def notify_startup():
-    """Отправляет уведомление о запуске бота в Telegram всем администраторам."""
-    admin_ids = config.load_admin_ids()
-    if not bot_instance.bot:
-        return
-
+    """Логирует запуск бота. Раньше слала Telegram-алерт на легаси admin_ids
+    (см. HANDOFF, вырезано 2026-08-09) — старт бота не привязан к
+    конкретному магазину, а per-store уведомления реальным пользователям
+    (notify_dispatch) для этого события не годятся, поэтому теперь это
+    просто запись в лог для journalctl."""
     cfg = config.load_chatbot_config()
     merchant_id = cfg.get("merchant_id") or "неизвестен"
-    alert_text = (
-        f"🚀 *Бот успешно запущен и начал работу!*\n"
-        f"----------------------------------------\n"
-        f"⏰ *Время:* {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
-        f"🏪 *Merchant ID:* `{_esc_md(merchant_id)}`"
-    )
-
-    logger.info(f"🚀 Отправка уведомления о запуске бота на Telegram IDs: {admin_ids}")
-    for admin_id in admin_ids:
-        await notify_dispatch.send_with_card(admin_id, alert_text, card="startup")
+    logger.info(f"🚀 Бот успешно запущен и начал работу! Merchant ID (легаси .env): {merchant_id}")
 
 async def notify_manager_and_block(
     group_id: str, client_name: str, item_title: str, client_text: str,
@@ -146,10 +124,6 @@ async def notify_manager_and_block(
 
             if store_id is not None:
                 await notify_dispatch.dispatch(store_id, "chats", alert_text, urgent=True, reply_markup=keyboard, card="chat_alert")
-
-            legacy_ids = await _unlinked_legacy_admin_ids(store_id)
-            for admin_id in legacy_ids:
-                await notify_dispatch.send_with_card(admin_id, alert_text, card="chat_alert", reply_markup=keyboard)
         except Exception as e:
             logger.error(f"⚠️ Ошибка формирования Telegram клавиатуры: {e}")
 

@@ -55,7 +55,6 @@ export interface ChatbotConfig {
   enabled: boolean;
   deepseek_api_key: string;
   tg_bot_token: string;
-  admin_ids: string[];
   use_tg_proxy: boolean;
   tg_proxy: string;
   merchant_id: string;

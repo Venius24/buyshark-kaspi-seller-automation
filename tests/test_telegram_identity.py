@@ -194,16 +194,13 @@ class TelegramIdentityTest(unittest.TestCase):
         ok = self.ti.unlink_member("store-a", 555, requesting_user_id=employee_user_id)
         self.assertFalse(ok)
 
-    # ---- legacy fallback (existing .env-based admin_ids mechanism) ----
-
-    def test_resolve_bot_access_falls_back_to_legacy_per_store_admin_ids(self):
-        from backend.chatbot import config as chatbot_config
-        chatbot_config.save_chatbot_config({"admin_ids": ["424242"]}, store_id="store-a")
-
+    def test_resolve_bot_access_unauthorized_without_deep_link(self):
+        """Легаси admin_ids-фоллбек вырезан 2026-08-09 (см. HANDOFF) — без
+        привязки через deep-link бот больше не притворяется, что магазин
+        подключен."""
         access = self.ti.resolve_bot_access(424242)
-        self.assertTrue(access["authorized"])
-        self.assertEqual(access["store_id"], "store-a")
-        self.assertEqual(access["role"], "OWNER")
+        self.assertFalse(access["authorized"])
+        self.assertIsNone(access["store_id"])
 
 
 if __name__ == "__main__":

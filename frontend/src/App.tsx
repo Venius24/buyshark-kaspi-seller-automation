@@ -68,7 +68,6 @@ export default function App() {
     enabled: true,
     deepseek_api_key: '',
     tg_bot_token: '',
-    admin_ids: [],
     use_tg_proxy: false,
     tg_proxy: '',
     merchant_id: ''
@@ -865,7 +864,6 @@ export default function App() {
 
         {activeTab === 'chatbot' && (
           <ChatbotTab
-            chatbotConfig={chatbotConfig}
             chatbotStatus={chatbotStatus}
             onSaveChatbotConfig={saveChatbotConfig}
             onUnblockChatbotGroup={unblockChatbotGroup}

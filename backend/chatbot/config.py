@@ -9,7 +9,6 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 STATES_DIR = os.path.join(BASE_DIR, "states")
 CONFIG_FILE = os.path.join(STATES_DIR, "chatbot_config.json")
 SESSION_FILE = os.path.join(STATES_DIR, "session.json")
-ADMIN_IDS_FILE = os.path.join(STATES_DIR, "admin_ids.txt")
 
 # ── Загрузка .env ──
 def load_env():
@@ -259,10 +258,10 @@ LOGISTICS_TRIGGERS = {
 def load_chatbot_config(store_id: Optional[str] = None) -> dict:
     """
     Загружает конфигурацию чат-бота из .env (деплойные креды — общие на всё
-    приложение, один Telegram-бот, см. HANDOFF) + enabled/admin_ids.
+    приложение, один Telegram-бот, см. HANDOFF) + enabled.
 
-    store_id given (Слайс 4): enabled/admin_ids из ChatbotSettingsDB этого
-    магазина. store_id=None (легаси): старый общий CONFIG_FILE.
+    store_id given (Слайс 4): enabled из ChatbotSettingsDB этого магазина.
+    store_id=None (легаси): старый общий CONFIG_FILE.
     """
     load_env()
 
@@ -283,7 +282,6 @@ def load_chatbot_config(store_id: Optional[str] = None) -> dict:
         "tg_proxy": tg_bot_proxy,
         "use_tg_proxy": bool(tg_bot_proxy),
         "merchant_id": merchant_id,
-        "admin_ids": ["7119137844", "8661441552"]
     }
 
     if store_id is not None:
@@ -295,12 +293,6 @@ def load_chatbot_config(store_id: Optional[str] = None) -> dict:
                 row = session.get(ChatbotSettingsDB, store_id)
                 if row:
                     config_data["enabled"] = row.enabled
-                    try:
-                        parsed = json.loads(row.admin_ids)
-                        if parsed:
-                            config_data["admin_ids"] = parsed
-                    except Exception:
-                        pass
             finally:
                 session.close()
         return config_data
@@ -310,8 +302,6 @@ def load_chatbot_config(store_id: Optional[str] = None) -> dict:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
-                    if data.get("admin_ids"):
-                        config_data["admin_ids"] = data["admin_ids"]
                     if "enabled" in data:
                         config_data["enabled"] = data["enabled"]
         except Exception as e:
@@ -320,12 +310,10 @@ def load_chatbot_config(store_id: Optional[str] = None) -> dict:
     return config_data
 
 def save_chatbot_config(new_config: dict, store_id: Optional[str] = None) -> dict:
-    """Сохраняет пользовательские настройки (admin_ids, enabled) этого магазина."""
+    """Сохраняет пользовательские настройки (enabled) этого магазина."""
     current = load_chatbot_config(store_id=store_id)
 
     to_save = {}
-    if "admin_ids" in new_config:
-        to_save["admin_ids"] = new_config["admin_ids"]
     if "enabled" in new_config:
         to_save["enabled"] = new_config["enabled"]
 
@@ -335,15 +323,13 @@ def save_chatbot_config(new_config: dict, store_id: Optional[str] = None) -> dic
         if session:
             try:
                 from backend.db.models import ChatbotSettingsDB
-                admin_ids_json = json.dumps(to_save.get("admin_ids", current.get("admin_ids", [])), ensure_ascii=False)
                 enabled_val = to_save.get("enabled", current.get("enabled", True))
                 row = session.get(ChatbotSettingsDB, store_id)
                 if not row:
-                    row = ChatbotSettingsDB(store_id=store_id, enabled=enabled_val, admin_ids=admin_ids_json)
+                    row = ChatbotSettingsDB(store_id=store_id, enabled=enabled_val)
                     session.add(row)
                 else:
                     row.enabled = enabled_val
-                    row.admin_ids = admin_ids_json
                 session.commit()
             except Exception as e:
                 logger.error(f"Error persisting chatbot settings to DB: {e}")
@@ -354,68 +340,12 @@ def save_chatbot_config(new_config: dict, store_id: Optional[str] = None) -> dic
         return current
 
     os.makedirs(STATES_DIR, exist_ok=True)
-    if "admin_ids" in new_config:
-        try:
-            with open(ADMIN_IDS_FILE, "w", encoding="utf-8") as f:
-                f.write("\n".join(new_config["admin_ids"]) + "\n")
-        except Exception as e:
-            logger.error(f"Ошибка записи {ADMIN_IDS_FILE}: {e}")
-
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(to_save, f, ensure_ascii=False, indent=2)
 
     logger.info("⚙️ Конфигурация чат-бота успешно обновлена.")
     current.update(to_save)
     return current
-
-def load_admin_ids(store_id: Optional[str] = None) -> list:
-    """Загружает ID получателей уведомлений Telegram этого магазина."""
-    if store_id is not None:
-        cfg = load_chatbot_config(store_id=store_id)
-        return cfg.get("admin_ids") or ["7119137844", "8661441552"]
-
-    if os.path.exists(ADMIN_IDS_FILE):
-        try:
-            with open(ADMIN_IDS_FILE, "r", encoding="utf-8") as f:
-                ids = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
-                if ids:
-                    return ids
-        except Exception as e:
-            logger.error(f"Ошибка чтения {ADMIN_IDS_FILE}: {e}")
-
-    cfg = load_chatbot_config()
-    if cfg.get("admin_ids"):
-        return cfg["admin_ids"]
-
-    return ["7119137844", "8661441552"]
-
-def get_store_ids_for_admin(admin_id: str) -> list:
-    """
-    Реверс-résolve: в каких магазинах этот Telegram ID числится получателем
-    чат-уведомлений (ChatbotSettingsDB.admin_ids). Бот единый на всё
-    приложение (см. HANDOFF 3.14 — рефакторинг на полностью per-store боты
-    отложен пользователем на потом), но админ может отвечать за несколько
-    магазинов сразу — /start и /status используют это, чтобы показать ЕГО
-    магазины, а не общую по всем сводку.
-    """
-    from backend.state_helpers import _get_sync_db_session
-    session = _get_sync_db_session()
-    if not session:
-        return []
-    try:
-        from backend.db.models import ChatbotSettingsDB
-        rows = session.query(ChatbotSettingsDB).all()
-        matching = []
-        for row in rows:
-            try:
-                ids = json.loads(row.admin_ids or "[]")
-            except Exception:
-                ids = []
-            if str(admin_id) in [str(i) for i in ids]:
-                matching.append(row.store_id)
-        return matching
-    finally:
-        session.close()
 
 def get_store_name(store_id: str) -> str:
     """Человекочитаемое имя магазина для текстов Telegram-алертов/команд —

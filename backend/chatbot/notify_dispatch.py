@@ -5,10 +5,9 @@ problems/money), тихие часы и батчинг для money-группы
 in-memory TTL по dedup_key (переживает рестарт хуже персистентного варианта,
 но это тот же компромисс, что и PENDING_FILES в handlers.py, — см. HANDOFF).
 
-Легаси-совместимость (§4.4): этот модуль НЕ заменяет
-config.load_admin_ids()/notify_cookie_expired — они продолжают слать по
-.env-фоллбеку тем, кто ещё не привязался по-новому; notifications.py вызывает
-оба пути и вычитает пересечение, чтобы не дублировать сообщения."""
+С 2026-08-09 (см. HANDOFF) это единственный путь доставки: легаси
+admin_ids-фоллбек вырезан из notifications.py, все алерты идут только
+реальным привязанным через deep-link пользователям магазина."""
 import asyncio
 import datetime
 import logging

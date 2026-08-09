@@ -9,13 +9,12 @@ import { useActiveStoreId } from '../../storeContext';
 import type { ChatbotConfig, ChatbotStatus } from '../../types';
 
 interface ChatbotTabProps {
-  chatbotConfig: ChatbotConfig;
   chatbotStatus: ChatbotStatus;
   onSaveChatbotConfig: (cfg: Partial<ChatbotConfig>) => void;
   onUnblockChatbotGroup: (groupId: string) => void;
 }
 
-export function ChatbotTab({ chatbotConfig, chatbotStatus, onSaveChatbotConfig, onUnblockChatbotGroup }: ChatbotTabProps) {
+export function ChatbotTab({ chatbotStatus, onSaveChatbotConfig, onUnblockChatbotGroup }: ChatbotTabProps) {
   const {
     phoneInput, setPhoneInput,
     codeInput, setCodeInput,
@@ -108,45 +107,6 @@ export function ChatbotTab({ chatbotConfig, chatbotStatus, onSaveChatbotConfig, 
       <OutboundTestCard />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
-        {/* 📢 Настройки рассылки Telegram Admin IDs */}
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600 }}>📢 Telegram Админы для рассылки</h3>
-            <span className="badge badge-success">Telegram CRM</span>
-          </div>
-
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Укажите Telegram ID администраторов, которые будут получать алерты при вызове менеджера и сбоях сессии.
-          </p>
-
-          <form onSubmit={(e) => {
-            e.preventDefault();
-            const adminIdsRaw = (document.getElementById('admin-ids-input') as HTMLInputElement).value;
-            const adminIds = adminIdsRaw.split(',').map(s => s.trim()).filter(Boolean);
-
-            onSaveChatbotConfig({
-              admin_ids: adminIds
-            });
-          }} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                Telegram Admin IDs (через запятую)
-              </label>
-              <input
-                type="text"
-                id="admin-ids-input"
-                className="form-input"
-                defaultValue={(chatbotConfig.admin_ids || []).join(', ')}
-                placeholder="7119137844, 8661441552"
-              />
-            </div>
-
-            <button type="submit" className="btn btn-primary" style={{ padding: '10px', marginTop: '8px' }}>
-              💾 Сохранить параметры рассылки
-            </button>
-          </form>
-        </div>
-
         {/* 🔒 Передача менеджеру (Human Override) */}
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

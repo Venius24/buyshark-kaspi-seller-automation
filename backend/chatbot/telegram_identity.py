@@ -342,47 +342,31 @@ def resolve_bot_access(tg_user_id: int) -> dict:
     Telegram-аккаунт доступ к боту, к какому ОДНОМУ магазину (печать/спул
     требуют конкретный store_id), и с какой ролью.
 
-    Приоритет:
-    1. Новая deep-link привязка (TelegramLinkDB) — активный магазин из
-       active_store_id, либо единственный магазин пользователя.
-    2. Легаси-механизм (см. HANDOFF 3.15): ChatbotSettingsDB.admin_ids по
-       каждому стору (config.get_store_ids_for_admin) — если ровно один
-       стор, используем его напрямую (роль условно OWNER, старый механизм
-       не знал ролей). Если их несколько — берём первый детерминированно
-       (тот же паттерн, что products_sync_worker для legacy multi-store,
-       см. HANDOFF 3.6): в проде сегодня ровно один реальный магазин,
-       полноценный /switch для этого легаси-пути не реализован (только
-       для новых deep-link привязок).
-    3. Совсем легаси общий список из .env (store_id=None, dev-бутстрап без
-       Store в БД вообще).
+    Единственный источник авторизации — deep-link привязка (TelegramLinkDB):
+    активный магазин из active_store_id, либо единственный магазин
+    пользователя. Легаси-фоллбек через захардкоженные/ручные admin_ids
+    вырезан 2026-08-09 (см. HANDOFF) — без привязки через ссылку из
+    кабинета бот теперь честно отвечает "не авторизован", вместо того
+    чтобы делать вид, что магазин подключен.
 
     Возвращает:
       {"authorized": bool, "store_id": Optional[str], "role": Optional[str],
        "needs_store_selection": bool, "store_choices": list}
     """
     link = get_link(tg_user_id)
-    if link:
-        stores = list_user_stores(link["user_id"])
-        if not stores:
-            return {"authorized": False, "store_id": None, "role": None, "needs_store_selection": False, "store_choices": []}
+    if not link:
+        return {"authorized": False, "store_id": None, "role": None, "needs_store_selection": False, "store_choices": []}
 
-        store_id = get_active_store_id(tg_user_id)
-        if store_id:
-            role = get_role(link["user_id"], store_id)
-            return {"authorized": True, "store_id": store_id, "role": role, "needs_store_selection": False, "store_choices": stores}
+    stores = list_user_stores(link["user_id"])
+    if not stores:
+        return {"authorized": False, "store_id": None, "role": None, "needs_store_selection": False, "store_choices": []}
 
-        return {"authorized": True, "store_id": None, "role": None, "needs_store_selection": True, "store_choices": stores}
+    store_id = get_active_store_id(tg_user_id)
+    if store_id:
+        role = get_role(link["user_id"], store_id)
+        return {"authorized": True, "store_id": store_id, "role": role, "needs_store_selection": False, "store_choices": stores}
 
-    from backend.chatbot import config as chatbot_config
-    legacy_store_ids = chatbot_config.get_store_ids_for_admin(str(tg_user_id))
-    if legacy_store_ids:
-        return {"authorized": True, "store_id": legacy_store_ids[0], "role": "OWNER", "needs_store_selection": False, "store_choices": []}
-
-    legacy_admin_ids = chatbot_config.load_admin_ids()
-    if str(tg_user_id) in legacy_admin_ids:
-        return {"authorized": True, "store_id": None, "role": "OWNER", "needs_store_selection": False, "store_choices": []}
-
-    return {"authorized": False, "store_id": None, "role": None, "needs_store_selection": False, "store_choices": []}
+    return {"authorized": True, "store_id": None, "role": None, "needs_store_selection": True, "store_choices": stores}
 
 
 def unlink_self(tg_user_id: int) -> bool:
