@@ -326,6 +326,18 @@ async def _process_store_queue(store_id: str, cookies: dict, merchant_id: str):
             await asyncio.to_thread(_mark, item.id, "skipped", "human_override", group_id)
             continue
 
+        # Кампания «Отзыв» — не лезем с шаблонным автозапросом, если по
+        # заказу уже идёт живая переписка с клиентом (решение пользователя
+        # 2026-08-09): шаблон "оставьте отзыв" рядом с реальным диалогом
+        # выглядит роботизированно и может перебить более важный разговор
+        # (жалоба, вопрос по заказу). Кампании «Самовывоз» это не касается —
+        # она сама пишет первой и такой переписки по определению ещё нет.
+        if item.campaign == "review":
+            history = await chat_client.get_history(group_id, cookies, merchant_id, limit=1)
+            if history:
+                await asyncio.to_thread(_mark, item.id, "skipped", "уже есть переписка с клиентом по заказу — не шлём автозапрос на отзыв", group_id)
+                continue
+
         result = await chat_client.send_message(group_id, item.message_text, cookies, merchant_id)
         if result.get("success"):
             await asyncio.to_thread(_mark, item.id, "sent", group_id=group_id)
