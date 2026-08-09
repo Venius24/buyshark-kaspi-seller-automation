@@ -44,18 +44,21 @@ sales_sync_worker поставил в очередь 225 сообщений ка
 тестирования, а не баг. Подъём MAX_OUTBOUND_PER_DAY под реальный объём —
 отдельная будущая задача, не Фазы 6.
 
-ВАЖНО (осознанный пробел этой фазы): если group_id ещё не известен (по
-заказу никогда не было переписки — типичный случай для кампании
-«Самовывоз», которая пишет клиенту ПЕРВОЙ), resolve_group_id() не находит
-его HTTP-сканом (потому что группа физически не существует, пока никто не
-написал первым), и запись остаётся в статусе 'needs_first_contact' до
-живой Playwright-автоматизации (открыть заказ -> «Сообщения по заказу» ->
-отправить). Сам этот шаг НЕ реализован в Фазе 3 — точные селекторы страницы
-заказа не были зафиксированы во время живого теста Фазы 0 (см.
-REAL_IMPORTANT/чаты_kaspi/KASPI_CHAT_API.md, раздел "Написать клиенту
-ПЕРВЫМ..."), и гадать их вслепую против прод-кабинета реального магазина
-рискованно. Это нужно будет добить в Фазе 4 с новой живой сессией сверки
-селекторов (по аналогии с тем, как SMS-логин в чат дошлифовывался вживую).
+ПЕРВЫЙ КОНТАКТ (Фаза 4, добито 2026-08-09): если group_id ещё не известен
+(по заказу никогда не было переписки), resolve_group_id() не находит его
+HTTP-сканом (группа физически не существует, пока никто не написал первым)
+— в этом случае _process_store_queue сама вызывает
+backend.services.playwright_first_contact.send_first_contact() (живой,
+дважды вручную подтверждённый Playwright-сценарий: открыть заказ ->
+«Сообщения по заказу» -> написать). Это отдельный, более медленный и
+хрупкий путь (реальный запуск браузера на заказ), поэтому у него СВОЙ
+лимит на тик — FIRST_CONTACT_MAX_PER_TICK, не смешанный с
+MAX_OUTBOUND_PER_DAY (тот всё равно тоже растёт при успехе — это такая же
+реальная исходящая отправка). Если Playwright-сценарий не смог отправить
+(чаще всего — протухла SMS-чат-сессия, живёт ~5 часов и продлевается
+только вручную), запись остаётся в 'needs_first_contact' с причиной в
+skip_reason и будет ретраиться на следующих тиках, пока не устареет
+(Гейт 5).
 """
 import logging
 import asyncio
@@ -71,6 +74,7 @@ from backend.chatbot.kaspi import load_chat_cookies
 from backend.dumper.config import discover_merchant_id
 from backend.security.store_context import list_active_stores
 from backend.state_helpers import _get_sync_db_session
+from backend.services.playwright_first_contact import send_first_contact, STATUS_BY_CAMPAIGN as FIRST_CONTACT_STATUS_BY_CAMPAIGN
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +82,13 @@ logger = logging.getLogger(__name__)
 # корректен, без зависимости от пакета tzdata (не установлен в этом venv).
 ALMATY_TZ = _dt.timezone(_dt.timedelta(hours=5))
 MAX_OUTBOUND_PER_DAY = 30
+# Первый контакт — реальный запуск браузера на заказ (~10-20с, медленнее и
+# хрупче HTTP-отправки в уже существующий чат). Лимит НА ТИК (не на день,
+# как MAX_OUTBOUND_PER_DAY) — осознанный выбор без доп. состояния в БД:
+# при тике раз в 60с и 3 заказах по ~15с воркер всё ещё укладывается в
+# межтиковый интервал. Поднимать вместе с ростом уверенности в стабильности
+# сценария, не заранее.
+FIRST_CONTACT_MAX_PER_TICK = 3
 # Гейт 5 (см. докстринг выше) — просроченные больше этого срока записи
 # срезаются в 'skipped' вместо отправки, чтобы очередь не растягивалась
 # на недели при MAX_OUTBOUND_PER_DAY меньше реального дневного притока.
@@ -295,6 +306,7 @@ async def _process_store_queue(store_id: str, cookies: dict, merchant_id: str):
         return
 
     sent_today = await asyncio.to_thread(_sent_today_count, store_id)
+    first_contact_this_tick = 0
     now = _dt.datetime.utcnow()
 
     for item in due:
@@ -319,7 +331,33 @@ async def _process_store_queue(store_id: str, cookies: dict, merchant_id: str):
         if not group_id:
             group_id = await resolve_group_id(store_id, item.order_id, cookies, merchant_id)
             if not group_id:
-                await asyncio.to_thread(_mark, item.id, "needs_first_contact", "group_id не найден (нужен первый контакт — не реализовано в Фазе 3)")
+                status_filter = FIRST_CONTACT_STATUS_BY_CAMPAIGN.get(item.campaign)
+                if not status_filter:
+                    await asyncio.to_thread(_mark, item.id, "needs_first_contact", f"первый контакт не поддержан для кампании {item.campaign!r}")
+                    continue
+                if first_contact_this_tick >= FIRST_CONTACT_MAX_PER_TICK:
+                    continue  # остаётся needs_first_contact, попробуем на следующем тике
+                first_contact_this_tick += 1
+
+                ok, detail = await asyncio.to_thread(send_first_contact, cookies, item.order_id, item.message_text, status_filter)
+                if not ok:
+                    await asyncio.to_thread(_mark, item.id, "needs_first_contact", f"первый контакт не удался: {detail}")
+                    await asyncio.sleep(random.uniform(2.5, 6.0))
+                    continue
+
+                # send_first_contact уже отправил сообщение сам (Playwright
+                # fill+Enter внутри виджета) — это не тот же путь, что ниже
+                # (chat_client.send_message в уже существующий чат), повторно
+                # слать через HTTP не нужно. group_id пробуем подтянуть сразу
+                # же для awaiting_review_reply/будущих ответов клиента —
+                # best-effort, не блокируем на этом успешную отправку.
+                resolved_group_id = await resolve_group_id(store_id, item.order_id, cookies, merchant_id)
+                await asyncio.to_thread(_mark, item.id, "sent", group_id=resolved_group_id)
+                sent_today += 1
+                logger.info(f"✅ [Outbound] {item.campaign} отправлено ПЕРВЫМ КОНТАКТОМ (Playwright) по заказу {item.order_id} (стор {store_id}).")
+                if item.campaign == "review" and resolved_group_id:
+                    await asyncio.to_thread(config.set_awaiting_review_reply, store_id, resolved_group_id)
+                await asyncio.sleep(random.uniform(2.5, 6.0))
                 continue
 
         if config.is_chat_human_override(store_id, group_id):
