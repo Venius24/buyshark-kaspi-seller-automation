@@ -1164,6 +1164,84 @@ def _load_analytics_history(store_id: str, days: int = 90) -> list:
         session.close()
 
 
+def _already_fetched_quality_metrics_today(store_id: str) -> bool:
+    """True если для (store_id, сегодня UTC) уже есть строка в
+    kaspi_quality_metrics_daily — ночной воркер использует это, чтобы не
+    скрапить один и тот же стор повторно в течение того же ночного окна."""
+    import datetime as _dt
+    session = _get_sync_db_session()
+    if not session:
+        return False
+    try:
+        from backend.db.models import KaspiQualityMetricsDailyDB
+        today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+        row = session.get(KaspiQualityMetricsDailyDB, (store_id, today))
+        return row is not None
+    finally:
+        session.close()
+
+
+def _upsert_quality_metrics_daily(store_id: str, data: dict):
+    """Пишет/обновляет ОДНУ строку на (store_id, сегодняшняя дата UTC) с
+    результатом ночного скрапа раздела Kaspi "Показатели качества"."""
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import KaspiQualityMetricsDailyDB
+        import datetime as _dt
+        today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+        row = session.get(KaspiQualityMetricsDailyDB, (store_id, today))
+        if not row:
+            row = KaspiQualityMetricsDailyDB(store_id=store_id, date=today)
+            session.add(row)
+        row.rating_percentage = data.get("rating_percentage")
+        row.returns_percentage = data.get("returns_percentage")
+        row.late_kd_percentage = data.get("late_kd_percentage")
+        row.cancelled_percentage = data.get("cancelled_percentage")
+        row.avg_chat_response_minutes = data.get("avg_chat_response_minutes")
+        row.chat_response_rate_percent = data.get("chat_response_rate_percent")
+        row.raw_payload = json.dumps(data.get("raw_payload") or {}, ensure_ascii=False)
+        row.fetched_at = _dt.datetime.utcnow()
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting Kaspi quality metrics to DB: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
+
+def _load_quality_metrics_latest(store_id: str) -> Optional[dict]:
+    """Последний (самый свежий по дате) снапшот показателей качества Kaspi
+    для этого стора, None если ночной скрап ещё ни разу не отрабатывал."""
+    session = _get_sync_db_session()
+    if not session:
+        return None
+    try:
+        from backend.db.models import KaspiQualityMetricsDailyDB
+        row = session.scalars(
+            select(KaspiQualityMetricsDailyDB)
+            .where(KaspiQualityMetricsDailyDB.store_id == store_id)
+            .order_by(KaspiQualityMetricsDailyDB.date.desc())
+            .limit(1)
+        ).first()
+        if not row:
+            return None
+        return {
+            "date": row.date,
+            "rating_percentage": row.rating_percentage,
+            "returns_percentage": row.returns_percentage,
+            "late_kd_percentage": row.late_kd_percentage,
+            "cancelled_percentage": row.cancelled_percentage,
+            "avg_chat_response_minutes": row.avg_chat_response_minutes,
+            "chat_response_rate_percent": row.chat_response_rate_percent,
+            "raw_payload": json.loads(row.raw_payload or "{}"),
+            "fetched_at": row.fetched_at.isoformat() if row.fetched_at else None,
+        }
+    finally:
+        session.close()
+
+
 def _upsert_price_war_snapshot(items: list, store_id: str):
     """Пишет по одной строке на SKU за цикл демпинга — piggyback на уже
     идущий запрос конкурентов в brain.py (см. коммент в price-war роутере),

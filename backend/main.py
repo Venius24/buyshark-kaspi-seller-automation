@@ -58,6 +58,7 @@ from backend.chatbot.notify_dispatch import flush_loop as notification_flush_loo
 from backend.services.stock_sync_worker import master_stock_radar_loop, start_packaging_sync_loop
 from backend.services.products_sync_worker import start_products_sync_loop
 from backend.services.sales_sync_worker import start_sales_sync_loop
+from backend.services.kaspi_quality_metrics_worker import start_quality_metrics_loop
 from backend.workers.health_check_worker import start_health_check_loop
 
 from backend.perf.collector import is_enabled as _perf_enabled
@@ -88,6 +89,7 @@ async def startup_event():
     asyncio.create_task(start_health_check_loop(3600))
     asyncio.create_task(start_products_sync_loop(1800))
     asyncio.create_task(start_sales_sync_loop(1800))
+    asyncio.create_task(start_quality_metrics_loop())
 
     # Опциональная инструментация производительности (PERF_PROFILING=1) —
     # см. backend/perf/. Ноль накладных расходов, если флаг не выставлен.

@@ -12,6 +12,7 @@ import { HourlyHeatmap } from '../HourlyHeatmap';
 import { ChatActivityHeatmap } from '../ChatActivityHeatmap';
 import { useSalesStats } from '../../hooks/useSalesStats';
 import { useScoreStats } from '../../hooks/useScoreStats';
+import { useQualityMetrics } from '../../hooks/useQualityMetrics';
 import { useAbcXyzStats } from '../../hooks/useAbcXyzStats';
 import { useInsightsStats } from '../../hooks/useInsightsStats';
 
@@ -45,6 +46,7 @@ export function OverviewTab({
 }: OverviewTabProps) {
   const salesStats = useSalesStats();
   const scoreStats = useScoreStats();
+  const qualityMetrics = useQualityMetrics();
   const abcXyzStats = useAbcXyzStats();
   const insightsStats = useInsightsStats();
 
@@ -52,7 +54,7 @@ export function OverviewTab({
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
       {/* 🎯 HERO ROW — composite score + "победа дня" (сохранённая маржа) */}
       <div className="grid-hero">
-        <ScoreRing data={scoreStats} />
+        <ScoreRing data={scoreStats} quality={qualityMetrics} />
         <SavedMarginCard totalSavedMargin={analytics.total_saved_margin} />
       </div>
 

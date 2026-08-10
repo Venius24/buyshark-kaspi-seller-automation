@@ -12,6 +12,7 @@ from backend.state_helpers import (
     _load_dumping_configs, _load_products, _load_analytics_snapshot, _load_dumper_logs,
     _load_sales_summary, _load_analytics_history, _load_price_war_snapshot,
     _load_competitor_leaderboard, _load_chat_activity, _get_sync_db_session,
+    _load_quality_metrics_latest,
 )
 from backend.dumper.config import _decode_base64_if_needed
 from backend.dumper.radar import _fetch_offers_sync
@@ -452,3 +453,19 @@ def get_score_stats(ctx: StoreContext = Depends(get_store_context)):
         "heatmap": sales_180.get("daily", []),
         "history_points": len(history),
     }
+
+
+@router.get("/quality-metrics")
+def get_quality_metrics(ctx: StoreContext = Depends(get_store_context)):
+    """
+    Последний ночной снапшот раздела кабинета Kaspi "Показатели качества"
+    (Рейтинг/Возвраты/Задержки при передачах/Отмены по вине/Среднее время
+    ответов/Доля ответов) — скрапится раз в сутки ночью
+    (backend/services/kaspi_quality_metrics_worker.py). Если воркер ещё ни
+    разу не отработал для этого стора (только что подключён), возвращаем
+    честный "нет данных", а не выдуманные нули.
+    """
+    snapshot = _load_quality_metrics_latest(ctx.store_id)
+    if not snapshot:
+        return {"success": True, "has_data": False, "data": None}
+    return {"success": True, "has_data": True, "data": snapshot}

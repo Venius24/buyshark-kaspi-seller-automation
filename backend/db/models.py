@@ -292,6 +292,31 @@ class AnalyticsDailyHistoryDB(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
+class KaspiQualityMetricsDailyDB(Base):
+    """Один снапшот в день на магазин (upsert по (store_id, date)) из раздела
+    кабинета Kaspi "Показатели качества" (#/main-quality-control) — Рейтинг,
+    Возвраты, Задержки при передачах, Отмены по вине, Среднее время ответов,
+    Доля ответов. Скрапится ночным воркером (kaspi_quality_metrics_worker.py)
+    раз в сутки через GraphQL mc.shop.kaspi.kz/mc/facade/graphql — см.
+    REAL_IMPORTANT/показатели_качества/KASPI_QUALITY_METRICS_API.md.
+    Промотированы только 6 headline-чисел; пороги/гистограмма/доп. поля —
+    в raw_payload (JSON), чтобы не плодить миграции при расширении UI.
+    """
+    __tablename__ = "kaspi_quality_metrics_daily"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    date: Mapped[str] = mapped_column(String(10), primary_key=True)  # 'YYYY-MM-DD' (UTC)
+
+    rating_percentage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    returns_percentage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    late_kd_percentage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    cancelled_percentage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    avg_chat_response_minutes: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    chat_response_rate_percent: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    raw_payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class PriceWarSnapshotDB(Base):
     """Последний известный расклад демпинг-войны по каждому включённому SKU —
     перезаписывается на каждом ~5-минутном цикле демпинга (piggyback на уже
