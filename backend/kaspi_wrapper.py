@@ -151,15 +151,20 @@ class KaspiAPI:
             return "Express"
     
         # 2. Проверка на Постамат (Kaspi Box)
+        # ВАЖНО: "DELIVERY_PICKUP" — реальное значение Kaspi API для курьерской
+        # доставки ДО постамата/пункта выдачи сети Kaspi (подтверждено живыми
+        # данными: разные города региона, см. HANDOFF 3.34) — это Постамат, а
+        # не самовывоз клиентом из точки продавца, хоть и содержит "PICKUP".
         is_postomat = (
             "POSTOMAT" in dm
             or "POSTOMAT" in dt_raw
+            or dm == "DELIVERY_PICKUP"
             or kaspi_deliv.get("postomat") is True
             or delivery_addr.get("postomat") is not None
         )
         if is_postomat:
             return "Postomat"
-    
+
         # 3. Самовывоз из точки продавца
         if "PICKUP" in dm or "PICKUP" in dt_raw:
             return "Самовывоз"
