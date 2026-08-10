@@ -81,6 +81,9 @@ export interface BotProfile {
   custom_instructions: string;
   custom_enabled: boolean;
   prompt_tier: 'base' | 'plus' | 'pro' | 'max';
+  review_delay_from_days: number;
+  review_delay_to_days: number | null;
+  review_send_overdue: boolean;
 }
 
 export interface OutboundQueueItem {

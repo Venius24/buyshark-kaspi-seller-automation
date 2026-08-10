@@ -5,7 +5,7 @@ import logging
 from backend.kaspi_wrapper import KaspiAPI
 from backend.state_helpers import _upsert_sales_orders, _get_latest_sales_order_date
 from backend.security.store_context import list_active_stores
-from backend.chatbot.review_campaign import maybe_trigger_review_campaign
+from backend.chatbot.review_campaign import scan_and_enqueue_review_campaign
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +35,11 @@ async def _sync_store_sales(token: str, store_id: str) -> int:
     now = datetime.datetime.utcnow()
     latest = await asyncio.to_thread(_get_latest_sales_order_date, store_id)
     # Холодный старт (новый стор, ещё нет ни одного сохранённого заказа) —
-    # уходим в 90-дневный бэкафилл. Фаза 5 (кампания «Отзыв») намеренно НЕ
-    # триггерится на этом проходе: иначе все старые завершённые заказы разом
-    # получат запрос на отзыв "через 4 дня от сейчас" — и поздно, и похоже на
-    # спам. Со следующего тика latest уже будет известен, и триггер заработает
-    # как обычно для реально новых завершённых заказов.
+    # уходим в 90-дневный бэкафилл. Заказы этого прохода вставляются с
+    # review_eligible=False (см. state_helpers._upsert_sales_orders) — иначе
+    # ежедневный скан кампании «Отзыв» (review_campaign.py) поймал бы всю
+    # историю разом при первом же подключении стора. Со следующего тика
+    # latest уже известен, и обычные заказы вставляются review_eligible=True.
     is_cold_start = latest is None
     # Пересканируем последний день заново на случай заказов, изменивших статус
     # на COMPLETED уже после нашего предыдущего прохода.
@@ -50,14 +50,17 @@ async def _sync_store_sales(token: str, store_id: str) -> int:
         orders = await asyncio.to_thread(KaspiAPI.get_completed_orders, token, ge_ms, le_ms)
         if not orders:
             continue
-        new_orders = await asyncio.to_thread(_upsert_sales_orders, orders, store_id)
+        new_orders = await asyncio.to_thread(_upsert_sales_orders, orders, store_id, not is_cold_start)
         total_new += len(new_orders)
-        if not is_cold_start:
-            for o in new_orders:
-                asyncio.create_task(maybe_trigger_review_campaign(store_id, o))
 
     if total_new:
         logger.info(f"💰 [Sales Sync Worker] Стор {store_id}: сохранено {total_new} новых заказов.")
+
+    # Скан кампании «Отзыв» (Фаза 5.1) — на каждом тике, не только при новых
+    # заказах: настраиваемое окно "от"/"до" per-store может поймать заказ,
+    # вставленный несколько тиков назад, только сегодня. Идемпотентно —
+    # enqueue_outbound дедупит по БД.
+    await asyncio.to_thread(scan_and_enqueue_review_campaign, store_id)
     return total_new
 
 

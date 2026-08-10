@@ -163,6 +163,45 @@ export function BotProfileCard() {
         </label>
       </div>
 
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Кампания «Отзыв» — окно отправки</label>
+        <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0 }}>
+          «От» — через сколько дней после доставки слать просьбу об отзыве. Без «до» шлём РОВНО в этот день.
+          С «до» — любой день в диапазоне. Заказы старше окна можно подхватить галочкой ниже.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>От (дней)</label>
+            <input
+              className="form-input"
+              type="number"
+              min={0}
+              value={draft.review_delay_from_days}
+              onChange={(e) => set('review_delay_from_days', Number(e.target.value))}
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>До (дней, необязательно)</label>
+            <input
+              className="form-input"
+              type="number"
+              min={0}
+              value={draft.review_delay_to_days ?? ''}
+              onChange={(e) => set('review_delay_to_days', e.target.value === '' ? null : Number(e.target.value))}
+              placeholder="без верхней границы"
+            />
+          </div>
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+          <input
+            type="checkbox"
+            checked={draft.review_send_overdue}
+            onChange={(e) => set('review_send_overdue', e.target.checked)}
+          />
+          Также слать тем, кому раньше не отправили (заказы старше «от», пропущенные ранее)
+        </label>
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         <button className="btn btn-primary" style={{ padding: '10px 20px' }} onClick={handleSave} disabled={saving}>
           {saving ? 'Сохранение...' : '💾 Сохранить профиль'}

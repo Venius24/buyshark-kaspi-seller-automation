@@ -267,6 +267,10 @@ class SalesOrderDB(Base):
     state: Mapped[str] = mapped_column(String(30), nullable=False, default="")
     entries_payload: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON [{sku,name,qty,totalPrice}]
     ingested_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    # Кампания «Отзыв» (Фаза 5.1, скан по дням) — False для заказов холодного
+    # 90-дневного бэкафилла нового магазина (см. _upsert_sales_orders), чтобы
+    # скан не отправил разом просьбу об отзыве по всей истории.
+    review_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
 class AnalyticsDailyHistoryDB(Base):

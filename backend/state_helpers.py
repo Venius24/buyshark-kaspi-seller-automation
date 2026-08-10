@@ -1036,12 +1036,15 @@ def _save_analytics_snapshot(data: dict, store_id: str):
         session.close()
 
 
-def _upsert_sales_orders(orders: list, store_id: str) -> list:
+def _upsert_sales_orders(orders: list, store_id: str, review_eligible: bool = True) -> list:
     """Апсертит завершённые заказы (см. KaspiAPI.get_completed_orders) в
-    sales_orders. Возвращает список реально НОВЫХ (не int — Фаза 5 использует
-    сами объекты заказов, чтобы поставить кампанию «Отзыв» в очередь для
-    каждого впервые увиденного). Идемпотентно по (store_id, order_internal_id) —
-    безопасно перезапускать с пересекающимися окнами дат."""
+    sales_orders. Возвращает список реально НОВЫХ (не int — вызывающий код
+    логирует их количество). Идемпотентно по (store_id, order_internal_id) —
+    безопасно перезапускать с пересекающимися окнами дат.
+
+    review_eligible=False на холодном 90-дневном бэкафилле нового магазина —
+    иначе ежедневный скан кампании «Отзыв» (backend/chatbot/review_campaign.py)
+    разом поймал бы всю историю заказов в окно "N дней с момента ingested_at"."""
     if not orders:
         return []
     session = _get_sync_db_session()
@@ -1073,6 +1076,7 @@ def _upsert_sales_orders(orders: list, store_id: str) -> list:
                     state=o.get("state", ""),
                     entries_payload=json.dumps(o.get("entries", []), ensure_ascii=False),
                     ingested_at=_dt.datetime.utcnow(),
+                    review_eligible=review_eligible,
                 ))
                 inserted.append(o)
         session.commit()

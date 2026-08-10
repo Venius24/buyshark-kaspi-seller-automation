@@ -52,6 +52,9 @@ class BotProfileRequest(BaseModel):
     logistics_reply_kk: Optional[str] = None
     custom_instructions: Optional[str] = None
     custom_enabled: Optional[bool] = None
+    review_delay_from_days: Optional[int] = None
+    review_delay_to_days: Optional[int] = None
+    review_send_overdue: Optional[bool] = None
 
 @router.get("/config")
 def get_chatbot_config(ctx: StoreContext = Depends(get_store_context)):

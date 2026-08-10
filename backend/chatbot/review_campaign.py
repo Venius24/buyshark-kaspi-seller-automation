@@ -1,35 +1,50 @@
 """
-Кампания «Отзыв» (Фаза 5) — детерминированное (не через ИИ) сообщение с
-просьбой оставить отзыв, через 4 дня после того, как заказ впервые замечен
+Кампания «Отзыв» (Фаза 5, Фаза 5.1 — переход на скан по дням 2026-08-11) —
+детерминированное (не через ИИ) сообщение с просьбой оставить отзыв, через
+настраиваемое per-store окно дней после того, как заказ впервые замечен
 завершённым (state=ARCHIVE, status=COMPLETED).
 
-ЗАЧЕМ так (бизнес-логика, 2026-08-09, зафиксировано со слов пользователя —
-не переизобретать, не переоткрывать без явного запроса):
+ЗАЧЕМ так (бизнес-логика, 2026-08-09/2026-08-11, зафиксировано со слов
+пользователя — не переизобретать, не переоткрывать без явного запроса):
 Человек оформляет заказ → через 3-4 дня забирает его, заказ уходит в архив
-(COMPLETED) → ещё через 3-4 дня (REVIEW_DELAY_DAYS) человек уже успел
-воспользоваться товаром — вот тогда пишем "не хотели бы оставить отзыв?".
+(COMPLETED) → ещё через несколько дней человек уже успел воспользоваться
+товаром — вот тогда пишем "не хотели бы оставить отзыв?".
 
 Кому НЕ пишем: тем, кто уже писал нам в чат по этому заказу (гейт в
-outbound.py, коммит 339278b). Причина — если клиент написал, это почти
-всегда узнать размер / отказаться от покупки / оформить возврат (пришло не
-то или сломанное). Это не кандидат на отзыв, ему просить отзыв не нужно и
-неуместно.
+outbound.py, коммит 339278b) — почти всегда это размер/отказ/возврат, не
+кандидат на отзыв.
 
-ВАЖНОЕ СЛЕДСТВИЕ (из-за чего 2026-08-09 была путаница): целевая аудитория
-кампании по определению — заказы БЕЗ существующего чата. Но текущая
-реализация (resolve_group_id → send_message) умеет писать только ВНУТРЬ уже
-существующего чата и не умеет открывать новый (Playwright "Фаза 4
-write-first" не реализована). То есть ровно та аудитория, для которой
-кампания задумана, технически недостижима, пока Фаза 4 не построена — это
-не баг гейта из 339278b и не изобретённое агентом ограничение, а реальный
-пробел в автоматизации, который нужно закрывать отдельно.
+Фаза 5.1 (2026-08-11): раньше сообщение планировалось РАЗ, сразу в момент
+обнаружения заказа (`scheduled_at = now + REVIEW_DELAY_DAYS`, фиксированные
+4 дня). Пользователь попросил вместо фиксированной задержки — настраиваемое
+per-store окно "от"/"до" дней (см. backend/chatbot/prompt.py::DEFAULT_PROFILE
+review_delay_from_days/review_delay_to_days/review_send_overdue), проверяемое
+скan'ом, а не разовым планированием вперёд. Правило (со слов пользователя):
+  - задано только "от" (N), без "до" и без чекбокса — шлём РОВНО тем, у кого
+    days_since_completion == N (не "от N и старше" — это была бы другая
+    семантика, пользователь явно попросил "только равно").
+  - задано "от" и "до" — диапазон [от, до] включительно.
+  - чекбокс review_send_overdue включён (и "до" не задано) — ослабляет
+    условие до days_since_completion >= "от", ловит пропущенных/просроченных.
+    Дедуп берёт на себя enqueue_outbound (UniqueConstraint по БД) — заказ,
+    уже поставленный в очередь раньше, просто не попадёт повторно.
+Скан вызывается на каждом тике backend/services/sales_sync_worker.py (не
+отдельным суточным циклом — тик и так раз в 30 мин, дешевле не заводить ещё
+один фоновый луп; сам скан идемпотентен благодаря дедупу выше, так что более
+частый вызов не создаёт дублей, а только увеличивает точность "в какой день
+поймали").
 
 Kaspi Order API не отдаёт точную дату фактической доставки курьером — самый
 надёжный доступный сигнал "заказ доставлен" это переход в COMPLETED, который
-видит backend/services/sales_sync_worker.py (тик каждые 30 мин). Поэтому
-"через 4 дня после доставки" реализовано как "через 4 дня после того как
-воркер впервые увидел заказ COMPLETED" — расхождение максимум ~30 мин (частота
-опроса), несущественно на фоне целого дня в окне отправки.
+видит backend/services/sales_sync_worker.py (тик каждые 30 мин), а точка
+отсчёта "дней с доставки" — SalesOrderDB.ingested_at (момент INSERT, не
+трогается при повторных апдейтах той же строки, см. state_helpers.py::
+_upsert_sales_orders) — та же аппроксимация, что была в исходной реализации.
+
+Холодный 90-дневный бэкафилл нового магазина исключён из скана колонкой
+SalesOrderDB.review_eligible (см. миграцию 025) — проставляется False при
+вставке заказов бэкафилла (backend/services/sales_sync_worker.py), иначе
+скан поймал бы всю полугодовую историю разом при первом же подключении стора.
 
 Постановка в очередь — backend/chatbot/outbound.py::enqueue_outbound (та же
 инфраструктура, что и у кампании «Самовывоз», Фаза 4). Флаг awaiting_review_reply,
@@ -40,22 +55,23 @@ Kaspi Order API не отдаёт точную дату фактической �
 в памяти агента): Kaspi отдаёт productCode товара прямо в orders API
 (relationships.product.data.id, base64 — декодируется тем же
 KaspiAPI._decode_base64_if_needed, что и Master SKU радара), так что
-backend/kaspi_wrapper.py::get_completed_orders прокидывает его в каждый entry.
-render_review_message() собирает orderCode+productCode в
-`kaspi.kz/shop/review/productreview?...&rating=5` — вручную подтверждено на
-живом заказе, что это НЕ авто-постинг: ссылка открывает форму с предзаполненной
-оценкой, клиент сам пишет комментарий и жмёт отправить. Если productCode не
-пришёл (например, entries пустые) — деградация на обычный текст без ссылки,
-кампания не срывается.
+backend/kaspi_wrapper.py::get_completed_orders прокидывает его в каждый entry,
+и он же сохраняется в SalesOrderDB.entries_payload как есть. render_review_message()
+собирает orderCode+productCode в `kaspi.kz/shop/review/productreview?...&rating=5`
+— вручную подтверждено на живом заказе, что это НЕ авто-постинг: ссылка открывает
+форму с предзаполненной оценкой, клиент сам пишет комментарий и жмёт отправить.
+Если productCode не пришёл (например, entries пустые) — деградация на обычный
+текст без ссылки, кампания не срывается.
 """
+import json
 import logging
 import datetime as _dt
 
 from backend.chatbot.outbound import enqueue_outbound
+from backend.chatbot import prompt as bot_prompt
 
 logger = logging.getLogger(__name__)
 
-REVIEW_DELAY_DAYS = 4
 REVIEW_WINDOW_START_HOUR = 11
 REVIEW_WINDOW_END_HOUR = 19
 
@@ -92,38 +108,79 @@ def render_review_message(order_id: str, order: dict) -> str:
     return f"{REVIEW_MESSAGE_TEMPLATE}\n\n⭐ Оставить отзыв в 1 клик: {link}"
 
 
-async def maybe_trigger_review_campaign(store_id: str, order: dict):
-    """Вызывается из sales_sync_worker для каждого НОВОГО (впервые увиденного
-    в этом тике) завершённого заказа. Дедуп самой кампании на уровне БД в
-    enqueue_outbound.
+def _should_send(days_since: int, from_days: int, to_days, send_overdue: bool) -> bool:
+    """Правило окна (см. докстринг модуля, зафиксировано со слов пользователя
+    2026-08-11): "до" задано — диапазон [от, до]; "до" не задано и включён
+    чекбокс "слать пропущенным" — от N дней и старше; иначе — РОВНО N дней,
+    не раньше и не позже."""
+    if to_days is not None:
+        return from_days <= days_since <= to_days
+    if send_overdue:
+        return days_since >= from_days
+    return days_since == from_days
 
-    НЕ проверяет тут "чат-бот выключен у магазина" (раньше проверял) — при
-    выключенном боте sales_sync_worker всё равно апсертит заказ в
-    sales_orders, так что запись становится "не новой" навсегда — включение
-    бота позже уже не подхватывало пропущенные отзывы. Теперь запись всегда
-    ставится в очередь по факту завершённого заказа; "enabled" проверяется
-    один раз, в момент реальной отправки — outbound.py::run_outbound_cycle.
 
-    ВАЖНО: вызывающий код (sales_sync_worker._sync_store_sales) обязан НЕ
-    вызывать это на холодном 90-дневном бэкафилле нового стора — иначе все
-    старые завершённые заказы разом получат запрос на отзыв "через 4 дня от
-    сейчас", что и поздно, и похоже на спам."""
-    import asyncio
+def scan_and_enqueue_review_campaign(store_id: str) -> int:
+    """Скан завершённых заказов магазина (вызывается на каждом тике
+    sales_sync_worker) — для каждого review_eligible заказа считает
+    days_since = сегодня - ingested_at и ставит в очередь тех, кто попал в
+    настроенное окно (backend/chatbot/prompt.py::DEFAULT_PROFILE). Идемпотентно:
+    enqueue_outbound сам отсеивает уже поставленные в очередь заказы (дедуп по
+    БД), так что безопасно вызывать чаще, чем раз в день. Возвращает число
+    реально поставленных в очередь записей."""
+    from backend.state_helpers import _get_sync_db_session
+    from backend.db.models import SalesOrderDB
+    from sqlalchemy import select
 
+    profile = bot_prompt.get_profile(store_id)
+    from_days = int(profile.get("review_delay_from_days") or 4)
+    to_days_raw = profile.get("review_delay_to_days")
+    to_days = int(to_days_raw) if to_days_raw not in (None, "") else None
+    send_overdue = bool(profile.get("review_send_overdue"))
+
+    session = _get_sync_db_session()
+    if not session:
+        return 0
     try:
-        order_id = str(order.get("code") or order.get("internalId") or "")
-        if not order_id:
-            return
-
-        message_text = render_review_message(order_id, order)
-
-        scheduled_at = _dt.datetime.utcnow() + _dt.timedelta(days=REVIEW_DELAY_DAYS)
-        queued = await asyncio.to_thread(
-            enqueue_outbound,
-            store_id, order_id, "review", message_text, scheduled_at,
-            REVIEW_WINDOW_START_HOUR, REVIEW_WINDOW_END_HOUR,
-        )
-        if queued:
-            logger.info(f"📤 [ReviewCampaign] Заказ {order_id} (стор {store_id}): запрос на отзыв поставлен в очередь на {scheduled_at.date()}.")
+        now = _dt.datetime.utcnow()
+        rows = session.execute(
+            select(SalesOrderDB).where(
+                SalesOrderDB.store_id == store_id,
+                SalesOrderDB.review_eligible.is_(True),
+                SalesOrderDB.status == "COMPLETED",
+                SalesOrderDB.state == "ARCHIVE",
+            )
+        ).scalars().all()
+        candidates = [
+            row for row in rows
+            if _should_send((now - row.ingested_at).days, from_days, to_days, send_overdue)
+        ]
+        session.expunge_all()
     except Exception as e:
-        logger.error(f"[ReviewCampaign] Сбой триггера для заказа {order.get('code')}: {e}")
+        logger.error(f"[ReviewCampaign] Сбой скана для стора {store_id}: {e}")
+        return 0
+    finally:
+        session.close()
+
+    queued_count = 0
+    for row in candidates:
+        try:
+            entries = json.loads(row.entries_payload or "[]")
+        except Exception:
+            entries = []
+        order_id = row.order_code or row.order_internal_id
+        message_text = render_review_message(order_id, {"entries": entries})
+        try:
+            queued = enqueue_outbound(
+                store_id, order_id, "review", message_text, now,
+                REVIEW_WINDOW_START_HOUR, REVIEW_WINDOW_END_HOUR,
+            )
+        except Exception as e:
+            logger.error(f"[ReviewCampaign] Сбой постановки в очередь заказа {order_id} (стор {store_id}): {e}")
+            continue
+        if queued:
+            queued_count += 1
+
+    if queued_count:
+        logger.info(f"📤 [ReviewCampaign] Стор {store_id}: {queued_count} запрос(ов) на отзыв поставлено в очередь скан-ом.")
+    return queued_count

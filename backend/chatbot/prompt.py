@@ -46,6 +46,11 @@ DEFAULT_PROFILE = {
     "shipping_cutoff_time": "16:00",
     "pickup_points": [],
     "human_triggers": DEFAULT_HUMAN_TRIGGERS,
+    # Кампания «Отзыв» (Фаза 5.1, окно дней настраиваемое per-store) — см.
+    # backend/chatbot/review_campaign.py::_should_send для точной семантики.
+    "review_delay_from_days": 4,
+    "review_delay_to_days": None,
+    "review_send_overdue": False,
     "logistics_reply_ru": (
         "Мы бы с радостью подсказали, но всю логистику и доставку полностью организует сам Kaspi. "
         "Мы собираем и передаем заказы вовремя, а дальше за движение посылки отвечает курьерская служба платформы. "
