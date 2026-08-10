@@ -103,7 +103,7 @@ export const MasterStockGroups: React.FC = () => {
   const [formDumpingEnabled, setFormDumpingEnabled] = useState<boolean>(false);
   const [formMinPrice, setFormMinPrice] = useState<number>(1000);
   const [formMaxPrice, setFormMaxPrice] = useState<number>(5000);
-  const [formDumpStep, setFormDumpStep] = useState<number>(10);
+  const [formDumpStep, setFormDumpStep] = useState<number>(1);
   const [formDumpingMode, setFormDumpingMode] = useState<string>('TOP_1');
   const [formTargetPosition, setFormTargetPosition] = useState<number>(1);
 
@@ -174,7 +174,7 @@ export const MasterStockGroups: React.FC = () => {
     setFormDumpingEnabled(false);
     setFormMinPrice(1000);
     setFormMaxPrice(5000);
-    setFormDumpStep(10);
+    setFormDumpStep(1);
     setFormDumpingMode('TOP_1');
     setFormTargetPosition(1);
     setIsModalOpen(true);
@@ -193,14 +193,14 @@ export const MasterStockGroups: React.FC = () => {
       setFormDumpingEnabled(group.dumping_config.enabled ?? false);
       setFormMinPrice(group.dumping_config.min_price || 1000);
       setFormMaxPrice(group.dumping_config.max_price || 5000);
-      setFormDumpStep(group.dumping_config.dump_step ?? 10);
+      setFormDumpStep(group.dumping_config.dump_step ?? 1);
       setFormDumpingMode(group.dumping_config.mode || 'TOP_1');
       setFormTargetPosition(group.dumping_config.target_position || 1);
     } else {
       setFormDumpingEnabled(false);
       setFormMinPrice(1000);
       setFormMaxPrice(5000);
-      setFormDumpStep(10);
+      setFormDumpStep(1);
       setFormDumpingMode('TOP_1');
       setFormTargetPosition(1);
     }
@@ -1112,7 +1112,7 @@ export const MasterStockGroups: React.FC = () => {
                       <input
                         type="number"
                         value={formDumpStep}
-                        onChange={e => setFormDumpStep(parseFloat(e.target.value) || 10)}
+                        onChange={e => setFormDumpStep(parseFloat(e.target.value) || 1)}
                         style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: '#fff', fontSize: '12px' }}
                       />
                     </div>

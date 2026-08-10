@@ -280,7 +280,7 @@ class BrainWorker:
                 my_current_price=float(price_num),
                 min_price=float(cfg_data.get("min_price", 0.0)),
                 max_price=float(cfg_data.get("max_price", 0.0)),
-                step=float(cfg_data.get("dump_step", 10.0)),
+                step=float(cfg_data.get("dump_step", 1.0)),
                 enabled=bool(cfg_data.get("enabled", True)),
                 mode=str(cfg_data.get("mode", "TOP_1")),
                 target_position=int(cfg_data.get("target_position", 1)),

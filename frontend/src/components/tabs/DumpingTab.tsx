@@ -6,7 +6,7 @@ import { PriceWarSummary } from '../PriceWarSummary';
 import { usePriceWarStats } from '../../hooks/usePriceWarStats';
 
 const EMPTY_CONFIG: DumpingConfig = {
-  min_price: 0, max_price: 0, dump_step: 10, enabled: false,
+  min_price: 0, max_price: 0, dump_step: 1, enabled: false,
   mode: 'TOP_1', target_position: 1, max_delivery_days: null,
   min_seller_rating: null, same_city_only: false, blacklisted_merchants: []
 };
@@ -368,7 +368,7 @@ export function DumpingTab({
                             type="number"
                             id={`step-${sku}`}
                             className="form-input"
-                            defaultValue={cfg.dump_step ?? 10}
+                            defaultValue={cfg.dump_step ?? 1}
                           />
                         </div>
                       </div>
@@ -466,7 +466,7 @@ export function DumpingTab({
                           onClick={() => {
                             const minVal = parseFloat((document.getElementById(`min-${sku}`) as HTMLInputElement).value) || 0;
                             const maxVal = parseFloat((document.getElementById(`max-${sku}`) as HTMLInputElement).value) || 0;
-                            const stepVal = parseFloat((document.getElementById(`step-${sku}`) as HTMLInputElement).value) || 10;
+                            const stepVal = parseFloat((document.getElementById(`step-${sku}`) as HTMLInputElement).value) || 1;
                             const enabledVal = (document.getElementById(`enabled-${sku}`) as HTMLInputElement).checked;
                             const modeVal = (document.getElementById(`mode-${sku}`) as HTMLSelectElement)?.value || 'TOP_1';
                             const targetPosEl = document.getElementById(`target_pos-${sku}`) as HTMLInputElement | null;
