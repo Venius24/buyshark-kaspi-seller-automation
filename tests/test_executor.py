@@ -165,20 +165,32 @@ class TestExecuteUpdatesWithAuth(ExecutorTestBase):
     @patch("backend.dumper.executor._load_mc_cookies")
     def test_concurrent_skus_run_in_parallel(self, mock_cookies, mock_update, mock_groups):
         """
-        Категория 1: N independent SKUs must actually overlap in wall-clock
-        time under the default max_workers=3, not just "not crash". Each
-        mocked Kaspi call sleeps for real (simulating network latency) —
-        if execute_updates were still sequential, 6 SKUs would take
-        >= 6 * SLEEP seconds; concurrent execution with 3 workers should
-        take roughly 2 batches worth (well under the sequential total).
+        Категория 1: N independent SKUs must actually overlap in execution,
+        not just "not crash". Each mocked Kaspi call blocks until released,
+        so we can directly observe how many calls are in-flight at once
+        instead of inferring it from wall-clock time (which is unreliable
+        on noisy/shared CI runners — see HANDOFF.md §"test_concurrent_skus_run_in_parallel").
         """
-        import time as time_module
+        import threading
 
-        SLEEP = 0.15
         NUM_SKUS = 6
+        lock = threading.Lock()
+        active = 0
+        peak_active = 0
+        # Barrier-like gate: block each call until we've observed at least
+        # 2 calls in flight simultaneously, then release them all.
+        release_event = threading.Event()
 
         def slow_update(*args, **kwargs):
-            time_module.sleep(SLEEP)
+            nonlocal active, peak_active
+            with lock:
+                active += 1
+                peak_active = max(peak_active, active)
+            if peak_active >= 2:
+                release_event.set()
+            release_event.wait(timeout=5)
+            with lock:
+                active -= 1
             return (True, "tx-ok")
 
         mock_cookies.return_value = {"mc-session": "s", "mc-sid": "sid"}
@@ -186,18 +198,14 @@ class TestExecuteUpdatesWithAuth(ExecutorTestBase):
         mock_update.side_effect = slow_update
 
         tasks = [make_task(sku=f"SKU-{i}") for i in range(NUM_SKUS)]
-        start = time_module.perf_counter()
         result = RateLimitExecutorWorker.execute_updates(
             tasks, self.save_override, rate_limit_delay=0, merchant_id="999", max_workers=3
         )
-        elapsed = time_module.perf_counter() - start
 
         self.assertEqual(result["updated_count"], NUM_SKUS)
-        sequential_estimate = NUM_SKUS * SLEEP
-        # Real concurrency: well under sequential time. Generous margin (0.7x)
-        # to absorb scheduling/CI jitter while still failing hard for the
-        # old fully-sequential implementation (which would take ~1.0x).
-        self.assertLess(elapsed, sequential_estimate * 0.7)
+        # A fully-sequential implementation could never have more than 1
+        # call in flight at once; real concurrency must reach at least 2.
+        self.assertGreaterEqual(peak_active, 2)
 
 
 class TestExecuteUpdatesDedup(ExecutorTestBase):
