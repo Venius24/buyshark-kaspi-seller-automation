@@ -121,6 +121,9 @@ class MasterStockGroupDB(Base):
     linked_skus: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON-stringified list
     external_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Стоп кол-во: при shared_stock <= stop_qty группа снимается с продажи
+    # (архивируется на Kaspi) и шлётся телеграм-уведомление — см. миграцию 024.
+    stop_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     dumping_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-stringified dict
     status: Mapped[str] = mapped_column(String(50), default="synced")
     created_at: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

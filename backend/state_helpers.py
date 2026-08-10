@@ -366,6 +366,7 @@ def _load_master_stock_groups(store_id: str) -> dict:
                     "linked_skus": linked_skus,
                     "external_code": r.external_code,
                     "is_active": r.is_active,
+                    "stop_qty": r.stop_qty if r.stop_qty is not None else 5,
                     "dumping_config": dumping_cfg,
                     "status": r.status,
                     "created_at": r.created_at,
@@ -400,6 +401,7 @@ def _save_master_stock_groups(groups: dict, store_id: str):
                     linked_skus=linked_str,
                     external_code=g.get("external_code"),
                     is_active=bool(g.get("is_active", True)),
+                    stop_qty=int(g.get("stop_qty", 5)),
                     dumping_config=dump_cfg_str,
                     status=g.get("status", "synced"),
                     created_at=g.get("created_at"),
@@ -415,6 +417,7 @@ def _save_master_stock_groups(groups: dict, store_id: str):
                 db_obj.linked_skus = linked_str
                 db_obj.external_code = g.get("external_code")
                 db_obj.is_active = bool(g.get("is_active", True))
+                db_obj.stop_qty = int(g.get("stop_qty", 5))
                 db_obj.dumping_config = dump_cfg_str
                 db_obj.status = g.get("status", "synced")
                 db_obj.created_at = g.get("created_at")

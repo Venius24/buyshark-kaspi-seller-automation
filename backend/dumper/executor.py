@@ -263,11 +263,16 @@ class RateLimitExecutorWorker:
                 store_full_id = p.get("storeId") or f"{merchant_id}_001"
                 store_suffix = store_full_id.split("_")[1] if "_" in store_full_id else "001"
 
-                # Проверяем, привязан ли данный SKU к Мастер-Группе остатка
+                # Проверяем, привязан ли данный SKU к Мастер-Группе остатка.
+                # Ниже/на "Стоп кол-ве" группы (см. stock_sync_worker.py) на
+                # Kaspi уходит 0 — иначе демпинг-цикл вернул бы карточку в
+                # продажу с реальным ненулевым остатком поверх Stop Qty Protection.
                 stock_val = int(p.get("stock", 10))
                 for mg in master_groups.values():
                     if mg.get("is_active", True) and sku_key in mg.get("linked_skus", []):
-                        stock_val = int(mg.get("shared_stock", stock_val))
+                        mg_stock = int(mg.get("shared_stock", stock_val))
+                        mg_stop_qty = int(mg.get("stop_qty", 5))
+                        stock_val = mg_stock if mg_stock > mg_stop_qty else 0
                         break
 
                 success, val = RateLimitExecutorWorker._update_kaspi_price_sync(

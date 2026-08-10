@@ -72,6 +72,7 @@ class MasterStockGroupCreateRequest(BaseModel):
     linked_skus: List[str]
     external_code: Optional[str] = None
     is_active: Optional[bool] = True
+    stop_qty: Optional[int] = 5
     dumping_config: Optional[GroupDumpingConfig] = None
 
 class MasterStockGroupUpdateRequest(BaseModel):
@@ -80,6 +81,7 @@ class MasterStockGroupUpdateRequest(BaseModel):
     linked_skus: Optional[List[str]] = None
     external_code: Optional[str] = None
     is_active: Optional[bool] = None
+    stop_qty: Optional[int] = None
     dumping_config: Optional[GroupDumpingConfig] = None
 
 class UpdateStockQtyRequest(BaseModel):

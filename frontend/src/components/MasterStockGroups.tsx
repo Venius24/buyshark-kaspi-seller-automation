@@ -45,6 +45,7 @@ export interface MasterStockGroup {
   linked_skus: string[];
   external_code?: string;
   is_active: boolean;
+  stop_qty: number;
   status: 'synced' | 'updating' | 'warning' | 'error';
   created_at: string;
   updated_at: string;
@@ -91,6 +92,7 @@ export const MasterStockGroups: React.FC = () => {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [formGroupName, setFormGroupName] = useState<string>('');
   const [formSharedStock, setFormSharedStock] = useState<number>(10);
+  const [formStopQty, setFormStopQty] = useState<number>(5);
   const [formSelectedSkus, setFormSelectedSkus] = useState<string[]>([]);
   const [formExternalCode, setFormExternalCode] = useState<string>('');
   const [formIsActive, setFormIsActive] = useState<boolean>(true);
@@ -156,7 +158,7 @@ export const MasterStockGroups: React.FC = () => {
     groups.forEach(g => g.linked_skus.forEach(s => skuSet.add(s)));
     return skuSet.size;
   }, [groups]);
-  const zeroStockGroupsCount = useMemo(() => groups.filter(g => g.shared_stock === 0).length, [groups]);
+  const zeroStockGroupsCount = useMemo(() => groups.filter(g => g.shared_stock <= (g.stop_qty ?? 5)).length, [groups]);
   const activeGroupsCount = useMemo(() => groups.filter(g => g.is_active).length, [groups]);
 
   // Modal Handlers
@@ -164,6 +166,7 @@ export const MasterStockGroups: React.FC = () => {
     setEditingGroupId(null);
     setFormGroupName('');
     setFormSharedStock(10);
+    setFormStopQty(5);
     setFormSelectedSkus([]);
     setFormExternalCode('');
     setFormIsActive(true);
@@ -181,6 +184,7 @@ export const MasterStockGroups: React.FC = () => {
     setEditingGroupId(group.group_id);
     setFormGroupName(group.group_name);
     setFormSharedStock(group.shared_stock);
+    setFormStopQty(group.stop_qty ?? 5);
     setFormSelectedSkus([...group.linked_skus]);
     setFormExternalCode(group.external_code || '');
     setFormIsActive(group.is_active);
@@ -232,6 +236,7 @@ export const MasterStockGroups: React.FC = () => {
         body: JSON.stringify({
           group_name: formGroupName.trim(),
           shared_stock: formSharedStock,
+          stop_qty: formStopQty,
           linked_skus: formSelectedSkus,
           external_code: formExternalCode.trim() || undefined,
           is_active: formIsActive,
@@ -695,15 +700,17 @@ export const MasterStockGroups: React.FC = () => {
                           </div>
                         ) : (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span style={{
-                              fontSize: '18px',
-                              fontWeight: 700,
-                              color: group.shared_stock === 0 ? 'var(--error)' : 'var(--primary-hover)',
-                              padding: '4px 12px',
-                              borderRadius: '8px',
-                              background: group.shared_stock === 0 ? 'rgba(239, 68, 68, 0.12)' : 'rgba(56, 189, 248, 0.12)',
-                              border: group.shared_stock === 0 ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(56, 189, 248, 0.3)'
-                            }}>
+                            <span
+                              title={`Стоп кол-во: ${group.stop_qty ?? 5} шт`}
+                              style={{
+                                fontSize: '18px',
+                                fontWeight: 700,
+                                color: group.shared_stock <= (group.stop_qty ?? 5) ? 'var(--error)' : 'var(--primary-hover)',
+                                padding: '4px 12px',
+                                borderRadius: '8px',
+                                background: group.shared_stock <= (group.stop_qty ?? 5) ? 'rgba(239, 68, 68, 0.12)' : 'rgba(56, 189, 248, 0.12)',
+                                border: group.shared_stock <= (group.stop_qty ?? 5) ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(56, 189, 248, 0.3)'
+                              }}>
                               {group.shared_stock} шт
                             </span>
                             <button
@@ -958,7 +965,7 @@ export const MasterStockGroups: React.FC = () => {
               </div>
 
               {/* Shared Stock Input */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '16px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' }}>
                     Общий физический остаток *
@@ -969,6 +976,30 @@ export const MasterStockGroups: React.FC = () => {
                     value={formSharedStock}
                     onChange={e => setFormSharedStock(parseInt(e.target.value) || 0)}
                     required
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '10px',
+                      background: 'var(--card-bg)',
+                      border: '1px solid var(--card-border)',
+                      color: 'var(--text-color)',
+                      fontSize: '14px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* Stop Qty Input */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' }}>
+                    Стоп кол-во
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formStopQty}
+                    onChange={e => setFormStopQty(parseInt(e.target.value) || 0)}
+                    title="При остатке <= этого значения группа снимается с продажи на Kaspi и приходит уведомление в Telegram"
                     style={{
                       width: '100%',
                       padding: '10px 14px',

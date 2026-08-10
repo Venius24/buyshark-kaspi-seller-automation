@@ -132,6 +132,8 @@ async def create_stock_group(
         raise HTTPException(status_code=400, detail="Остаток не может быть отрицательным.")
     if not req.linked_skus:
         raise HTTPException(status_code=400, detail="Выберите хотя бы один товар (SKU) для связывания.")
+    if req.stop_qty is not None and req.stop_qty < 0:
+        raise HTTPException(status_code=400, detail="Стоп кол-во не может быть отрицательным.")
 
     group_id = f"grp_{uuid.uuid4().hex[:8]}"
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -143,6 +145,7 @@ async def create_stock_group(
         "linked_skus": _expand_linked_skus(req.linked_skus, ctx.store_id),
         "external_code": (req.external_code or "").strip() or None,
         "is_active": req.is_active if req.is_active is not None else True,
+        "stop_qty": int(req.stop_qty) if req.stop_qty is not None else 5,
         "dumping_config": req.dumping_config.dict() if req.dumping_config else None,
         "status": "updating",
         "created_at": now_str,
@@ -175,6 +178,9 @@ async def update_stock_group(
     """Обновить конфигурацию Мастер-Группы."""
     token = ctx.token
 
+    if req.stop_qty is not None and req.stop_qty < 0:
+        raise HTTPException(status_code=400, detail="Стоп кол-во не может быть отрицательным.")
+
     async with get_stock_lock(ctx.store_id):
         groups = _load_master_stock_groups(store_id=ctx.store_id)
         if group_id not in groups:
@@ -191,6 +197,8 @@ async def update_stock_group(
             group["external_code"] = req.external_code.strip() or None
         if req.is_active is not None:
             group["is_active"] = req.is_active
+        if req.stop_qty is not None:
+            group["stop_qty"] = int(req.stop_qty)
         if req.dumping_config is not None:
             group["dumping_config"] = req.dumping_config.dict() if req.dumping_config else None
 

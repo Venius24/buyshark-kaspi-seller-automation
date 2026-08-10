@@ -36,17 +36,18 @@ def get_stock_lock(store_id=None) -> asyncio.Lock:
         _stock_locks[store_id] = asyncio.Lock()
     return _stock_locks[store_id]
 
-async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus: List[str], store_id: Optional[str] = None, trigger_order_info: Optional[dict] = None):
-    """Уведомление при обнулении остатка группы с деталями о заказе-триггере
-    — реальным привязанным через deep-link пользователям магазина (группа
-    'problems'), через notify_dispatch. Раньше слало напрямую по легаси
-    admin_ids (см. HANDOFF, вырезано 2026-08-09)."""
+async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus: List[str], store_id: Optional[str] = None, trigger_order_info: Optional[dict] = None, shared_stock: int = 0, stop_qty: int = 5):
+    """Уведомление при просаде остатка группы ниже (или равно) её "Стоп
+    кол-ва" (по умолчанию 5, настраивается per-группа) с деталями о
+    заказе-триггере — реальным привязанным через deep-link пользователям
+    магазина (группа 'problems'), через notify_dispatch. Раньше слало
+    напрямую по легаси admin_ids (см. HANDOFF, вырезано 2026-08-09)."""
     try:
         from backend.chatbot import notify_dispatch
         from backend.chatbot.notifications import _esc_md
 
         if store_id is None:
-            logger.info("Zero Stock notify skipped: без store_id некому отправлять (легаси-путь без магазина).")
+            logger.info("Stop Qty notify skipped: без store_id некому отправлять (легаси-путь без магазина).")
             return
 
         skus_str = ", ".join(linked_skus[:5]) + ("..." if len(linked_skus) > 5 else "")
@@ -60,7 +61,7 @@ async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus
             customer = trigger_order_info.get("customer") or "Покупатель"
 
             order_section = (
-                f"🛒 *ПРИЧИНА СНИЖЕНИЯ ДО 0 (Новый заказ):*\n"
+                f"🛒 *ПРИЧИНА ПРОСАДА (Новый заказ):*\n"
                 f"• *№ Заказа:* `#{_esc_md(code)}`\n"
                 f"• *Товар:* {_esc_md(title)}\n"
                 f"• *Артикул списания:* `{_esc_md(sku)}` (-{units} шт.)\n"
@@ -68,16 +69,16 @@ async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus
             )
 
         text = (
-            f"🚨 *ВНИМАНИЕ: СНЯТО С ПРОДАЖИ (Zero Stock Protection)*\n\n"
+            f"🚨 *ВНИМАНИЕ: СНЯТО С ПРОДАЖИ (Стоп кол-во достигнуто)*\n\n"
             f"📦 *Группа:* {_esc_md(group_name)}\n"
             f"🆔 *ID Группы:* `{group_id}`\n"
-            f"📉 *Доступный остаток:* 0 шт.\n"
+            f"📉 *Доступный остаток:* {shared_stock} шт. (стоп кол-во: {stop_qty} шт.)\n"
             f"🔗 *Привязанные SKU:* {_esc_md(skus_str)}\n\n"
             f"{order_section}"
-            f"⚠️ Все карточки товаров группы занулены и временно сняты с продажи на Kaspi!"
+            f"⚠️ Все карточки товаров группы временно сняты с продажи на Kaspi!"
         )
 
-        await notify_dispatch.dispatch(store_id, "problems", text, urgent=True, dedup_key=f"zero_stock:{group_id}")
+        await notify_dispatch.dispatch(store_id, "problems", text, urgent=True, dedup_key=f"stop_qty:{group_id}")
     except Exception as e:
         logger.error(f"Failed to execute notify_zero_stock_telegram: {e}")
 
@@ -110,6 +111,7 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
 
     linked_skus = group.get("linked_skus", [])
     shared_stock = int(group.get("shared_stock", 0))
+    stop_qty = int(group.get("stop_qty", 5))
     group_name = group.get("group_name", "Без названия")
 
     logger.info(f"🔄 [Broadcast Sync] Начало обхода {len(linked_skus)} SKU для группы '{group_name}' (Остаток: {shared_stock})")
@@ -159,7 +161,11 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
 
         store_full_id = target_p.get("storeId") or f"{merchant_id}_001"
         store_suffix = store_full_id.split("_")[1] if "_" in store_full_id else "001"
-        status_text = "Активен" if shared_stock > 0 else "Архив"
+        status_text = "Активен" if shared_stock > stop_qty else "Архив"
+        # При просаде до/ниже "Стоп кол-ва" на Kaspi уходит именно 0 —
+        # иначе карточка так и останется доступной для покупки с реальным
+        # (ещё ненулевым) остатком, хотя мы считаем её "снятой с продажи".
+        kaspi_push_stock = shared_stock if shared_stock > stop_qty else 0
 
         # Сохраняем локальный оверрайд
         _save_override(sku, price, shared_stock, target_p.get("brand"), status_text, store_id=store_id)
@@ -180,14 +186,14 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
                 master_sku=decoded_master,
                 model_name=target_p.get("name", "Товар"),
                 new_price=price,
-                stock=shared_stock,
+                stock=kaspi_push_stock,
                 store_id_suffix=store_suffix,
                 city_id="750000000",
                 internal_store_id=store_id
             )
             if success:
                 success_count += 1
-                msg = f"[{t_now}] ✓ Группа '{group_name}' -> SKU {sku}: остаток {shared_stock} отправлен в Kaspi MC (Tx: {val})"
+                msg = f"[{t_now}] ✓ Группа '{group_name}' -> SKU {sku}: остаток {kaspi_push_stock} отправлен в Kaspi MC (Tx: {val})"
                 logs.append(msg)
                 await broadcast_ws_event("log", msg, store_id=store_id)
             else:
@@ -231,14 +237,14 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
             _save_master_stock_groups(groups, store_id=store_id)
             await broadcast_ws_event("stock_group_updated", g, store_id=store_id)
 
-    # Обработка Zero Stock Protection
-    if shared_stock == 0:
-        logger.warning(f"🚨 [Zero Stock Protection] Группа '{group_name}' занулена!")
-        await notify_zero_stock_telegram(group_name, group_id, linked_skus, store_id=store_id, trigger_order_info=trigger_order_info)
+    # Обработка Stop Qty Protection: остаток просел до/ниже кастомного "Стоп кол-ва" группы
+    if shared_stock <= stop_qty:
+        logger.warning(f"🚨 [Stop Qty Protection] Группа '{group_name}' остаток {shared_stock} <= стоп кол-во {stop_qty}!")
+        await notify_zero_stock_telegram(group_name, group_id, linked_skus, store_id=store_id, trigger_order_info=trigger_order_info, shared_stock=shared_stock, stop_qty=stop_qty)
         await broadcast_ws_event("zero_stock_alert", {
             "group_id": group_id,
             "group_name": group_name,
-            "message": f"Группа [{group_name}] занулена и снята с продажи на Kaspi!"
+            "message": f"Группа [{group_name}] снята с продажи на Kaspi (остаток {shared_stock} <= стоп кол-во {stop_qty})!"
         }, store_id=store_id)
 
 async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
