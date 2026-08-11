@@ -24,6 +24,25 @@ def _get_chatbot_state(store_id=None) -> dict:
         _chatbot_state[store_id] = {"day_start_ts": day_start_ts, "start_gts": day_start_ts}
     return _chatbot_state[store_id]
 
+# Один Telegram-алерт в день на магазин при исчерпании дневных кредитов
+# (Слайс 3) — in-memory, ключ по (store_id, дата по Алматы) сам себя чистит:
+# смена даты даёт новый ключ, процесс не растёт бесконечно за разумное время.
+_credits_exhausted_alerted: set = set()
+
+def _notify_credits_exhausted_once_daily(store_id: str) -> None:
+    from backend.billing.credits import today_key
+    key = (store_id, today_key())
+    if key in _credits_exhausted_alerted:
+        return
+    _credits_exhausted_alerted.add(key)
+    try:
+        from backend.chatbot.notify_dispatch import dispatch
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(dispatch(store_id, "money", "⚠️ Дневной лимит ответов ИИ исчерпан, бот молчит до завтра.", urgent=True))
+    except Exception as e:
+        logger.debug(f"[Chatbot] notify_credits_exhausted skipped: {e}")
+
 async def start_telegram_bot_polling():
     """Фоновый запуск Telegram бота (Aiogram polling)."""
     bot, dp = bot_instance.init_bot()
@@ -161,6 +180,23 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
                 continue
 
             config.mark_chat_replied(store_id, group_id, msg_id)
+
+            # Резерв дневного кредита ДО платного вызова DeepSeek (Слайс 3).
+            # mark_chat_replied уже отработал выше — иначе 5с-цикл вечно
+            # переоценивал бы то же сообщение при исчерпанном лимите.
+            credit_units_milli = 0
+            if store_id:
+                from backend.billing import catalog as billing_catalog, credits as billing_credits
+                band = bot_profile.get("prompt_tier") or billing_catalog.DEFAULT_PROMPT_BAND
+                credit_units_milli = billing_catalog.multiplier_milli(band)
+                consume = await asyncio.to_thread(billing_credits.try_consume, store_id, credit_units_milli)
+                if not consume.ok:
+                    logger.warning(f"[Chatbot] Store {store_id}: дневной лимит кредитов исчерпан, ответ клиенту {client_name} пропущен.")
+                    from backend.state_helpers import _append_chat_response_log
+                    _append_chat_response_log(store_id, group_id, kind="inbound_skipped_no_credits", billed_units=0)
+                    await asyncio.to_thread(_notify_credits_exhausted_once_daily, store_id)
+                    continue
+
             history = await get_chat_history(group_id, cookies, headers)
             ai_reply, is_human_override, ai_usage = await generate_ai_reply(
                 client_name, item_title, history, store_id=store_id, awaiting_review_reply=was_awaiting_review
@@ -196,9 +232,15 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
                         prompt_tokens=ai_usage.get("prompt_tokens"),
                         completion_tokens=ai_usage.get("completion_tokens"),
                         billed_units=1,
+                        credit_units_milli=credit_units_milli,
                     )
             else:
                 logger.error(f"❌ [Chatbot] Сбой отправки ответа клиенту {client_name}: {send_result.get('error')}")
+                if store_id and credit_units_milli:
+                    from backend.billing import credits as billing_credits
+                    await asyncio.to_thread(billing_credits.release, store_id, credit_units_milli)
+                    from backend.state_helpers import _append_chat_response_log
+                    _append_chat_response_log(store_id, group_id, kind="inbound_send_failed", billed_units=0)
 
     return True
 
@@ -219,6 +261,10 @@ async def run_chatbot_cycle():
             try:
                 store_cfg = await asyncio.to_thread(config.load_chatbot_config, store.store_id)
                 if not store_cfg.get("enabled", True):
+                    continue
+                from backend.billing import enforcement as billing_enforcement
+                blocked, _reason = await asyncio.to_thread(billing_enforcement.is_service_blocked, store.store_id)
+                if blocked:
                     continue
                 any_enabled = True
                 cookies = await asyncio.to_thread(load_chat_cookies, store_id=store.store_id)

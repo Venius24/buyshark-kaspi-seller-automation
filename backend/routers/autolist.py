@@ -22,7 +22,7 @@ from backend.autolist import category_mapper as cm
 from backend.autolist import extractor
 from backend.autolist import validator as v
 from backend.models import AutolistDraftPatchRequest
-from backend.security.store_context import StoreContext, get_store_context
+from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/autolist", tags=["autolist"])
@@ -151,7 +151,7 @@ async def approve_draft(draft_id: str, ctx: StoreContext = Depends(get_store_con
 
 
 @router.post("/drafts/{draft_id}/submit")
-async def submit_draft(draft_id: str, ctx: StoreContext = Depends(get_store_context)):
+async def submit_draft(draft_id: str, ctx: StoreContext = Depends(get_store_context_billed)):
     """Реальная отправка в Kaspi — требует, чтобы черновик уже был в статусе
     'approved' (см. /approve). Отправляет ровно один товар; для массовой
     отправки фронтенд вызывает это по очереди на каждый одобренный черновик."""

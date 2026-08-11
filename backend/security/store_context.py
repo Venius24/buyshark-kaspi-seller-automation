@@ -80,6 +80,22 @@ async def get_store_context(
     raise HTTPException(status_code=401, detail="Требуется вход в аккаунт с подключённым магазином.")
 
 
+async def get_store_context_billed(ctx: StoreContext = Depends(get_store_context)) -> StoreContext:
+    """Сиблинг get_store_context для ДЕЙСТВИЙ (сохранение конфига демпинга,
+    включение бота, autolist, print batcher, auto-assembly) — не для GET.
+    Заблокированный по тарифу магазин должен видеть свой кабинет и платить,
+    но не потреблять сервис, поэтому проверка НЕ встроена в сам
+    get_store_context (который охраняет вообще всё, включая саму страницу
+    оплаты) — только в этот отдельный, применяемый выборочно на
+    action-роутах. Тарификация, 2026-08-12 (Слайс 6)."""
+    import asyncio
+    from backend.billing import enforcement
+    blocked, reason = await asyncio.to_thread(enforcement.is_service_blocked, ctx.store_id)
+    if blocked:
+        raise HTTPException(status_code=402, detail={"code": "BILLING_BLOCKED", "reason": reason})
+    return ctx
+
+
 async def list_active_stores() -> list[StoreContext]:
     """
     Резолвит список сторов для фоновых воркеров (Phase 7) — system-internal вызов,

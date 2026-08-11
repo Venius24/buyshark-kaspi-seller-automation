@@ -47,8 +47,10 @@ from backend.db.seed import seed_default_admin
 from backend.routers import (
     auth, products, orders, dumping, ws, analytics,
     chatbot, stock_groups, api_keys, print_batcher,
-    auth_v1, stores_v1, chats, autolist, auto_assembly, telegram_link
+    auth_v1, stores_v1, chats, autolist, auto_assembly, telegram_link,
+    stores_auto_connect
 )
+from backend.routers import billing as billing_router, admin_billing, referral as referral_router
 from backend.routers.public_api import groups as public_groups
 
 from backend.routers.dumping import background_dumping_loop
@@ -59,6 +61,7 @@ from backend.services.stock_sync_worker import master_stock_radar_loop, start_pa
 from backend.services.products_sync_worker import start_products_sync_loop
 from backend.services.sales_sync_worker import start_sales_sync_loop
 from backend.services.kaspi_quality_metrics_worker import start_quality_metrics_loop
+from backend.services.billing_worker import start_billing_loop
 from backend.workers.health_check_worker import start_health_check_loop
 
 from backend.perf.collector import is_enabled as _perf_enabled
@@ -90,6 +93,7 @@ async def startup_event():
     asyncio.create_task(start_products_sync_loop(1800))
     asyncio.create_task(start_sales_sync_loop(1800))
     asyncio.create_task(start_quality_metrics_loop())
+    asyncio.create_task(start_billing_loop())
 
     # Опциональная инструментация производительности (PERF_PROFILING=1) —
     # см. backend/perf/. Ноль накладных расходов, если флаг не выставлен.
@@ -118,6 +122,7 @@ app.mount("/ping-pong", StaticFiles(directory="api-ping-pong", html=True), name=
 # Подключение роутеров v1 и стандартных
 app.include_router(auth_v1.router)
 app.include_router(stores_v1.router)
+app.include_router(stores_auto_connect.router)  # выключено флагом AUTO_CONNECT_ENABLED, см. AUTOCONNECT_PLAN.md
 
 app.include_router(auth.router)
 app.include_router(products.router)
@@ -134,6 +139,9 @@ app.include_router(public_groups.router)
 app.include_router(autolist.router)
 app.include_router(auto_assembly.router)
 app.include_router(telegram_link.router)
+app.include_router(billing_router.router)
+app.include_router(admin_billing.router)
+app.include_router(referral_router.router)
 
 if _perf_enabled():
     from backend.perf.router import router as perf_router

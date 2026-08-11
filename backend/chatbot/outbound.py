@@ -413,6 +413,11 @@ async def run_outbound_cycle():
             if not cfg.get("enabled", True):
                 continue
 
+            from backend.billing import enforcement as billing_enforcement
+            blocked, _reason = await asyncio.to_thread(billing_enforcement.is_service_blocked, store.store_id)
+            if blocked:
+                continue
+
             cookies = await asyncio.to_thread(load_chat_cookies, store_id=store.store_id)
             if not cookies:
                 continue

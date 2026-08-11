@@ -1,7 +1,7 @@
 import { apiFetch, API_URL } from './api';
 import type { StoreItem, UserProfile } from './components/StoreHub';
 import type { MasterStockGroup, ProductItem } from './components/MasterStockGroups';
-import type { BotProfile, BotUsageSummary, OutboundQueueItem, OutboundStats } from './types';
+import type { BotProfile, BotUsageSummary, OutboundQueueItem, OutboundStats, BillingSummary, BillingPlan, BillingTransaction } from './types';
 
 export const fetchProfile = async (): Promise<UserProfile | null> => {
   const res = await apiFetch(`${API_URL}/api/v1/auth/me`);
@@ -65,6 +65,36 @@ export const fetchBotUsage = async (): Promise<BotUsageSummary | null> => {
     return { total_billed_units: data.total_billed_units, by_kind: data.by_kind, period_days: data.period_days };
   } catch {
     return null;
+  }
+};
+
+export const fetchBillingSummary = async (): Promise<BillingSummary | null> => {
+  try {
+    const res = await apiFetch(`${API_URL}/api/billing/summary`);
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+};
+
+export const fetchBillingPlans = async (): Promise<BillingPlan[]> => {
+  try {
+    const res = await apiFetch(`${API_URL}/api/billing/plans`);
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+};
+
+export const fetchBillingTransactions = async (): Promise<BillingTransaction[]> => {
+  try {
+    const res = await apiFetch(`${API_URL}/api/billing/transactions`);
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
   }
 };
 

@@ -9,7 +9,7 @@ from backend.services.print_batcher_service import (
     reset_printed_history,
     load_printed_history
 )
-from backend.security.store_context import StoreContext, get_store_context
+from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed
 
 router = APIRouter(prefix="/api/print-batcher", tags=["Print Batcher Engine"])
 
@@ -23,7 +23,7 @@ async def process_print_batch(
     deduplicate_history: bool = Form(True),
     force_reprint: bool = Form(False),
     output_layout: str = Form("auto"),              # 'auto' | 'a4_4' | 'a4_8' | 'a4_9' | 'a4_1' | 'thermal_75_120' | 'thermal_100_150' | 'just_merge'
-    ctx: StoreContext = Depends(get_store_context),
+    ctx: StoreContext = Depends(get_store_context_billed),
 ):
     """
     Принимает ZIP-архив или PDF-файл, выполняет суточную дедупликацию по истории печати,

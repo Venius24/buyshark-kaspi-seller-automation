@@ -9,6 +9,9 @@ interface SidebarProps {
   ordersCount: number;
   transfersCount: number;
   isWsConnected: boolean;
+  isSuperadmin?: boolean;
+  isReferrer?: boolean;
+  billingBlocked?: boolean;
 }
 
 export function Sidebar({
@@ -20,6 +23,9 @@ export function Sidebar({
   ordersCount,
   transfersCount,
   isWsConnected,
+  isSuperadmin,
+  isReferrer,
+  billingBlocked,
 }: SidebarProps) {
   return (
     <aside className="sidebar">
@@ -134,6 +140,41 @@ export function Sidebar({
             </div>
             <span className="sidebar-pill">API</span>
           </button>
+
+          <button
+            className={`sidebar-item ${activeTab === 'billing' ? 'active' : ''}`}
+            onClick={() => onSelectTab('billing')}
+          >
+            <div className="sidebar-item-left">
+              <span className="sidebar-icon">💳</span>
+              <span>Тариф и Баланс</span>
+            </div>
+            {billingBlocked && <span className="sidebar-pill" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>Блок</span>}
+          </button>
+
+          {isSuperadmin && (
+            <button
+              className={`sidebar-item ${activeTab === 'admin' ? 'active' : ''}`}
+              onClick={() => onSelectTab('admin')}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">🛡️</span>
+                <span>Админ-панель</span>
+              </div>
+            </button>
+          )}
+
+          {isReferrer && (
+            <button
+              className={`sidebar-item ${activeTab === 'referral' ? 'active' : ''}`}
+              onClick={() => onSelectTab('referral')}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">🤝</span>
+                <span>Рефералы</span>
+              </div>
+            </button>
+          )}
         </div>
 
         <div className="sidebar-group">

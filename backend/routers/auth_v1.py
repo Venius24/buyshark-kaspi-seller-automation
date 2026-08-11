@@ -8,7 +8,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from backend.db.database import get_db
-from backend.db.models import User, Subscription, UserSession
+from backend.db.models import User, Subscription, UserSession, ReferralProfileDB
 from backend.security.auth import (
     hash_password,
     verify_password,
@@ -28,6 +28,7 @@ class RegisterRequest(BaseModel):
     password: str
     full_name: Optional[str] = None
     phone: Optional[str] = None
+    referral_code: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -92,6 +93,16 @@ async def register_user(
     if res.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Пользователь с таким Email уже зарегистрирован")
 
+    # Реф-код проверяем ДО создания юзера, чтобы невалидный/чужой код не
+    # тихо проглатывался — просто не сохраняем его, атрибуции не будет.
+    pending_referral_code = None
+    if req.referral_code:
+        code_clean = req.referral_code.strip().upper()
+        ref_stmt = select(ReferralProfileDB).where(ReferralProfileDB.code == code_clean, ReferralProfileDB.is_active == True)  # noqa: E712
+        ref_res = await db.execute(ref_stmt)
+        if ref_res.scalar_one_or_none():
+            pending_referral_code = code_clean
+
     # Создаем пользователя
     new_user = User(
         email=req.email.lower(),
@@ -99,7 +110,8 @@ async def register_user(
         full_name=req.full_name,
         phone=req.phone,
         is_active=True,
-        is_verified=False
+        is_verified=False,
+        pending_referral_code=pending_referral_code,
     )
     db.add(new_user)
     await db.flush()
@@ -264,6 +276,10 @@ async def get_me(
     sub_res = await db.execute(sub_stmt)
     sub = sub_res.scalar_one_or_none()
 
+    referrer_stmt = select(ReferralProfileDB.user_id).where(ReferralProfileDB.user_id == user.id)
+    referrer_res = await db.execute(referrer_stmt)
+    is_referrer = referrer_res.scalar_one_or_none() is not None
+
     return {
         "user": {
             "id": user.id,
@@ -271,7 +287,9 @@ async def get_me(
             "full_name": user.full_name,
             "phone": user.phone,
             "is_active": user.is_active,
-            "is_verified": user.is_verified
+            "is_verified": user.is_verified,
+            "is_superadmin": user.is_superadmin,
+            "is_referrer": is_referrer,
         },
         "subscription": {
             "plan_type": sub.plan_type if sub else "STARTER",

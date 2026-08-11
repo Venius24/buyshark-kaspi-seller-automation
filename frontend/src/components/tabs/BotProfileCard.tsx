@@ -7,10 +7,10 @@ import type { BotProfile, PickupPoint } from '../../types';
 const EMPTY_POINT: PickupPoint = { name: '', address: '', map_url: '', hours: '', notes: '' };
 
 const TIER_LABELS: Record<BotProfile['prompt_tier'], string> = {
-  base: 'Базовый (без доп. инструкций)',
-  plus: 'Plus',
-  pro: 'Pro',
-  max: 'Max',
+  band0: 'Базовый (0-500 символов)',
+  band1: 'Plus (500-2000, +1000₸/мес)',
+  band2: 'Pro (2000-5000, +2500₸/мес)',
+  band3: 'Max (5000+, +5000₸/мес)',
 };
 
 export function BotProfileCard() {

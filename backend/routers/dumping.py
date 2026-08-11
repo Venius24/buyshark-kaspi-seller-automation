@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from backend.models import DumpingConfigRequest
 from backend.state_helpers import _load_dumping_configs, _save_dumping_configs, _save_override, _apply_overrides, _load_products, _save_products
 from backend.dumper import run_price_dumping_job
-from backend.security.store_context import StoreContext, get_store_context, list_active_stores
+from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed, list_active_stores
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dumping", tags=["dumping"])
@@ -72,6 +72,10 @@ async def run_scheduled_dumping_cycle() -> dict:
     logger.info(f"🤖 [Scheduler] Running automated 5-minute price dumper cycle for {len(stores)} store(s)...")
     for store in stores:
         try:
+            from backend.billing import enforcement as billing_enforcement
+            blocked, _reason = await asyncio.to_thread(billing_enforcement.is_service_blocked, store.store_id)
+            if blocked:
+                continue
             res = await _run_dumping_cycle(store.token, store.store_id)
             updated = res.get("updated_count", 0)
             total_updated += updated
@@ -130,7 +134,7 @@ def get_dumping_configs(ctx: StoreContext = Depends(get_store_context)):
     return {"success": True, "configs": configs}
 
 @router.post("/config")
-def save_dumping_config(req: DumpingConfigRequest, ctx: StoreContext = Depends(get_store_context)):
+def save_dumping_config(req: DumpingConfigRequest, ctx: StoreContext = Depends(get_store_context_billed)):
     """Сохранить или обновить конфигурацию демпинга для SKU."""
     configs = _load_dumping_configs(store_id=ctx.store_id)
     configs[req.sku] = {
@@ -172,7 +176,7 @@ def get_dumping_status(ctx: StoreContext = Depends(get_store_context)):
     }
 
 @router.post("/run")
-async def run_price_dumping(ctx: StoreContext = Depends(get_store_context)):
+async def run_price_dumping(ctx: StoreContext = Depends(get_store_context_billed)):
     """Запустить расчет авто-демпинга вручную для стора текущего пользователя."""
     if not _load_products(ctx.store_id):
         raise HTTPException(status_code=404, detail="Список товаров пуст. Загрузите товары.")

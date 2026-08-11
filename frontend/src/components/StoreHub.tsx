@@ -19,6 +19,8 @@ export interface UserProfile {
     id: string;
     email: string;
     full_name: string;
+    is_superadmin?: boolean;
+    is_referrer?: boolean;
   };
   subscription: {
     plan_type: string;
@@ -46,6 +48,17 @@ export const StoreHub: React.FC = () => {
 
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // "Сделайте всё за меня" — авто-подключение через SMS владельца.
+  // Каркас: см. AUTOCONNECT_PLAN.md — бэкенд пока отдаёт 503, т.к. Фаза 1
+  // (реальные селекторы кабинета "Сотрудники"/"Интеграция") не сделана.
+  const [connectMode, setConnectMode] = useState<'manual' | 'auto'>('manual');
+  const [autoStoreName, setAutoStoreName] = useState<string>('');
+  const [ownerPhone, setOwnerPhone] = useState<string>('');
+  const [smsStep, setSmsStep] = useState<'phone' | 'code'>('phone');
+  const [smsCode, setSmsCode] = useState<string>('');
+  const [autoSubmitting, setAutoSubmitting] = useState<boolean>(false);
+  const [autoErrorMsg, setAutoErrorMsg] = useState<string | null>(null);
 
   const { data: profile } = useQuery({
     queryKey: ['auth', 'me'],
@@ -130,6 +143,73 @@ export const StoreHub: React.FC = () => {
     setMcEmail('');
     setMcPassword('');
     setErrorMsg(null);
+    setConnectMode('manual');
+    setAutoStoreName('');
+    setOwnerPhone('');
+    setSmsStep('phone');
+    setSmsCode('');
+    setAutoErrorMsg(null);
+  };
+
+  // "Сделайте всё за меня" — каркас (см. AUTOCONNECT_PLAN.md). Бэкенд
+  // сейчас всегда отдаёт 503, пока не сделана Фаза 1 (реальные селекторы
+  // кабинета "Сотрудники"/"Интеграция" под владельческой сессией).
+  const handleSendOwnerSms = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!autoStoreName.trim()) {
+      setAutoErrorMsg('Укажите название магазина');
+      return;
+    }
+    if (!ownerPhone.trim()) {
+      setAutoErrorMsg('Введите номер телефона владельца кабинета Kaspi');
+      return;
+    }
+    setAutoSubmitting(true);
+    setAutoErrorMsg(null);
+    try {
+      const res = await apiFetch(`${API_URL}/api/v1/stores/auto-connect/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: ownerPhone.trim() }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || 'Не удалось отправить SMS');
+      }
+      setSmsStep('code');
+    } catch (err: any) {
+      setAutoErrorMsg(err.message || 'Не удалось отправить SMS');
+    } finally {
+      setAutoSubmitting(false);
+    }
+  };
+
+  const handleVerifyOwnerSms = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!smsCode.trim()) {
+      setAutoErrorMsg('Введите код из SMS');
+      return;
+    }
+    setAutoSubmitting(true);
+    setAutoErrorMsg(null);
+    try {
+      const res = await apiFetch(`${API_URL}/api/v1/stores/auto-connect/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: ownerPhone.trim(), code: smsCode.trim(), store_name: autoStoreName.trim() }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || 'Не удалось завершить авто-подключение');
+      }
+      setShowAddModal(false);
+      resetModalState();
+      refetchStoresAndProfile();
+    } catch (err: any) {
+      setAutoErrorMsg(err.message || 'Не удалось завершить авто-подключение');
+    } finally {
+      setAutoSubmitting(false);
+    }
   };
 
   const handleVerifyStore = async (storeId: string) => {
@@ -284,6 +364,86 @@ export const StoreHub: React.FC = () => {
               </button>
             </div>
 
+            {/* Переключатель "Ручной" / "Сделайте всё за меня" — см. AUTOCONNECT_PLAN.md */}
+            <div style={{ display: 'flex', gap: '8px', padding: '16px 20px 0 20px' }}>
+              <button
+                type="button"
+                onClick={() => setConnectMode('manual')}
+                className={`btn ${connectMode === 'manual' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ flex: 1, padding: '10px', fontSize: '13px' }}
+              >
+                🛠️ Ручное подключение
+              </button>
+              <button
+                type="button"
+                onClick={() => setConnectMode('auto')}
+                className={`btn ${connectMode === 'auto' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ flex: 1, padding: '10px', fontSize: '13px' }}
+              >
+                ✨ Сделайте всё за меня
+              </button>
+            </div>
+
+            {connectMode === 'auto' ? (
+              <div style={{ padding: '20px' }}>
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 16px 0' }}>
+                  Введите номер телефона <strong>владельца</strong> кабинета Kaspi Merchant — мы пришлём SMS-код и
+                  подключим магазин сами, без ручного ввода токена и пароля.
+                </p>
+                {autoErrorMsg && <div style={styles.errorBox}>⚠️ {autoErrorMsg}</div>}
+
+                {smsStep === 'phone' ? (
+                  <form onSubmit={handleSendOwnerSms}>
+                    <div style={styles.formGroup}>
+                      <label style={styles.label}>Название магазина:</label>
+                      <input
+                        type="text"
+                        placeholder="Barkhan"
+                        value={autoStoreName}
+                        onChange={(e) => setAutoStoreName(e.target.value)}
+                        className="form-input"
+                        required
+                      />
+                    </div>
+                    <div style={styles.formGroup}>
+                      <label style={styles.label}>Телефон владельца кабинета:</label>
+                      <input
+                        type="tel"
+                        placeholder="+7 700 123 45 67"
+                        value={ownerPhone}
+                        onChange={(e) => setOwnerPhone(e.target.value)}
+                        className="form-input"
+                        required
+                      />
+                    </div>
+                    <div style={{ marginTop: '24px' }}>
+                      <button type="submit" disabled={autoSubmitting} className="btn btn-primary" style={{ width: '100%', padding: '14px 24px', fontSize: '15px' }}>
+                        {autoSubmitting ? '⏳ Отправляем SMS...' : '📲 Отправить SMS-код'}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <form onSubmit={handleVerifyOwnerSms}>
+                    <div style={styles.formGroup}>
+                      <label style={styles.label}>Код из SMS:</label>
+                      <input
+                        type="text"
+                        placeholder="1234"
+                        value={smsCode}
+                        onChange={(e) => setSmsCode(e.target.value)}
+                        className="form-input"
+                        required
+                      />
+                    </div>
+                    <div style={{ marginTop: '24px' }}>
+                      <button type="submit" disabled={autoSubmitting} className="btn btn-primary" style={{ width: '100%', padding: '14px 24px', fontSize: '15px' }}>
+                        {autoSubmitting ? '⏳ Подключаем магазин...' : '✅ Подтвердить и подключить'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            ) : (
             <form onSubmit={handleConnectFullStore} style={{ padding: '20px' }}>
               {errorMsg && <div style={styles.errorBox}>⚠️ {errorMsg}</div>}
 
@@ -343,6 +503,7 @@ export const StoreHub: React.FC = () => {
                 </button>
               </div>
             </form>
+            )}
           </div>
         </div>
       )}

@@ -21,6 +21,17 @@ class User(Base):
     # веб-кабинет для него заблокирован на уровне auth_v1.py, существует
     # только для того, чтобы иметь UserStore-запись (роль в конкретном сторе).
     is_telegram_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Тарификация (2026-08-12): платформенная роль суперадмина — полный
+    # доступ к /api/admin/* (все магазины, тарифы, балансы, рефералы).
+    # Ортогонально referral_profiles (наличие строки = "этот юзер реферер")
+    # и UserStore.role (авторизация ВНУТРИ конкретного магазина) — три разные
+    # оси, намеренно не сведены в один enum.
+    is_superadmin: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Реф-код с лендинга, сохранённый при регистрации ДО того, как у юзера
+    # появился первый магазин (атрибуция происходит позже, в
+    # connect-full-store, когда есть store_id, на который вешается
+    # store_referrals). Очищается после первой успешной атрибуции.
+    pending_referral_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -369,6 +380,11 @@ class ChatResponseLogDB(Base):
     prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     billed_units: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Тарификация (2026-08-12): фактически списанные милли-кредиты за этот
+    # ответ (с учётом множителя ступени промпта). Позволяет сверять быстрый
+    # счётчик store_daily_credits.used_milli с этим аудит-логом построчно.
+    # billed_units сохраняет старый смысл (1 сообщение) — не переопределяем.
+    credit_units_milli: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
@@ -597,5 +613,157 @@ class TelegramAuditLogDB(Base):
     tg_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+# ============================================================================
+# Тарификация (2026-08-12) — см. backend/billing/ и HANDOFF.md.
+# Тариф и баланс привязаны к МАГАЗИНУ, не к пользователю — это отдельная ось
+# от существующей per-user Subscription (та enforce-ит только max_stores,
+# т.е. квоту уровня аккаунта "сколько магазинов можно подключить";
+# Subscription сознательно не тронута этой миграцией).
+# ============================================================================
+
+class StoreTariffDB(Base):
+    """Тарифный профиль магазина: план, доплата за кредиты, статус блокировки,
+    период продления. Один ряд на магазин. plan_code='DEV' — внутренний
+    безлимитный тариф без списаний и блокировок (на него мигрируют все
+    существующие магазины при вводе тарификации)."""
+    __tablename__ = "store_tariffs"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    plan_code: Mapped[str] = mapped_column(String(30), nullable=False, default="DEV")
+    # Договорная цена ГигаПредприятие — перекрывает цену плана из каталога,
+    # если задана. NULL = использовать catalog.PLANS[plan_code].monthly_price_minor.
+    custom_monthly_price_minor: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    # 'NONE'|'C70'|'C100' — одна колонка, поэтому ступени кредитов структурно
+    # не могут суммироваться (владелец: "это замена").
+    credit_addon_code: Mapped[str] = mapped_column(String(20), nullable=False, default="NONE")
+    auto_upgrade_credits: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 'ACTIVE'|'BLOCKED_LIMIT'|'BLOCKED_BALANCE'
+    billing_status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
+    blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    blocked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    force_unblock_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    billing_anchor_day: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    period_start: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    period_end: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    next_charge_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    # Момент перевода с DEV на платный план — якорь для реферального окна
+    # (window_start), НЕ Store.created_at, иначе простой на DEV сжигал бы
+    # комиссионные месяцы реферера впустую.
+    activated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StoreBalanceDB(Base):
+    """Баланс кабинета магазина, тиын (1/100 ₸). Отдельно от StoreTariffDB:
+    горячий путь записи (каждое списание) не должен блокироваться на той же
+    строке, что редко читаемые тарифные настройки. Может уходить в минус —
+    блокировка наступает по catalog.BALANCE_BLOCK_THRESHOLD_MINOR, а не по
+    самому факту отрицательного значения."""
+    __tablename__ = "store_balances"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    balance_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BillingTransactionDB(Base):
+    """Append-only леджер — единственный источник правды по деньгам. Готов
+    под платёжный шлюз с первого дня (provider/provider_payment_id/method/
+    status), хотя пополнение сейчас только ручное через админку.
+    idempotency_key UNIQUE — вся защита от двойного списания/зачисления
+    построена на этом констрейнте, а не на read-check-write."""
+    __tablename__ = "billing_transactions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)  # знаковое: + начисление, - списание
+    balance_after_minor: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    # topup_manual|topup_gateway|charge_subscription|charge_credit_addon|
+    # charge_prompt_addon|referral_payout|adjustment|refund
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="completed")  # pending|completed|failed|canceled
+    provider: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)  # manual|kaspi_pay|halyk
+    provider_payment_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    method: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)  # card|kaspi_qr|bank_transfer|cash
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="KZT")
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, unique=True)
+    period_start: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    period_end: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    raw_payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class StoreDailyCreditDB(Base):
+    """Дневной счётчик кредитов ответов ИИ-бота. Строка создаётся лениво при
+    первом расходе за день — ОТСУТСТВИЕ строки и есть сброс, отдельного
+    job'а на полночь не существует (убирает целый класс багов с рестартом
+    на границе суток). date — 'YYYY-MM-DD' по часовому поясу Алматы
+    (catalog.BILLING_TZ_OFFSET_HOURS), не UTC. limit_milli — снапшот
+    дневного лимита на момент создания строки."""
+    __tablename__ = "store_daily_credits"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    date: Mapped[str] = mapped_column(String(10), primary_key=True)
+    limit_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    used_milli: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    exhausted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class ReferralProfileDB(Base):
+    """Наличие строки = "этот пользователь реферер". Ортогонально
+    User.is_superadmin и UserStore.role — три разные оси прав."""
+    __tablename__ = "referral_profiles"
+
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    code: Mapped[str] = mapped_column(String(16), nullable=False, unique=True, index=True)
+    commission_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
+    commission_months: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class StoreReferralDB(Base):
+    """PK store_id ⇒ у магазина структурно не может быть больше одного
+    реферера. window_start/window_end МАТЕРИАЛИЗОВАНЫ (не пересчитываются
+    по формуле) — иначе смена тарифа или его данных молча перезапустила бы
+    3-месячный отсчёт комиссии. window_start = StoreTariffDB.activated_at
+    (первый платный период), а не Store.created_at."""
+    __tablename__ = "store_referrals"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    referrer_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    referral_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # NULL при ручной привязке
+    source: Mapped[str] = mapped_column(String(10), nullable=False)  # 'code'|'manual'
+    assigned_by_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    window_end: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ReferralAccrualDB(Base):
+    """Append-only начисления рефереру. source_transaction_id UNIQUE —
+    идемпотентность: один пополнение → максимум одно начисление. Начисляется
+    в момент реального пополнения баланса магазина (topup_*), не в момент
+    списания за тариф — решение владельца 2026-08-12."""
+    __tablename__ = "referral_accruals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    referrer_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_transaction_id: Mapped[str] = mapped_column(String(36), ForeignKey("billing_transactions.id", ondelete="CASCADE"), nullable=False, unique=True)
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    percent: Mapped[int] = mapped_column(Integer, nullable=False)  # снапшот на момент начисления
+    period_start: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    period_end: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="accrued")  # accrued|payable|paid|canceled
+    paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    payout_ref: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 

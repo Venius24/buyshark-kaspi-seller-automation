@@ -1363,6 +1363,7 @@ def _append_chat_response_log(
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     billed_units: int = 1,
+    credit_units_milli: int = 0,
 ):
     session = _get_sync_db_session()
     if not session:
@@ -1379,6 +1380,7 @@ def _append_chat_response_log(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             billed_units=billed_units,
+            credit_units_milli=credit_units_milli,
             created_at=_dt.datetime.utcnow(),
         ))
         session.commit()

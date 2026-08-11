@@ -64,22 +64,15 @@ DEFAULT_PROFILE = {
 
 # Тир по длине custom_instructions (символы) — понятнее клиенту, чем токены,
 # и видно сразу при наборе текста в форме (решение владельца, 2026-08-08).
-# base: нет доп.инструкций, plus/pro/max — растущие пороги длины.
-TIER_THRESHOLDS = [
-    ("plus", 400),
-    ("pro", 1200),
-    ("max", float("inf")),
-]
-
-
+# Пороги и коды band0..band3 — часть тарификации (2026-08-12), см.
+# backend/billing/catalog.py::PROMPT_BANDS (0-500/500-2000/2000-5000/5000+,
+# каждая ступень даёт и доплату, и множитель кредита за сообщение). Старые
+# коды base/plus/pro/max заменены на band0..band3 — историю в
+# chat_response_logs.prompt_tier не трогаем, это снапшот на момент ответа.
 def compute_prompt_tier(custom_instructions: str) -> str:
+    from backend.billing.catalog import resolve_prompt_band
     length = len(custom_instructions or "")
-    if length == 0:
-        return "base"
-    for name, threshold in TIER_THRESHOLDS:
-        if length <= threshold:
-            return name
-    return "max"
+    return resolve_prompt_band(length).code
 
 
 def _merge_profile(stored: dict) -> dict:
@@ -96,7 +89,7 @@ def get_profile(store_id: Optional[str]) -> dict:
         **DEFAULT_PROFILE,
         "custom_instructions": "",
         "custom_enabled": True,
-        "prompt_tier": "base",
+        "prompt_tier": "band0",
     }
     if not store_id:
         return result

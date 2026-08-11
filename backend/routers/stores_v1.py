@@ -2,14 +2,15 @@ import asyncio
 import uuid
 import hashlib
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 from backend.db.database import get_db
-from backend.db.models import User, Subscription, Store, UserStore
+from backend.db.models import User, Subscription, Store, UserStore, StoreTariffDB, StoreBalanceDB, StoreReferralDB, ReferralProfileDB
+from backend.billing import catalog as billing_catalog
 from backend.security.crypto import encrypt_data, decrypt_data
 from backend.routers.auth_v1 import get_current_user
 from backend.kaspi_wrapper import KaspiAPI
@@ -196,6 +197,27 @@ async def connect_full_store(
         if not us_res.scalar_one_or_none():
             db.add(UserStore(user_id=user.id, store_id=existing_store.id, role="OWNER"))
 
+        # Подстраховка на случай стора, заведённого до миграции 027 без
+        # backfill (не должно случаться в норме, но без этого он тихо
+        # оставался бы без тарифа/баланса навсегда).
+        tariff_row = await db.get(StoreTariffDB, existing_store.id)
+        if not tariff_row:
+            now = datetime.utcnow()
+            db.add(StoreTariffDB(
+                store_id=existing_store.id,
+                plan_code=billing_catalog.DEFAULT_PLAN_CODE,
+                credit_addon_code=billing_catalog.DEFAULT_CREDIT_ADDON,
+                billing_status="ACTIVE",
+                billing_anchor_day=now.day,
+                period_start=now,
+                period_end=now + timedelta(days=36500),
+                next_charge_at=now + timedelta(days=36500),
+                activated_at=now,
+            ))
+        balance_row = await db.get(StoreBalanceDB, existing_store.id)
+        if not balance_row:
+            db.add(StoreBalanceDB(store_id=existing_store.id, balance_minor=0))
+
         await db.commit()
 
         # Креды на автообновление сессии сохраняем ИСКЛЮЧИТЕЛЬНО в строку
@@ -237,6 +259,48 @@ async def connect_full_store(
         role="OWNER"
     )
     db.add(user_store)
+
+    # Тарификация (Слайс 7): новый магазин стартует на DEV (безлимит, без
+    # списаний) — суперадмин назначит реальный тариф вручную через админку.
+    # Без этой строки credits.py/engine.py тихо откатывались бы на дефолты
+    # (лимит NONE-тира вместо безлимита DEV) — явная строка безопаснее.
+    now = datetime.utcnow()
+    db.add(StoreTariffDB(
+        store_id=new_store.id,
+        plan_code=billing_catalog.DEFAULT_PLAN_CODE,
+        credit_addon_code=billing_catalog.DEFAULT_CREDIT_ADDON,
+        billing_status="ACTIVE",
+        billing_anchor_day=now.day,
+        period_start=now,
+        period_end=now + timedelta(days=36500),
+        next_charge_at=now + timedelta(days=36500),
+        activated_at=now,
+    ))
+    db.add(StoreBalanceDB(store_id=new_store.id, balance_minor=0))
+
+    # Реферальная атрибуция (Слайс 7): если юзер регистрировался по коду —
+    # привязываем магазин к рефереру прямо сейчас, окно старта с момента
+    # подключения магазина (не с момента ухода с DEV — упрощение: реальный
+    # потолок начисления в referrals.py всё равно ограничен % от того, что
+    # магазин реально заплатил в окне, так что раннее окно не переплачивает).
+    if user.pending_referral_code:
+        profile_stmt = select(ReferralProfileDB).where(
+            ReferralProfileDB.code == user.pending_referral_code,
+            ReferralProfileDB.is_active == True,  # noqa: E712
+        )
+        profile_res = await db.execute(profile_stmt)
+        profile = profile_res.scalar_one_or_none()
+        if profile and profile.user_id != user.id:
+            db.add(StoreReferralDB(
+                store_id=new_store.id,
+                referrer_user_id=profile.user_id,
+                referral_code=user.pending_referral_code,
+                source="code",
+                window_start=now,
+                window_end=now + timedelta(days=31 * profile.commission_months),
+            ))
+        user.pending_referral_code = None
+
     await db.commit()
 
     # Аналогично — креды привязываются к id только что созданного магазина.

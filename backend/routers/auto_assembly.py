@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from backend.models import AutoAssemblyRuleRequest, MarkSpoolPrintedRequest
-from backend.security.store_context import StoreContext, get_store_context
+from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed
 from backend.state_helpers import _get_sync_db_session
 from backend.services.auto_assembly_worker import (
     run_auto_assembly_cycle,
@@ -81,7 +81,7 @@ def get_rules(ctx: StoreContext = Depends(get_store_context)):
 
 
 @router.put("/rules")
-def put_rule(req: AutoAssemblyRuleRequest, ctx: StoreContext = Depends(get_store_context)):
+def put_rule(req: AutoAssemblyRuleRequest, ctx: StoreContext = Depends(get_store_context_billed)):
     """Создать/обновить правило одного вида доставки (upsert по
     store_id+delivery_type)."""
     if req.delivery_type not in DELIVERY_TYPES:
@@ -144,7 +144,7 @@ def get_log(limit: int = Query(100, le=500), ctx: StoreContext = Depends(get_sto
 
 
 @router.post("/run-once")
-async def run_once(ctx: StoreContext = Depends(get_store_context)):
+async def run_once(ctx: StoreContext = Depends(get_store_context_billed)):
     """Ручной прогон одного цикла автосборки вне 30с фонового тика —
     удобно для проверки правила сразу после сохранения."""
     try:

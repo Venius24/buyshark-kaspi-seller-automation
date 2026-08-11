@@ -80,7 +80,7 @@ export interface BotProfile {
   logistics_reply_kk: string;
   custom_instructions: string;
   custom_enabled: boolean;
-  prompt_tier: 'base' | 'plus' | 'pro' | 'max';
+  prompt_tier: 'band0' | 'band1' | 'band2' | 'band3';
   review_delay_from_days: number;
   review_delay_to_days: number | null;
   review_send_overdue: boolean;
@@ -229,5 +229,43 @@ export type ActiveTab =
   | 'packaging'
   | 'transfer'
   | 'auto-assembly'
+  | 'billing'
+  | 'admin'
+  | 'referral'
   | 'logs'
   | 'settings';
+
+export interface BillingSummary {
+  plan_code: string;
+  plan_name: string;
+  max_products: number | null;
+  monthly_price_minor: number;
+  credit_addon_code: string;
+  billing_status: 'ACTIVE' | 'BLOCKED_LIMIT' | 'BLOCKED_BALANCE';
+  blocked_reason: string | null;
+  balance_minor: number;
+  block_threshold_minor: number;
+  period_end: string | null;
+  prompt_band: string;
+  prompt_multiplier_milli: number;
+  credits_used_milli: number;
+  credits_limit_milli: number;
+}
+
+export interface BillingPlan {
+  code: string;
+  name: string;
+  max_products: number | null;
+  monthly_price_minor: number | null;
+  badge: string | null;
+}
+
+export interface BillingTransaction {
+  id: string;
+  amount_minor: number;
+  balance_after_minor: number | null;
+  kind: string;
+  status: string;
+  comment: string | null;
+  created_at: string | null;
+}

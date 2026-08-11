@@ -588,7 +588,10 @@ async def run_packaging_sync_cycle():
         except Exception as e:
             logger.error(f"[Packaging Sync Loop] Store {store.store_id} failed: {e}")
         try:
-            await run_auto_assembly_cycle(store.token, store.store_id)
+            from backend.billing import enforcement as billing_enforcement
+            blocked, _reason = await asyncio.to_thread(billing_enforcement.is_service_blocked, store.store_id)
+            if not blocked:
+                await run_auto_assembly_cycle(store.token, store.store_id)
         except Exception as e:
             logger.error(f"[Auto Assembly] Store {store.store_id} failed: {e}")
 

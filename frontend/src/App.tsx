@@ -27,6 +27,10 @@ import { ChatsTab } from './components/tabs/ChatsTab';
 import { ProductsTab } from './components/tabs/ProductsTab';
 import { DumpingTab } from './components/tabs/DumpingTab';
 import { AutoAssemblyTab } from './components/tabs/AutoAssemblyTab';
+import { BillingTab } from './components/tabs/BillingTab';
+import { AdminPanel } from './components/admin/AdminPanel';
+import { ReferralTab } from './components/tabs/ReferralTab';
+import { fetchProfile, fetchBillingSummary } from './queries';
 import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig } from './types';
 
 export default function App() {
@@ -59,6 +63,25 @@ export default function App() {
 
   // Tabs navigation, packaging and transfer states
   const [activeTab, setActiveTab] = useState<ActiveTab>('stores');
+
+  // Тарификация (Слайс 6/7): роли читаются из того же ['auth','me'] кэша,
+  // что уже прогревает BackgroundSync — второго запроса не заводим.
+  const { data: profile } = useQuery({ queryKey: ['auth', 'me'], queryFn: fetchProfile, refetchInterval: 30_000 });
+  const isSuperadmin = !!profile?.user.is_superadmin;
+  const isReferrer = !!profile?.user.is_referrer;
+
+  const { data: billingSummary } = useQuery({
+    queryKey: ['billing', 'summary', activeStoreId],
+    queryFn: fetchBillingSummary,
+    enabled: !!activeStoreId,
+    refetchInterval: 60_000,
+  });
+  const billingBlocked = !!billingSummary && billingSummary.billing_status !== 'ACTIVE';
+
+  useEffect(() => {
+    if (activeTab === 'admin' && !isSuperadmin) setActiveTab('stores');
+    if (activeTab === 'referral' && !isReferrer) setActiveTab('stores');
+  }, [activeTab, isSuperadmin, isReferrer]);
 
 
 
@@ -679,12 +702,32 @@ export default function App() {
         ordersCount={orders.length}
         transfersCount={transfers.length}
         isWsConnected={isWsConnected}
+        isSuperadmin={isSuperadmin}
+        isReferrer={isReferrer}
+        billingBlocked={billingBlocked}
       />
 
       {/* ── MAIN CONTENT AREA ─────────────────────────────────── */}
       <main className="main-content">
         {/* TOP CONTENT HEADER */}
         <ContentHeader activeTab={activeTab} onLogout={handleLogout} />
+
+        {billingBlocked && activeTab !== 'billing' && (
+          <div
+            style={{
+              margin: '16px 24px 0', padding: '12px 16px', borderRadius: '10px',
+              background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
+            }}
+          >
+            <span style={{ color: '#f87171', fontSize: '13px' }}>
+              🔒 {billingSummary?.blocked_reason || 'Сервис заблокирован по тарифу — оплатите, чтобы продолжить.'}
+            </span>
+            <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => setActiveTab('billing')}>
+              Перейти к оплате
+            </button>
+          </div>
+        )}
 
         {/* 🏪 TAB: STORES */}
         {activeTab === 'stores' && <StoreHub />}
@@ -894,6 +937,15 @@ export default function App() {
         {activeTab === 'print-batcher' && (
           <PrintBatcher />
         )}
+
+        {/* 💳 TAB: BILLING */}
+        {activeTab === 'billing' && <BillingTab />}
+
+        {/* 🛡️ TAB: ADMIN (только суперадмин) */}
+        {activeTab === 'admin' && isSuperadmin && <AdminPanel />}
+
+        {/* 🤝 TAB: REFERRAL (только реферер) */}
+        {activeTab === 'referral' && isReferrer && <ReferralTab />}
       </main>
       <McAuthModal
         mcAuthStep={mcAuthStep}

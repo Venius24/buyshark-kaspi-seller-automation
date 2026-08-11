@@ -27,7 +27,8 @@ async def seed_default_admin():
                     full_name="Venius Admin",
                     phone="+77070000000",
                     is_active=True,
-                    is_verified=True
+                    is_verified=True,
+                    is_superadmin=True
                 )
                 db.add(new_user)
                 await db.flush()
