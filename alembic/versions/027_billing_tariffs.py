@@ -204,7 +204,7 @@ def upgrade() -> None:
                                     credit_addon_code, auto_upgrade_credits, billing_status,
                                     billing_anchor_day, period_start, period_end,
                                     next_charge_at, activated_at, created_at, updated_at)
-        SELECT s.id, 'DEV', NULL, 'NONE', 0, 'ACTIVE', 1,
+        SELECT s.id, 'DEV', NULL, 'NONE', false, 'ACTIVE', 1,
                :now, :far, :far, :now, :now, :now
         FROM stores s
         WHERE NOT EXISTS (SELECT 1 FROM store_tariffs t WHERE t.store_id = s.id)
