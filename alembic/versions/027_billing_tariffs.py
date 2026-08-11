@@ -32,6 +32,7 @@ Revises: 026_kaspi_quality_metrics_daily
 Create Date: 2026-08-12 00:00:00.000000
 
 """
+import datetime as _dt
 from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
@@ -41,7 +42,7 @@ down_revision: Union[str, None] = '026_kaspi_quality_metrics_daily'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-_FAR_FUTURE = "2100-01-01 00:00:00"
+_FAR_FUTURE = _dt.datetime(2100, 1, 1)
 
 
 def upgrade() -> None:
@@ -239,13 +240,15 @@ def upgrade() -> None:
     ))
 
 
-def _now_literal(bind) -> str:
-    """Единая Python-строка для :now, чтобы store_tariffs.period_start и
+def _now_literal(bind) -> _dt.datetime:
+    """Единый Python datetime для :now, чтобы store_tariffs.period_start и
     store_balances.updated_at были согласованы в один и тот же момент вставки
     независимо от диалекта (избегаем func.now() внутри именованного bind-параметра,
-    т.к. sa.text() с :now ожидает конкретное значение, а не серверное выражение)."""
-    import datetime
-    return datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    т.к. sa.text() с :now ожидает конкретное значение, а не серверное выражение).
+    Раньше возвращалась строка — SQLite коерсит её молча, asyncpg на Postgress
+    требует настоящий datetime.datetime для TIMESTAMP-колонок и падает с
+    DataError (поймано вживую на проде при первом накате на реальный Postgres)."""
+    return _dt.datetime.utcnow()
 
 
 def downgrade() -> None:
