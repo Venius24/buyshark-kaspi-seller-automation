@@ -367,6 +367,92 @@ class TestFlush(OfferSyncDBTestCase):
         self.assertEqual(order[1], "SKU-1")
 
 
+class TestNeverWriteZeroPrice(OfferSyncDBTestCase):
+    """
+    Регрессия на инцидент 2026-08-12: карточки H422-0002-7 и H422-0002-9 были
+    сняты Kaspi с продажи с причиной "не указан в прайс-листе", потому что мы
+    записали им цену 0.
+
+    Причина — плоское поле offer["price"] у bff/offer-view/list: у ~35%
+    офферов это устаревший кэш с нулём при реально назначенной цене (правило
+    уже было выучено в kaspi_wrapper, но _fetch_kaspi_state читала поле
+    наивно). Намерение по остатку от веера Мастер-Группы подставляло эту
+    "базу" в cityPrices — и обнуляло цену живого товара.
+    """
+
+    def _listing(self, offer: dict):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"data": [offer]}
+        return resp
+
+    def test_real_price_is_recovered_when_flat_field_is_a_stale_zero(self):
+        offer_sync.enqueue("s1", "SKU-NEW", stock=7, reason="group:g1")
+        listing = self._listing({
+            "sku": "SKU-NEW", "price": 0, "masterSku": "M9", "title": "Товар",
+            "cityPrices": [{"cityId": "750000000", "value": 992}],
+            "minPrice": 992, "rangePrice": {"MIN": 992, "MAX": 992},
+            "availabilities": [{"available": "yes", "storeId": "999_001", "stockCount": 27}],
+        })
+
+        def route(method, url, **kwargs):
+            return listing if method == "GET" else self._mock_batch_ok()
+
+        with patch("backend.state_helpers._mc_api_request", side_effect=route) as req, \
+             patch.object(offer_sync.quota, "get", return_value=QuotaState(limit=250, used=0, known=True)):
+            stats = offer_sync.flush_store("s1", "999")
+        self.assertEqual(stats["written"], 1)
+        self.assertEqual(req.call_args.kwargs["json"][0]["cityPrices"][0]["value"], 992)
+
+    def test_unreadable_price_defers_instead_of_writing_zero(self):
+        # Цены нет вообще ни в одном поле — писать нечего. Раньше сюда
+        # приезжал ноль и снимал карточку с продажи.
+        offer_sync.enqueue("s1", "SKU-NEW", stock=7, reason="group:g1")
+        listing = self._listing({
+            "sku": "SKU-NEW", "price": 0, "masterSku": "M9", "title": "Товар",
+            "availabilities": [{"available": "yes", "storeId": "999_001", "stockCount": 27}],
+        })
+        with patch("backend.state_helpers._mc_api_request", return_value=listing) as req, \
+             patch.object(offer_sync.quota, "get", return_value=QuotaState(limit=250, used=0, known=True)):
+            stats = offer_sync.flush_store("s1", "999")
+        self.assertEqual(stats["written"], 0)
+        self.assertEqual(stats["deferred"], 1)
+        # Ни одного POST — только чтение сверки.
+        self.assertTrue(all(c.args[0] == "GET" for c in req.call_args_list))
+        # Намерение живо и уйдёт, когда цена прочитается.
+        self.assertIsNotNone(self._row("SKU-NEW").desired_at)
+
+    def test_zero_baseline_from_history_never_reaches_the_wire(self):
+        # Последний рубеж: даже если ноль просочился в базу (как это уже
+        # произошло на проде до фикса), отправлять его нельзя.
+        self._seed_pushed(price=0, stock=994)
+        offer_sync.enqueue("s1", "SKU-1", stock=500)
+        with patch("backend.state_helpers._mc_api_request") as req, \
+             patch.object(offer_sync.quota, "get", return_value=QuotaState(limit=250, used=0, known=True)):
+            stats = offer_sync.flush_store("s1", "999")
+        posts = [c for c in req.call_args_list if c.args and c.args[0] == "POST"]
+        self.assertEqual(posts, [])
+        self.assertEqual(stats["written"], 0)
+
+    def test_withdrawal_still_works_with_a_valid_price(self):
+        # Снятие с продажи — это остаток 0 при живой цене, а не цена 0.
+        self._seed_pushed(price=1000, stock=10)
+        offer_sync.enqueue("s1", "SKU-1", stock=0, available=False, priority=Priority.WITHDRAW)
+        with patch("backend.state_helpers._mc_api_request", return_value=self._mock_batch_ok()) as req, \
+             patch.object(offer_sync.quota, "get", return_value=QuotaState(limit=250, used=0, known=True)):
+            stats = offer_sync.flush_store("s1", "999")
+        self.assertEqual(stats["written"], 1)
+        body = req.call_args.kwargs["json"]
+        self.assertEqual(body[0]["cityPrices"][0]["value"], 1000)
+        self.assertEqual(body[0]["availabilities"][0]["available"], "no")
+
+    def _mock_batch_ok(self):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = [{"id": "tx0"}]
+        return resp
+
+
 class TestAntiFlap(OfferSyncDBTestCase):
     def test_ping_pong_freezes_the_sku(self):
         # Два бота, пилящие друг друга по цене, — самая дорогая патология:

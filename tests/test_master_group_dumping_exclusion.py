@@ -143,5 +143,79 @@ class MasterGroupDumpingExclusionEnrichmentTest(unittest.IsolatedAsyncioTestCase
         self.assertEqual(effective["SKU-2"]["min_price"], 50)
 
 
+class MasterGroupDumpingExclusionAliasTest(unittest.IsolatedAsyncioTestCase):
+    """
+    Регрессия (прод, 2026-08-12): один физический оффер лежит в linked_skus под
+    ДВУМЯ идентификаторами — кодом мастер-карточки Kaspi ("102050852", это
+    поле sku/kaspiSku в ассортименте) и нашим merchantSku ("247353364").
+    Пользователь исключил брендовую карточку по первому, а демпинг продолжил
+    работать по второму и записал ей новую цену.
+    """
+
+    async def _effective_configs(self, products, groups, configs=None):
+        from backend.dumper import run_price_dumping_job
+
+        captured = {}
+
+        async def fake_scan_market(prods, effective_configs):
+            captured["effective_configs"] = effective_configs
+            return None
+
+        with patch("backend.state_helpers._load_master_stock_groups", return_value=groups), \
+             patch("backend.dumper.discover_merchant_id", return_value="123456"), \
+             patch("backend.dumper.RadarWorker.scan_market", side_effect=fake_scan_market):
+            await run_price_dumping_job(
+                token="fake-token",
+                configs=configs or {},
+                products=products,
+                save_override_func=lambda *a, **k: None,
+                store_id="store-A",
+            )
+        return captured["effective_configs"]
+
+    def _products(self):
+        return [
+            {"sku": "102050852", "merchantSku": "247353364", "kaspiSku": "102050852",
+             "name": "Термометр Barkhan D673-0001 белый"},
+            {"sku": "173596408", "merchantSku": "D673-0001-2", "kaspiSku": "173596408",
+             "name": "Термометр PROconnect"},
+        ]
+
+    async def test_exclusion_by_master_card_code_also_covers_the_merchant_sku(self):
+        groups = {"grp_A": make_group_dict(
+            ["102050852", "247353364", "173596408"],
+            dumping_config={"enabled": True, "min_price": 100, "max_price": 200},
+            dumping_excluded_skus=["102050852"],
+        )}
+        effective = await self._effective_configs(self._products(), groups)
+        self.assertNotIn("102050852", effective)
+        self.assertNotIn("247353364", effective)
+        # Соседний товар группы не задет.
+        self.assertIn("173596408", effective)
+
+    async def test_exclusion_by_merchant_sku_also_covers_the_master_card_code(self):
+        groups = {"grp_A": make_group_dict(
+            ["102050852", "247353364", "173596408"],
+            dumping_config={"enabled": True, "min_price": 100, "max_price": 200},
+            dumping_excluded_skus=["247353364"],
+        )}
+        effective = await self._effective_configs(self._products(), groups)
+        self.assertNotIn("102050852", effective)
+        self.assertNotIn("247353364", effective)
+        self.assertIn("173596408", effective)
+
+    async def test_unknown_sku_falls_back_to_literal_comparison(self):
+        # Товара нет в ассортименте (например, снят с продажи) — сравниваем
+        # как раньше, по строке, а не теряем исключение.
+        groups = {"grp_A": make_group_dict(
+            ["GHOST-1", "173596408"],
+            dumping_config={"enabled": True, "min_price": 100, "max_price": 200},
+            dumping_excluded_skus=["GHOST-1"],
+        )}
+        effective = await self._effective_configs(self._products(), groups)
+        self.assertNotIn("GHOST-1", effective)
+        self.assertIn("173596408", effective)
+
+
 if __name__ == "__main__":
     unittest.main()

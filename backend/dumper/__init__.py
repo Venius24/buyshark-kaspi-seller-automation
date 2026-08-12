@@ -9,6 +9,28 @@ from backend.dumper.xml_feed import generate_xml_feed
 
 logger = logging.getLogger(__name__)
 
+
+def _build_sku_alias_map(products: List[dict]) -> dict:
+    """
+    Псевдоним оффера -> его канонический ключ (merchantSku).
+
+    Даёт возможность сравнивать SKU "по физическому товару", а не по строке:
+    "102050852" (код мастер-карточки Kaspi) и "247353364" (наш merchantSku) —
+    один и тот же оффер, и настройка, заданная на любом из них, должна
+    действовать на оба.
+    """
+    alias_map: dict = {}
+    for p in products or []:
+        merchant_sku = p.get("merchantSku")
+        canonical = str(merchant_sku or p.get("sku") or p.get("kaspiSku") or "")
+        if not canonical:
+            continue
+        for alias in (p.get("sku"), p.get("merchantSku"), p.get("kaspiSku")):
+            if alias:
+                alias_map[str(alias)] = canonical
+    return alias_map
+
+
 async def run_price_dumping_job(
     token: str,
     configs: dict,
@@ -37,16 +59,29 @@ async def run_price_dumping_job(
     from backend.state_helpers import _load_master_stock_groups
     master_groups = _load_master_stock_groups(store_id=store_id)
     effective_configs = dict(configs)
-    
+
+    # Один физический оффер известен под двумя идентификаторами: наш
+    # merchantSku и код мастер-карточки Kaspi (в ассортименте это поля
+    # merchantSku и sku/kaspiSku). В linked_skus Мастер-Группы регулярно лежат
+    # ОБА — например, "102050852" и "247353364" — это один и тот же термометр.
+    # Поэтому исключение, заданное одним идентификатором, надо разворачивать на
+    # все псевдонимы: иначе брендовая карточка, снятая с демпинга по коду
+    # мастер-карточки, продолжала демпинговаться по merchantSku (замечено на
+    # проде 2026-08-12, карточка 247353364 получила новую цену вопреки
+    # исключению 102050852).
+    canonical = _build_sku_alias_map(products)
+
     # Обогащаем конфигурации демпинга из настроек Мастер-Групп
     for gid, group in master_groups.items():
         if not group.get("is_active", True):
             continue
         g_dump_cfg = group.get("dumping_config")
-        excluded_skus = set(group.get("dumping_excluded_skus") or [])
+        excluded_skus = {
+            canonical.get(str(s), str(s)) for s in (group.get("dumping_excluded_skus") or [])
+        }
         if g_dump_cfg and g_dump_cfg.get("enabled"):
             for sku in group.get("linked_skus", []):
-                if sku in excluded_skus:
+                if canonical.get(str(sku), str(sku)) in excluded_skus:
                     # Товар явно исключён из группового демпинга — групповой
                     # конфиг его не касается, но собственный individual
                     # конфиг (если задан) продолжает работать как обычно.

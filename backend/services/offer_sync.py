@@ -316,8 +316,15 @@ def _fetch_kaspi_state(store_id, merchant_uid: str, sku: str) -> Optional[dict]:
         if not match:
             return None
         avail = (match.get("availabilities") or [{}])[0]
+        # Цену берём через extract_offer_price, а не из плоского match["price"]:
+        # то поле — денормализованный кэш Kaspi, у ~35% офферов отдающий 0 при
+        # реально назначенной цене (см. backend/kaspi_offer_price.py). Наивное
+        # чтение стоило двух карточек, снятых Kaspi с продажи по причине
+        # "не указан в прайс-листе", — мы записали им цену 0.
+        from backend.kaspi_offer_price import extract_offer_price
+
         return {
-            "price": int(match["price"]) if match.get("price") is not None else None,
+            "price": extract_offer_price(match),
             "stock": int(avail["stockCount"]) if avail.get("stockCount") is not None else None,
             "available": avail.get("available") == "yes",
             "master_sku": match.get("masterSku"),
@@ -355,8 +362,20 @@ def _baseline(row) -> tuple:
         and (now - row.kaspi_seen_at).total_seconds() < KASPI_STATE_TTL_SECONDS
     )
     if fresh:
-        return row.kaspi_price, row.kaspi_stock, (row.kaspi_stock or 0) > 0, True
-    return row.pushed_price, row.pushed_stock, (row.pushed_stock or 0) > 0, False
+        return _usable_price(row.kaspi_price), row.kaspi_stock, (row.kaspi_stock or 0) > 0, True
+    return _usable_price(row.pushed_price), row.pushed_stock, (row.pushed_stock or 0) > 0, False
+
+
+def _usable_price(price) -> Optional[int]:
+    """
+    Неположительная цена — это не цена, а "не знаем": возвращаем None, чтобы
+    сработала сверка (need_verify гейтится именно на None). Иначе ноль,
+    однажды записанный в базу — а на проде такие строки уже есть, — залипал бы
+    навсегда: писать его нельзя, а перечитать было некому.
+    """
+    if price is None or int(price) <= 0:
+        return None
+    return int(price)
 
 
 #: Возвращается вместо решения, когда для сборки payload не хватает данных.
@@ -380,6 +399,19 @@ def _decide(row, base_price, base_stock, base_available, now_ts: float):
     if want_price is None or want_stock is None:
         # Payload Kaspi всегда несёт и цену, и остаток — отправить половину
         # нельзя, затрём чужое значение своим "не знаю".
+        return INCOMPLETE
+    if int(want_price) <= 0:
+        # Жёсткий инвариант: цену 0 на Kaspi не отправляем НИКОГДА. Оффер с
+        # нулевой ценой выпадает из прайс-листа, и карточка снимается с
+        # продажи с причиной "не указан в прайс-листе" — ровно это и
+        # случилось 2026-08-12 с H422-0002-7 и H422-0002-9, когда база цены
+        # пришла нулём из денормализованного кэша Kaspi. Откладываем: на
+        # следующем флаше сверка перечитает цену (base_price is None ->
+        # need_verify), и намерение уйдёт уже с настоящей ценой.
+        logger.warning(
+            "[OfferSync] SKU %s: расчётная цена %r — отправлять нельзя, откладываем.",
+            row.sku, want_price,
+        )
         return INCOMPLETE
 
     want_available = row.desired_available
@@ -521,15 +553,34 @@ def flush_store(store_id, merchant_uid: str) -> dict:
         for row, d in decisions:
             if len(allowed) < state.budget_for(d.priority):
                 allowed.append((row, d))
-        stats["deferred"] = len(decisions) - len(allowed)
-        if stats["deferred"]:
+        # Именно +=, а не =: в stats["deferred"] уже лежат намерения,
+        # отложенные по неполноте данных (INCOMPLETE), и присваивание их
+        # затирало — в логе получалось "отложено 0" при реально отложенных.
+        cut_by_quota = len(decisions) - len(allowed)
+        stats["deferred"] += cut_by_quota
+        if cut_by_quota:
             logger.info(
                 "⏳ [OfferSync] Стор %s: квота %d/%d, откладываем %d записей до сброса через %.0f мин.",
-                store_id, state.used, state.limit, stats["deferred"],
+                store_id, state.used, state.limit, cut_by_quota,
                 state.seconds_until_reset() / 60.0,
             )
         if not allowed:
             return stats
+
+        # Последний рубеж перед сетью: цена 0 в payload снимает карточку с
+        # продажи ("не указан в прайс-листе"). _decide такое уже не пропускает,
+        # но цена решения — единственное поле, ошибка в котором ломает товар
+        # необратимо и молча, поэтому проверяем ещё раз прямо перед отправкой.
+        unsafe = [(row, d) for row, d in allowed if d.price <= 0]
+        if unsafe:
+            allowed = [(row, d) for row, d in allowed if d.price > 0]
+            stats["deferred"] += len(unsafe)
+            logger.error(
+                "[OfferSync] Отброшены %d решений с неположительной ценой: %s",
+                len(unsafe), ", ".join(f"{d.sku}={d.price}" for _, d in unsafe[:10]),
+            )
+            if not allowed:
+                return stats
 
         for start in range(0, len(allowed), BATCH_CHUNK):
             chunk = allowed[start:start + BATCH_CHUNK]

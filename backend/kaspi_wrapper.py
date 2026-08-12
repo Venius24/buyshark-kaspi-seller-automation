@@ -1004,39 +1004,8 @@ class KaspiAPI:
                         # rangePrice — их и нужно читать первыми, а не после плоского поля, иначе
                         # такие товары ошибочно помечаются "Цена не указана" (ломает демпинг, т.к.
                         # price_num=0 попадает в brain.py как my_current_price).
-                        price_val = offer.get("price")
-                        price_num = 0
-                        if isinstance(price_val, (int, float)) and price_val > 0:
-                            price_num = int(price_val)
-
-                        if not price_num:
-                            city_prices = offer.get("cityPrices")
-                            if isinstance(city_prices, list) and city_prices:
-                                val = city_prices[0].get("value")
-                                if isinstance(val, (int, float)) and val > 0:
-                                    price_num = int(val)
-
-                        if not price_num:
-                            val = offer.get("minPrice")
-                            if isinstance(val, (int, float)) and val > 0:
-                                price_num = int(val)
-
-                        if not price_num:
-                            range_price = offer.get("rangePrice")
-                            if isinstance(range_price, dict):
-                                val = range_price.get("MIN")
-                                if isinstance(val, (int, float)) and val > 0:
-                                    price_num = int(val)
-
-                        if not price_num:
-                            all_city_prices = offer.get("allCityPrices")
-                            if isinstance(all_city_prices, dict):
-                                for entry in all_city_prices.values():
-                                    if isinstance(entry, dict):
-                                        val = entry.get("price")
-                                        if isinstance(val, (int, float)) and val > 0:
-                                            price_num = int(val)
-                                            break
+                        from backend.kaspi_offer_price import extract_offer_price
+                        price_num = extract_offer_price(offer) or 0
 
                         brand_name = offer.get("brandName") or "Без бренда"
                         title = offer.get("title") or f"Товар {merchant_sku}"
