@@ -268,6 +268,15 @@ async def list_referrers(db: AsyncSession = Depends(get_db)):
     ]
 
 
+@router.get("/users/lookup")
+async def lookup_user_by_email(email: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(User).where(User.email == email))
+    user = res.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь с таким email не найден")
+    return {"user_id": user.id, "email": user.email}
+
+
 @router.post("/referrers")
 async def create_referrer(req: ReferrerCreateRequest, db: AsyncSession = Depends(get_db)):
     user = await db.get(User, req.user_id)

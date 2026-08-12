@@ -47,6 +47,7 @@ export const AdminPanel: React.FC = () => {
   const [subTab, setSubTab] = useState<SubTab>('stores');
   const [tariffModalStore, setTariffModalStore] = useState<AdminStoreRow | null>(null);
   const [topupModalStore, setTopupModalStore] = useState<AdminStoreRow | null>(null);
+  const [referrerModalStore, setReferrerModalStore] = useState<AdminStoreRow | null>(null);
 
   const { data: stores = [], isLoading } = useQuery({ queryKey: ['admin', 'stores'], queryFn: fetchAdminStores, refetchInterval: 30_000 });
   const { data: referrers = [] } = useQuery({ queryKey: ['admin', 'referrers'], queryFn: fetchReferrers });
@@ -102,6 +103,7 @@ export const AdminPanel: React.FC = () => {
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => setTariffModalStore(s)}>Тариф</button>
                           <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => setTopupModalStore(s)}>Пополнить</button>
+                          <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => setReferrerModalStore(s)}>Реферер</button>
                           <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => reevaluate(s.store_id)}>Пересчитать</button>
                           <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => chargeNow(s.store_id)}>Списать сейчас</button>
                         </div>
@@ -117,7 +119,8 @@ export const AdminPanel: React.FC = () => {
 
       {subTab === 'referrers' && (
         <div className="glass-card" style={styles.card}>
-          <div style={{ overflowX: 'auto' }}>
+          <CreateReferrerForm onCreated={() => queryClient.invalidateQueries({ queryKey: ['admin', 'referrers'] })} />
+          <div style={{ overflowX: 'auto', marginTop: '16px' }}>
             <table style={styles.table}>
               <thead>
                 <tr>
@@ -160,6 +163,139 @@ export const AdminPanel: React.FC = () => {
           onSaved={() => { setTopupModalStore(null); invalidateStores(); }}
         />
       )}
+
+      {referrerModalStore && (
+        <ReferrerAssignModal
+          store={referrerModalStore}
+          referrers={referrers}
+          onClose={() => setReferrerModalStore(null)}
+          onSaved={() => { setReferrerModalStore(null); invalidateStores(); }}
+        />
+      )}
+    </div>
+  );
+};
+
+const CreateReferrerForm: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
+  const [email, setEmail] = useState('');
+  const [commissionPercent, setCommissionPercent] = useState('50');
+  const [commissionMonths, setCommissionMonths] = useState('3');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!email.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const lookupRes = await apiFetch(`${API_URL}/api/admin/users/lookup?email=${encodeURIComponent(email.trim())}`);
+      if (!lookupRes.ok) {
+        const body = await lookupRes.json().catch(() => null);
+        setError(body?.detail || 'Пользователь не найден');
+        return;
+      }
+      const { user_id } = await lookupRes.json();
+      const createRes = await apiFetch(`${API_URL}/api/admin/referrers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id,
+          commission_percent: parseInt(commissionPercent, 10) || 50,
+          commission_months: parseInt(commissionMonths, 10) || 3,
+        }),
+      });
+      if (!createRes.ok) {
+        const body = await createRes.json().catch(() => null);
+        setError(body?.detail || 'Не удалось создать реферера');
+        return;
+      }
+      setEmail('');
+      onCreated();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+      <div>
+        <div style={styles.formLabel}>Email пользователя</div>
+        <input className="form-input" placeholder="friend@example.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ width: '240px' }} />
+      </div>
+      <div>
+        <div style={styles.formLabel}>Комиссия, %</div>
+        <input className="form-input" type="number" value={commissionPercent} onChange={(e) => setCommissionPercent(e.target.value)} style={{ width: '90px' }} />
+      </div>
+      <div>
+        <div style={styles.formLabel}>Месяцев</div>
+        <input className="form-input" type="number" value={commissionMonths} onChange={(e) => setCommissionMonths(e.target.value)} style={{ width: '90px' }} />
+      </div>
+      <button className="btn btn-primary" disabled={saving || !email.trim()} onClick={submit}>Добавить реферера</button>
+      {error && <div style={{ color: 'var(--error)', fontSize: '13px' }}>{error}</div>}
+    </div>
+  );
+};
+
+const ReferrerAssignModal: React.FC<{ store: AdminStoreRow; referrers: ReferrerRow[]; onClose: () => void; onSaved: () => void }> = ({ store, referrers, onClose, onSaved }) => {
+  const [referrerUserId, setReferrerUserId] = useState(store.referrer_user_id || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const assign = async () => {
+    if (!referrerUserId) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`${API_URL}/api/admin/stores/${store.store_id}/referrer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referrer_user_id: referrerUserId }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.detail || 'Не удалось привязать реферера');
+        return;
+      }
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await apiFetch(`${API_URL}/api/admin/stores/${store.store_id}/referrer`, { method: 'DELETE' });
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '420px' }}>
+        <h3>Реферер для «{store.name}»</h3>
+        {referrers.length === 0 ? (
+          <div style={{ color: '#9ca3af', fontSize: '13px' }}>Сначала добавьте реферера на вкладке «Рефереры».</div>
+        ) : (
+          <select className="form-input" value={referrerUserId} onChange={(e) => setReferrerUserId(e.target.value)}>
+            <option value="">— выбрать —</option>
+            {referrers.map((r) => <option key={r.user_id} value={r.user_id}>{r.email} ({r.code})</option>)}
+          </select>
+        )}
+        {error && <div style={{ color: 'var(--error)', fontSize: '13px', marginTop: '8px' }}>{error}</div>}
+        <div style={{ display: 'flex', gap: '8px', marginTop: '16px', justifyContent: 'space-between' }}>
+          {store.referrer_user_id ? (
+            <button className="btn btn-secondary" disabled={saving} onClick={remove}>Отвязать</button>
+          ) : <span />}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn btn-secondary" onClick={onClose}>Отмена</button>
+            <button className="btn btn-primary" disabled={saving || !referrerUserId} onClick={assign}>Сохранить</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -244,4 +380,5 @@ const styles: Record<string, React.CSSProperties> = {
   th: { textAlign: 'left', padding: '8px', color: '#9ca3af', borderBottom: '1px solid rgba(255,255,255,0.08)' },
   td: { padding: '8px', borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#e5e7eb' },
   smallBtn: { padding: '4px 8px', fontSize: '11px' },
+  formLabel: { fontSize: '11px', color: '#9ca3af', marginBottom: '4px' },
 };
