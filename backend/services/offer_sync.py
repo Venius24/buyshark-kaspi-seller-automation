@@ -198,6 +198,31 @@ def last_known_stock(store_id, sku: str) -> Optional[int]:
         session.close()
 
 
+def queue_depth(store_id) -> int:
+    """Сколько намерений ждёт отправки. Для индикатора на вкладке демпинга."""
+    from sqlalchemy import func
+
+    session = _session()
+    if not session:
+        return 0
+    try:
+        from backend.db.models import KaspiOfferSyncDB
+
+        return int(session.scalar(
+            select(func.count())
+            .select_from(KaspiOfferSyncDB)
+            .where(
+                KaspiOfferSyncDB.store_id == store_id,
+                KaspiOfferSyncDB.desired_at.isnot(None),
+            )
+        ) or 0)
+    except Exception as e:
+        logger.debug("Не удалось посчитать глубину очереди: %s", e)
+        return 0
+    finally:
+        session.close()
+
+
 def enqueue(
     store_id,
     sku: str,

@@ -260,6 +260,20 @@ export interface BillingPlan {
   badge: string | null;
 }
 
+/**
+ * Квота Kaspi на обновление офферов: 250 штук за фиксированное 30-минутное
+ * окно на весь магазин, общая на демпинг и на связку остатков. Приходит из
+ * GET /api/dumping/status (кэш бэкенда, не живой запрос к Kaspi).
+ */
+export interface KaspiQuotaStatus {
+  used: number;
+  limit: number;
+  remaining: number;
+  reset_in_seconds: number;
+  /** Сколько записей из окна зарезервировано под снятие с продажи. */
+  reserved_for_withdraw: number;
+}
+
 export interface BillingTransaction {
   id: string;
   amount_minor: number;

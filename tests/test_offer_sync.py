@@ -427,3 +427,35 @@ class TestCycleUsesDbMerchantId(unittest.IsolatedAsyncioTestCase):
              patch.object(offer_sync, "flush_store") as flush:
             await offer_sync.run_offer_sync_cycle()
         flush.assert_not_called()
+
+
+class TestQuotaPeekForUI(unittest.TestCase):
+    """
+    Индикатор на вкладке демпинга поллит /api/dumping/status раз в 10 секунд.
+    peek() обязан отдавать только кэш: живой запрос к Kaspi отсюда дал бы 360
+    обращений в час на каждую открытую вкладку — тот самый паттерн, что уже
+    приводил к бану IP этого VPS (HANDOFF 3.8).
+    """
+
+    def test_peek_never_calls_kaspi(self):
+        q = KaspiOfferQuota()
+        with patch.object(q, "_fetch", side_effect=AssertionError("peek не должен ходить в сеть")):
+            self.assertIsNone(q.peek("store-1"))
+
+    def test_peek_returns_cached_snapshot(self):
+        q = KaspiOfferQuota()
+        future = datetime.datetime.now() + datetime.timedelta(minutes=5)
+        q._states["store-1"] = QuotaState(limit=250, used=46, reset_at=future,
+                                          fetched_at=datetime.datetime.now(), known=True)
+        snap = q.peek("store-1")
+        self.assertEqual(snap.used, 46)
+        self.assertEqual(snap.remaining, 204)
+
+    def test_peek_zeroes_a_window_that_already_reset(self):
+        # Показывать израсходованный счётчик от прошлого окна — враньё, а
+        # перечитать из peek() нельзя.
+        q = KaspiOfferQuota()
+        past = datetime.datetime.now() - datetime.timedelta(seconds=1)
+        q._states["store-1"] = QuotaState(limit=250, used=250, reset_at=past,
+                                          fetched_at=datetime.datetime.now(), known=True)
+        self.assertEqual(q.peek("store-1").used, 0)

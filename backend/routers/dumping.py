@@ -168,11 +168,32 @@ def get_dumping_status(ctx: StoreContext = Depends(get_store_context)):
     global_state = _get_scheduler_state(None)
     store_state = _get_scheduler_state(ctx.store_id)
     next_run_seconds = max(0, int(global_state.next_run_timestamp - now))
+
+    # Квота Kaspi на обновление офферов (250 / 30 мин). Берём ТОЛЬКО из кэша
+    # (peek): этот эндпоинт фронтенд поллит раз в 10 секунд, поход в Kaspi
+    # отсюда превратился бы в 360 запросов/час на каждую открытую вкладку.
+    # Кэш наполняет флашер offer_sync раз в 45 секунд.
+    from backend.services.kaspi_quota import P0_RESERVE, quota
+    from backend.services.offer_sync import queue_depth
+
+    quota_block = None
+    snapshot = quota.peek(ctx.store_id)
+    if snapshot:
+        quota_block = {
+            "used": snapshot.used,
+            "limit": snapshot.limit,
+            "remaining": snapshot.remaining,
+            "reset_in_seconds": int(snapshot.seconds_until_reset()),
+            "reserved_for_withdraw": P0_RESERVE,
+        }
+
     return {
         "success": True,
         "last_run_time": store_state.last_run_timestamp,
         "next_run_seconds": next_run_seconds,
-        "is_running": global_state.is_running or store_state.is_running
+        "is_running": global_state.is_running or store_state.is_running,
+        "quota": quota_block,
+        "queue_pending": queue_depth(ctx.store_id),
     }
 
 @router.post("/run")

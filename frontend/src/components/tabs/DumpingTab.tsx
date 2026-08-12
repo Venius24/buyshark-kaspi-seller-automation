@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react';
-import type { Product, DumpingConfig } from '../../types';
+import type { Product, DumpingConfig, KaspiQuotaStatus } from '../../types';
 import { Pagination } from '../shared/Pagination';
 import { ProductCardHeader } from '../shared/ProductCardHeader';
 import { PriceWarSummary } from '../PriceWarSummary';
@@ -33,6 +33,8 @@ interface DumpingTabProps {
   fetchingProducts: boolean;
   totalCount: number;
   nextRunSeconds: number | null;
+  kaspiQuota: KaspiQuotaStatus | null;
+  queuePending: number;
   formatTime: (seconds: number | null) => string;
   isRunningDumping: boolean;
   onRunDumpingCycle: () => void;
@@ -74,6 +76,8 @@ export function DumpingTab({
   fetchingProducts,
   totalCount,
   nextRunSeconds,
+  kaspiQuota,
+  queuePending,
   formatTime,
   isRunningDumping,
   onRunDumpingCycle,
@@ -128,6 +132,61 @@ export function DumpingTab({
                 Следующий запуск через: <strong style={{ color: 'var(--success)', fontFamily: 'monospace' }}>{formatTime(nextRunSeconds)}</strong>
               </div>
             )}
+
+            {kaspiQuota && (() => {
+              // Kaspi разрешает 250 обновлений товара за фиксированное
+              // 30-минутное окно на ВЕСЬ магазин — одна касса на демпинг и на
+              // связку остатков. Из них reserved_for_withdraw держится под
+              // снятие с продажи, поэтому обычные записи упираются раньше:
+              // именно этот, а не полный лимит показываем как «потолок».
+              const usableLimit = Math.max(0, kaspiQuota.limit - kaspiQuota.reserved_for_withdraw);
+              const usedRatio = usableLimit > 0 ? kaspiQuota.used / usableLimit : 1;
+              const color = usedRatio >= 1 ? 'var(--danger)'
+                : usedRatio >= 0.75 ? 'var(--warning)'
+                : 'var(--success)';
+              return (
+                <div
+                  title={
+                    `Лимит Kaspi: ${kaspiQuota.limit} обновлений товара за 30 минут на весь магазин.\n` +
+                    `Израсходовано: ${kaspiQuota.used}. Осталось: ${kaspiQuota.remaining}.\n` +
+                    `Из них ${kaspiQuota.reserved_for_withdraw} зарезервировано под снятие с продажи — ` +
+                    `обычные изменения цены и остатка останавливаются на ${usableLimit}.\n` +
+                    `Счётчик обнулится через ${formatTime(kaspiQuota.reset_in_seconds)}.` +
+                    (queuePending > 0 ? `\n\nЖдут отправки: ${queuePending}.` : '')
+                  }
+                  style={{
+                    fontSize: '13px',
+                    color: 'var(--text-muted)',
+                    background: 'rgba(255,255,255,0.04)',
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    cursor: 'help',
+                  }}
+                >
+                  <span>Лимит Kaspi:</span>
+                  <strong style={{ color, fontFamily: 'monospace' }}>
+                    {kaspiQuota.used}/{usableLimit}
+                  </strong>
+                  <span style={{ opacity: 0.6 }}>сброс {formatTime(kaspiQuota.reset_in_seconds)}</span>
+                  {queuePending > 0 && (
+                    <span
+                      style={{
+                        color: 'var(--warning)',
+                        fontFamily: 'monospace',
+                        borderLeft: '1px solid rgba(255,255,255,0.12)',
+                        paddingLeft: '8px',
+                      }}
+                    >
+                      ⏳ {queuePending}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
 
             <button
               type="button"

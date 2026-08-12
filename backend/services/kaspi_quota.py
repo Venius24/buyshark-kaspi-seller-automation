@@ -176,6 +176,29 @@ class KaspiOfferQuota:
             self._states[store_id] = state
         return state
 
+    def peek(self, store_id) -> Optional[QuotaState]:
+        """
+        Последний известный снимок БЕЗ похода в Kaspi.
+
+        Ровно для показа в UI: `/api/dumping/status` фронтенд поллит раз в 10
+        секунд, и дёргать оттуда limit/settings значило бы гонять к Kaspi 360
+        запросов в час на каждую открытую вкладку — тот самый паттерн, что уже
+        приводил к бану IP (см. HANDOFF 3.8). Снимок наполняет флашер раз в 45
+        секунд, этого для индикатора достаточно.
+        """
+        with self._lock:
+            state = self._states.get(store_id)
+        if not state:
+            return None
+        if state.reset_at and datetime.datetime.now() >= state.reset_at:
+            # Окно уже обнулилось — показывать старый израсходованный счётчик
+            # было бы враньём, а перечитывать отсюда нельзя.
+            return QuotaState(
+                limit=state.limit, used=0, reset_at=None,
+                fetched_at=state.fetched_at, known=True,
+            )
+        return state
+
     def consume(self, store_id, count: int) -> None:
         """Локально засчитать уже отправленные офферы, не дожидаясь перечитывания."""
         if count <= 0:

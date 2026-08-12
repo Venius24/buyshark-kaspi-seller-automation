@@ -31,7 +31,7 @@ import { BillingTab } from './components/tabs/BillingTab';
 import { AdminPanel } from './components/admin/AdminPanel';
 import { ReferralTab } from './components/tabs/ReferralTab';
 import { fetchProfile, fetchBillingSummary } from './queries';
-import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig } from './types';
+import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig, KaspiQuotaStatus } from './types';
 
 export default function App() {
   const queryClient = useQueryClient();
@@ -146,6 +146,8 @@ export default function App() {
   const [selectedModes, setSelectedModes] = useState<Record<string, string>>({});
   const [isRunningDumping, setIsRunningDumping] = useState(false);
   const [nextRunSeconds, setNextRunSeconds] = useState<number | null>(null);
+  const [kaspiQuota, setKaspiQuota] = useState<KaspiQuotaStatus | null>(null);
+  const [queuePending, setQueuePending] = useState<number>(0);
   const [dumpingOnlyFilter, setDumpingOnlyFilter] = useState(false);
   const [dumpingStatusFilter, setDumpingStatusFilter] = useState<string>('');
 
@@ -186,6 +188,8 @@ export default function App() {
       if (res.ok && data.success) {
         setNextRunSeconds(data.next_run_seconds);
         setIsRunningDumping(data.is_running);
+        setKaspiQuota(data.quota ?? null);
+        setQueuePending(data.queue_pending ?? 0);
       }
     } catch {
       // Ignore
@@ -819,6 +823,8 @@ export default function App() {
                 fetchingProducts={fetchingProducts}
                 totalCount={totalCount}
                 nextRunSeconds={nextRunSeconds}
+                kaspiQuota={kaspiQuota}
+                queuePending={queuePending}
                 formatTime={formatTime}
                 isRunningDumping={isRunningDumping}
                 onRunDumpingCycle={runDumpingCycle}
