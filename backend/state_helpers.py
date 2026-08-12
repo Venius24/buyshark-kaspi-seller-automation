@@ -1164,19 +1164,26 @@ def _load_analytics_history(store_id: str, days: int = 90) -> list:
         session.close()
 
 
-def _already_fetched_quality_metrics_today(store_id: str) -> bool:
-    """True если для (store_id, сегодня UTC) уже есть строка в
-    kaspi_quality_metrics_daily — ночной воркер использует это, чтобы не
-    скрапить один и тот же стор повторно в течение того же ночного окна."""
+def _quality_metrics_fresh(store_id: str, min_interval_hours: float) -> bool:
+    """True если самый свежий снапшот показателей качества для стора моложе
+    min_interval_hours — воркер использует это, чтобы не скрапить один и тот
+    же стор чаще заданного интервала (см. kaspi_quality_metrics_worker.py)."""
     import datetime as _dt
     session = _get_sync_db_session()
     if not session:
         return False
     try:
         from backend.db.models import KaspiQualityMetricsDailyDB
-        today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
-        row = session.get(KaspiQualityMetricsDailyDB, (store_id, today))
-        return row is not None
+        row = session.scalars(
+            select(KaspiQualityMetricsDailyDB)
+            .where(KaspiQualityMetricsDailyDB.store_id == store_id)
+            .order_by(KaspiQualityMetricsDailyDB.fetched_at.desc())
+            .limit(1)
+        ).first()
+        if not row:
+            return False
+        age = _dt.datetime.utcnow() - row.fetched_at
+        return age < _dt.timedelta(hours=min_interval_hours)
     finally:
         session.close()
 
