@@ -401,6 +401,44 @@ class TestFlush(OfferSyncDBTestCase):
         self.assertEqual(order[1], "SKU-1")
 
 
+class TestQuotaHeartbeatOnIdleStore(OfferSyncDBTestCase):
+    """
+    Регрессия 2026-08-12: на сторе без активного авто-демпинга (все SKU
+    отключены, группы не шевелятся) очередь намерений пуста — flush_store
+    раньше уходил в ранний return, ни разу не вызвав quota.get(), кэш
+    quota.peek() никогда не наполнялся, и чип "Лимит Kaspi" на вкладке
+    демпинга не появлялся вообще, сколько ни жди.
+    """
+
+    def test_quota_is_fetched_even_with_an_empty_queue(self):
+        with patch.object(offer_sync.quota, "peek", return_value=None) as peek, \
+             patch.object(offer_sync.quota, "get",
+                          return_value=QuotaState(limit=250, used=10, known=True)) as get:
+            stats = offer_sync.flush_store("s1", "999")
+        peek.assert_called_once_with("s1")
+        get.assert_called_once_with("s1", "999")
+        self.assertEqual(stats["candidates"], 0)
+
+    def test_quota_is_not_refetched_within_the_heartbeat_window(self):
+        fresh = QuotaState(limit=250, used=10, known=True, fetched_at=datetime.datetime.now())
+        with patch.object(offer_sync.quota, "peek", return_value=fresh), \
+             patch.object(offer_sync.quota, "get") as get:
+            offer_sync.flush_store("s1", "999")
+        get.assert_not_called()
+
+    def test_quota_is_refetched_once_the_snapshot_goes_stale(self):
+        stale = QuotaState(
+            limit=250, used=10, known=True,
+            fetched_at=datetime.datetime.now() - datetime.timedelta(
+                seconds=offer_sync.QUOTA_HEARTBEAT_SECONDS + 1),
+        )
+        with patch.object(offer_sync.quota, "peek", return_value=stale), \
+             patch.object(offer_sync.quota, "get",
+                          return_value=QuotaState(limit=250, used=20, known=True)) as get:
+            offer_sync.flush_store("s1", "999")
+        get.assert_called_once_with("s1", "999")
+
+
 class TestNeverWriteZeroPrice(OfferSyncDBTestCase):
     """
     Регрессия на инцидент 2026-08-12: карточки H422-0002-7 и H422-0002-9 были

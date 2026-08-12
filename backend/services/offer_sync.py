@@ -95,6 +95,15 @@ MAX_VERIFY_PER_FLUSH = 40
 # Насколько долго доверяем ранее увиденному состоянию оффера на Kaspi.
 KASPI_STATE_TTL_SECONDS = 1800.0
 
+# Раньше quota.get() вызывался ТОЛЬКО когда в этом флаше была хотя бы одна
+# запись на отправку — на тихом сторе (демпинг выключен по всем SKU, группы
+# не шевелятся) кэш quota.peek() никогда не наполнялся, и чип "Лимит Kaspi"
+# на фронте не появлялся вообще (жалоба пользователя 2026-08-12: "нету").
+# Теперь раз в этот интервал обновляем кэш независимо от того, есть ли что
+# писать — запрос лёгкий и квоту OFFER не тратит (см. kaspi_quota.py), но
+# всё равно не хотим ходить в Kaspi на каждом 45-секундном тике впустую.
+QUOTA_HEARTBEAT_SECONDS = 120.0
+
 
 def stock_step(value: int) -> int:
     """Шаг лестницы для данного остатка."""
@@ -489,6 +498,18 @@ def flush_store(store_id, merchant_uid: str) -> dict:
         return stats
 
     try:
+        # Держим индикатор квоты на фронте живым даже на тихом сторе — см.
+        # QUOTA_HEARTBEAT_SECONDS выше. Делаем это ДО чтения очереди: у
+        # стора может не быть вообще ни одного намерения (rows пуст), и
+        # раньше цикл в этом случае завершался, ни разу не тронув Kaspi.
+        cached_quota = quota.peek(store_id)
+        quota_stale = (
+            cached_quota is None
+            or (datetime.datetime.now() - cached_quota.fetched_at).total_seconds() >= QUOTA_HEARTBEAT_SECONDS
+        )
+        if quota_stale:
+            quota.get(store_id, merchant_uid)
+
         rows = session.scalars(
             select(KaspiOfferSyncDB)
             .where(KaspiOfferSyncDB.store_id == store_id, KaspiOfferSyncDB.desired_at.isnot(None))
