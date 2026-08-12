@@ -438,6 +438,39 @@ def _save_master_stock_groups(groups: dict, store_id: str):
             session.rollback()
             session.close()
 
+def _delete_master_stock_group(group_id: str, store_id: str) -> bool:
+    """
+    Удалить Мастер-Группу из БД. Возвращает True, если строка была удалена.
+
+    Отдельная функция, а не "сохранить словарь без неё":
+    _save_master_stock_groups делает ТОЛЬКО upsert по ключам переданного
+    словаря и ничего не удаляет — из-за этого удаление группы в кабинете
+    возвращало "успешно удалена", но строка оставалась в БД и группа
+    возвращалась при следующей загрузке списка. Делать save авторитетным
+    (стирать всё, чего нет в словаре) опаснее: любой вызов с частичным
+    словарём молча снёс бы остальные группы магазина.
+
+    store_id в условии обязателен — чтобы чужой group_id нельзя было удалить
+    из другого магазина.
+    """
+    session = _get_sync_db_session()
+    if not session:
+        return False
+    try:
+        from backend.db.models import MasterStockGroupDB
+        row = session.get(MasterStockGroupDB, group_id)
+        if not row or row.store_id != store_id:
+            return False
+        session.delete(row)
+        session.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Error deleting master stock group {group_id}: {e}")
+        session.rollback()
+        return False
+    finally:
+        session.close()
+
 def _load_processed_orders_by_kind(store_id: str, kind: str) -> dict:
     """{order_id: payload} из ProcessedOrderDB этого магазина+kind ('radar'
     или 'packaging' — держит их независимыми)."""

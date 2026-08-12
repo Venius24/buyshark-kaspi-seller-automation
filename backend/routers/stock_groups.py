@@ -15,6 +15,7 @@ from backend.models import (
 from backend.state_helpers import (
     _load_master_stock_groups,
     _save_master_stock_groups,
+    _delete_master_stock_group,
     _load_products,
 )
 from backend.security.store_context import StoreContext, get_store_context
@@ -188,6 +189,14 @@ async def update_stock_group(
         if group_id not in groups:
             raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
 
+        # "Поле не прислали" и "поле прислали пустым" — разные намерения, а по
+        # значению None они неразличимы. Для полей, которые пользователь
+        # должен уметь СБРОСИТЬ, смотрим на model_fields_set: раньше
+        # выключение демпинга у группы (фронт шлёт dumping_config: null) молча
+        # игнорировалось — форма закрывалась с "успешно обновлена", а группа
+        # продолжала демпинговаться со старыми настройками.
+        provided = req.model_fields_set
+
         group = groups[group_id]
         if req.group_name is not None and req.group_name.strip():
             group["group_name"] = req.group_name.strip()
@@ -195,14 +204,14 @@ async def update_stock_group(
             group["shared_stock"] = int(req.shared_stock)
         if req.linked_skus is not None and req.linked_skus:
             group["linked_skus"] = _expand_linked_skus(req.linked_skus, ctx.store_id)
-        if req.external_code is not None:
-            group["external_code"] = req.external_code.strip() or None
+        if "external_code" in provided:
+            group["external_code"] = (req.external_code or "").strip() or None
         if req.is_active is not None:
             group["is_active"] = req.is_active
         if req.stop_qty is not None:
             group["stop_qty"] = int(req.stop_qty)
-        if req.dumping_config is not None:
-            group["dumping_config"] = req.dumping_config.dict() if req.dumping_config else None
+        if "dumping_config" in provided:
+            group["dumping_config"] = req.dumping_config.model_dump() if req.dumping_config else None
         if req.dumping_excluded_skus is not None:
             group["dumping_excluded_skus"] = [s for s in req.dumping_excluded_skus if s in group["linked_skus"]]
 
@@ -259,7 +268,14 @@ async def delete_stock_group(group_id: str, ctx: StoreContext = Depends(get_stor
             raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
 
         deleted_group = groups.pop(group_id)
-        _save_master_stock_groups(groups, store_id=ctx.store_id)
+        # Именно _delete_master_stock_group: _save_master_stock_groups делает
+        # только upsert и строку из БД не убирает — раньше группа "удалялась"
+        # с зелёным тостом и возвращалась при следующем обновлении списка.
+        if not _delete_master_stock_group(group_id, ctx.store_id):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Не удалось удалить Мастер-Группу '{deleted_group.get('group_name')}'.",
+            )
 
     return {
         "success": True,
