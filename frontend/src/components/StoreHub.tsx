@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, API_URL } from '../api';
-import { fetchProfile, fetchStores } from '../queries';
+import { fetchProfile, fetchStores, fetchBillingPlans } from '../queries';
 import { useActiveStoreId, setActiveStoreId as setSharedActiveStoreId } from '../storeContext';
+import { formatTenge } from '../utils/money';
 
 export interface StoreItem {
   id: string;
@@ -45,6 +46,7 @@ export const StoreHub: React.FC = () => {
   const [apiToken, setApiToken] = useState<string>('');
   const [mcEmail, setMcEmail] = useState<string>('');
   const [mcPassword, setMcPassword] = useState<string>('');
+  const [selectedPlanCode, setSelectedPlanCode] = useState<string>('');
 
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -70,6 +72,12 @@ export const StoreHub: React.FC = () => {
     queryKey: ['stores'],
     queryFn: fetchStores,
     refetchInterval: 30_000,
+  });
+
+  const { data: plans = [] } = useQuery({
+    queryKey: ['billing', 'plans'],
+    queryFn: fetchBillingPlans,
+    staleTime: Infinity,
   });
 
   const refetchStoresAndProfile = () => {
@@ -119,6 +127,7 @@ export const StoreHub: React.FC = () => {
           api_token: apiToken.trim(),
           email: mcEmail.trim() || undefined,
           password: mcPassword || undefined,
+          plan_code: selectedPlanCode || undefined,
         }),
       });
 
@@ -142,6 +151,7 @@ export const StoreHub: React.FC = () => {
     setApiToken('');
     setMcEmail('');
     setMcPassword('');
+    setSelectedPlanCode('');
     setErrorMsg(null);
     setConnectMode('manual');
     setAutoStoreName('');
@@ -497,6 +507,42 @@ export const StoreHub: React.FC = () => {
                 />
               </div>
 
+              {/* Field 5: тариф — выбор даёт 7 дней бесплатно на выбранный тариф; без
+                  выбора магазин остаётся на DEV (владелец назначит тариф вручную позже). */}
+              <div style={styles.formGroup}>
+                <label style={styles.label}>5. Тариф (необязательно — 7 дней бесплатно):</label>
+                <div style={styles.planGrid}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPlanCode('')}
+                    className={`btn ${selectedPlanCode === '' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={styles.planOption}
+                  >
+                    Без тарифа (DEV)
+                  </button>
+                  {plans.map((p) => (
+                    <button
+                      key={p.code}
+                      type="button"
+                      onClick={() => setSelectedPlanCode(p.code)}
+                      className={`btn ${selectedPlanCode === p.code ? 'btn-primary' : 'btn-secondary'}`}
+                      style={styles.planOption}
+                    >
+                      <span style={{ fontWeight: 700 }}>{p.name}</span>
+                      <span style={{ fontSize: '11px', opacity: 0.85 }}>
+                        {p.monthly_price_minor != null ? `${formatTenge(p.monthly_price_minor)}/мес` : 'договорная'}
+                        {p.max_products ? ` · до ${p.max_products} тов.` : ' · безлимит'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {selectedPlanCode && (
+                  <p style={{ fontSize: '12px', color: 'var(--secondary)', margin: '8px 0 0 0' }}>
+                    ✨ Первые 7 дней — бесплатно. Дальше тариф продлевается автоматически по цене выше.
+                  </p>
+                )}
+              </div>
+
               <div style={{ marginTop: '24px' }}>
                 <button type="submit" disabled={submitting} className="btn btn-primary" style={{ width: '100%', padding: '14px 24px', fontSize: '15px' }}>
                   {submitting ? '⏳ Подключение магазина и проверка данных...' : '🚀 Подключить магазин Kaspi'}
@@ -628,6 +674,20 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '13px',
     fontWeight: 600,
     color: '#cbd5e1',
+  },
+  planGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: '8px',
+  },
+  planOption: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: '4px',
+    padding: '10px 12px',
+    fontSize: '13px',
+    textAlign: 'left',
   },
   errorBox: {
     background: 'rgba(226, 84, 95, 0.12)',

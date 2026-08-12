@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { TRIAL_DAYS } from '../data/pricing';
 import styles from './FinalCta.module.css';
 
 export function FinalCta() {
@@ -33,7 +34,7 @@ export function FinalCta() {
       <div className={styles.scrim} />
       <div className={styles.panel}>
         <h2 className={styles.title}>Пора выпустить акулу на ваш рынок</h2>
-        <p className={styles.subtitle}>3 дня бесплатно. Без карты. Отменить в любой момент.</p>
+        <p className={styles.subtitle}>{TRIAL_DAYS} дней бесплатно. Без карты. Отменить в любой момент.</p>
         <a className={styles.cta} href="https://app.buyshark.kz/">
           Начать бесплатно
         </a>

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { TRIAL_DAYS } from '../data/pricing';
 import styles from './Hero.module.css';
 
 function scrollToPricing() {
@@ -52,7 +53,7 @@ export function Hero() {
         </p>
         <div className={styles.actions}>
           <a className={styles.btnPrimary} href="https://app.buyshark.kz/">
-            Начать бесплатно на 3 дня
+            Начать бесплатно на {TRIAL_DAYS} дней
           </a>
           <button className={styles.btnSecondary} onClick={scrollToPricing}>
             Смотреть тарифы ↓

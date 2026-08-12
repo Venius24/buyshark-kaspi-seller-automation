@@ -28,6 +28,7 @@ class ConnectFullStoreRequest(BaseModel):
     email: Optional[str] = None
     password: Optional[str] = None
     cookies_raw: Optional[str] = None
+    plan_code: Optional[str] = None  # тариф для 7-дневного триала (только на НОВОМ магазине)
 
 
 class StoreResponse(BaseModel):
@@ -125,6 +126,13 @@ async def connect_full_store(
 
     if not api_token_clean:
         raise HTTPException(status_code=400, detail="API токен (X-Auth-Token) обязателен для подключения")
+
+    trial_plan = None
+    if req.plan_code:
+        candidate = billing_catalog.get_plan(req.plan_code)
+        if candidate.code != req.plan_code or candidate.is_free or not candidate.is_public:
+            raise HTTPException(status_code=400, detail="Неизвестный или недоступный тариф")
+        trial_plan = candidate
 
     # 1. Верификация API Токена через Kaspi Public API
     try:
@@ -260,22 +268,42 @@ async def connect_full_store(
     )
     db.add(user_store)
 
-    # Тарификация (Слайс 7): новый магазин стартует на DEV (безлимит, без
+    # Тарификация: по умолчанию новый магазин стартует на DEV (безлимит, без
     # списаний) — суперадмин назначит реальный тариф вручную через админку.
     # Без этой строки credits.py/engine.py тихо откатывались бы на дефолты
     # (лимит NONE-тира вместо безлимита DEV) — явная строка безопаснее.
+    #
+    # Если пользователь выбрал платный тариф при подключении — вместо DEV
+    # даём 7-дневный бесплатный триал ЭТОГО тарифа (тот же трюк, что и в
+    # ручном admin_billing.set_store_tariff: короче обычного 31-дневный
+    # первый период, дальше billing_worker сам спишет полную цену как
+    # обычное продление). Только для только что созданного Store — у него
+    # заведомо нет истории тарифа, так что триал не выдаётся повторно.
     now = datetime.utcnow()
-    db.add(StoreTariffDB(
-        store_id=new_store.id,
-        plan_code=billing_catalog.DEFAULT_PLAN_CODE,
-        credit_addon_code=billing_catalog.DEFAULT_CREDIT_ADDON,
-        billing_status="ACTIVE",
-        billing_anchor_day=now.day,
-        period_start=now,
-        period_end=now + timedelta(days=36500),
-        next_charge_at=now + timedelta(days=36500),
-        activated_at=now,
-    ))
+    if trial_plan:
+        db.add(StoreTariffDB(
+            store_id=new_store.id,
+            plan_code=trial_plan.code,
+            credit_addon_code=billing_catalog.DEFAULT_CREDIT_ADDON,
+            billing_status="ACTIVE",
+            billing_anchor_day=now.day,
+            period_start=now,
+            period_end=now + timedelta(days=7),
+            next_charge_at=now + timedelta(days=7),
+            activated_at=now,
+        ))
+    else:
+        db.add(StoreTariffDB(
+            store_id=new_store.id,
+            plan_code=billing_catalog.DEFAULT_PLAN_CODE,
+            credit_addon_code=billing_catalog.DEFAULT_CREDIT_ADDON,
+            billing_status="ACTIVE",
+            billing_anchor_day=now.day,
+            period_start=now,
+            period_end=now + timedelta(days=36500),
+            next_charge_at=now + timedelta(days=36500),
+            activated_at=now,
+        ))
     db.add(StoreBalanceDB(store_id=new_store.id, balance_minor=0))
 
     # Реферальная атрибуция (Слайс 7): если юзер регистрировался по коду —
