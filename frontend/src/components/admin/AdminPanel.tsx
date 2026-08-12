@@ -302,15 +302,20 @@ const ReferrerAssignModal: React.FC<{ store: AdminStoreRow; referrers: ReferrerR
 
 const TariffModal: React.FC<{ store: AdminStoreRow; plans: BillingPlan[]; onClose: () => void; onSaved: () => void }> = ({ store, plans, onClose, onSaved }) => {
   const [planCode, setPlanCode] = useState(store.plan_code);
+  const [trialDays, setTrialDays] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const wasFree = store.plan_code === 'DEV';
+  const switchingToPaid = wasFree && planCode !== 'DEV';
 
   const submit = async () => {
     setSaving(true);
     try {
+      const trial = switchingToPaid && trialDays.trim() ? parseInt(trialDays, 10) : undefined;
       await apiFetch(`${API_URL}/api/admin/stores/${store.store_id}/tariff`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan_code: planCode }),
+        body: JSON.stringify({ plan_code: planCode, trial_days: trial }),
       });
       onSaved();
     } finally {
@@ -326,6 +331,24 @@ const TariffModal: React.FC<{ store: AdminStoreRow; plans: BillingPlan[]; onClos
           {plans.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
           <option value="DEV">DEV</option>
         </select>
+        {switchingToPaid && (
+          <div style={{ marginTop: '12px' }}>
+            <div style={styles.formLabel}>Бесплатный триал, дней (необязательно)</div>
+            <input
+              className="form-input"
+              type="number"
+              placeholder="напр. 7 — первое списание произойдёт через 7 дней"
+              value={trialDays}
+              onChange={(e) => setTrialDays(e.target.value)}
+              style={{ width: '100%' }}
+            />
+            <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
+              Магазин получает полный доступ к тарифу «{plans.find(p => p.code === planCode)?.name || planCode}» бесплатно.
+              По истечении срока спишется полная цена тарифа как за обычное продление — если баланс не пополнить заранее,
+              магазин заблокируется автоматически (та же логика, что и для просроченной оплаты). Пусто = обычный 31-дневный цикл с оплатой сразу.
+            </div>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: '8px', marginTop: '16px', justifyContent: 'flex-end' }}>
           <button className="btn btn-secondary" onClick={onClose}>Отмена</button>
           <button className="btn btn-primary" disabled={saving} onClick={submit}>Сохранить</button>

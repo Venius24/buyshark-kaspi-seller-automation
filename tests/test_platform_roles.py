@@ -33,6 +33,7 @@ ADMIN_ROUTES = [
     ("GET", "/api/admin/transactions?store_id=store-a"),
     ("GET", "/api/admin/referrers"),
     ("POST", "/api/admin/referrers", {"user_id": "ref-user"}),
+    ("GET", "/api/admin/users/lookup?email=x@example.com"),
     ("GET", "/api/admin/referrers/ref-user/accruals"),
     ("POST", "/api/admin/accruals/acc-1/mark-paid"),
 ]

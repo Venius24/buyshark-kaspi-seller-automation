@@ -31,6 +31,7 @@ class TariffUpdateRequest(BaseModel):
     plan_code: str
     credit_addon_code: Optional[str] = None
     custom_monthly_price_minor: Optional[int] = None
+    trial_days: Optional[int] = None
 
 
 class TopupRequest(BaseModel):
@@ -122,6 +123,8 @@ async def set_store_tariff(store_id: str, req: TariffUpdateRequest, db: AsyncSes
         raise HTTPException(status_code=400, detail="Неизвестный код тарифа")
     if req.credit_addon_code and req.credit_addon_code not in catalog.CREDIT_TIERS:
         raise HTTPException(status_code=400, detail="Неизвестный код надбавки кредитов")
+    if req.trial_days is not None and not (1 <= req.trial_days <= 90):
+        raise HTTPException(status_code=400, detail="Триал должен быть от 1 до 90 дней")
 
     tariff = await db.get(StoreTariffDB, store_id)
     if not tariff:
@@ -139,10 +142,15 @@ async def set_store_tariff(store_id: str, req: TariffUpdateRequest, db: AsyncSes
     # Первый переход с DEV/бесплатного плана на платный — здесь начинается
     # реальный отсчёт для продления (period_start/next_charge_at), и это же
     # activated_at, если реферальное окно ещё не материализовано.
+    # trial_days — тот же путь, просто первый период короче обычных 31: по
+    # его истечении billing_worker спишет полную цену тарифа как обычное
+    # продление (никакой отдельной "триальной" логики не нужно — если магазин
+    # не пополнили до этого момента, баланс уйдёт далеко за -3000₸ и
+    # evaluate_block заблокирует его тем же путём, что и обычную неоплату).
     if was_free and not catalog.is_free_plan(req.plan_code):
         tariff.activated_at = now
         tariff.period_start = now
-        tariff.period_end = now + timedelta(days=31)
+        tariff.period_end = now + timedelta(days=req.trial_days or 31)
         tariff.next_charge_at = tariff.period_end
         tariff.billing_anchor_day = now.day
 
