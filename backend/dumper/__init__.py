@@ -43,8 +43,14 @@ async def run_price_dumping_job(
         if not group.get("is_active", True):
             continue
         g_dump_cfg = group.get("dumping_config")
+        excluded_skus = set(group.get("dumping_excluded_skus") or [])
         if g_dump_cfg and g_dump_cfg.get("enabled"):
             for sku in group.get("linked_skus", []):
+                if sku in excluded_skus:
+                    # Товар явно исключён из группового демпинга — групповой
+                    # конфиг его не касается, но собственный individual
+                    # конфиг (если задан) продолжает работать как обычно.
+                    continue
                 indiv_cfg = effective_configs.get(sku)
                 # Если индивидуального конфига нет или он выключен - применяем демпинг группы
                 if not indiv_cfg or not indiv_cfg.get("enabled"):

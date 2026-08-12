@@ -358,6 +358,7 @@ def _load_master_stock_groups(store_id: str) -> dict:
             for r in rows:
                 linked_skus = json.loads(r.linked_skus) if r.linked_skus else []
                 dumping_cfg = json.loads(r.dumping_config) if r.dumping_config else None
+                dumping_excluded_skus = json.loads(r.dumping_excluded_skus) if r.dumping_excluded_skus else []
                 sync_logs = json.loads(r.sync_logs) if r.sync_logs else []
                 groups[r.group_id] = {
                     "group_id": r.group_id,
@@ -368,6 +369,7 @@ def _load_master_stock_groups(store_id: str) -> dict:
                     "is_active": r.is_active,
                     "stop_qty": r.stop_qty if r.stop_qty is not None else 5,
                     "dumping_config": dumping_cfg,
+                    "dumping_excluded_skus": dumping_excluded_skus,
                     "status": r.status,
                     "created_at": r.created_at,
                     "updated_at": r.updated_at,
@@ -391,6 +393,7 @@ def _save_master_stock_groups(groups: dict, store_id: str):
             db_obj = session.get(MasterStockGroupDB, gid)
             linked_str = json.dumps(g.get("linked_skus") or [], ensure_ascii=False)
             dump_cfg_str = json.dumps(g.get("dumping_config"), ensure_ascii=False) if g.get("dumping_config") else None
+            dump_excl_str = json.dumps(g.get("dumping_excluded_skus") or [], ensure_ascii=False)
             logs_str = json.dumps(g.get("sync_logs") or [], ensure_ascii=False)
             if not db_obj:
                 db_obj = MasterStockGroupDB(
@@ -403,6 +406,7 @@ def _save_master_stock_groups(groups: dict, store_id: str):
                     is_active=bool(g.get("is_active", True)),
                     stop_qty=int(g.get("stop_qty", 5)),
                     dumping_config=dump_cfg_str,
+                    dumping_excluded_skus=dump_excl_str,
                     status=g.get("status", "synced"),
                     created_at=g.get("created_at"),
                     updated_at=g.get("updated_at"),
@@ -419,6 +423,7 @@ def _save_master_stock_groups(groups: dict, store_id: str):
                 db_obj.is_active = bool(g.get("is_active", True))
                 db_obj.stop_qty = int(g.get("stop_qty", 5))
                 db_obj.dumping_config = dump_cfg_str
+                db_obj.dumping_excluded_skus = dump_excl_str
                 db_obj.status = g.get("status", "synced")
                 db_obj.created_at = g.get("created_at")
                 db_obj.updated_at = g.get("updated_at")

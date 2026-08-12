@@ -54,6 +54,7 @@ export interface MasterStockGroup {
   last_sync_log?: string;
   sync_logs?: string[];
   dumping_config?: GroupDumpingConfig | null;
+  dumping_excluded_skus?: string[];
 }
 
 
@@ -106,6 +107,7 @@ export const MasterStockGroups: React.FC = () => {
   const [formDumpStep, setFormDumpStep] = useState<number>(1);
   const [formDumpingMode, setFormDumpingMode] = useState<string>('TOP_1');
   const [formTargetPosition, setFormTargetPosition] = useState<number>(1);
+  const [formDumpingExcludedSkus, setFormDumpingExcludedSkus] = useState<string[]>([]);
 
   // Inline Stock Edit State
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
@@ -177,6 +179,7 @@ export const MasterStockGroups: React.FC = () => {
     setFormDumpStep(1);
     setFormDumpingMode('TOP_1');
     setFormTargetPosition(1);
+    setFormDumpingExcludedSkus([]);
     setIsModalOpen(true);
   };
 
@@ -204,11 +207,20 @@ export const MasterStockGroups: React.FC = () => {
       setFormDumpingMode('TOP_1');
       setFormTargetPosition(1);
     }
+    setFormDumpingExcludedSkus([...(group.dumping_excluded_skus || [])]);
     setIsModalOpen(true);
   };
 
   const handleToggleSkuSelection = (sku: string) => {
     setFormSelectedSkus(prev =>
+      prev.includes(sku) ? prev.filter(s => s !== sku) : [...prev, sku]
+    );
+    // SKU, снятый с привязки, не может оставаться исключённым из демпинга.
+    setFormDumpingExcludedSkus(prev => prev.filter(s => s !== sku));
+  };
+
+  const handleToggleDumpingExclusion = (sku: string) => {
+    setFormDumpingExcludedSkus(prev =>
       prev.includes(sku) ? prev.filter(s => s !== sku) : [...prev, sku]
     );
   };
@@ -248,6 +260,7 @@ export const MasterStockGroups: React.FC = () => {
             mode: formDumpingMode,
             target_position: formTargetPosition,
           } : null,
+          dumping_excluded_skus: formDumpingEnabled ? formDumpingExcludedSkus : [],
         }),
       });
 
@@ -639,6 +652,23 @@ export const MasterStockGroups: React.FC = () => {
                               <Zap size={11} />
                               <span>Демпинг: {group.dumping_config.min_price} – {group.dumping_config.max_price} ₸ ({group.dumping_config.mode || 'TOP_1'})</span>
                             </span>
+                            {(group.dumping_excluded_skus?.length ?? 0) > 0 && (
+                              <span
+                                title={`Исключены из демпинга: ${group.dumping_excluded_skus!.join(', ')}`}
+                                style={{
+                                  fontSize: '11px',
+                                  color: 'var(--text-muted)',
+                                  background: 'rgba(255,255,255,0.05)',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  border: '1px solid var(--card-border)',
+                                  marginLeft: '6px',
+                                  display: 'inline-block'
+                                }}
+                              >
+                                Исключено: {group.dumping_excluded_skus!.length}
+                              </span>
+                            )}
                           </div>
                         )}
                       </td>
@@ -1115,6 +1145,47 @@ export const MasterStockGroups: React.FC = () => {
                         onChange={e => setFormDumpStep(parseFloat(e.target.value) || 1)}
                         style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: '#fff', fontSize: '12px' }}
                       />
+                    </div>
+                  </div>
+                )}
+
+                {formDumpingEnabled && formSelectedSkus.length > 0 && (
+                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px' }}>
+                      Исключить из группового демпинга (эти товары демпинг группы не тронет — при наличии у них собственного индивидуального демпинга он продолжит работать как обычно)
+                    </label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
+                      {formSelectedSkus.map(sku => {
+                        const pMatch = products.find(p => p.sku === sku || p.merchantSku === sku);
+                        const isExcluded = formDumpingExcludedSkus.includes(sku);
+                        return (
+                          <label
+                            key={sku}
+                            onClick={() => handleToggleDumpingExclusion(sku)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '10px',
+                              padding: '6px 10px',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              background: isExcluded ? 'rgba(239, 68, 68, 0.1)' : 'transparent',
+                              border: isExcluded ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid transparent',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isExcluded}
+                              onChange={() => {}}
+                              style={{ width: '14px', height: '14px', accentColor: 'var(--error)', cursor: 'pointer' }}
+                            />
+                            <span style={{ fontSize: '12px', color: isExcluded ? 'var(--error)' : '#cbd5e1' }}>
+                              {pMatch?.name ? `${pMatch.name} ` : ''}
+                              <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>({sku})</span>
+                            </span>
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

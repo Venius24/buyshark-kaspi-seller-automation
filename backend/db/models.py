@@ -179,6 +179,10 @@ class MasterStockGroupDB(Base):
     # (архивируется на Kaspi) и шлётся телеграм-уведомление — см. миграцию 024.
     stop_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     dumping_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-stringified dict
+    # SKU из linked_skus, исключённые из ГРУППОВОГО демпинга (dumping_config
+    # выше их игнорирует) — но их собственный individual dumping_config (см.
+    # dumping_configs таблицу) продолжает работать как обычно, если задан.
+    dumping_excluded_skus: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-stringified list
     status: Mapped[str] = mapped_column(String(50), default="synced")
     created_at: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     updated_at: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

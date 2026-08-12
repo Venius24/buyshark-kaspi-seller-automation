@@ -138,15 +138,17 @@ async def create_stock_group(
     group_id = f"grp_{uuid.uuid4().hex[:8]}"
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    expanded_skus = _expand_linked_skus(req.linked_skus, ctx.store_id)
     new_group = {
         "group_id": group_id,
         "group_name": req.group_name.strip(),
         "shared_stock": int(req.shared_stock),
-        "linked_skus": _expand_linked_skus(req.linked_skus, ctx.store_id),
+        "linked_skus": expanded_skus,
         "external_code": (req.external_code or "").strip() or None,
         "is_active": req.is_active if req.is_active is not None else True,
         "stop_qty": int(req.stop_qty) if req.stop_qty is not None else 5,
         "dumping_config": req.dumping_config.dict() if req.dumping_config else None,
+        "dumping_excluded_skus": [s for s in (req.dumping_excluded_skus or []) if s in expanded_skus],
         "status": "updating",
         "created_at": now_str,
         "updated_at": now_str,
@@ -201,6 +203,8 @@ async def update_stock_group(
             group["stop_qty"] = int(req.stop_qty)
         if req.dumping_config is not None:
             group["dumping_config"] = req.dumping_config.dict() if req.dumping_config else None
+        if req.dumping_excluded_skus is not None:
+            group["dumping_excluded_skus"] = [s for s in req.dumping_excluded_skus if s in group["linked_skus"]]
 
         group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         group["status"] = "updating"

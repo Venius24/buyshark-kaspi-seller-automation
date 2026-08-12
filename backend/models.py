@@ -74,6 +74,7 @@ class MasterStockGroupCreateRequest(BaseModel):
     is_active: Optional[bool] = True
     stop_qty: Optional[int] = 5
     dumping_config: Optional[GroupDumpingConfig] = None
+    dumping_excluded_skus: Optional[List[str]] = None
 
 class MasterStockGroupUpdateRequest(BaseModel):
     group_name: Optional[str] = None
@@ -83,6 +84,7 @@ class MasterStockGroupUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
     stop_qty: Optional[int] = None
     dumping_config: Optional[GroupDumpingConfig] = None
+    dumping_excluded_skus: Optional[List[str]] = None
 
 class UpdateStockQtyRequest(BaseModel):
     shared_stock: int
