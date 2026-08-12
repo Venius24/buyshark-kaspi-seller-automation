@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import random
 import datetime
 from typing import Optional, List
 
@@ -15,7 +14,7 @@ from backend.state_helpers import (
     _save_products,
 )
 from backend.kaspi_wrapper import KaspiAPI
-from backend.dumper.executor import RateLimitExecutorWorker, _load_mc_cookies
+from backend.services import offer_sync
 from backend.dumper.config import discover_merchant_id, _decode_base64_if_needed
 from backend.dumper.telemetry import telemetry_manager
 from backend.services.webhook_dispatcher import dispatch_webhook_event
@@ -92,7 +91,18 @@ async def broadcast_ws_event(event_type: str, data: dict, store_id: Optional[str
 
 async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[str] = None, trigger_order_info: Optional[dict] = None):
     """
-    Веерная рассылка обновленного остатка по всем SKU группы через 3-шаговый Kaspi MC API.
+    Веерная рассылка обновлённого остатка по всем SKU группы.
+
+    Больше не ходит в Kaspi сама: объявляет желаемый остаток в
+    backend/services/offer_sync.py, а отправкой занимается единый флашер. Это
+    даёт схлопывание — пять заказов подряд по одной группе оставляют по
+    каждому SKU ОДНО намерение с финальным остатком, а не пять записей.
+
+    Поверх этого работает лестница шагов (решение пользователя): чем больше
+    остаток, тем крупнее должна быть накопленная разница, чтобы её вообще
+    стоило слать. На проде было видно, как группа из 14 SKU трижды подряд
+    рассылала остатки 1006 / 1006 / 998 — 42 записи квоты, из которых ни одна
+    ничего осмысленного не меняла. С лестницей их будет ноль.
 
     store_id=None (легаси) — нескоуп-чтение/запись группы, как было всегда.
     store_id задан (Phase 7) — группа читается/сохраняется в рамках конкретного стора.
@@ -119,8 +129,9 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
     # Загружаем товары из кэша (per-store, см. state_helpers._load_products)
     all_products = _load_products(store_id)
 
-    cookies = _load_mc_cookies(store_id=store_id)
-    has_cookies = bool(cookies and "mc-session" in cookies and "mc-sid" in cookies)
+    # Куки здесь больше не проверяем: намерения ставятся независимо от
+    # состояния сессии, а отправкой (и автообновлением сессии при 401)
+    # занимается флашер offer_sync.
     merchant_id = discover_merchant_id(token)
     if not merchant_id:
         # НЕ подставляем чужой merchant_id (раньше был хардкод "20186986" —
@@ -132,6 +143,7 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
 
     success_count = 0
     fail_count = 0
+    skipped_count = 0
     logs = []
 
     processed_physical_skus = set()
@@ -177,40 +189,44 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
                 p["status"] = status_text
                 break
 
-        if has_cookies:
-            # Запуск 3-шагового частного API Kaspi
-            success, val = await asyncio.to_thread(
-                RateLimitExecutorWorker._update_kaspi_price_sync,
-                merchant_uid=merchant_id,
-                sku=target_p.get("merchantSku") or sku,
-                master_sku=decoded_master,
-                model_name=target_p.get("name", "Товар"),
-                new_price=price,
-                stock=kaspi_push_stock,
-                store_id_suffix=store_suffix,
-                city_id="750000000",
-                internal_store_id=store_id
+        if store_id is None:
+            # Легаси-путь без стора: очередь намерений скоупится по store_id,
+            # ставить её некуда — ограничиваемся локальным оверрайдом выше.
+            continue
+
+        physical_sku = target_p.get("merchantSku") or sku
+
+        # Лестница шагов: сравниваем с тем, что Kaspi уже знает (ещё не
+        # отправленное намерение, иначе последняя отправка, иначе факт).
+        last_pushed = await asyncio.to_thread(offer_sync.last_known_stock, store_id, physical_sku)
+        if not offer_sync.should_push_stock(last_pushed, kaspi_push_stock, stop_qty=stop_qty):
+            skipped_count += 1
+            msg = (
+                f"[{t_now}] ⏭ Группа '{group_name}' -> SKU {sku}: остаток "
+                f"{last_pushed} -> {kaspi_push_stock}, разница меньше шага "
+                f"{offer_sync.stock_step(min(last_pushed, kaspi_push_stock))} — запись отложена (экономия квоты)"
             )
-            if success:
-                success_count += 1
-                msg = f"[{t_now}] ✓ Группа '{group_name}' -> SKU {sku}: остаток {kaspi_push_stock} отправлен в Kaspi MC (Tx: {val})"
-                logs.append(msg)
-                await broadcast_ws_event("log", msg, store_id=store_id)
-            else:
-                fail_count += 1
-                msg = f"[{t_now}] ❌ Группа '{group_name}' -> SKU {sku}: ошибка Kaspi MC: {val}"
-                logs.append(msg)
-                await broadcast_ws_event("log", msg, store_id=store_id)
-        else:
-            fail_count += 1
-            msg = f"[{t_now}] ⚠️ Группа '{group_name}' -> SKU {sku}: отсутствуют куки Kaspi MC (требуется SMS-авторизация)"
             logs.append(msg)
             await broadcast_ws_event("log", msg, store_id=store_id)
+            continue
 
-        # Jitter пауза 1.2 – 2.0 секунды перед следующим SKU
-        if idx < len(linked_skus) - 1:
-            jitter_delay = random.uniform(1.2, 2.0)
-            await asyncio.sleep(jitter_delay)
+        await asyncio.to_thread(
+            offer_sync.enqueue,
+            store_id,
+            physical_sku,
+            priority=(offer_sync.Priority.WITHDRAW if kaspi_push_stock <= 0 else offer_sync.Priority.MINOR),
+            reason=f"group:{group_id}",
+            stock=kaspi_push_stock,
+            available=kaspi_push_stock > 0,
+            master_sku=decoded_master,
+            model=target_p.get("name", "Товар"),
+            store_suffix=store_suffix,
+            city_id="750000000",
+        )
+        success_count += 1
+        msg = f"[{t_now}] ✓ Группа '{group_name}' -> SKU {sku}: остаток {kaspi_push_stock} поставлен в очередь на отправку"
+        logs.append(msg)
+        await broadcast_ws_event("log", msg, store_id=store_id)
 
     # Сохраняем обновлённый кэш товаров
     if all_products:
@@ -225,7 +241,10 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
         if group_id in groups:
             g = groups[group_id]
             g["last_synced_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            g["last_sync_log"] = f"Успешно: {success_count}/{len(linked_skus)}. Ошибок: {fail_count}."
+            g["last_sync_log"] = (
+                f"В очередь: {success_count}/{len(linked_skus)}. "
+                f"Пропущено по шагу: {skipped_count}. Ошибок: {fail_count}."
+            )
             if fail_count == 0:
                 g["status"] = "synced"
             elif success_count > 0:
@@ -317,15 +336,26 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
             entries = [{"sku": order.get("sku"), "quantity": order.get("quantity", 1)}]
 
         order_matched_groups = set()
+        order_claimed = False
+        order_claim_denied = False
 
         for entry in entries:
+            if order_claim_denied:
+                break
             raw_sku_candidates = set()
             for k in ["sku", "merchantSku", "masterSku", "kaspiSku"]:
                 val = entry.get(k)
                 if val:
                     raw_sku_candidates.add(str(val).strip())
 
-            qty = int(entry.get("quantity", 1))
+            # Физические штуки с учётом комплектов/мультипаков (-2, -4, -6...) —
+            # ровно та же формула, что у упаковщика. Раньше радар вычитал сырое
+            # quantity, и итог зависел от того, какой воркер увидел заказ
+            # первым; теперь оба считают одинаково.
+            raw_qty = int(entry.get("quantity", 1))
+            qty = _calculate_physical_units(
+                entry.get("merchantSku") or entry.get("sku") or "", raw_qty
+            )
             if not raw_sku_candidates:
                 continue
 
@@ -344,6 +374,15 @@ async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
                     continue
                 linked = [str(s).strip() for s in grp.get("linked_skus", [])]
                 if any(k in linked for k in all_possible_skus):
+                    # Право на списание — одно на заказ, общее с упаковщиком.
+                    if not order_claimed:
+                        order_claimed = await asyncio.to_thread(
+                            claim_stock_deduction, store_id, order_id, "radar",
+                            {"stage": "NEW", "qty": qty},
+                        )
+                        if not order_claimed:
+                            order_claim_denied = True
+                            break
                     async with get_stock_lock(store_id):
                         current_stock = int(grp.get("shared_stock", 0))
                         new_stock = max(0, current_stock - qty)
@@ -426,6 +465,41 @@ async def master_stock_radar_loop():
 
 # ── 5. Auto Deduction on Packaging Detection Engine ──────────────────────
 
+def claim_stock_deduction(store_id: Optional[str], order_id: str, claimed_by: str, payload: dict) -> bool:
+    """
+    Забронировать право списать остаток по этому заказу.
+
+    Один и тот же заказ видят ДВА воркера: радар ловит его в NEW/
+    APPROVED_BY_BANK, упаковщик — позже, на стадии «На сборке». Раньше у них
+    были независимые списки обработанных заказов ('radar' и 'packaging'), и
+    каждый списывал остаток самостоятельно — то есть один заказ вычитался
+    дважды, а веерная рассылка по группе запускалась тоже дважды.
+
+    Решение пользователя: оба воркера оставляем, но списывает тот, кто увидел
+    заказ первым; второй только логирует. Общая отметка живёт в
+    ProcessedOrderDB под kind='stock' — она и есть арбитр.
+
+    Возвращает True, если право получено (значит, списывать должен вызывающий).
+    """
+    if not store_id or not order_id:
+        return True
+    from backend.state_helpers import _load_processed_orders_by_kind, _save_processed_orders_by_kind
+
+    claimed = _load_processed_orders_by_kind(store_id, "stock")
+    if order_id in claimed:
+        logger.info(
+            "🔁 [StockClaim] Заказ %s уже списан (%s) — %s только логирует, повторного вычитания нет.",
+            order_id, (claimed[order_id] or {}).get("claimed_by", "?"), claimed_by,
+        )
+        return False
+    _save_processed_orders_by_kind(
+        {order_id: {**payload, "claimed_by": claimed_by,
+                    "claimed_at": datetime.datetime.now().isoformat()}},
+        store_id, "stock",
+    )
+    return True
+
+
 def _calculate_physical_units(merchant_sku: str, quantity: int = 1) -> int:
     """
     Вычисляет физическое количество штук товара с учетом комплектов и мультипаков (-2, -4, -6...).
@@ -477,6 +551,7 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
     async with get_stock_lock(store_id):
         groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
         groups_modified = False
+        orders_marked = False
 
         for order in cargo_assembly:
             order_code = str(order.get("code") or order.get("id")).strip()
@@ -503,6 +578,22 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
 
                 if matched_group:
                     units = _calculate_physical_units(m_sku, qty)
+                    # Право на списание — одно на заказ, общее с радаром.
+                    # Если радар уже вычел этот заказ на стадии NEW, здесь мы
+                    # только помечаем его обработанным и идём дальше.
+                    if not await asyncio.to_thread(
+                        claim_stock_deduction, store_id, order_code, "packaging",
+                        {"stage": "cargo_assembly", "sku": m_sku, "units": units},
+                    ):
+                        processed_orders[order_code] = {
+                            "deducted_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "group_id": matched_group["group_id"],
+                            "sku": m_sku,
+                            "units": 0,
+                            "skipped_reason": "already_deducted_by_radar",
+                        }
+                        orders_marked = True
+                        break
                     old_stock = int(matched_group.get("shared_stock", 0))
                     new_stock = max(0, old_stock - units)
                     matched_group["shared_stock"] = new_stock
@@ -521,6 +612,7 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
 
                     matched_group["last_sync_log"] = log_entry
                     groups_modified = True
+                    orders_marked = True
 
                     processed_orders[order_code] = {
                         "deducted_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -556,6 +648,10 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
 
         if groups_modified:
             await asyncio.to_thread(_save_master_stock_groups, groups, store_id=store_id)
+        if groups_modified or orders_marked:
+            # Отметку об обработке сохраняем и когда списания не было (заказ
+            # уже вычел радар) — иначе тот же заказ переспрашивался бы каждые
+            # 30 секунд до бесконечности.
             await asyncio.to_thread(_save_processed_packaging_orders, processed_orders, store_id)
 
     return {

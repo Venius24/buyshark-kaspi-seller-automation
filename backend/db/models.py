@@ -205,6 +205,55 @@ class ProductOverrideDB(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class KaspiOfferSyncDB(Base):
+    """
+    Одна строка на (магазин, SKU) — всё состояние синхронизации оффера с Kaspi.
+
+    Отдельной таблицы-очереди намеренно НЕТ: очередь на запись — это просто
+    строки, где желаемое (desired_*) расходится с фактическим, отсортированные
+    по priority/desired_at. Три слоя в одной строке:
+
+    * desired_*  — что мы хотим видеть на Kaspi (кладут демпер и Мастер-Группы);
+    * pushed_*   — что мы реально отправили и когда (дешёвая проверка "не шлём
+                   то же самое повторно" без единого запроса);
+    * kaspi_*    — что Kaspi реально показывает (из bff/offer-view/list, квоту
+                   не тратит). Нужен, потому что в кабинет пишем не только мы:
+                   на проде видны записи и от других аккаунтов мерчанта.
+    """
+
+    __tablename__ = "kaspi_offer_sync"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    sku: Mapped[str] = mapped_column(String(255), primary_key=True)
+
+    # Реквизиты для сборки payload на /pricefeed/upload/merchant/process
+    master_sku: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    store_suffix: Mapped[str] = mapped_column(String(20), default="001")
+    city_id: Mapped[str] = mapped_column(String(20), default="750000000")
+
+    # Желаемое состояние (NULL = по этому полю намерений нет)
+    desired_price: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    desired_stock: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    desired_available: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, default=3, index=True)
+    reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    desired_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+
+    # Что реально ушло на Kaspi
+    pushed_price: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pushed_stock: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Что Kaspi показывает по факту
+    kaspi_price: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    kaspi_stock: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    kaspi_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    last_error: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class StoreProductDB(Base):
     __tablename__ = "store_products"
 

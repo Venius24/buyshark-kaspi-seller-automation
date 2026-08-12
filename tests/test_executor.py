@@ -9,6 +9,7 @@ sys.path.append(os.getcwd())
 
 from backend.dumper.executor import RateLimitExecutorWorker
 from backend.dumper.config import DumpingProductConfig
+from backend.services.offer_sync import Priority
 
 
 def make_config(**overrides):
@@ -25,7 +26,7 @@ def make_config(**overrides):
     return DumpingProductConfig(**defaults)
 
 
-def make_task(sku="TEST-0001", new_price=990, **product_overrides):
+def make_task(sku="TEST-0001", new_price=990, action="DUMP_TOP_1", **product_overrides):
     config = make_config(sku=sku)
     product = {"name": "Товар", "sku": sku, "merchantSku": sku, "stock": 10}
     product.update(product_overrides)
@@ -35,7 +36,7 @@ def make_task(sku="TEST-0001", new_price=990, **product_overrides):
         "config": config,
         "calculation_result": {
             "bestCompetitorPrice": 995,
-            "action": "DUMP_TOP_1",
+            "action": action,
             "currentPos": 1,
         },
         "product_ref": product,
@@ -57,161 +58,97 @@ class ExecutorTestBase(unittest.TestCase):
 
 
 class TestExecuteUpdatesNoAuth(ExecutorTestBase):
+    """
+    До 2026-08-12 отсутствие кук ТЕРЯЛО решение демпинга: цена писалась только
+    в локальный оверрайд, а в Kaspi не уходила уже никогда. Теперь намерение
+    ставится в очередь и переживает восстановление сессии.
+    """
+
+    @patch("backend.state_helpers._load_master_stock_groups")
     @patch("backend.dumper.executor._load_mc_cookies")
-    def test_missing_cookies_skips_mc_api_but_saves_override(self, mock_cookies):
+    def test_missing_cookies_still_queues_and_saves_override(self, mock_cookies, mock_groups):
         mock_cookies.return_value = {}
-        task = make_task()
+        mock_groups.return_value = {}
         result = RateLimitExecutorWorker.execute_updates(
-            [task], self.save_override, rate_limit_delay=0, merchant_id="999"
+            [make_task()], self.save_override, rate_limit_delay=0, merchant_id="999"
         )
         self.assertEqual(result["updated_count"], 1)
-        self.assertTrue(any("повторный вход" in m for m in result["logs"]))
+        self.assertTrue(any("повторного входа" in m for m in result["logs"]))
         self.save_override.assert_called_once()
 
+    @patch("backend.state_helpers._load_master_stock_groups")
     @patch("backend.dumper.executor._load_mc_cookies")
-    def test_incomplete_cookies_treated_as_no_auth(self, mock_cookies):
+    def test_incomplete_cookies_treated_as_no_auth(self, mock_cookies, mock_groups):
         mock_cookies.return_value = {"mc-session": "abc"}  # missing mc-sid
-        task = make_task()
+        mock_groups.return_value = {}
         result = RateLimitExecutorWorker.execute_updates(
-            [task], self.save_override, rate_limit_delay=0, merchant_id="999"
+            [make_task()], self.save_override, rate_limit_delay=0, merchant_id="999"
         )
-        self.assertTrue(any("повторный вход" in m for m in result["logs"]))
+        self.assertTrue(any("повторного входа" in m for m in result["logs"]))
 
 
-class TestExecuteUpdatesWithAuth(ExecutorTestBase):
+class TestExecuteUpdatesEnqueues(ExecutorTestBase):
+    @patch("backend.services.offer_sync.enqueue")
     @patch("backend.state_helpers._load_master_stock_groups")
-    @patch("backend.dumper.executor.RateLimitExecutorWorker._update_kaspi_price_sync")
     @patch("backend.dumper.executor._load_mc_cookies")
-    def test_success_path_logs_transaction_id(
-        self, mock_cookies, mock_update, mock_groups
-    ):
+    def test_queues_intent_instead_of_calling_kaspi(self, mock_cookies, mock_groups, mock_enqueue):
         mock_cookies.return_value = {"mc-session": "s", "mc-sid": "sid"}
         mock_groups.return_value = {}
-        mock_update.return_value = (True, "tx-999")
-        task = make_task()
         result = RateLimitExecutorWorker.execute_updates(
-            [task], self.save_override, rate_limit_delay=0, merchant_id="999"
+            [make_task()], self.save_override, rate_limit_delay=0,
+            merchant_id="999", store_id="store-1",
         )
         self.assertEqual(result["updated_count"], 1)
-        self.assertTrue(any("tx-999" in m for m in result["logs"]))
-        self.save_override.assert_called_once()
+        mock_enqueue.assert_called_once()
+        kwargs = mock_enqueue.call_args.kwargs
+        self.assertEqual(kwargs["price"], 990)
+        self.assertEqual(kwargs["stock"], 10)
+        self.assertEqual(mock_enqueue.call_args.args[1], "TEST-0001")
 
+    @patch("backend.services.offer_sync.enqueue")
     @patch("backend.state_helpers._load_master_stock_groups")
-    @patch("backend.dumper.executor.RateLimitExecutorWorker._update_kaspi_price_sync")
     @patch("backend.dumper.executor._load_mc_cookies")
-    def test_failed_update_logs_error_but_still_advances(
-        self, mock_cookies, mock_update, mock_groups
-    ):
+    def test_stop_qty_group_forces_zero_stock_and_p0(self, mock_cookies, mock_groups, mock_enqueue):
+        # Остаток группы на "Стоп кол-ве" -> на Kaspi уходит 0, и это P0:
+        # иначе Kaspi продолжит продавать товар, которого нет.
+        mock_cookies.return_value = {"mc-session": "s", "mc-sid": "sid"}
+        mock_groups.return_value = {
+            "g1": {"is_active": True, "linked_skus": ["TEST-0001"], "shared_stock": 5, "stop_qty": 5}
+        }
+        RateLimitExecutorWorker.execute_updates(
+            [make_task()], self.save_override, rate_limit_delay=0,
+            merchant_id="999", store_id="store-1",
+        )
+        kwargs = mock_enqueue.call_args.kwargs
+        self.assertEqual(kwargs["stock"], 0)
+        self.assertEqual(kwargs["priority"], Priority.WITHDRAW)
+
+    @patch("backend.services.offer_sync.enqueue")
+    @patch("backend.state_helpers._load_master_stock_groups")
+    @patch("backend.dumper.executor._load_mc_cookies")
+    def test_price_cut_is_higher_priority_than_pull_up(self, mock_cookies, mock_groups, mock_enqueue):
         mock_cookies.return_value = {"mc-session": "s", "mc-sid": "sid"}
         mock_groups.return_value = {}
-        mock_update.return_value = (False, "Шаг 1 (Discount) провален со статусом 500")
-        task = make_task()
-        result = RateLimitExecutorWorker.execute_updates(
-            [task], self.save_override, rate_limit_delay=0, merchant_id="999"
+        RateLimitExecutorWorker.execute_updates(
+            [make_task(new_price=900, action="DUMP_TOP_1")], self.save_override,
+            rate_limit_delay=0, merchant_id="999", store_id="store-1",
         )
-        self.assertEqual(result["updated_count"], 1)
-        self.assertTrue(any("MC API: ✗" in m for m in result["logs"]))
+        self.assertEqual(mock_enqueue.call_args.kwargs["priority"], Priority.LOSING)
 
-    @patch("time.sleep")
-    @patch("backend.state_helpers._load_master_stock_groups")
-    @patch("backend.dumper.executor.RateLimitExecutorWorker._update_kaspi_price_sync")
-    @patch("backend.dumper.executor._load_mc_cookies")
-    def test_429_triggers_backoff_then_retries_once(
-        self, mock_cookies, mock_update, mock_groups, mock_sleep
-    ):
-        mock_cookies.return_value = {"mc-session": "s", "mc-sid": "sid"}
-        mock_groups.return_value = {}
-        mock_update.side_effect = [(False, "429_BLOCKED"), (True, "tx-after-backoff")]
-        task = make_task()
-        result = RateLimitExecutorWorker.execute_updates(
-            [task], self.save_override, rate_limit_delay=0, merchant_id="999"
+        mock_enqueue.reset_mock()
+        RateLimitExecutorWorker.execute_updates(
+            [make_task(new_price=1100, action="PULL_UP_PRICE")], self.save_override,
+            rate_limit_delay=0, merchant_id="999", store_id="store-1",
         )
-        mock_sleep.assert_any_call(60)
-        self.assertEqual(mock_update.call_count, 2)
-        self.assertEqual(result["updated_count"], 1)
-        self.assertTrue(any("tx-after-backoff" in m for m in result["logs"]))
-
-    @patch("time.sleep")
-    @patch("backend.state_helpers._load_master_stock_groups")
-    @patch("backend.dumper.executor.RateLimitExecutorWorker._update_kaspi_price_sync")
-    @patch("backend.dumper.executor._load_mc_cookies")
-    def test_persistent_block_aborts_entire_queue(
-        self, mock_cookies, mock_update, mock_groups, mock_sleep
-    ):
-        mock_cookies.return_value = {"mc-session": "s", "mc-sid": "sid"}
-        mock_groups.return_value = {}
-        mock_update.return_value = (False, "429_BLOCKED")
-        task1 = make_task(sku="SKU-A")
-        task2 = make_task(sku="SKU-B")
-        # Категория 1: execute_updates теперь обрабатывает очередь через
-        # ThreadPoolExecutor (по умолчанию max_workers=3). max_workers=1 здесь
-        # воспроизводит строго последовательный порядок, чтобы детерминированно
-        # проверить "abort останавливает СТАРТ следующей задачи" — с реальной
-        # конкурентностью (>1) SKU-B мог бы успеть стартовать до того, как
-        # SKU-A выставит abort_event, и это не баг, а осознанный компромисс
-        # параллельности (см. test_concurrent_skus_run_in_parallel ниже).
-        result = RateLimitExecutorWorker.execute_updates(
-            [task1, task2], self.save_override, rate_limit_delay=0, merchant_id="999",
-            max_workers=1,
-        )
-        # First task retried once after backoff, then queue aborted before task2 runs
-        self.assertEqual(mock_update.call_count, 2)
-        self.assertEqual(result["updated_count"], 0)
-        self.assertTrue(any("Останавливаем выполнение очереди" in m for m in result["logs"]))
-        self.save_override.assert_not_called()
-
-    @patch("backend.state_helpers._load_master_stock_groups")
-    @patch("backend.dumper.executor.RateLimitExecutorWorker._update_kaspi_price_sync")
-    @patch("backend.dumper.executor._load_mc_cookies")
-    def test_concurrent_skus_run_in_parallel(self, mock_cookies, mock_update, mock_groups):
-        """
-        Категория 1: N independent SKUs must actually overlap in execution,
-        not just "not crash". Each mocked Kaspi call blocks until released,
-        so we can directly observe how many calls are in-flight at once
-        instead of inferring it from wall-clock time (which is unreliable
-        on noisy/shared CI runners — see HANDOFF.md §"test_concurrent_skus_run_in_parallel").
-        """
-        import threading
-
-        NUM_SKUS = 6
-        lock = threading.Lock()
-        active = 0
-        peak_active = 0
-        # Barrier-like gate: block each call until we've observed at least
-        # 2 calls in flight simultaneously, then release them all.
-        release_event = threading.Event()
-
-        def slow_update(*args, **kwargs):
-            nonlocal active, peak_active
-            with lock:
-                active += 1
-                peak_active = max(peak_active, active)
-            if peak_active >= 2:
-                release_event.set()
-            release_event.wait(timeout=5)
-            with lock:
-                active -= 1
-            return (True, "tx-ok")
-
-        mock_cookies.return_value = {"mc-session": "s", "mc-sid": "sid"}
-        mock_groups.return_value = {}
-        mock_update.side_effect = slow_update
-
-        tasks = [make_task(sku=f"SKU-{i}") for i in range(NUM_SKUS)]
-        result = RateLimitExecutorWorker.execute_updates(
-            tasks, self.save_override, rate_limit_delay=0, merchant_id="999", max_workers=3
-        )
-
-        self.assertEqual(result["updated_count"], NUM_SKUS)
-        # A fully-sequential implementation could never have more than 1
-        # call in flight at once; real concurrency must reach at least 2.
-        self.assertGreaterEqual(peak_active, 2)
+        self.assertEqual(mock_enqueue.call_args.kwargs["priority"], Priority.MARGIN)
 
 
 class TestExecuteUpdatesDedup(ExecutorTestBase):
+    @patch("backend.state_helpers._load_master_stock_groups")
     @patch("backend.dumper.executor._load_mc_cookies")
-    def test_duplicate_skus_keep_only_last_occurrence(self, mock_cookies):
+    def test_duplicate_skus_keep_only_last_occurrence(self, mock_cookies, mock_groups):
         mock_cookies.return_value = {}
+        mock_groups.return_value = {}
         task_old = make_task(sku="DUP-1", new_price=900)
         task_new = make_task(sku="DUP-1", new_price=950)
         result = RateLimitExecutorWorker.execute_updates(
@@ -219,16 +156,12 @@ class TestExecuteUpdatesDedup(ExecutorTestBase):
         )
         self.assertEqual(result["updated_count"], 1)
         self.save_override.assert_called_once()
-        called_price = self.save_override.call_args.args[1]
-        self.assertEqual(called_price, 950)
+        self.assertEqual(self.save_override.call_args.args[1], 950)
 
 
 class TestExecuteUpdatesLogPersistence(ExecutorTestBase):
-    """Characterizes the current saved_margin placeholder (hardcoded 1500/2500 by
-    substring-matching the log message) — a known stub flagged for a real fix in Phase 4.
-    Слайс 7: _append_dumper_logs now requires a real store_id and writes to the DB,
-    not states/dumper_logs.json — isolate against a scratch SQLite DB, same pattern as
-    test_dumping_configs_store_scoping.py."""
+    """Слайс 7: _append_dumper_logs требует реальный store_id и пишет в БД —
+    изолируемся на временной SQLite, как в test_dumping_configs_store_scoping.py."""
 
     def setUp(self):
         super().setUp()
@@ -253,10 +186,9 @@ class TestExecuteUpdatesLogPersistence(ExecutorTestBase):
         self._session_patch.stop()
         super().tearDown()
 
+    @patch("backend.services.offer_sync.enqueue")
     @patch("backend.dumper.executor._load_mc_cookies")
-    def test_saved_margin_is_computed_honestly_from_price_diff(self, mock_cookies):
-        # Раньше saved_margin была захардкожена (1500/2500 ₸ по совпадению
-        # подстроки в тексте лога) — теперь это реальная разница new_price - min_price.
+    def test_saved_margin_is_computed_honestly_from_price_diff(self, mock_cookies, _enq):
         mock_cookies.return_value = {}
         task = make_task(new_price=990)
         task["config"] = make_config(min_price=800.0)
@@ -265,39 +197,18 @@ class TestExecuteUpdatesLogPersistence(ExecutorTestBase):
             store_id="store-test",
         )
         from backend.state_helpers import _load_dumper_logs
-        logs = _load_dumper_logs("store-test", limit=5)
-        self.assertEqual(logs[0]["saved_margin"], 190)
+        self.assertEqual(_load_dumper_logs("store-test", limit=5)[0]["saved_margin"], 190)
 
-    def test_saved_margin_is_zero_without_min_price_floor(self):
-        # Без настроенной минималки честная маржа — 0, а не выдуманное число.
-        task = make_task(new_price=990)
-        RateLimitExecutorWorker.execute_updates(
-            [task], self.save_override, rate_limit_delay=0, merchant_id="999",
-            store_id="store-test",
-        )
-        from backend.state_helpers import _load_dumper_logs
-        logs = _load_dumper_logs("store-test", limit=5)
-        self.assertEqual(logs[0]["saved_margin"], 0)
-
-    @patch("backend.state_helpers._load_master_stock_groups")
-    @patch("backend.dumper.executor.RateLimitExecutorWorker._update_kaspi_price_sync")
+    @patch("backend.services.offer_sync.enqueue")
     @patch("backend.dumper.executor._load_mc_cookies")
-    def test_pull_up_action_saved_margin_matches_price_diff(
-        self, mock_cookies, mock_update, mock_groups
-    ):
-        mock_cookies.return_value = {"mc-session": "s", "mc-sid": "sid"}
-        mock_groups.return_value = {}
-        mock_update.return_value = (True, "tx-1")
-        task = make_task(new_price=990)
-        task["config"] = make_config(min_price=800.0)
-        task["calculation_result"]["action"] = "PULL_UP_PRICE"
+    def test_saved_margin_is_zero_without_min_price_floor(self, mock_cookies, _enq):
+        mock_cookies.return_value = {}
         RateLimitExecutorWorker.execute_updates(
-            [task], self.save_override, rate_limit_delay=0, merchant_id="999",
-            store_id="store-test",
+            [make_task(new_price=990)], self.save_override, rate_limit_delay=0,
+            merchant_id="999", store_id="store-test",
         )
         from backend.state_helpers import _load_dumper_logs
-        logs = _load_dumper_logs("store-test", limit=5)
-        self.assertEqual(logs[0]["saved_margin"], 190)
+        self.assertEqual(_load_dumper_logs("store-test", limit=5)[0]["saved_margin"], 0)
 
 
 if __name__ == "__main__":

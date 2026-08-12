@@ -1,11 +1,4 @@
-import concurrent.futures
 import logging
-import json
-import os
-import requests
-import threading
-import time
-import random
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
@@ -182,6 +175,26 @@ class RateLimitExecutorWorker:
             return False, f"Исключение на Шаге 3: {e}"
 
     @staticmethod
+    def _priority_for(action: str, old_price: float, new_price: float, stock: int) -> int:
+        """
+        Во что вкладывать квоту, когда её на всех не хватает.
+
+        Снятие с продажи — всегда вперёд всех: если не отправить ноль, Kaspi
+        продолжит продавать товар, которого нет. Дальше идёт реальная потеря
+        позиции (деньги утекают прямо сейчас), потом подтяжка цены вверх
+        (заработок, но подождёт), потом всё остальное.
+        """
+        from backend.services.offer_sync import Priority
+
+        if int(stock) <= 0:
+            return Priority.WITHDRAW
+        if str(action).startswith("PULL_UP") or action == "SET_MAX_PRICE_SINGLE_SELLER":
+            return Priority.MARGIN
+        if new_price < old_price:
+            return Priority.LOSING
+        return Priority.MINOR
+
+    @staticmethod
     def execute_updates(
         update_queue: List[dict],
         save_override_func,
@@ -191,16 +204,24 @@ class RateLimitExecutorWorker:
         max_workers: int = 3,
     ) -> dict:
         """
-        Разбирает очередь задач и шлёт запросы на Kaspi MC API с ограниченной
-        конкурентностью (по умолчанию max_workers=3, тот же уровень, что уже
-        используется в routers/orders.py::pack_all_orders для assemble_cargo).
-        Каждый SKU независим по данным — но при первом устойчивом блоке
-        429/403 конкурентность останавливает СТАРТ новых задач (уже начатые
-        доделываются, прервать HTTP-запрос на середине нельзя и не нужно).
+        Разбирает очередь решений Мозга и ОБЪЯВЛЯЕТ желаемое состояние оффера
+        в backend/services/offer_sync.py. Ни одного запроса к Kaspi отсюда
+        больше не уходит.
 
-        max_workers=1 воспроизводит строго последовательное поведение (было
-        до Категории 1) — самый быстрый способ отката, если параллельность
-        когда-либо создаст проблемы с Kaspi.
+        Было (до 2026-08-12): на каждый SKU — 4 запроса подряд из пула в 3
+        потока, при 429 слепой sleep(60) и остановка всей очереди. На проде
+        это выродилось в мёртвую петлю: каждый 5-минутный цикл ловил 429 на
+        7-18-й секунде, применял 0 изменений, спал и ретраился, снова
+        выбирая окно квоты, — и так сутками.
+
+        Стало: решения складываются в очередь намерений, единый флашер раз в
+        45 секунд отбрасывает то, что ничего не меняет, сортирует остальное
+        по приоритету, отрезает по реальному остатку квоты и отправляет всё
+        одним batch-запросом. Отсутствие кук больше не теряет решения —
+        намерение переживёт восстановление сессии.
+
+        rate_limit_delay и max_workers сохранены в сигнатуре ради обратной
+        совместимости вызовов и больше ни на что не влияют.
         """
         # 1. Smart Debounce: исключаем дубликаты SKU, оставляя только самое последнее/свежее решение
         deduped_tasks = {}
@@ -211,41 +232,26 @@ class RateLimitExecutorWorker:
         if len(update_queue) != len(deduped_queue):
             logger.info(f"🧹 [Smart Debounce] Очередь оптимизирована: {len(update_queue)} -> {len(deduped_queue)} запросов.")
 
-        cookies = _load_mc_cookies(store_id=store_id)
-        if not cookies or "mc-session" not in cookies or "mc-sid" not in cookies:
-            # Кук нет вообще (не только истекли) — пробуем автообновить сессию сохранёнными
-            # email/паролем ещё до начала очереди, чтобы не пропускать весь батч зря.
-            from backend.state_helpers import _refresh_mc_session
-            if _refresh_mc_session(store_id=store_id):
-                cookies = _load_mc_cookies(store_id=store_id)
+        from backend.services import offer_sync
 
         log_messages = []
-        price_change_events = []  # реальные события реакции на конкурента (msg + честная saved_margin), см. фикс ниже
+        price_change_events = []  # реальные события реакции на конкурента (msg + честная saved_margin)
+
+        cookies = _load_mc_cookies(store_id=store_id)
         if not cookies or "mc-session" not in cookies or "mc-sid" not in cookies:
-            warn_msg = "⚠️ [Executor] Внимание: Отсутствуют или недействительны mc-session / mc-sid куки, автообновление сессии не удалось. Обновление цен в Kaspi MC пропущено (запись только в локальный фид). Требуется повторный вход в Kaspi MC."
+            # Кук нет — намерения всё равно ставим (их отправит флашер, когда
+            # сессия вернётся), но пользователю честно говорим, что нужен вход.
+            warn_msg = "⚠️ [Executor] Внимание: Отсутствуют или недействительны mc-session / mc-sid куки. Решения демпинга поставлены в очередь и уйдут в Kaspi MC после повторного входа."
             logger.warning(warn_msg)
             log_messages.append(warn_msg)
-            has_mc_auth = False
-        else:
-            has_mc_auth = True
 
-        # A.1: Мастер-Группы остатка грузятся ОДИН раз для всей очереди, а не
-        # заново на каждый SKU (было — 241-247 в старой версии) — вызывается
-        # 1 раз вместо N, независимо от конкурентности.
-        master_groups = {}
-        if has_mc_auth:
-            from backend.state_helpers import _load_master_stock_groups
-            master_groups = _load_master_stock_groups(store_id=store_id)
+        # Мастер-Группы остатка грузятся ОДИН раз на всю очередь, а не на каждый SKU.
+        from backend.state_helpers import _load_master_stock_groups
+        master_groups = _load_master_stock_groups(store_id=store_id)
 
         updated_count = 0
-        abort_event = threading.Event()
-        results_lock = threading.Lock()  # защищает log_messages/updated_count между потоками
 
-        def _process_one(task: dict) -> None:
-            nonlocal updated_count
-            if abort_event.is_set():
-                return
-
+        for task in deduped_queue:
             sku_key = task["sku"]
             new_price = task["new_price"]
             config = task["config"]
@@ -257,80 +263,43 @@ class RateLimitExecutorWorker:
 
             min_comp = res["bestCompetitorPrice"] or new_price
 
-            # Попытка моментального обновления через Kaspi MC API
-            tx_info = ""
-            if has_mc_auth:
-                store_full_id = p.get("storeId") or f"{merchant_id}_001"
-                store_suffix = store_full_id.split("_")[1] if "_" in store_full_id else "001"
+            store_full_id = p.get("storeId") or f"{merchant_id}_001"
+            store_suffix = store_full_id.split("_")[1] if "_" in store_full_id else "001"
 
-                # Проверяем, привязан ли данный SKU к Мастер-Группе остатка.
-                # Ниже/на "Стоп кол-ве" группы (см. stock_sync_worker.py) на
-                # Kaspi уходит 0 — иначе демпинг-цикл вернул бы карточку в
-                # продажу с реальным ненулевым остатком поверх Stop Qty Protection.
-                stock_val = int(p.get("stock", 10))
-                for mg in master_groups.values():
-                    if mg.get("is_active", True) and sku_key in mg.get("linked_skus", []):
-                        mg_stock = int(mg.get("shared_stock", stock_val))
-                        mg_stop_qty = int(mg.get("stop_qty", 5))
-                        stock_val = mg_stock if mg_stock > mg_stop_qty else 0
-                        break
+            # Привязан ли SKU к Мастер-Группе остатка. На/ниже "Стоп кол-ва"
+            # группы (см. stock_sync_worker.py) на Kaspi уходит 0 — иначе
+            # демпинг-цикл вернул бы карточку в продажу с реальным ненулевым
+            # остатком поверх Stop Qty Protection.
+            stock_val = int(p.get("stock", 10))
+            for mg in master_groups.values():
+                if mg.get("is_active", True) and sku_key in mg.get("linked_skus", []):
+                    mg_stock = int(mg.get("shared_stock", stock_val))
+                    mg_stop_qty = int(mg.get("stop_qty", 5))
+                    stock_val = mg_stock if mg_stock > mg_stop_qty else 0
+                    break
 
-                success, val = RateLimitExecutorWorker._update_kaspi_price_sync(
-                    merchant_uid=merchant_id,
-                    sku=p.get("merchantSku") or sku_key,
-                    master_sku=config.master_sku,
-                    model_name=p.get("name", "Товар"),
-                    new_price=int(new_price),
+            priority = RateLimitExecutorWorker._priority_for(
+                res.get("action", ""), config.my_current_price, new_price, stock_val
+            )
+            if store_id is not None:
+                offer_sync.enqueue(
+                    store_id,
+                    p.get("merchantSku") or sku_key,
+                    priority=priority,
+                    reason=f"dump:{res.get('action', '')}",
+                    price=int(new_price),
                     stock=stock_val,
-                    store_id_suffix=store_suffix,
+                    master_sku=config.master_sku,
+                    model=p.get("name", "Товар"),
+                    store_suffix=store_suffix,
                     city_id=config.city_code,
-                    internal_store_id=store_id
                 )
-
-                # 2. Backoff при 429 (Too Many Requests) / 403 (Forbidden/Rate limit)
-                if not success and val in ["429_BLOCKED", "403_BLOCKED"]:
-                    block_code = val.split("_")[0]
-                    cooldown_msg = f"⚠️ [Executor] Обнаружен блок {block_code} от Kaspi. Включаем Backoff: пауза 60 секунд для защиты от флуда..."
-                    logger.warning(cooldown_msg)
-                    with results_lock:
-                        log_messages.append(cooldown_msg)
-
-                    time.sleep(60)  # Cooldown pause — только этот поток, не все остальные
-
-                    # Повторная одиночная попытка после паузы
-                    success, val = RateLimitExecutorWorker._update_kaspi_price_sync(
-                        merchant_uid=merchant_id,
-                        sku=p.get("merchantSku") or sku_key,
-                        master_sku=config.master_sku,
-                        model_name=p.get("name", "Товар"),
-                        new_price=int(new_price),
-                        stock=int(p.get("stock", 75)),
-                        store_id_suffix=store_suffix,
-                        city_id=config.city_code,
-                        internal_store_id=store_id
-                    )
-
-                    if not success:
-                        abort_msg = f"🚨 [Executor] Повторный запрос после Backoff завершился неудачно ({val}). Останавливаем выполнение очереди!"
-                        logger.error(abort_msg)
-                        # Останавливаем СТАРТ новых задач — не отменяет уже
-                        # выполняющиеся (прервать HTTP-запрос на середине
-                        # нельзя, да и не нужно — он уже ушёл на Kaspi).
-                        abort_event.set()
-                        with results_lock:
-                            log_messages.append(abort_msg)
-                        return
-
-                if success:
-                    tx_info = f" (MC API: ✓, ID транзакции: {val})"
-                else:
-                    tx_info = f" (MC API: ✗ Ошибка: {val})"
-                    logger.warning(f"Ошибка моментального обновления цены для {sku_key}: {val}")
 
             msg = (
                 f"🚀 [Executor] Авто-демпинг {sku_key} (город {config.city_code}): "
                 f"{int(config.my_current_price)} ₸ -> {int(new_price)} ₸ "
-                f"(конкурент: {int(min_comp)} ₸, действие: {res['action']}, позиция: {res['currentPos']}){tx_info}"
+                f"(конкурент: {int(min_comp)} ₸, действие: {res['action']}, позиция: {res['currentPos']})"
+                f" (в очереди на отправку, приоритет {priority})"
             )
             logger.info(msg)
 
@@ -340,9 +309,6 @@ class RateLimitExecutorWorker:
             except Exception:
                 pass
 
-            # save_override_func -> state_helpers._save_override — сама
-            # защищена _overrides_file_lock от гонки на общем JSON-файле,
-            # безопасна к параллельному вызову для разных SKU.
             save_override_func(
                 sku_key,
                 int(new_price),
@@ -352,27 +318,14 @@ class RateLimitExecutorWorker:
             )
 
             # Честная сохранённая маржа — та же формула, что и total_saved_margin
-            # в brain.py (new_price - min_price), а не выдуманные 1500/2500 ₸,
-            # которые раньше подставлялись по совпадению подстроки в тексте лога.
+            # в brain.py (new_price - min_price).
             real_saved_margin = 0
             if config.min_price > 0 and new_price > config.min_price:
                 real_saved_margin = int(new_price - config.min_price)
 
-            with results_lock:
-                log_messages.append(msg)
-                price_change_events.append({"message": msg, "saved_margin": real_saved_margin})
-                updated_count += 1
-
-            # 3. Jitter & Micro-delays: случайная задержка 1.2 - 2.8 сек на
-            # ПОТОК (не на всю очередь) — сохраняет паттерн "не ровные
-            # интервалы", просто теперь по max_workers параллельным потокам.
-            if rate_limit_delay > 0:
-                time.sleep(random.uniform(1.2, 2.8))
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
-            futures = [pool.submit(_process_one, task) for task in deduped_queue]
-            for future in concurrent.futures.as_completed(futures):
-                future.result()  # пробрасывает исключение из потока, если оно было, а не глотает его
+            log_messages.append(msg)
+            price_change_events.append({"message": msg, "saved_margin": real_saved_margin})
+            updated_count += 1
 
         # Сохранение логов для радара (per-store, Слайс 5)
         try:
@@ -389,7 +342,7 @@ class RateLimitExecutorWorker:
         except Exception as e:
             logger.error(f"Failed to save dumper logs: {e}")
 
-        summary_msg = f"🚀 [Executor] Исполнение очереди завершено. Применено изменений: {updated_count}."
+        summary_msg = f"🚀 [Executor] Решения поставлены в очередь на отправку: {updated_count}."
         return {
             "success": True,
             "updated_count": updated_count,

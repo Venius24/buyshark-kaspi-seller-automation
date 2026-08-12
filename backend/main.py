@@ -88,6 +88,11 @@ async def startup_event():
     asyncio.create_task(start_telegram_bot_polling())
     asyncio.create_task(notification_flush_loop())
     asyncio.create_task(master_stock_radar_loop())
+    # Единый писатель цен/остатков в Kaspi: демпер и Мастер-Группы только
+    # объявляют желаемое состояние, отправляет их отсюда один флашер с учётом
+    # реальной квоты (250 офферов / 30 мин) — см. backend/services/offer_sync.py.
+    from backend.services.offer_sync import offer_sync_loop
+    asyncio.create_task(offer_sync_loop())
     asyncio.create_task(start_packaging_sync_loop(30))
     asyncio.create_task(start_health_check_loop(3600))
     asyncio.create_task(start_products_sync_loop(1800))

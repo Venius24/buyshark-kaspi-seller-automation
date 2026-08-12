@@ -85,7 +85,7 @@ async def run_scheduled_dumping_cycle() -> dict:
                     from backend.chatbot import notify_dispatch
                     await notify_dispatch.dispatch(
                         store.store_id, "money",
-                        f"📉 Демпинг подвинул цену у {updated} товар(ов)",
+                        f"📉 Демпинг поставил в очередь новую цену у {updated} товар(ов)",
                     )
                 except Exception as notif_ex:
                     logger.error(f"[Dumping] Не удалось отправить уведомление о демпинге: {notif_ex}")
