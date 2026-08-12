@@ -7,7 +7,7 @@
 но его собственный individual dumping_config (dumping_configs) как
 работал, так и работает.
 
-Revision ID: 030_master_stock_group_dumping_excluded_skus
+Revision ID: 030_stock_group_dump_exclusions
 Revises: 029_client_mailboxes
 Create Date: 2026-08-12 00:00:00.000000
 
@@ -16,7 +16,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = '030_master_stock_group_dumping_excluded_skus'
+revision: str = '030_stock_group_dump_exclusions'
 down_revision: Union[str, None] = '029_client_mailboxes'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
