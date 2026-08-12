@@ -56,6 +56,22 @@ class Subscription(Base):
     user: Mapped["User"] = relationship("User", back_populates="subscription")
 
 
+class IncomingEmail(Base):
+    """Письма, принятые Cloudflare Email Routing на *@buyshark.kz и
+    переданные вебхуком (backend/routers/webhooks_incoming_email.py) — в
+    первую очередь приветственные письма Kaspi MC с временными паролями для
+    сотрудников, создаваемых сервисом на себя (см. AUTOCONNECT_PLAN.md,
+    generate_employee_credentials() в kaspi_auto_connect.py)."""
+    __tablename__ = "incoming_emails"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    to_address: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    from_address: Mapped[str] = mapped_column(String(255), nullable=False)
+    subject: Mapped[Optional[str]] = mapped_column(String(998), nullable=True)
+    encrypted_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Store(Base):
     __tablename__ = "stores"
 

@@ -50,6 +50,7 @@ from backend.routers import (
     auth_v1, stores_v1, chats, autolist, auto_assembly, telegram_link,
 )
 from backend.routers import billing as billing_router, admin_billing, referral as referral_router
+from backend.routers import webhooks_incoming_email
 from backend.routers.public_api import groups as public_groups
 
 from backend.routers.dumping import background_dumping_loop
@@ -140,6 +141,7 @@ app.include_router(telegram_link.router)
 app.include_router(billing_router.router)
 app.include_router(admin_billing.router)
 app.include_router(referral_router.router)
+app.include_router(webhooks_incoming_email.router)
 
 if _perf_enabled():
     from backend.perf.router import router as perf_router
