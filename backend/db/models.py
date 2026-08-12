@@ -56,6 +56,29 @@ class Subscription(Base):
     user: Mapped["User"] = relationship("User", back_populates="subscription")
 
 
+class ClientMailbox(Base):
+    """Скелет провижининга персональных адресов на *@buyshark.kz — по одному
+    на каждого клиента/сотрудника, которого сервис заводит на себя в Kaspi MC
+    (см. AUTOCONNECT_PLAN.md). Реального клиента под это пока нет, поэтому
+    ничего сюда не пишет — это задел на будущее: когда Фаза 1 автоподключения
+    будет реализована, create_employee_and_fetch_token() должен вызывать
+    provision_mailbox() (backend/services/client_mailbox.py) ДО создания
+    сотрудника в кабинете Kaspi, чтобы иметь готовый уникальный email и запись
+    для последующего сопоставления с IncomingEmail.mailbox_id.
+
+    owner_user_id, а не store_id — потому что на момент провижининга (SMS-вход
+    владельца) магазина в БД ещё нет, есть только залогиненный User сервиса
+    buyshark. store_id проставляется позже, когда Store появляется (Фаза 2)."""
+    __tablename__ = "client_mailboxes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    owner_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    store_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("stores.id", ondelete="SET NULL"), nullable=True)
+    label: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class IncomingEmail(Base):
     """Письма, принятые Cloudflare Email Routing на *@buyshark.kz и
     переданные вебхуком (backend/routers/webhooks_incoming_email.py) — в
@@ -69,6 +92,10 @@ class IncomingEmail(Base):
     from_address: Mapped[str] = mapped_column(String(255), nullable=False)
     subject: Mapped[Optional[str]] = mapped_column(String(998), nullable=True)
     encrypted_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    # Проставляется вебхуком при получении, если to_address совпал с
+    # известным ClientMailbox.email — так письмо сразу привязано к клиенту,
+    # без отдельного шага сопоставления.
+    mailbox_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("client_mailboxes.id", ondelete="SET NULL"), nullable=True)
     received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

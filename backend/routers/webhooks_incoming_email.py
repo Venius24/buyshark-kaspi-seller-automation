@@ -15,10 +15,11 @@ from email import message_from_string
 from email.header import decode_header
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.database import get_db
-from backend.db.models import IncomingEmail
+from backend.db.models import IncomingEmail, ClientMailbox
 from backend.security.crypto import encrypt_data
 
 logger = logging.getLogger(__name__)
@@ -62,14 +63,22 @@ async def receive_incoming_email(
     except Exception:
         logger.exception("Не удалось распарсить subject входящего письма")
 
+    mailbox = (await db.execute(
+        select(ClientMailbox).where(ClientMailbox.email == to_address)
+    )).scalar_one_or_none()
+
     record = IncomingEmail(
         to_address=to_address,
         from_address=from_address,
         subject=subject,
         encrypted_raw=encrypt_data(raw),
+        mailbox_id=mailbox.id if mailbox else None,
     )
     db.add(record)
     await db.flush()
 
-    logger.info(f"📧 Входящее письмо: to={to_address} from={from_address} subject={subject!r}")
-    return {"success": True, "id": record.id}
+    logger.info(
+        f"📧 Входящее письмо: to={to_address} from={from_address} subject={subject!r} "
+        f"mailbox_matched={bool(mailbox)}"
+    )
+    return {"success": True, "id": record.id, "mailbox_matched": bool(mailbox)}
