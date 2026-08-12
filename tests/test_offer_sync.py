@@ -310,6 +310,40 @@ class TestFlush(OfferSyncDBTestCase):
         self.assertIsNotNone(row.desired_at)
         self.assertEqual(row.desired_stock, 7)
 
+    def test_verification_finds_the_exact_sku_among_prefix_matches(self):
+        # t= у Kaspi — поиск по подстроке: "H422-0002" возвращает и
+        # "H422-0002-3", и "H422-0002-7". При l=1 точного совпадения в выдаче
+        # не оказывалось и намерение висело в очереди вечно.
+        offer_sync.enqueue("s1", "H422-0002", stock=994, reason="group:g1")
+        listing = MagicMock()
+        listing.status_code = 200
+        listing.json.return_value = {"data": [
+            {"sku": "H422-0002-3", "price": 741, "masterSku": "M3",
+             "availabilities": [{"available": "yes", "storeId": "999_001", "stockCount": 998}]},
+            {"sku": "H422-0002-7", "price": 499, "masterSku": "M7",
+             "availabilities": [{"available": "yes", "storeId": "999_001", "stockCount": 998}]},
+            {"sku": "H422-0002", "price": 990, "masterSku": "M0", "title": "Стойка",
+             "availabilities": [{"available": "yes", "storeId": "999_001", "stockCount": 1011}]},
+        ]}
+
+        def route(method, url, **kwargs):
+            if method == "GET":
+                self.assertIn("l=50", url)
+                return listing
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.json.return_value = [{"id": "tx0"}]
+            return resp
+
+        with patch("backend.state_helpers._mc_api_request", side_effect=route) as req, \
+             patch.object(offer_sync.quota, "get", return_value=QuotaState(limit=250, used=0, known=True)):
+            stats = offer_sync.flush_store("s1", "999")
+        self.assertEqual(stats["verified"], 1)
+        self.assertEqual(stats["written"], 1)
+        body = req.call_args.kwargs["json"]
+        self.assertEqual(body[0]["sku"], "H422-0002")
+        self.assertEqual(body[0]["cityPrices"][0]["value"], 990)
+
     def test_missing_baseline_is_fetched_then_written(self):
         offer_sync.enqueue("s1", "SKU-NEW", stock=7, reason="group:g1")
         listing = MagicMock()

@@ -36,7 +36,13 @@ from backend.services.kaspi_quota import quota
 logger = logging.getLogger(__name__)
 
 BATCH_URL = "https://mc.shop.kaspi.kz/pricefeed/upload/merchant/process/process/batch"
-OFFER_LIST_URL = "https://mc.shop.kaspi.kz/bff/offer-view/list?m={muid}&p=0&l=1&t={sku}"
+# l=50, а не 1: t= — это ПОИСК ПО ПОДСТРОКЕ, а не выборка по ключу. Запрос по
+# "H422-0002" находит ещё и H422-0002-3, -4, -5, -7..., и при l=1 в ответ
+# попадала случайная из них, точного совпадения в выдаче не оказывалось, и
+# сверка вечно возвращала None: намерение по такому SKU висело в очереди
+# бесконечно (замечено на проде 2026-08-12 — H422-0002 не мог сверитьcя
+# десятки флашей подряд). Запрос всё так же один и квоту не тратит.
+OFFER_LIST_URL = "https://mc.shop.kaspi.kz/bff/offer-view/list?m={muid}&p=0&l=50&t={sku}"
 
 _HEADERS = {
     "Accept": "application/json, text/plain, */*",
