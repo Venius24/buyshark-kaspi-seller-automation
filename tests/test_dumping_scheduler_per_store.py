@@ -148,5 +148,19 @@ class TestRunScheduledDumpingCycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["stores_processed"], 2)
 
 
+class TestDumpingIntervalIsFifteenMinutes(unittest.TestCase):
+    """2026-08-12: interval raised from 5 to 15 minutes to cut Kaspi offer-quota
+    consumption for stores with many active dumping SKUs (see HANDOFF 3.42)."""
+
+    def test_interval_centers_on_900_seconds_with_90s_jitter(self):
+        samples = [dumping._next_interval_seconds() for _ in range(200)]
+        for s in samples:
+            self.assertGreaterEqual(s, 900.0 - 90.0)
+            self.assertLessEqual(s, 900.0 + 90.0)
+        # Sanity: jitter is actually applied (not a constant), and it's not
+        # accidentally still centered on the old 5-minute value.
+        self.assertGreater(max(samples) - min(samples), 10.0)
+
+
 if __name__ == "__main__":
     unittest.main()

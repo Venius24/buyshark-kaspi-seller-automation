@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/dumping", tags=["dumping"])
 class _SchedulerState:
     def __init__(self):
         self.last_run_timestamp: float = 0.0
-        self.next_run_timestamp: float = time.time() + 300.0
+        self.next_run_timestamp: float = time.time() + 900.0
         self.is_running: bool = False
 
 # Слайс 5: раньше был единый class-level DumpingSchedulerState — "последний
@@ -69,7 +69,7 @@ async def run_scheduled_dumping_cycle() -> dict:
     total_updated = 0
     stores = await list_active_stores()
 
-    logger.info(f"🤖 [Scheduler] Running automated 5-minute price dumper cycle for {len(stores)} store(s)...")
+    logger.info(f"🤖 [Scheduler] Running automated 15-minute price dumper cycle for {len(stores)} store(s)...")
     for store in stores:
         try:
             from backend.billing import enforcement as billing_enforcement
@@ -97,15 +97,18 @@ async def run_scheduled_dumping_cycle() -> dict:
     return {"updated_count": total_updated, "stores_processed": len(stores)}
 
 def _next_interval_seconds() -> float:
-    # Джиттер ±45с вокруг 5 минут: ровные тики раз в 300с — заметный для
-    # антибот-систем паттерн бота, случайный разброс делает трафик менее
-    # предсказуемым (см. разбор IP-бана Kaspi, 2026-07-30).
-    return 300.0 + random.uniform(-45.0, 45.0)
+    # Джиттер ±90с вокруг 15 минут: ровные тики — заметный для антибот-систем
+    # паттерн бота, случайный разброс делает трафик менее предсказуемым (см.
+    # разбор IP-бана Kaspi, 2026-07-30). Интервал поднят с 5 до 15 минут
+    # 2026-08-12 — при 26 активных SKU в демпинге 5-минутный тик мог утроить
+    # свой же расход квоты (до 6 циклов на 30-минутное окно Kaspi вместо 2),
+    # см. HANDOFF 3.42.
+    return 900.0 + random.uniform(-90.0, 90.0)
 
 async def background_dumping_loop():
-    logger.info("Background price dumping loop initialized (~5-minute interval, jittered).")
+    logger.info("Background price dumping loop initialized (~15-minute interval, jittered).")
     global_state = _get_scheduler_state(None)
-    # При запуске ставим первую авто-проверку через ~5 минут
+    # При запуске ставим первую авто-проверку через ~15 минут
     global_state.next_run_timestamp = time.time() + _next_interval_seconds()
 
     while True:
@@ -211,7 +214,7 @@ async def run_price_dumping(ctx: StoreContext = Depends(get_store_context_billed
             raise HTTPException(status_code=400, detail=f"Ошибка выполнения демпинга: {e}")
 
         # Сбрасываем таймер следующего запуска общего цикла, так как только что выполнили
-        _get_scheduler_state(None).next_run_timestamp = time.time() + 300.0
+        _get_scheduler_state(None).next_run_timestamp = time.time() + _next_interval_seconds()
         store_state.last_run_timestamp = time.time()
         return res
     finally:

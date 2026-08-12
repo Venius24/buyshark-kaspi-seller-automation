@@ -51,7 +51,7 @@ export const PriceWarSummary: React.FC<{ data: PriceWarStats }> = ({ data }) => 
     >
       {!hasData ? (
         <div style={{ padding: '12px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-          Сводка заполнится после первого цикла демпинга (~5 минут)
+          Сводка заполнится после первого цикла демпинга (~15 минут)
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
