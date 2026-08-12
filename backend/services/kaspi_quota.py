@@ -26,6 +26,7 @@ Kaspi отдаёт собственное состояние квоты — эт
 """
 import datetime
 import logging
+import re
 import threading
 from dataclasses import dataclass
 from typing import Optional
@@ -45,6 +46,10 @@ P0_RESERVE = 30
 # Насколько долго доверяем прочитанному состоянию квоты, прежде чем перечитать.
 _QUOTA_TTL_SECONDS = 20.0
 
+# Предельный возраст снимка, который ещё имеет смысл показывать в UI. Кэш
+# наполняет флашер раз в 45 секунд; старше — значит писатель встал.
+_PEEK_MAX_AGE_SECONDS = 180.0
+
 _HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json",
@@ -58,6 +63,17 @@ _HEADERS = {
 }
 
 
+def _parse_window_seconds(limit_time: Optional[str]) -> float:
+    """'30m' -> 1800.0. Неизвестный формат -> 30 минут."""
+    if not limit_time:
+        return 1800.0
+    match = re.fullmatch(r"\s*(\d+)\s*([smhd])\s*", str(limit_time).lower())
+    if not match:
+        return 1800.0
+    value, unit = int(match.group(1)), match.group(2)
+    return float(value * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit])
+
+
 @dataclass
 class QuotaState:
     """Снимок окна квоты OFFER для одного мерчанта."""
@@ -67,6 +83,7 @@ class QuotaState:
     reset_at: Optional[datetime.datetime] = None
     fetched_at: Optional[datetime.datetime] = None
     known: bool = False  # False = прочитать не удалось, работаем по консервативной оценке
+    window_seconds: float = 1800.0
 
     @property
     def remaining(self) -> int:
@@ -82,11 +99,28 @@ class QuotaState:
         return max(0, self.remaining - P0_RESERVE)
 
     def seconds_until_reset(self, now: Optional[datetime.datetime] = None) -> float:
-        """Сколько секунд до обнуления счётчика. Без даты — консервативные 30 минут."""
+        """
+        Сколько секунд до обнуления счётчика.
+
+        Kaspi отдаёт expirationDate БЕЗ смещения зоны и в своём локальном
+        времени (Алматы, UTC+5), а прод-сервер живёт в UTC — прямое вычитание
+        давало +5 часов (наблюдалось живьём: 18394 секунды при окне в 30
+        минут). Поэтому результат приводим к длине окна: смещение зоны всегда
+        кратно часу, значит остаток от деления на час и есть настоящее время
+        до сброса. Значение не гейтит записи (для этого есть remaining) —
+        только логи и индикатор, поэтому в сомнительном случае округляем в
+        большую сторону, к полному окну.
+        """
         if not self.reset_at:
-            return 1800.0
+            return self.window_seconds
         now = now or datetime.datetime.now()
-        return max(0.0, (self.reset_at - now).total_seconds())
+        raw = (self.reset_at - now).total_seconds()
+        if raw < 0:
+            return 0.0
+        if raw <= self.window_seconds:
+            return raw
+        normalized = raw % 3600.0
+        return normalized if normalized <= self.window_seconds else self.window_seconds
 
 
 def _parse_quota(payload: dict) -> QuotaState:
@@ -113,6 +147,7 @@ def _parse_quota(payload: dict) -> QuotaState:
         reset_at=reset_at,
         fetched_at=datetime.datetime.now(),
         known=True,
+        window_seconds=_parse_window_seconds(payload.get("limitTime")),
     )
 
 
@@ -188,15 +223,15 @@ class KaspiOfferQuota:
         """
         with self._lock:
             state = self._states.get(store_id)
-        if not state:
+        if not state or not state.fetched_at:
             return None
-        if state.reset_at and datetime.datetime.now() >= state.reset_at:
-            # Окно уже обнулилось — показывать старый израсходованный счётчик
-            # было бы враньём, а перечитывать отсюда нельзя.
-            return QuotaState(
-                limit=state.limit, used=0, reset_at=None,
-                fetched_at=state.fetched_at, known=True,
-            )
+        # Свежесть меряем по возрасту снимка, а НЕ по reset_at: тот приходит в
+        # алматинском времени без смещения и с UTC-сервером напрямую не
+        # сравнивается (см. seconds_until_reset). Флашер обновляет кэш раз в 45
+        # секунд, поэтому протухший снимок означает, что писатель встал — и
+        # честнее не показать ничего, чем показать залипшие цифры.
+        if (datetime.datetime.now() - state.fetched_at).total_seconds() > _PEEK_MAX_AGE_SECONDS:
+            return None
         return state
 
     def consume(self, store_id, count: int) -> None:

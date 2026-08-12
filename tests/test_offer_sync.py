@@ -16,7 +16,9 @@ from unittest.mock import MagicMock, patch
 sys.path.append(os.getcwd())
 
 from backend.services import offer_sync
-from backend.services.kaspi_quota import KaspiOfferQuota, QuotaState, P0_RESERVE, _parse_quota
+from backend.services.kaspi_quota import (
+    KaspiOfferQuota, QuotaState, P0_RESERVE, _parse_quota, _parse_window_seconds,
+)
 from backend.services.offer_sync import Priority, should_push_stock, stock_step
 
 
@@ -451,11 +453,50 @@ class TestQuotaPeekForUI(unittest.TestCase):
         self.assertEqual(snap.used, 46)
         self.assertEqual(snap.remaining, 204)
 
-    def test_peek_zeroes_a_window_that_already_reset(self):
-        # Показывать израсходованный счётчик от прошлого окна — враньё, а
-        # перечитать из peek() нельзя.
+    def test_peek_hides_a_stale_snapshot(self):
+        # Флашер обновляет кэш раз в 45с. Если снимок протух — писатель встал,
+        # и честнее не показать ничего, чем залипшие цифры.
         q = KaspiOfferQuota()
-        past = datetime.datetime.now() - datetime.timedelta(seconds=1)
-        q._states["store-1"] = QuotaState(limit=250, used=250, reset_at=past,
-                                          fetched_at=datetime.datetime.now(), known=True)
-        self.assertEqual(q.peek("store-1").used, 0)
+        q._states["store-1"] = QuotaState(
+            limit=250, used=250, reset_at=None,
+            fetched_at=datetime.datetime.now() - datetime.timedelta(minutes=10), known=True,
+        )
+        self.assertIsNone(q.peek("store-1"))
+
+
+class TestResetTimeTimezone(unittest.TestCase):
+    """
+    Kaspi отдаёт expirationDate в алматинском времени (UTC+5) БЕЗ смещения, а
+    прод-сервер живёт в UTC. Наблюдалось живьём: 18394 секунды до сброса при
+    длине окна в 30 минут.
+    """
+
+    def test_window_length_is_parsed(self):
+        self.assertEqual(_parse_window_seconds("30m"), 1800.0)
+        self.assertEqual(_parse_window_seconds("2h"), 7200.0)
+        self.assertEqual(_parse_window_seconds(None), 1800.0)
+        self.assertEqual(_parse_window_seconds("непонятно"), 1800.0)
+
+    def test_five_hour_skew_is_normalized_to_the_window(self):
+        now = datetime.datetime(2026, 8, 12, 13, 28, 0)          # UTC
+        reset_almaty = datetime.datetime(2026, 8, 12, 18, 34, 36)  # тот же момент +5ч
+        state = QuotaState(reset_at=reset_almaty, window_seconds=1800.0)
+        self.assertAlmostEqual(state.seconds_until_reset(now), 396.0, delta=2)
+
+    def test_no_skew_passes_through_untouched(self):
+        now = datetime.datetime(2026, 8, 12, 13, 28, 0)
+        state = QuotaState(reset_at=now + datetime.timedelta(minutes=7), window_seconds=1800.0)
+        self.assertAlmostEqual(state.seconds_until_reset(now), 420.0, delta=1)
+
+    def test_past_reset_is_zero(self):
+        now = datetime.datetime(2026, 8, 12, 13, 28, 0)
+        state = QuotaState(reset_at=now - datetime.timedelta(minutes=1))
+        self.assertEqual(state.seconds_until_reset(now), 0.0)
+
+    def test_window_length_survives_parsing(self):
+        state = _parse_quota({
+            "limitTime": "30m", "limits": {"OFFER": 250},
+            "statistics": [{"documentType": "OFFER", "uploadedCount": 1,
+                            "expirationDate": "2026-08-12T18:34:36.000"}],
+        })
+        self.assertEqual(state.window_seconds, 1800.0)
