@@ -573,19 +573,24 @@ async def run_offer_sync_cycle() -> dict:
     import asyncio
 
     from backend.security.store_context import list_active_stores
-    from backend.dumper.config import discover_merchant_id
 
     totals = {"candidates": 0, "no_op": 0, "written": 0, "deferred": 0, "verified": 0, "errors": 0}
     for store in await list_active_stores():
         try:
-            merchant_uid = await asyncio.to_thread(discover_merchant_id, store.token)
-            if not merchant_uid:
+            # merchant_id берём из БД (Store.merchant_id), а НЕ через
+            # discover_merchant_id: тот ходит в Kaspi (/pointofservices, на
+            # проде стабильно отдаёт 500, дальше фоллбек через историю
+            # заказов). Тик раз в 45 секунд на каждый стор превратил бы это в
+            # постоянный лишний трафик к Kaspi — ровно тот паттерн, за который
+            # IP этого VPS уже банили (см. HANDOFF 3.8/3.9).
+            merchant_uid = getattr(store, "merchant_id", None)
+            if not merchant_uid or not str(merchant_uid).isdigit():
                 logger.warning(
-                    "[OfferSync] Стор %s: merchant_id не определяется, пропускаем флаш.",
-                    store.store_id,
+                    "[OfferSync] Стор %s: merchant_id в БД отсутствует или не числовой (%r), пропускаем флаш.",
+                    store.store_id, merchant_uid,
                 )
                 continue
-            stats = await asyncio.to_thread(flush_store, store.store_id, merchant_uid)
+            stats = await asyncio.to_thread(flush_store, store.store_id, str(merchant_uid))
             for k in totals:
                 totals[k] += stats.get(k, 0)
         except Exception as e:

@@ -397,3 +397,33 @@ class TestAntiFlap(OfferSyncDBTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCycleUsesDbMerchantId(unittest.IsolatedAsyncioTestCase):
+    """
+    Флашер тикает раз в 45 секунд на каждый стор. Резолвить merchant_id через
+    Kaspi на каждом тике нельзя: discover_merchant_id ходит в
+    /pointofservices (на проде стабильно 500) и дальше в историю заказов —
+    это ровно тот постоянный лишний трафик, за который IP VPS уже банили
+    (HANDOFF 3.8/3.9). Берём из Store.merchant_id.
+    """
+
+    async def test_merchant_id_comes_from_db_without_touching_kaspi(self):
+        from types import SimpleNamespace
+
+        store = SimpleNamespace(store_id="s1", token="tok", merchant_id="20186986")
+        with patch("backend.security.store_context.list_active_stores", return_value=[store]), \
+             patch("backend.dumper.config.discover_merchant_id") as discover, \
+             patch.object(offer_sync, "flush_store", return_value={"written": 0}) as flush:
+            await offer_sync.run_offer_sync_cycle()
+        discover.assert_not_called()
+        flush.assert_called_once_with("s1", "20186986")
+
+    async def test_store_without_numeric_merchant_id_is_skipped(self):
+        from types import SimpleNamespace
+
+        store = SimpleNamespace(store_id="s1", token="tok", merchant_id="m_deadbeef")
+        with patch("backend.security.store_context.list_active_stores", return_value=[store]), \
+             patch.object(offer_sync, "flush_store") as flush:
+            await offer_sync.run_offer_sync_cycle()
+        flush.assert_not_called()
