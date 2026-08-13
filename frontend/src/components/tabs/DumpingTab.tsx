@@ -3,7 +3,7 @@ import type { Product, DumpingConfig, KaspiQuotaStatus } from '../../types';
 import { Pagination } from '../shared/Pagination';
 import { ProductCardHeader } from '../shared/ProductCardHeader';
 import { PriceWarSummary } from '../PriceWarSummary';
-import { usePriceWarStats } from '../../hooks/usePriceWarStats';
+import { usePriceWarStats, leaderPrice, type PriceWarProduct } from '../../hooks/usePriceWarStats';
 
 const EMPTY_CONFIG: DumpingConfig = {
   min_price: 0, max_price: 0, dump_step: 2, enabled: false,
@@ -104,6 +104,8 @@ export function DumpingTab({
   onPageChange,
 }: DumpingTabProps) {
   const priceWarStats = usePriceWarStats();
+  const priceWarBySku: Record<string, PriceWarProduct> = {};
+  priceWarStats.products.forEach((p) => { priceWarBySku[p.sku] = p; });
   return (
     <>
       <div style={{ marginBottom: '20px' }}>
@@ -339,6 +341,8 @@ export function DumpingTab({
               const isDumpingActive = hasConfig && cfg.enabled && cfg.mode !== 'OFF';
               const dStatus = product.dumping_status || (isDumpingActive ? 'WINNING_1ST' : 'OFF');
               const selectedMode = selectedModes[sku] ?? (cfg.mode || 'TOP_1');
+              const pw = priceWarBySku[product.merchantSku || ''] || priceWarBySku[sku] || priceWarBySku[product.kaspiSku || ''];
+              const pwLeaderPrice = pw ? leaderPrice(pw) : null;
 
               return (
                 <div
@@ -371,6 +375,12 @@ export function DumpingTab({
                     </div>
 
                     <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '16px' }}>
+                      <div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Цена 1-го места:</div>
+                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#9ca3af' }}>
+                          {pwLeaderPrice !== null ? `${pwLeaderPrice.toLocaleString('ru-RU')} ₸` : '—'}
+                        </div>
+                      </div>
                       <div>
                         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Текущая цена:</div>
                         <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>

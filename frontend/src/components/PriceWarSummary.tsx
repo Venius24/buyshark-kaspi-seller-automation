@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Swords } from 'lucide-react';
 import { ExpandableCard } from './ExpandableCard';
-import type { PriceWarStats } from '../hooks/usePriceWarStats';
+import { leaderPrice, type PriceWarStats } from '../hooks/usePriceWarStats';
 
 type SortKey = 'rank_worst' | 'rank_best' | 'gap';
 
@@ -76,13 +76,28 @@ export const PriceWarSummary: React.FC<{ data: PriceWarStats }> = ({ data }) => 
             ))}
           </div>
 
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr auto auto auto auto',
+              gap: '12px',
+              padding: '0 10px',
+            }}
+          >
+            <span />
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)', textAlign: 'right', whiteSpace: 'nowrap' }}>Цена 1-го места</span>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)', textAlign: 'right', whiteSpace: 'nowrap' }}>Текущая цена</span>
+            <span />
+            <span />
+          </div>
+
           <div style={{ maxHeight: '360px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {sorted.map((p) => (
               <div
                 key={p.sku}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '1fr auto auto auto',
+                  gridTemplateColumns: '1fr auto auto auto auto',
                   gap: '12px',
                   alignItems: 'center',
                   padding: '8px 10px',
@@ -113,7 +128,10 @@ export const PriceWarSummary: React.FC<{ data: PriceWarStats }> = ({ data }) => 
                     )}
                   </div>
                 </div>
-                <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: '#e5e7eb', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: '#9ca3af', whiteSpace: 'nowrap', textAlign: 'right' }}>
+                  {leaderPrice(p) !== null ? `${leaderPrice(p)!.toLocaleString('ru-RU')} ₸` : '—'}
+                </div>
+                <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: '#e5e7eb', whiteSpace: 'nowrap', textAlign: 'right' }}>
                   {p.our_price.toLocaleString('ru-RU')} ₸
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>

@@ -24,6 +24,10 @@ export interface PriceWarStats {
   products: PriceWarProduct[];
 }
 
+// Цена лидера рынка: если 1-е место — это мы, лидер = наша цена, иначе — лучший конкурент.
+export const leaderPrice = (p: Pick<PriceWarProduct, 'our_rank' | 'our_price' | 'best_competitor_price'>): number | null =>
+  p.our_rank === 1 ? p.our_price : p.best_competitor_price;
+
 const EMPTY_PRICE_WAR: PriceWarStats = {
   summary: { total_in_war: 0, avg_rank: 0, winning_count: 0, losing_count: 0 },
   products: [],
