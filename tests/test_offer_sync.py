@@ -439,6 +439,97 @@ class TestQuotaHeartbeatOnIdleStore(OfferSyncDBTestCase):
         get.assert_called_once_with("s1", "999")
 
 
+class TestUnconfirmedWriteIsRechecked(OfferSyncDBTestCase):
+    """Регрессия 2026-08-13: ручка batch асинхронная, 200 = "принято", не
+    "применено". Батч из 105 офферов ушёл в 19:10 с 200 и без ошибок, но часть
+    строк Kaspi не применил (X471-0018-6: у нас 471 ₸, на карточке 720 ₸).
+    Мы копировали отправленное значение в фактическое состояние, и позиция
+    залипала навсегда: демпер решает, флашер гасит вхолостую, цена старая.
+    """
+
+    def _seed_unconfirmed(self, sku="SKU-1", pushed=471, age_seconds=1000):
+        from backend.db.models import KaspiOfferSyncDB
+        from sqlalchemy.orm import Session
+        pushed_at = datetime.datetime.utcnow() - datetime.timedelta(seconds=age_seconds)
+        with Session(self._engine) as s:
+            s.add(KaspiOfferSyncDB(
+                store_id="s1", sku=sku, master_sku="M1", model="Товар",
+                store_suffix="001", city_id="750000000",
+                pushed_price=pushed, pushed_stock=10, pushed_at=pushed_at,
+                kaspi_price=None, kaspi_stock=None, kaspi_seen_at=None,
+                priority=Priority.MINOR,
+            ))
+            s.commit()
+
+    def _listing(self, price):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"data": [{
+            "sku": "SKU-1", "price": price, "masterSku": "M1", "title": "Товар",
+            "availabilities": [{"available": "yes", "storeId": "999_001", "stockCount": 10}],
+        }]}
+        return resp
+
+    def test_repeat_of_unapplied_price_is_verified_and_resent(self):
+        self._seed_unconfirmed(pushed=471)
+        offer_sync.enqueue("s1", "SKU-1", price=471, stock=10)
+
+        batch = MagicMock(status_code=200)
+        batch.json.return_value = [{"id": "tx0"}]
+
+        def route(method, url, **kwargs):
+            return self._listing(720) if method == "GET" else batch
+
+        with patch("backend.state_helpers._mc_api_request", side_effect=route) as req, \
+             patch.object(offer_sync.quota, "get", return_value=QuotaState(limit=250, used=0, known=True)):
+            stats = offer_sync.flush_store("s1", "999")
+
+        self.assertEqual(stats["verified"], 1)
+        self.assertEqual(stats["written"], 1)
+        self.assertEqual(stats["no_op"], 0)
+        body = req.call_args.kwargs["json"]
+        self.assertEqual(body[0]["cityPrices"][0]["value"], 471)
+
+    def test_repeat_of_applied_price_is_dropped_after_verification(self):
+        self._seed_unconfirmed(pushed=471)
+        offer_sync.enqueue("s1", "SKU-1", price=471, stock=10)
+
+        with patch("backend.state_helpers._mc_api_request", return_value=self._listing(471)), \
+             patch.object(offer_sync.quota, "get", return_value=QuotaState(limit=250, used=0, known=True)):
+            stats = offer_sync.flush_store("s1", "999")
+
+        self.assertEqual(stats["verified"], 1)
+        self.assertEqual(stats["no_op"], 1)
+        self.assertEqual(stats["written"], 0)
+
+    def test_recent_write_is_not_rechecked(self):
+        # Сразу после записи Kaspi ещё обрабатывает батч — ходить незачем.
+        self._seed_unconfirmed(pushed=471, age_seconds=60)
+        offer_sync.enqueue("s1", "SKU-1", price=471, stock=10)
+
+        with patch("backend.state_helpers._mc_api_request") as req, \
+             patch.object(offer_sync.quota, "get", return_value=QuotaState(limit=250, used=0, known=True)):
+            stats = offer_sync.flush_store("s1", "999")
+
+        req.assert_not_called()
+        self.assertEqual(stats["no_op"], 1)
+
+    def test_write_does_not_claim_kaspi_state_as_seen(self):
+        self._seed_unconfirmed(pushed=1000, age_seconds=60)
+        offer_sync.enqueue("s1", "SKU-1", price=900, stock=10)
+
+        batch = MagicMock(status_code=200)
+        batch.json.return_value = [{"id": "tx0"}]
+        with patch("backend.state_helpers._mc_api_request", return_value=batch), \
+             patch.object(offer_sync.quota, "get", return_value=QuotaState(limit=250, used=0, known=True)):
+            offer_sync.flush_store("s1", "999")
+
+        row = self._row()
+        self.assertEqual(row.pushed_price, 900)
+        self.assertIsNone(row.kaspi_price)
+        self.assertIsNone(row.kaspi_seen_at)
+
+
 class TestNeverWriteZeroPrice(OfferSyncDBTestCase):
     """
     Регрессия на инцидент 2026-08-12: карточки H422-0002-7 и H422-0002-9 были

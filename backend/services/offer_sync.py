@@ -94,6 +94,19 @@ BATCH_CHUNK = 50
 MAX_VERIFY_PER_FLUSH = 40
 # Насколько долго доверяем ранее увиденному состоянию оффера на Kaspi.
 KASPI_STATE_TTL_SECONDS = 1800.0
+# Через сколько после НАШЕЙ записи (не подтверждённой чтением) перепроверяем
+# оффер, если движок снова просит ровно ту же цену.
+#
+# Ручка batch асинхронная: 200 значит "принято", а не "применено". На проде
+# 2026-08-13 батч из 105 офферов ушёл в 19:10 с 200 и без ошибок, но часть
+# строк Kaspi так и не применил (X471-0018-6: у нас записано 471 ₸, на
+# карточке 720 ₸). Мы же после 200 помечали состояние достигнутым — и каждое
+# следующее одинаковое намерение гасилось как "нечего менять". Позиция
+# залипала навсегда: демпер решает, флашер гасит, цена стоит старая.
+#
+# Значение = один цикл демпинга: раньше перепроверять бессмысленно (Kaspi
+# ещё обрабатывает), позже — деньги подтекают дольше нужного.
+UNCONFIRMED_RECHECK_SECONDS = 900.0
 
 # Раньше quota.get() вызывался ТОЛЬКО когда в этом флаше была хотя бы одна
 # запись на отправку — на тихом сторе (демпинг выключен по всем SKU, группы
@@ -401,6 +414,35 @@ def _usable_price(price) -> Optional[int]:
 INCOMPLETE = "incomplete"
 
 
+def _looks_like_unconfirmed_noop(row, base_price, base_stock, was_fresh: bool) -> bool:
+    """
+    Похоже ли, что намерение сейчас погасится вхолостую об НЕподтверждённую
+    запись — то есть об наше же "мы это уже отправили", которое никто не
+    перечитывал у Kaspi.
+
+    Только такие строки и стоит сверять дополнительно: если движок просит
+    новую цену, она уйдёт и без сверки; а вот повтор ровно той же цены — это
+    либо честное "всё уже так" (сверка подтвердит и погасит), либо залипшая
+    позиция, чью запись Kaspi молча не применил (см.
+    UNCONFIRMED_RECHECK_SECONDS). Отличить их можно только чтением.
+
+    was_fresh=True означает, что база взята из недавней СВЕРКИ — там врать
+    нечему, повторно не ходим.
+    """
+    if was_fresh or row.pushed_at is None:
+        return False
+    age = (datetime.datetime.utcnow() - row.pushed_at).total_seconds()
+    if age < UNCONFIRMED_RECHECK_SECONDS:
+        return False
+    price_same = row.desired_price is None or (
+        base_price is not None and abs(int(row.desired_price) - int(base_price)) < PRICE_EPS
+    )
+    stock_same = row.desired_stock is None or (
+        base_stock is not None and int(row.desired_stock) == int(base_stock)
+    )
+    return price_same and stock_same
+
+
 def _decide(row, base_price, base_stock, base_available, now_ts: float):
     """
     Нужна ли запись по этому SKU.
@@ -534,12 +576,25 @@ def flush_store(store_id, merchant_uid: str) -> dict:
                 base_price is None
                 or base_stock is None
                 or (not was_fresh and (row.desired_price is None or row.desired_stock is None))
+                or _looks_like_unconfirmed_noop(row, base_price, base_stock, was_fresh)
             )
             if need_verify:
                 verify_left -= 1
                 actual = _fetch_kaspi_state(store_id, merchant_uid, row.sku)
                 if actual:
                     stats["verified"] += 1
+                    if (
+                        row.pushed_price is not None
+                        and actual["price"]
+                        and abs(int(actual["price"]) - int(row.pushed_price)) >= PRICE_EPS
+                    ):
+                        # Наша запись не доехала: Kaspi принял батч (200), но
+                        # строку не применил. Намерение сейчас уйдёт заново —
+                        # ради этого сверка и затевалась.
+                        logger.warning(
+                            "🔁 [OfferSync] SKU %s: писали %s ₸, на Kaspi %s ₸ — запись не применилась, отправляем снова.",
+                            row.sku, row.pushed_price, actual["price"],
+                        )
                     row.kaspi_price = actual["price"]
                     row.kaspi_stock = actual["stock"]
                     row.kaspi_seen_at = datetime.datetime.utcnow()
@@ -648,11 +703,19 @@ def flush_store(store_id, merchant_uid: str) -> dict:
                 row.pushed_price = d.price
                 row.pushed_stock = d.stock
                 row.pushed_at = written_at
-                # Мы только что сделали Kaspi таким — отражаем это и в
-                # фактическом состоянии, чтобы следующий флаш не ходил сверять.
-                row.kaspi_price = d.price
-                row.kaspi_stock = d.stock
-                row.kaspi_seen_at = written_at
+                # kaspi_* — это "что мы ПРОЧИТАЛИ у Kaspi", и собственная
+                # запись таким доказательством не является: ручка batch
+                # асинхронная, 200 значит "принято", а не "применено".
+                # Раньше мы копировали сюда отправленное значение, и
+                # непринятая Kaspi строка залипала навсегда — следующий флаш
+                # видел "уже так" и гасил намерение вхолостую. Теперь
+                # фактическое состояние честно обнуляется: базой станет
+                # pushed_* (was_fresh=False), а через
+                # UNCONFIRMED_RECHECK_SECONDS повтор того же намерения
+                # вызовет бесплатную сверку с Kaspi.
+                row.kaspi_price = None
+                row.kaspi_stock = None
+                row.kaspi_seen_at = None
                 row.desired_price = row.desired_stock = row.desired_available = None
                 row.desired_at = None
                 row.reason = None
