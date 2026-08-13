@@ -34,6 +34,19 @@ class KaspiAPI:
     _packaging_tabs_cache: Dict[str, dict] = {}
     _packaging_tabs_cache_lock = threading.Lock()
 
+    # merchant_id для токена не меняется, а резолвится он дорого: шаг через
+    # /pointofservices на проде стабильно отдаёт 500, после чего идёт фоллбек
+    # через историю заказов — 2 запроса к Kaspi на КАЖДЫЙ вызов. При этом
+    # зовут его из горячих мест (луп чатбота, outbound, веер Мастер-Групп,
+    # routers/chats.py на каждый HTTP-запрос фронта): в логах прода 2026-08-13
+    # эти 500 шли по 5 раз в минуту непрерывно. Кэшируем по токену.
+    _merchant_id_cache: Dict[str, dict] = {}
+    _merchant_id_cache_lock = threading.Lock()
+    _MERCHANT_ID_TTL_SECONDS = 21600.0  # 6 часов
+    # Синтетический m_<hash> — это «не резолвится», а не ответ: держим его
+    # недолго, чтобы погасить шторм, но не залипнуть, если Kaspi оживёт.
+    _MERCHANT_ID_NEGATIVE_TTL_SECONDS = 60.0
+
     # ── helpers ──────────────────────────────────────────────
 
     @staticmethod
@@ -193,6 +206,42 @@ class KaspiAPI:
 
     @staticmethod
     def get_merchant_id(token: str) -> str:
+        """
+        merchant_id по токену, с кэшем в памяти процесса (см. _merchant_id_cache).
+
+        Кэш именно здесь, а не в вызывающих: точек вызова много и часть из них
+        горячие, а сам резолв стоит двух запросов к Kaspi и не меняется.
+        Синтетический m_<hash> кэшируется коротко — это признак «не удалось»,
+        и часть кода (offer_sync) на него осознанно не полагается.
+        """
+        now = time.time()
+        with KaspiAPI._merchant_id_cache_lock:
+            cached = KaspiAPI._merchant_id_cache.get(token)
+            if cached and now < cached["expires_at"]:
+                return cached["merchant_id"]
+
+        merchant_id = KaspiAPI._resolve_merchant_id(token)
+
+        ttl = (
+            KaspiAPI._MERCHANT_ID_NEGATIVE_TTL_SECONDS
+            if str(merchant_id).startswith("m_")
+            else KaspiAPI._MERCHANT_ID_TTL_SECONDS
+        )
+        with KaspiAPI._merchant_id_cache_lock:
+            KaspiAPI._merchant_id_cache[token] = {
+                "merchant_id": merchant_id,
+                "expires_at": time.time() + ttl,
+            }
+        return merchant_id
+
+    @staticmethod
+    def reset_merchant_id_cache() -> None:
+        """Только для тестов — кэш живёт в процессе и переживает patch()."""
+        with KaspiAPI._merchant_id_cache_lock:
+            KaspiAPI._merchant_id_cache.clear()
+
+    @staticmethod
+    def _resolve_merchant_id(token: str) -> str:
         # 1. Попытка через pointofservices
         try:
             pos_list = KaspiAPI.get_point_of_services(token)

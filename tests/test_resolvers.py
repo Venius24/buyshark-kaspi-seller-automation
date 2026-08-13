@@ -38,6 +38,12 @@ class TestDiscoverMerchantIdConfigModule(unittest.TestCase):
     "пропустить операцию", а не non-digit ID, непригодный для Kaspi API.
     """
 
+    # get_merchant_id кэширует результат по токену в памяти процесса, а все
+    # тесты здесь резолвят один и тот же "tok" — без сброса первый же тест
+    # раздавал бы свой ответ остальным.
+    def setUp(self):
+        KaspiAPI.reset_merchant_id_cache()
+
     @patch("backend.kaspi_wrapper.KaspiAPI.get_point_of_services")
     def test_resolves_via_api_with_underscore(self, mock_pos):
         mock_pos.return_value = [{"id": "12345_001"}]
@@ -63,6 +69,10 @@ class TestDiscoverMerchantIdConfigModule(unittest.TestCase):
 
 class TestGetMerchantIdKaspiWrapper(unittest.TestCase):
     """kaspi_wrapper.py::KaspiAPI.get_merchant_id — a SEPARATE implementation."""
+
+    # См. комментарий к setUp выше: кэш по токену общий на процесс.
+    def setUp(self):
+        KaspiAPI.reset_merchant_id_cache()
 
     @patch("backend.kaspi_wrapper.KaspiAPI.get_point_of_services")
     def test_pointofservices_with_underscore(self, mock_pos):
