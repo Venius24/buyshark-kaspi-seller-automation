@@ -139,6 +139,43 @@ def _load_overrides(store_id: str) -> dict:
             session.close()
     return overrides
 
+def _purge_stale_overrides(store_id: str, before) -> int:
+    """
+    Удалить оверрайды старше `before` — момента, когда каталог был выкачан из
+    Kaspi. Возвращает число удалённых.
+
+    Оверрайд — это локальный слепок «мы только что поменяли цену/остаток, а
+    Kaspi ещё не знает». Как только Kaspi отдал своё состояние, слепок старше
+    этого ответа устарел по определению: либо изменение доехало (и лежит в
+    свежих данных), либо было отменено. Держать его дальше нельзя — именно
+    так позавчерашние 605 ₸ пережили десяток синхронизаций и заставляли
+    демпер каждый цикл «чинить» несуществующее отклонение.
+
+    Барьера свежести в _apply_overrides для этого мало: цикл демпинга
+    накладывает оверрайды на уже сохранённый каталог и никакой отсечки не
+    знает, так что протухшая запись всплыла бы там снова. Чистим у источника.
+    """
+    session = _get_sync_db_session()
+    if not session or not before:
+        return 0
+    try:
+        from backend.db.models import ProductOverrideDB
+        deleted = session.query(ProductOverrideDB).filter(
+            ProductOverrideDB.store_id == store_id,
+            ProductOverrideDB.updated_at < before,
+        ).delete(synchronize_session=False)
+        session.commit()
+        if deleted:
+            logger.info(f"🧹 [Overrides] Удалено {deleted} оверрайдов старше синхронизации с Kaspi (store {store_id}).")
+        return deleted
+    except Exception as e:
+        logger.error(f"Ошибка очистки протухших оверрайдов: {e}")
+        session.rollback()
+        return 0
+    finally:
+        session.close()
+
+
 def _save_override(
     sku: str,
     price: int,

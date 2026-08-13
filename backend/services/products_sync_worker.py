@@ -2,7 +2,7 @@ import asyncio
 import datetime
 import logging
 from backend.kaspi_wrapper import KaspiAPI
-from backend.state_helpers import _get_token, _apply_overrides, _save_products
+from backend.state_helpers import _get_token, _apply_overrides, _save_products, _purge_stale_overrides
 from backend.security.store_context import list_active_stores
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,8 @@ async def _sync_store_products(token: str, store_id=None) -> int:
     # цены, сделанная руками во время выкачки, пережила синхронизацию.
     products = _apply_overrides(products, store_id=store_id, fresh_from_kaspi_at=fetched_at)
     await asyncio.to_thread(_save_products, products, store_id)
+    if store_id:
+        await asyncio.to_thread(_purge_stale_overrides, store_id, fetched_at)
 
     logger.info(f"✅ [Products Sync Worker] Успешно обновлено {len(products)} товаров из Kaspi API (store {store_id}).")
     return len(products)

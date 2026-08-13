@@ -71,6 +71,29 @@ class TestOverrideMatchingAndFreshness(unittest.TestCase):
         out = state_helpers._apply_overrides([p], store_id=self.store)
         self.assertEqual(out[0]["price_num"], 595)
 
+    def test_purge_removes_stale_overrides_but_keeps_fresh_ones(self):
+        state_helpers._save_override("111881073", 605, 492, store_id=self.store)
+        # Отсечка ровно между двумя записями: первая старше её, вторая нет.
+        cutoff = datetime.datetime.utcnow()
+        state_helpers._save_override("T219-0005-1", 595, 492, store_id=self.store)
+
+        deleted = state_helpers._purge_stale_overrides(self.store, cutoff)
+        self.assertEqual(deleted, 1)
+
+        left = state_helpers._load_overrides(self.store)
+        self.assertNotIn("111881073", left)
+        self.assertIn("T219-0005-1", left)
+
+    def test_purged_override_cannot_resurface_in_dumping_cycle(self):
+        """Цикл демпинга накладывает оверрайды БЕЗ барьера свежести — значит
+        протухшая запись обязана быть удалена, а не просто пропущена."""
+        state_helpers._save_override("111881073", 605, 492, store_id=self.store)
+        cutoff = datetime.datetime.utcnow() + datetime.timedelta(seconds=1)
+        state_helpers._purge_stale_overrides(self.store, cutoff)
+
+        out = state_helpers._apply_overrides([self._product()], store_id=self.store)
+        self.assertEqual(out[0]["price_num"], 595)
+
     def test_newer_key_wins_when_both_keys_exist(self):
         state_helpers._save_override("T219-0005-1", 595, 492, store_id=self.store)
         state_helpers._save_override("111881073", 640, 492, store_id=self.store)

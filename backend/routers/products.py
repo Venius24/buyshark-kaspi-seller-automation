@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from backend.kaspi_wrapper import KaspiAPI
 from backend.models import UpdateProductRequest
-from backend.state_helpers import _save_override, _apply_overrides, _load_products, _save_products
+from backend.state_helpers import _save_override, _apply_overrides, _load_products, _save_products, _purge_stale_overrides
 from backend.security.store_context import StoreContext, get_store_context
 from backend.dumper import generate_xml_feed
 
@@ -182,6 +182,7 @@ def refresh_products(ctx: StoreContext = Depends(get_store_context)):
         # выкачанную из Kaspi цену не перекрываем вчерашним оверрайдом.
         products = _apply_overrides(products, store_id=ctx.store_id, fresh_from_kaspi_at=fetched_at)
         _save_products(products, ctx.store_id)
+        _purge_stale_overrides(ctx.store_id, fetched_at)
         return {"success": True, "count": len(products), "message": f"Обновлено {len(products)} товаров."}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
