@@ -140,3 +140,38 @@ export const testFirstContact = async (order_id: string, message_text: string, s
   if (!res.ok) return { success: false, message: data.detail || 'Ошибка отправки' };
   return { success: true, message: data.message || 'OK' };
 };
+
+export const pricefeedPreview = async (
+  phone: string,
+  password: string,
+  merchant_id?: string
+): Promise<import('./types').PriceFeedPreviewResult> => {
+  const res = await apiFetch(`${API_URL}/api/dumping/pricefeed/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone, password, merchant_id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = typeof data.detail === 'string' ? data.detail : 'Не удалось выполнить импорт из PriceFeed';
+    throw new Error(detail);
+  }
+  return data;
+};
+
+export const pricefeedApply = async (
+  import_id: string,
+  overwrite: boolean
+): Promise<import('./types').PriceFeedApplyResult> => {
+  const res = await apiFetch(`${API_URL}/api/dumping/pricefeed/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ import_id, overwrite }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = typeof data.detail === 'string' ? data.detail : 'Не удалось применить импорт из PriceFeed';
+    throw new Error(detail);
+  }
+  return data;
+};

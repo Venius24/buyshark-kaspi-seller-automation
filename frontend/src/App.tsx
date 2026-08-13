@@ -7,6 +7,7 @@ import { useWebSocket } from './hooks/useWebSocket';
 import { useLogs } from './hooks/useLogs';
 import { useAnalyticsWidgets } from './hooks/useAnalyticsWidgets';
 import { useMcAuth } from './hooks/useMcAuth';
+import { usePriceFeedImport } from './hooks/usePriceFeedImport';
 import { LogsTab } from './components/tabs/LogsTab';
 import { OverviewTab } from './components/tabs/OverviewTab';
 import { SettingsTab } from './components/tabs/SettingsTab';
@@ -18,6 +19,7 @@ import { AuthModal } from './components/AuthModal';
 import { StoreHub } from './components/StoreHub';
 import { BackgroundSync } from './components/BackgroundSync';
 import { McAuthModal } from './components/McAuthModal';
+import { PriceFeedImportModal } from './components/PriceFeedImportModal';
 import { Sidebar } from './components/Sidebar';
 import { ContentHeader } from './components/ContentHeader';
 import { PackagingTab } from './components/tabs/PackagingTab';
@@ -435,6 +437,11 @@ export default function App() {
     }
   };
 
+  const priceFeedImport = usePriceFeedImport(() => {
+    loadDumpingConfigs();
+    loadProducts(currentPage, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, dumpingStatusFilter);
+  });
+
   const getOrderParams = (statusFilter: 'NEW' | 'ASSEMBLY') => {
     if (statusFilter === 'NEW') {
       return { state: 'KASPI_DELIVERY', status: 'APPROVED_BY_BANK', assembled: undefined };
@@ -844,6 +851,7 @@ export default function App() {
                   loadProducts(1, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, val);
                 }}
                 onRefreshConfigs={loadDumpingConfigs}
+                onOpenPriceFeedImport={priceFeedImport.openModal}
                 dumpingConfigs={dumpingConfigs}
                 expandedSkus={expandedSkus}
                 onToggleExpanded={(sku) => {
@@ -962,6 +970,24 @@ export default function App() {
         onPasswordChange={setPasswordInput}
         onClose={closeMcAuthModal}
         onSubmit={submitMcAuthLogin}
+      />
+      <PriceFeedImportModal
+        step={priceFeedImport.step}
+        phone={priceFeedImport.phone}
+        onPhoneChange={priceFeedImport.setPhone}
+        password={priceFeedImport.password}
+        onPasswordChange={priceFeedImport.setPassword}
+        merchants={priceFeedImport.merchants}
+        preview={priceFeedImport.preview}
+        applyResult={priceFeedImport.applyResult}
+        overwrite={priceFeedImport.overwrite}
+        onOverwriteChange={priceFeedImport.setOverwrite}
+        error={priceFeedImport.error}
+        onClose={priceFeedImport.closeModal}
+        onSubmitCredentials={priceFeedImport.submitCredentials}
+        onChooseMerchant={priceFeedImport.chooseMerchant}
+        onApply={priceFeedImport.applyImport}
+        onFinish={priceFeedImport.finish}
       />
     </div>
   );

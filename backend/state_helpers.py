@@ -279,7 +279,7 @@ def _load_dumping_configs(store_id: str) -> dict:
                     "sku": r.sku,
                     "min_price": float(r.min_price or 0.0),
                     "max_price": float(r.max_price or 0.0),
-                    "dump_step": float(r.dump_step or 1.0),
+                    "dump_step": float(r.dump_step or 2.0),
                     "enabled": bool(r.enabled),
                     "mode": r.mode or "TOP_1",
                     "target_position": int(r.target_position or 1),
@@ -314,7 +314,7 @@ def _save_dumping_configs(configs: dict, store_id: str):
                     store_id=store_id,
                     min_price=float(cfg.get("min_price", 0.0)),
                     max_price=float(cfg.get("max_price", 0.0)),
-                    dump_step=float(cfg.get("dump_step", 1.0)),
+                    dump_step=float(cfg.get("dump_step", 2.0)),
                     enabled=bool(cfg.get("enabled", True)),
                     mode=str(cfg.get("mode", "TOP_1")),
                     target_position=int(cfg.get("target_position", 1)),
@@ -328,7 +328,7 @@ def _save_dumping_configs(configs: dict, store_id: str):
             else:
                 db_obj.min_price = float(cfg.get("min_price", 0.0))
                 db_obj.max_price = float(cfg.get("max_price", 0.0))
-                db_obj.dump_step = float(cfg.get("dump_step", 1.0))
+                db_obj.dump_step = float(cfg.get("dump_step", 2.0))
                 db_obj.enabled = bool(cfg.get("enabled", True))
                 db_obj.mode = str(cfg.get("mode", "TOP_1"))
                 db_obj.target_position = int(cfg.get("target_position", 1))

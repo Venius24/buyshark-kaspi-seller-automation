@@ -260,6 +260,57 @@ export interface BillingPlan {
   badge: string | null;
 }
 
+export interface BillingTransaction {
+  id: string;
+  amount_minor: number;
+  balance_after_minor: number | null;
+  kind: string;
+  status: string;
+  comment: string | null;
+  created_at: string | null;
+}
+
+export interface PriceFeedMerchant {
+  id: string;
+  name: string;
+}
+
+export interface PriceFeedPreviewSampleRow {
+  sku: string;
+  title: string | null;
+  min_price: number;
+  max_price: number;
+  dump_step: number;
+  mode: string;
+  already_configured: boolean;
+}
+
+export interface PriceFeedPreviewResult {
+  status: 'ready' | 'choose_merchant';
+  import_id?: string;
+  expires_in_seconds?: number;
+  merchant?: PriceFeedMerchant;
+  merchants?: PriceFeedMerchant[];
+  total_fetched?: number;
+  importable?: number;
+  matched?: number;
+  unmatched?: number;
+  unmatched_sample?: string[];
+  already_configured?: number;
+  skipped?: Record<string, number>;
+  warnings?: string[];
+  sample?: PriceFeedPreviewSampleRow[];
+  truncated?: boolean;
+}
+
+export interface PriceFeedApplyResult {
+  success: boolean;
+  created: number;
+  updated: number;
+  skipped_existing: number;
+  total: number;
+}
+
 /**
  * Квота Kaspi на обновление офферов: 250 штук за фиксированное 30-минутное
  * окно на весь магазин, общая на демпинг и на связку остатков. Приходит из
@@ -272,14 +323,4 @@ export interface KaspiQuotaStatus {
   reset_in_seconds: number;
   /** Сколько записей из окна зарезервировано под снятие с продажи. */
   reserved_for_withdraw: number;
-}
-
-export interface BillingTransaction {
-  id: string;
-  amount_minor: number;
-  balance_after_minor: number | null;
-  kind: string;
-  status: string;
-  comment: string | null;
-  created_at: string | null;
 }

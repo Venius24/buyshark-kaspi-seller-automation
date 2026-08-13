@@ -48,6 +48,7 @@ from backend.routers import (
     auth, products, orders, dumping, ws, analytics,
     chatbot, stock_groups, api_keys, print_batcher,
     auth_v1, stores_v1, chats, autolist, auto_assembly, telegram_link,
+    pricefeed_import,
 )
 from backend.routers import billing as billing_router, admin_billing, referral as referral_router
 from backend.routers import webhooks_incoming_email
@@ -132,6 +133,7 @@ app.include_router(auth.router)
 app.include_router(products.router)
 app.include_router(orders.router)
 app.include_router(dumping.router)
+app.include_router(pricefeed_import.router)
 app.include_router(ws.router)
 app.include_router(analytics.router)
 app.include_router(chatbot.router)

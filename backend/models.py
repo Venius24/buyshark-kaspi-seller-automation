@@ -25,7 +25,7 @@ class DumpingConfigRequest(BaseModel):
     sku: str
     min_price: float
     max_price: float
-    dump_step: Optional[float] = 1.0
+    dump_step: Optional[float] = 2.0
     enabled: bool = True
     mode: Optional[str] = "TOP_1"  # OFF, TOP_1, TOP_2, MATCH_FIRST, TARGET_POSITION
     target_position: Optional[int] = 1
@@ -57,7 +57,7 @@ class GroupDumpingConfig(BaseModel):
     enabled: bool = True
     min_price: float
     max_price: float
-    dump_step: Optional[float] = 1.0
+    dump_step: Optional[float] = 2.0
     mode: Optional[str] = "TOP_1"  # OFF, TOP_1, TOP_2, MATCH_FIRST, TARGET_POSITION
     target_position: Optional[int] = 1
     max_delivery_days: Optional[int] = None

@@ -151,7 +151,7 @@ class DumpingConfigDB(Base):
     sku: Mapped[str] = mapped_column(String(100), primary_key=True)
     min_price: Mapped[float] = mapped_column(Float, default=0.0)
     max_price: Mapped[float] = mapped_column(Float, default=0.0)
-    dump_step: Mapped[float] = mapped_column(Float, default=1.0)
+    dump_step: Mapped[float] = mapped_column(Float, default=2.0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     mode: Mapped[str] = mapped_column(String(50), default="TOP_1")
     target_position: Mapped[int] = mapped_column(Integer, default=1)

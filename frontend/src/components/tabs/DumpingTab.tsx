@@ -6,7 +6,7 @@ import { PriceWarSummary } from '../PriceWarSummary';
 import { usePriceWarStats } from '../../hooks/usePriceWarStats';
 
 const EMPTY_CONFIG: DumpingConfig = {
-  min_price: 0, max_price: 0, dump_step: 1, enabled: false,
+  min_price: 0, max_price: 0, dump_step: 2, enabled: false,
   mode: 'TOP_1', target_position: 1, max_delivery_days: null,
   min_seller_rating: null, same_city_only: false, blacklisted_merchants: []
 };
@@ -46,6 +46,7 @@ interface DumpingTabProps {
   dumpingStatusFilter: string;
   onDumpingStatusFilterChange: (val: string) => void;
   onRefreshConfigs: () => void;
+  onOpenPriceFeedImport: () => void;
   dumpingConfigs: Record<string, DumpingConfig>;
   expandedSkus: Set<string>;
   onToggleExpanded: (sku: string) => void;
@@ -89,6 +90,7 @@ export function DumpingTab({
   dumpingStatusFilter,
   onDumpingStatusFilterChange,
   onRefreshConfigs,
+  onOpenPriceFeedImport,
   dumpingConfigs,
   expandedSkus,
   onToggleExpanded,
@@ -273,6 +275,14 @@ export function DumpingTab({
           >
             🔄 Обновить настройки
           </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ padding: '10px 14px' }}
+            onClick={onOpenPriceFeedImport}
+          >
+            📥 Импорт из PriceFeed
+          </button>
         </form>
       </div>
 
@@ -298,10 +308,19 @@ export function DumpingTab({
           }}>
             {products.map((product) => {
               const sku = product.sku;
+              // Демпинг-движок (backend/dumper/radar.py) матчит конфиг сперва по
+              // merchantSku и только потом по Kaspi sku — импорт из PriceFeed
+              // всегда пишет по merchantSku. Читаем/пишем конфиг по тому же
+              // приоритету, иначе для товаров с merchantSku !== sku панель
+              // показывает пустые поля, а ручное сохранение создаёт
+              // осиротевший дубль-конфиг, который движок не увидит.
+              const cfgKey = (product.merchantSku && dumpingConfigs[product.merchantSku])
+                ? product.merchantSku
+                : (product.merchantSku || sku);
               const isExpanded = expandedSkus.has(sku);
               const isFiltersExpanded = expandedFilterSkus.has(sku);
-              const cfg = dumpingConfigs[sku] || EMPTY_CONFIG;
-              const hasConfig = !!dumpingConfigs[sku];
+              const cfg = dumpingConfigs[cfgKey] || EMPTY_CONFIG;
+              const hasConfig = !!dumpingConfigs[cfgKey];
               const isDumpingActive = hasConfig && cfg.enabled && cfg.mode !== 'OFF';
               const dStatus = product.dumping_status || (isDumpingActive ? 'WINNING_1ST' : 'OFF');
               const selectedMode = selectedModes[sku] ?? (cfg.mode || 'TOP_1');
@@ -427,7 +446,7 @@ export function DumpingTab({
                             type="number"
                             id={`step-${sku}`}
                             className="form-input"
-                            defaultValue={cfg.dump_step ?? 1}
+                            defaultValue={cfg.dump_step ?? 2}
                           />
                         </div>
                       </div>
@@ -541,7 +560,7 @@ export function DumpingTab({
                             const blacklistArr = blacklistRaw ? blacklistRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
 
                             onSaveDumpingConfig(
-                              sku, minVal, maxVal, stepVal, enabledVal,
+                              cfgKey, minVal, maxVal, stepVal, enabledVal,
                               modeVal, targetPosVal, maxDelivVal, minRatingVal, sameCityVal, blacklistArr
                             );
                           }}
