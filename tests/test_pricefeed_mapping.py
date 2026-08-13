@@ -119,6 +119,18 @@ class TestMatchItems(unittest.TestCase):
         self.assertEqual(report.skipped.get("duplicate_sku"), 1)
         self.assertTrue(any("Дубликат" in w for w in report.warnings))
 
+    def test_many_duplicates_collapse_into_single_warning(self):
+        """Сотня дублей = одна строка предупреждения.
+
+        Раньше на каждый дубль добавлялась своя строка, и превью реальной
+        выгрузки разрасталось так, что модалка не помещалась на экран."""
+        items = [_item(sku="X1", min_price=100 + i) for i in range(100)]
+        report = pricefeed_mapping.match_items(items, self.products, {})
+        self.assertEqual(report.skipped.get("duplicate_sku"), 99)
+        dup_warnings = [w for w in report.warnings if "Дубликат" in w]
+        self.assertEqual(len(dup_warnings), 1)
+        self.assertIn("99", dup_warnings[0])
+
     def test_unknown_algorithm_warns_with_count(self):
         items = [_item(sku="X1", algorithm="WEIRD_NEW_ONE")]
         report = pricefeed_mapping.match_items(items, self.products, {})

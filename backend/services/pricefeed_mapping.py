@@ -128,6 +128,7 @@ def match_items(items: list, products: list, existing_configs: dict) -> MatchRep
     report = MatchReport()
     sku_index = build_sku_index(products)
     seen_canonical = set()
+    duplicate_skus: list = []
 
     for item in items:
         config, skip_reason = map_item(item)
@@ -146,7 +147,7 @@ def match_items(items: list, products: list, existing_configs: dict) -> MatchRep
 
         if canonical in seen_canonical:
             report.skipped["duplicate_sku"] = report.skipped.get("duplicate_sku", 0) + 1
-            report.warnings.append(f"Дубликат SKU {canonical} в выгрузке PriceFeed — оставлена первая запись.")
+            duplicate_skus.append(canonical)
             continue
         seen_canonical.add(canonical)
 
@@ -155,6 +156,17 @@ def match_items(items: list, products: list, existing_configs: dict) -> MatchRep
         if canonical in existing_configs:
             report.already_configured.add(canonical)
         report.rows[canonical] = config
+
+    if duplicate_skus:
+        # ОДНА строка на все дубли, а не по строке на каждый: в реальной выгрузке
+        # их сотни, и раньше этот список раздувал превью так, что модалка
+        # переставала помещаться на экран и страница не листалась.
+        examples = ", ".join(duplicate_skus[:5])
+        tail = f" и ещё {len(duplicate_skus) - 5}" if len(duplicate_skus) > 5 else ""
+        report.warnings.append(
+            f"Дубликат SKU в выгрузке PriceFeed: {len(duplicate_skus)} шт "
+            f"({examples}{tail}) — по каждому оставлена первая запись."
+        )
 
     unknown_count = report.skipped.get("unknown_algorithm", 0)
     if unknown_count:

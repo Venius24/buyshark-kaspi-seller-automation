@@ -55,7 +55,13 @@ export function PriceFeedImportModal({
 
   return (
     <div className="modal-overlay">
-      <div className="glass-card modal-content" style={{ maxWidth: '520px', width: '100%', padding: '30px' }}>
+      {/* maxHeight/overflow — страховка: что бы ни пришло с бэка (сотни предупреждений,
+          длинный список пропусков), модалка обязана остаться в пределах экрана и листаться,
+          а не растянуть страницу так, что до кнопок не добраться. */}
+      <div
+        className="glass-card modal-content"
+        style={{ maxWidth: '520px', width: '100%', padding: '30px', maxHeight: '85vh', overflowY: 'auto' }}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h3 style={{ fontSize: '18px', fontWeight: 700 }}>📥 Импорт настроек демпинга из PriceFeed</h3>
           <button
@@ -174,7 +180,16 @@ export function PriceFeedImportModal({
             )}
 
             {!!preview.warnings?.length && (
-              <div style={{ fontSize: '12px', color: '#fbbf24', marginBottom: '12px' }}>
+              <div
+                style={{
+                  fontSize: '12px',
+                  color: '#fbbf24',
+                  marginBottom: '12px',
+                  maxHeight: '96px',
+                  overflowY: 'auto',
+                  wordBreak: 'break-word',
+                }}
+              >
                 {preview.warnings.map((w, i) => <div key={i}>⚠️ {w}</div>)}
               </div>
             )}
