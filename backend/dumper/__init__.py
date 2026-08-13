@@ -94,7 +94,7 @@ async def run_price_dumping_job(
                     effective_configs[sku] = merged
 
     # 1. 📡 Воркер-Радар
-    market_snapshot = await RadarWorker.scan_market(products, effective_configs)
+    market_snapshot = await RadarWorker.scan_market(products, effective_configs, store_id=store_id)
     if not market_snapshot:
         return {
             "success": True,

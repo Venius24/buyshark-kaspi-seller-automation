@@ -89,7 +89,7 @@ class MasterGroupDumpingExclusionEnrichmentTest(unittest.IsolatedAsyncioTestCase
 
         captured = {}
 
-        async def fake_scan_market(products, effective_configs):
+        async def fake_scan_market(products, effective_configs, **kwargs):
             captured["effective_configs"] = effective_configs
             return None  # прерываем цикл сразу после обогащения — сканирование не нужно для этого теста
 
@@ -123,7 +123,7 @@ class MasterGroupDumpingExclusionEnrichmentTest(unittest.IsolatedAsyncioTestCase
 
         captured = {}
 
-        async def fake_scan_market(products, effective_configs):
+        async def fake_scan_market(products, effective_configs, **kwargs):
             captured["effective_configs"] = effective_configs
             return None
 
@@ -157,7 +157,7 @@ class MasterGroupDumpingExclusionAliasTest(unittest.IsolatedAsyncioTestCase):
 
         captured = {}
 
-        async def fake_scan_market(prods, effective_configs):
+        async def fake_scan_market(prods, effective_configs, **kwargs):
             captured["effective_configs"] = effective_configs
             return None
 

@@ -162,7 +162,7 @@ class TestClearingDumpingConfig(StockGroupsRouterTestCase):
 
         captured = {}
 
-        async def fake_scan(products, effective_configs):
+        async def fake_scan(products, effective_configs, **kwargs):
             captured["cfg"] = effective_configs
             return None
 
