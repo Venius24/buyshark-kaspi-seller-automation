@@ -58,7 +58,7 @@ from backend.routers.dumping import background_dumping_loop
 from backend.chatbot.worker import kaspi_chatbot_loop, start_telegram_bot_polling
 from backend.chatbot.outbound import outbound_loop
 from backend.chatbot.notify_dispatch import flush_loop as notification_flush_loop
-from backend.services.stock_sync_worker import master_stock_radar_loop, start_packaging_sync_loop
+from backend.services.stock_sync_worker import pickup_campaign_loop, start_packaging_sync_loop
 from backend.services.products_sync_worker import start_products_sync_loop
 from backend.services.sales_sync_worker import start_sales_sync_loop
 from backend.services.kaspi_quality_metrics_worker import start_quality_metrics_loop
@@ -88,7 +88,7 @@ async def startup_event():
     asyncio.create_task(outbound_loop())
     asyncio.create_task(start_telegram_bot_polling())
     asyncio.create_task(notification_flush_loop())
-    asyncio.create_task(master_stock_radar_loop())
+    asyncio.create_task(pickup_campaign_loop())
     # Единый писатель цен/остатков в Kaspi: демпер и Мастер-Группы только
     # объявляют желаемое состояние, отправляет их отсюда один флашер с учётом
     # реальной квоты (250 офферов / 30 мин) — см. backend/services/offer_sync.py.

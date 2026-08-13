@@ -48,17 +48,17 @@ class TestGetStockLock(unittest.IsolatedAsyncioTestCase):
             lock_a.release()
 
 
-class TestRunStockRadarCycle(unittest.IsolatedAsyncioTestCase):
-    """Phase 7: run_stock_radar_cycle() — the testable core of
-    master_stock_radar_loop(), extracted from the infinite while-loop."""
+class TestRunPickupCampaignCycle(unittest.IsolatedAsyncioTestCase):
+    """Phase 7: run_pickup_campaign_cycle() — the testable core of
+    pickup_campaign_loop(), extracted from the infinite while-loop."""
 
     @patch("backend.services.stock_sync_worker.list_active_stores", new_callable=AsyncMock)
     async def test_no_active_stores_does_nothing(self, mock_list_stores):
         """Слайс 7: легаси-фоллбек на общую сессию убран — нет активных
         сторов, нечего сканировать."""
         mock_list_stores.return_value = []
-        with patch("backend.services.stock_sync_worker._run_stock_radar_pass", new_callable=AsyncMock) as mock_pass:
-            await worker.run_stock_radar_cycle()
+        with patch("backend.services.stock_sync_worker._run_pickup_campaign_pass", new_callable=AsyncMock) as mock_pass:
+            await worker.run_pickup_campaign_cycle()
         mock_pass.assert_not_awaited()
 
     @patch("backend.services.stock_sync_worker.list_active_stores", new_callable=AsyncMock)
@@ -67,8 +67,8 @@ class TestRunStockRadarCycle(unittest.IsolatedAsyncioTestCase):
             StoreContext(token="tok_a", merchant_id="m_a", store_id="store-a"),
             StoreContext(token="tok_b", merchant_id="m_b", store_id="store-b"),
         ]
-        with patch("backend.services.stock_sync_worker._run_stock_radar_pass", new_callable=AsyncMock) as mock_pass:
-            await worker.run_stock_radar_cycle()
+        with patch("backend.services.stock_sync_worker._run_pickup_campaign_pass", new_callable=AsyncMock) as mock_pass:
+            await worker.run_pickup_campaign_cycle()
         self.assertEqual(mock_pass.await_args_list[0].args, ("tok_a", "store-a"))
         self.assertEqual(mock_pass.await_args_list[1].args, ("tok_b", "store-b"))
 
@@ -79,11 +79,11 @@ class TestRunStockRadarCycle(unittest.IsolatedAsyncioTestCase):
             StoreContext(token="tok_b", merchant_id="m_b", store_id="store-b"),
         ]
         with patch(
-            "backend.services.stock_sync_worker._run_stock_radar_pass",
+            "backend.services.stock_sync_worker._run_pickup_campaign_pass",
             new_callable=AsyncMock,
             side_effect=[Exception("Kaspi API 500"), None],
         ) as mock_pass:
-            await worker.run_stock_radar_cycle()
+            await worker.run_pickup_campaign_cycle()
         self.assertEqual(mock_pass.await_count, 2)
 
 

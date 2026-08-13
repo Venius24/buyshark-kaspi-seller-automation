@@ -175,11 +175,25 @@ class KaspiAPI:
         if is_express:
             return "Express"
     
-        # 2. Проверка на Постамат (Kaspi Box)
-        # ВАЖНО: "DELIVERY_PICKUP" — реальное значение Kaspi API для курьерской
-        # доставки ДО постамата/пункта выдачи сети Kaspi (подтверждено живыми
-        # данными: разные города региона, см. HANDOFF 3.34) — это Постамат, а
-        # не самовывоз клиентом из точки продавца, хоть и содержит "PICKUP".
+        # 2. Самовывоз клиентом из точки продавца.
+        # ВАЖНО (исправлено 2026-08-13, см. HANDOFF 3.46): раньше здесь стояло
+        # `dm == "DELIVERY_PICKUP" -> Постамат`, и самовывоз не существовал как
+        # класс вообще — вся вкладка уезжала в "Postomat". На живых данных
+        # Бархана видно, что deliveryMode у постамата и самовывоза ОДИНАКОВ
+        # ("DELIVERY_PICKUP"), и pickupPointId тоже одинаков (это точка
+        # продавца, а не постамат). Различает их `isKaspiDelivery`: когда везёт
+        # Kaspi — это доставка до постамата/пункта выдачи, когда не везёт никто
+        # — клиент забирает сам. Счёт сошёлся с кабинетом владельца: 8 из 60
+        # заказов в state=PICKUP оказались настоящим самовывозом.
+        kaspi_carries = (
+            attr.get("isKaspiDelivery") is True
+            or bool(kaspi_deliv)
+            or "POSTOMAT" in dt_raw
+        )
+        if "PICKUP" in dm and not kaspi_carries:
+            return "Самовывоз"
+
+        # 3. Постамат (Kaspi Box) — везёт Kaspi до ячейки/пункта выдачи.
         is_postomat = (
             "POSTOMAT" in dm
             or "POSTOMAT" in dt_raw
@@ -190,7 +204,6 @@ class KaspiAPI:
         if is_postomat:
             return "Postomat"
 
-        # 3. Самовывоз из точки продавца
         if "PICKUP" in dm or "PICKUP" in dt_raw:
             return "Самовывоз"
     

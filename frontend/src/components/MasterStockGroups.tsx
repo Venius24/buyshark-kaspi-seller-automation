@@ -16,7 +16,8 @@ import {
   ShieldAlert,
   Boxes,
   Zap,
-  FileText
+  FileText,
+  ShoppingCart
 } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { LiveTerminalStream } from './LiveTerminalStream';
@@ -46,7 +47,7 @@ export interface MasterStockGroup {
   external_code?: string;
   is_active: boolean;
   stop_qty: number;
-  status: 'synced' | 'updating' | 'warning' | 'error';
+  status: 'synced' | 'updating' | 'deducting' | 'warning' | 'error';
   created_at: string;
   updated_at: string;
 
@@ -799,7 +800,15 @@ export const MasterStockGroups: React.FC = () => {
 
                       {/* Sync Status Badge */}
                       <td style={{ padding: '18px 24px' }}>
-                        {group.status === 'updating' ? (
+                        {group.status === 'deducting' ? (
+                          /* Продажа: списание по заказу + следующая за ним веерная
+                             рассылка. Отдельный статус, чтобы отличать продажу от
+                             ручной правки остатка. */
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(168, 85, 247, 0.15)', border: '1px solid rgba(168, 85, 247, 0.35)', color: '#c084fc', fontSize: '13px', fontWeight: 600 }}>
+                            <ShoppingCart size={14} className="spin" />
+                            <span>Идёт списание</span>
+                          </div>
+                        ) : group.status === 'updating' ? (
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '20px', background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)', color: 'var(--primary-hover)', fontSize: '13px', fontWeight: 600 }}>
                             <RefreshCw size={14} className="spin" />
                             <span>Обновление...</span>

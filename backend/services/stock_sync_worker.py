@@ -1,4 +1,5 @@
 import asyncio
+import re
 import logging
 import datetime
 from typing import Optional, List
@@ -113,8 +114,18 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
         if not group or not group.get("is_active", True):
             return
 
-        group["status"] = "updating"
-        group["last_sync_log"] = "Запуск веерной синхронизации..."
+        # Когда рассылку запустил заказ, на карточке группы должно быть видно
+        # именно списание, а не абстрактная «синхронизация» — иначе владелец не
+        # отличает продажу от ручной правки остатка.
+        if trigger_order_info:
+            group["status"] = "deducting"
+            group["last_sync_log"] = (
+                f"Списание по заказу #{trigger_order_info.get('order_code')} "
+                f"({trigger_order_info.get('sku')}): рассылка остатка по SKU группы..."
+            )
+        else:
+            group["status"] = "updating"
+            group["last_sync_log"] = "Запуск веерной синхронизации..."
         _save_master_stock_groups(groups, store_id=store_id)
 
     await broadcast_ws_event("stock_group_updated", group, store_id=store_id)
@@ -241,9 +252,13 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
         if group_id in groups:
             g = groups[group_id]
             g["last_synced_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            order_tail = (
+                f" Причина: заказ #{trigger_order_info.get('order_code')}."
+                if trigger_order_info else ""
+            )
             g["last_sync_log"] = (
                 f"В очередь: {success_count}/{len(linked_skus)}. "
-                f"Пропущено по шагу: {skipped_count}. Ошибок: {fail_count}."
+                f"Пропущено по шагу: {skipped_count}. Ошибок: {fail_count}.{order_tail}"
             )
             if fail_count == 0:
                 g["status"] = "synced"
@@ -252,7 +267,10 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
             else:
                 g["status"] = "error"
 
-            g["sync_logs"] = logs
+            # Строку о списании (её пишет упаковщик ДО запуска рассылки) не
+            # затираем: раньше здесь стояло присваивание, и журнал группы терял
+            # ровно то событие, ради которого рассылка и запускалась.
+            g["sync_logs"] = (logs + list(g.get("sync_logs") or []))[:30]
             _save_master_stock_groups(groups, store_id=store_id)
             await broadcast_ws_event("stock_group_updated", g, store_id=store_id)
 
@@ -266,218 +284,199 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
             "message": f"Группа [{group_name}] снята с продажи на Kaspi (остаток {shared_stock} <= стоп кол-во {stop_qty})!"
         }, store_id=store_id)
 
-async def _run_stock_radar_pass(token: str, store_id: Optional[str] = None):
+async def _run_pickup_campaign_pass(token: str, store_id: Optional[str] = None):
     """
-    Один проход радара для одного магазина: находит новые заказы, списывает
-    остаток у совпавших Мастер-Групп, запускает веерную синхронизацию.
+    Один проход кампании «Самовывоз» для одного магазина.
 
-    store_id=None (легаси) — нескоуп-чтение групп, как было всегда.
-    Каталог товаров (Слайс 1) и дедупликация заказов (Слайс 5) — per-store.
+    Раньше это был «радар NEW-заказов»: опрашивал NEW/APPROVED_BY_BANK каждые
+    20 секунд, списывал остаток по совпавшим Мастер-Группам и попутно дёргал
+    кампанию. Аудит 2026-08-13 (HANDOFF 3.46) показал, что он не поймал НИ
+    ОДНОГО заказа с 11 августа: в стадии NEW заказы не задерживаются, и все 42
+    списания за сутки сделал упаковщик. То есть ~8600 запросов в сутки уходило
+    впустую, а кампания самовывоза, повешенная на этот же перебор, физически не
+    могла сработать — вдобавок она искала тип «Самовывоз», которого не
+    существовало из-за неверного разбора вида доставки.
+
+    Теперь: списание остатка целиком на упаковщике (он смотрит обе вкладки —
+    «На сборке» и «Передача»), а здесь остался только триггер кампании, и
+    опрашиваем мы ту стадию, где самовывозные заказы действительно лежат
+    (PICKUP), а не NEW.
     """
-    groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
-    active_groups = {gid: g for gid, g in groups.items() if g.get("is_active", True)}
-
-    # Фаза 4 (кампания «Самовывоз»): этот проход — единственный, что уже
-    # опрашивает NEW/APPROVED_BY_BANK заказы per-store каждые 20с, поэтому
-    # триггер рассылки повешен сюда, а не на отдельный поллер. НО (фикс
-    # 2026-08-09 — первая версия дёргала Kaspi /orders для ВСЕХ сторов
-    # каждые 20с безусловно, даже без единой активной Мастер-Группы и без
-    # настроенных точек самовывоза — резкий рост трафика к Kaspi, а Kaspi уже
-    # банил VPS по IP за похожий паттерн, см. HANDOFF/память): опрашиваем
-    # только если у стора ЕСТЬ причина — активные Мастер-Группы (демпинг) ИЛИ
-    # настроенные точки самовывоза (кампания реально может сработать).
-    has_pickup_points = False
-    if store_id and not active_groups:
-        from backend.chatbot.prompt import get_profile as _get_bot_profile
-        profile = await asyncio.to_thread(_get_bot_profile, store_id)
-        has_pickup_points = bool(profile.get("pickup_points"))
-
-    if not active_groups and not has_pickup_points:
+    if not store_id:
         return
 
-    # Получаем свежие новые заказы через Kaspi API
+    # Нет настроенных точек самовывоза — звать клиента некуда, и тогда мы не
+    # делаем к Kaspi ни одного запроса.
+    from backend.chatbot.prompt import get_profile as _get_bot_profile
+    profile = await asyncio.to_thread(_get_bot_profile, store_id)
+    if not profile.get("pickup_points"):
+        return
+
     try:
         orders_resp = await asyncio.to_thread(
             KaspiAPI.get_orders_with_products,
             token,
-            state="NEW",
+            state="PICKUP",
             status="APPROVED_BY_BANK",
-            limit=50
+            limit=50,
+            assembled=None,
         )
     except Exception as req_ex:
-        logger.debug(f"[Master Stock Radar] Ошибка получения заказов: {req_ex}")
+        # Раньше это был logger.debug — сбой канала к Kaspi был не виден вообще.
+        logger.warning(f"[PickupCampaign] Не удалось получить заказы самовывоза: {req_ex}")
         return
 
     if not orders_resp:
         return
 
-    # Загружаем товары из кэша для резолва алиасов ключей (per-store, Слайс 1)
-    all_products_cache = await asyncio.to_thread(_load_products, store_id) if active_groups else []
-
     processed_orders = await asyncio.to_thread(_load_processed_orders, store_id)
-    order_dedup_changed = False
+    changed = False
 
     for order in orders_resp:
         order_id = str(order.get("id") or order.get("internalId") or "")
         if not order_id or order_id in processed_orders:
             continue
 
-        # Фаза 4: кампания «Самовывоз» — независимо от Мастер-Групп остатков.
-        if store_id and order.get("deliveryType") == "Самовывоз":
-            asyncio.create_task(maybe_trigger_pickup_campaign(store_id, token, order))
-
-        if not active_groups:
-            processed_orders[order_id] = {"processed_at": datetime.datetime.now().isoformat(), "matched_groups": []}
-            order_dedup_changed = True
+        # В стадии PICKUP лежат И постаматные заказы (их там большинство:
+        # 51 из 60 на замере 13.08). Клиент забирает такой заказ из ячейки
+        # Kaspi, а не приезжает к продавцу — писать ему адрес магазина нельзя.
+        if order.get("deliveryType") != "Самовывоз":
             continue
 
-        entries = order.get("entries", [])
-        if not entries and "sku" in order:
-            entries = [{"sku": order.get("sku"), "quantity": order.get("quantity", 1)}]
-
-        order_matched_groups = set()
-        order_claimed = False
-        order_claim_denied = False
-
-        for entry in entries:
-            if order_claim_denied:
-                break
-            raw_sku_candidates = set()
-            for k in ["sku", "merchantSku", "masterSku", "kaspiSku"]:
-                val = entry.get(k)
-                if val:
-                    raw_sku_candidates.add(str(val).strip())
-
-            # Физические штуки с учётом комплектов/мультипаков (-2, -4, -6...) —
-            # ровно та же формула, что у упаковщика. Раньше радар вычитал сырое
-            # quantity, и итог зависел от того, какой воркер увидел заказ
-            # первым; теперь оба считают одинаково.
-            raw_qty = int(entry.get("quantity", 1))
-            qty = _calculate_physical_units(
-                entry.get("merchantSku") or entry.get("sku") or "", raw_qty
-            )
-            if not raw_sku_candidates:
-                continue
-
-            # Находим товар в кэше и собираем все его возможные алиасы (merchantSku, kaspiSku и т.д.)
-            all_possible_skus = set(raw_sku_candidates)
-            for cand in raw_sku_candidates:
-                p_match = next((p for p in all_products_cache if p.get("sku") == cand or p.get("merchantSku") == cand or p.get("kaspiSku") == cand), None)
-                if p_match:
-                    for key_field in ["sku", "merchantSku", "kaspiSku"]:
-                        if p_match.get(key_field):
-                            all_possible_skus.add(str(p_match[key_field]).strip())
-
-            # Находим группы, в которые входит любой из этих ключей
-            for gid, grp in active_groups.items():
-                if gid in order_matched_groups:
-                    continue
-                linked = [str(s).strip() for s in grp.get("linked_skus", [])]
-                if any(k in linked for k in all_possible_skus):
-                    # Право на списание — одно на заказ, общее с упаковщиком.
-                    if not order_claimed:
-                        order_claimed = await asyncio.to_thread(
-                            claim_stock_deduction, store_id, order_id, "radar",
-                            {"stage": "NEW", "qty": qty},
-                        )
-                        if not order_claimed:
-                            order_claim_denied = True
-                            break
-                    async with get_stock_lock(store_id):
-                        current_stock = int(grp.get("shared_stock", 0))
-                        new_stock = max(0, current_stock - qty)
-                        grp["shared_stock"] = new_stock
-                        groups[gid] = grp
-                        await asyncio.to_thread(_save_master_stock_groups, groups, store_id=store_id)
-                        logger.info(
-                            f"📦 [Order Sale Detected] Заказ {order_id} (Ключи: {list(all_possible_skus)}, qty: {qty}). "
-                            f"Группа '{grp.get('group_name')}' остаток: {current_stock} -> {new_stock}"
-                        )
-
-                        # Отправка Webhook в 1С/ERP
-                        asyncio.create_task(
-                            dispatch_webhook_event(
-                                "order.created",
-                                {
-                                    "order_id": order_id,
-                                    "purchased_sku": list(all_possible_skus)[0],
-                                    "all_matched_skus": list(all_possible_skus),
-                                    "quantity": qty,
-                                    "group_id": gid,
-                                    "group_name": grp.get("group_name"),
-                                    "external_code": grp.get("external_code"),
-                                    "previous_stock": current_stock,
-                                    "remaining_shared_stock": new_stock
-                                },
-                                store_id
-                            )
-                        )
-
-                    order_matched_groups.add(gid)
-
-        # Помечаем заказ как обработанный
+        asyncio.create_task(maybe_trigger_pickup_campaign(store_id, token, order))
         processed_orders[order_id] = {
             "processed_at": datetime.datetime.now().isoformat(),
-            "matched_groups": list(order_matched_groups)
+            "matched_groups": [],
         }
-        order_dedup_changed = True
+        changed = True
 
-        # Запускаем веерное обновление для затронутых групп
-        for gid in order_matched_groups:
-            asyncio.create_task(execute_broadcast_sync(gid, token, store_id=store_id))
-
-    if order_dedup_changed:
+    if changed:
         await asyncio.to_thread(_save_processed_orders, processed_orders, store_id)
 
-async def run_stock_radar_cycle():
+async def run_pickup_campaign_cycle():
     """
-    Один цикл радара по всем активным сторам. Вынесено из
-    master_stock_radar_loop отдельной функцией для юнит-тестов (без
-    бесконечного цикла/sleep вокруг).
-
-    Слайс 7: легаси-фоллбек на общую сессию (когда в БД ещё нет ни одного
-    Store) убран — нет активных сторов, нечего сканировать.
+    Один цикл кампании «Самовывоз» по всем активным сторам. Вынесено из
+    pickup_campaign_loop отдельной функцией для юнит-тестов (без бесконечного
+    цикла/sleep вокруг).
     """
     stores = await list_active_stores()
     for store in stores:
         try:
-            await _run_stock_radar_pass(store.token, store.store_id)
+            await _run_pickup_campaign_pass(store.token, store.store_id)
         except Exception as e:
-            logger.error(f"[Master Stock Radar] Store {store.store_id} pass failed: {e}")
+            logger.error(f"[PickupCampaign] Store {store.store_id} pass failed: {e}")
 
-async def master_stock_radar_loop():
+async def pickup_campaign_loop():
     """
-    Фоновый радар фиксации продаж заказов и веерной синхронизации остатков —
-    по всем активным сторам (Phase 7).
+    Фоновый триггер кампании «Самовывоз» по всем активным сторам.
+
+    Интервал 60с, а не прежние 20: это приветственное сообщение клиенту с
+    адресом и графиком, а не движок остатков — секунды здесь ничего не решают,
+    зато запросов к Kaspi втрое меньше.
     """
-    logger.info("🟢 [Master Stock Radar] Запущен фоновый радар списания остатков.")
+    logger.info("🟢 [PickupCampaign] Запущен фоновый триггер кампании «Самовывоз».")
     while True:
         try:
-            await asyncio.sleep(20)
-            await run_stock_radar_cycle()
+            await asyncio.sleep(60)
+            await run_pickup_campaign_cycle()
 
         except asyncio.CancelledError:
-            logger.info("⏹ [Master Stock Radar] Радар остановлен.")
+            logger.info("⏹ [PickupCampaign] Триггер остановлен.")
             break
         except Exception as e:
-            logger.error(f"❌ [Master Stock Radar] Ошибка в цикле радара: {e}")
+            logger.error(f"❌ [PickupCampaign] Ошибка в цикле: {e}")
 
 
 # ── 5. Auto Deduction on Packaging Detection Engine ──────────────────────
 
-def claim_stock_deduction(store_id: Optional[str], order_id: str, claimed_by: str, payload: dict) -> bool:
+# ── Сопоставление артикула заказа с Мастер-Группой ───────────────────────
+#
+# Правило было широким: подстрока в обе стороны ПЛЮС поиск ключа группы в
+# НАЗВАНИИ товара. Замер 13.08 по всем ~1500 заказам магазина (HANDOFF 3.46):
+# строгое правило даёт те же 181 совпадение, широкое добавляет ровно один
+# артикул — и тот лишь из-за приписки от руки в merchantSku ("H422-0007-9
+# 2шт"). Обратных случаев ноль. То есть широта не приносила ничего, кроме
+# риска списать у чужой группы. Приписку добиваем нормализацией.
+
+_MULTIPACK_RE = re.compile(r"^(.+?)-(\d{1,2})$")
+
+
+def _normalize_sku(raw) -> str:
+    """Артикул в сравнимом виде: без регистра и без человеческих приписок.
+
+    В merchantSku регулярно попадает хвост через пробел — "H422-0007-9 2шт",
+    "X474-0018-6 1шт". Код товара — это первый токен.
     """
-    Забронировать право списать остаток по этому заказу.
+    s = str(raw or "").strip().lower()
+    return s.split()[0] if s else ""
 
-    Один и тот же заказ видят ДВА воркера: радар ловит его в NEW/
-    APPROVED_BY_BANK, упаковщик — позже, на стадии «На сборке». Раньше у них
-    были независимые списки обработанных заказов ('radar' и 'packaging'), и
-    каждый списывал остаток самостоятельно — то есть один заказ вычитался
-    дважды, а веерная рассылка по группе запускалась тоже дважды.
 
-    Решение пользователя: оба воркера оставляем, но списывает тот, кто увидел
-    заказ первым; второй только логирует. Общая отметка живёт в
-    ProcessedOrderDB под kind='stock' — она и есть арбитр.
+def _sku_base(sku: str) -> str:
+    """База мультипака: "t219-0005-4" -> "t219-0005". Не мультипак — сам себя."""
+    m = _MULTIPACK_RE.match(sku)
+    return m.group(1) if m else sku
+
+
+def match_group_for_sku(m_sku: str, groups: dict):
+    """
+    Мастер-группа для артикула из заказа. Возвращает (group_id, group) либо
+    (None, None).
+
+    Сначала ищем ТОЧНОЕ совпадение артикула, и только если его нет — совпадение
+    по базе мультипака ("T219-0005-4" при привязанном "T219-0005"). Порядок
+    важен: иначе "K474-0003-1" и "K474-0003-2", лежащие в РАЗНЫХ группах,
+    схлопнулись бы по общей базе "K474-0003".
+
+    Если под правило подходит больше одной группы — НЕ угадываем: возвращаем
+    пусто и пишем предупреждение. Молча вычесть у не той группы хуже, чем не
+    вычесть вовсе.
+    """
+    sku = _normalize_sku(m_sku)
+    if not sku:
+        return None, None
+
+    base = _sku_base(sku)
+    exact, by_base = [], []
+    for gid, g in groups.items():
+        linked = {_normalize_sku(s) for s in (g.get("linked_skus") or [])}
+        linked.discard("")
+        if sku in linked:
+            exact.append((gid, g))
+        elif base in linked or any(_sku_base(s) == sku for s in linked):
+            by_base.append((gid, g))
+
+    hits = exact or by_base
+    if not hits:
+        return None, None
+    if len(hits) > 1:
+        logger.warning(
+            "⚠️ [AutoDeduction] Артикул %s подходит сразу к %d Мастер-Группам (%s) — "
+            "списание пропущено, чтобы не вычесть у чужой. Разведите привязки.",
+            m_sku, len(hits), ", ".join(str(g.get("group_name")) for _, g in hits),
+        )
+        return None, None
+    return hits[0]
+
+
+def _claim_key(order_id: str, sku: str) -> str:
+    return f"{order_id}:{_normalize_sku(sku)}"
+
+
+def claim_stock_deduction(
+    store_id: Optional[str], order_id: str, claimed_by: str, payload: dict, sku: str = ""
+) -> bool:
+    """
+    Забронировать право списать остаток по ПОЗИЦИИ заказа.
+
+    Раньше право бралось на заказ целиком, и заказ из двух разных товаров
+    списывал только первый — вторая Мастер-Группа о продаже не узнавала вовсе.
+    Теперь ключ — пара (заказ, артикул), поэтому каждая позиция уменьшает свою
+    группу, и при этом повторно не списывается.
+
+    Совместимость: заказы, забронированные старым способом (ключ = только номер
+    заказа), по-прежнему считаются списанными. Без этого смена формата ключа
+    заново вычла бы все исторические заказы — ровно то дублирование, которого
+    мы избегаем.
 
     Возвращает True, если право получено (значит, списывать должен вызывающий).
     """
@@ -486,15 +485,19 @@ def claim_stock_deduction(store_id: Optional[str], order_id: str, claimed_by: st
     from backend.state_helpers import _load_processed_orders_by_kind, _save_processed_orders_by_kind
 
     claimed = _load_processed_orders_by_kind(store_id, "stock")
-    if order_id in claimed:
+    key = _claim_key(order_id, sku) if sku else order_id
+    prev = claimed.get(key)
+    if prev is None and key != order_id:
+        prev = claimed.get(order_id)  # старый формат: право на заказ целиком
+    if prev is not None:
         logger.info(
-            "🔁 [StockClaim] Заказ %s уже списан (%s) — %s только логирует, повторного вычитания нет.",
-            order_id, (claimed[order_id] or {}).get("claimed_by", "?"), claimed_by,
+            "🔁 [StockClaim] Позиция %s уже списана (%s) — %s только логирует, повторного вычитания нет.",
+            key, (prev or {}).get("claimed_by", "?"), claimed_by,
         )
         return False
     _save_processed_orders_by_kind(
-        {order_id: {**payload, "claimed_by": claimed_by,
-                    "claimed_at": datetime.datetime.now().isoformat()}},
+        {key: {**payload, "claimed_by": claimed_by,
+               "claimed_at": datetime.datetime.now().isoformat()}},
         store_id, "stock",
     )
     return True
@@ -508,7 +511,7 @@ def _calculate_physical_units(merchant_sku: str, quantity: int = 1) -> int:
     if not merchant_sku:
         return quantity
 
-    sku_str = str(merchant_sku).strip()
+    sku_str = _normalize_sku(merchant_sku)
     multiplier = 1
     if "-" in sku_str:
         parts = sku_str.split("-")
@@ -521,143 +524,147 @@ def _calculate_physical_units(merchant_sku: str, quantity: int = 1) -> int:
 
 async def process_packaging_auto_deduction(token: str, store_id: Optional[str] = None) -> dict:
     """
-    Фоновая процедура обнаружения новых заказов в Упаковке:
-    1. Запрашивает активные заказы 'На сборке' (cargo_assembly).
-    2. Если заказ новый (нет в processed_packaging_orders.json):
-       - Находит соответствующую Мастер-Группу остатка.
-       - Вычисляет физическое количество списания с учетом комплектов (-2, -4, -6...).
-       - Уменьшает shared_stock группы: max(0, shared_stock - units).
-       - Логирует списание и при 0 активирует Zero-Stock Protection.
-       - Запускает асинхронный broadcast sync (execute_broadcast_sync) на Kaspi!
+    Обнаружение продаж по вкладкам упаковки и списание остатка Мастер-Групп.
+
+    Смотрит ДВЕ вкладки: «На сборке» (cargo_assembly) и «Ожидает курьера»
+    (wait_for_courier, она же «Передача»). Передача — страховка: если заказ
+    упаковали между двумя тиками или пока сервис перезагружался, он минует «На
+    сборке», и раньше такой заказ не списывался НИКОГДА. Дублей это не создаёт
+    — право на списание берётся один раз на пару (заказ, артикул).
+
+    Списываются ВСЕ подходящие позиции заказа, а не только первая: заказ из
+    двух товаров разных групп уменьшает обе.
     """
     from backend.state_helpers import _load_processed_packaging_orders, _save_processed_packaging_orders
 
-    processed_orders = await asyncio.to_thread(_load_processed_packaging_orders, store_id)
-
     try:
-        # Синхронный постраничный обход Kaspi MC (весь список заказов
-        # "На сборке") — тик каждые 30с на каждый активный стор.
+        # Синхронный постраничный обход Kaspi MC — тик каждые 30с на каждый
+        # активный стор.
         tabs = await asyncio.to_thread(KaspiAPI.get_all_packaging_tabs, token)
     except Exception as e:
         logger.error(f"[AutoDeduction] Error fetching packaging tabs: {e}")
         return {"success": False, "error": str(e)}
 
-    cargo_assembly = tabs.get("cargo_assembly", [])
-    if not cargo_assembly:
+    orders = list(tabs.get("cargo_assembly") or []) + list(tabs.get("wait_for_courier") or [])
+    if not orders:
         return {"success": True, "deducted_orders_count": 0, "deductions": []}
 
+    processed_orders = await asyncio.to_thread(_load_processed_packaging_orders, store_id)
     new_deductions = []
+    # Одна веерная рассылка на группу, даже если заказ задел её дважды.
+    to_broadcast: dict = {}
 
     async with get_stock_lock(store_id):
         groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
+        active_groups = {gid: g for gid, g in groups.items() if g.get("is_active", True)}
         groups_modified = False
         orders_marked = False
 
-        for order in cargo_assembly:
-            order_code = str(order.get("code") or order.get("id")).strip()
-            if not order_code or order_code in processed_orders:
+        for order in orders:
+            order_code = str(order.get("code") or order.get("id") or "").strip()
+            if not order_code:
                 continue
 
-            items = order.get("items", [])
-            for item in items:
+            for item in order.get("items", []) or []:
                 m_sku = str(item.get("merchant_sku", "")).strip()
                 title = str(item.get("title", "")).strip()
-                qty = item.get("quantity", 1)
+                if not m_sku:
+                    continue
 
-                matched_group = None
-                for g_id, g in groups.items():
-                    linked = set(str(s).strip().lower() for s in g.get("linked_skus", []))
-                    m_sku_lower = m_sku.lower()
+                pkey = _claim_key(order_code, m_sku)
+                # Отметка старого формата (на заказ целиком) тоже закрывает
+                # позицию — исторические заказы не пересчитываются.
+                if pkey in processed_orders or order_code in processed_orders:
+                    continue
 
-                    if (
-                        m_sku_lower in linked
-                        or any(s in m_sku_lower or m_sku_lower.startswith(s) or s in title.lower() for s in linked if len(s) >= 4)
-                    ):
-                        matched_group = g
-                        break
+                gid, matched_group = match_group_for_sku(m_sku, active_groups)
+                if not matched_group:
+                    continue
 
-                if matched_group:
-                    units = _calculate_physical_units(m_sku, qty)
-                    # Право на списание — одно на заказ, общее с радаром.
-                    # Если радар уже вычел этот заказ на стадии NEW, здесь мы
-                    # только помечаем его обработанным и идём дальше.
-                    if not await asyncio.to_thread(
-                        claim_stock_deduction, store_id, order_code, "packaging",
-                        {"stage": "cargo_assembly", "sku": m_sku, "units": units},
-                    ):
-                        processed_orders[order_code] = {
-                            "deducted_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "group_id": matched_group["group_id"],
-                            "sku": m_sku,
-                            "units": 0,
-                            "skipped_reason": "already_deducted_by_radar",
-                        }
-                        orders_marked = True
-                        break
-                    old_stock = int(matched_group.get("shared_stock", 0))
-                    new_stock = max(0, old_stock - units)
-                    matched_group["shared_stock"] = new_stock
-                    matched_group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                units = _calculate_physical_units(m_sku, item.get("quantity", 1))
 
-                    now_time = datetime.datetime.now().strftime("%H:%M:%S")
-                    log_entry = (
-                        f"[{now_time}] 🛒 Авто-списание по заказу #{order_code} ({m_sku}): "
-                        f"-{units} шт. (Было: {old_stock} -> Стало: {new_stock} шт.)"
-                    )
-
-                    logs = matched_group.setdefault("sync_logs", [])
-                    logs.insert(0, log_entry)
-                    if len(logs) > 30:
-                        matched_group["sync_logs"] = logs[:30]
-
-                    matched_group["last_sync_log"] = log_entry
-                    groups_modified = True
-                    orders_marked = True
-
-                    processed_orders[order_code] = {
+                if not await asyncio.to_thread(
+                    claim_stock_deduction, store_id, order_code, "packaging",
+                    {"stage": "packaging", "sku": m_sku, "units": units}, m_sku,
+                ):
+                    processed_orders[pkey] = {
                         "deducted_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "group_id": matched_group["group_id"],
+                        "group_id": matched_group.get("group_id"),
                         "sku": m_sku,
-                        "units": units,
-                        "old_stock": old_stock,
-                        "new_stock": new_stock
+                        "units": 0,
+                        "skipped_reason": "already_claimed",
                     }
+                    orders_marked = True
+                    continue
 
-                    new_deductions.append({
-                        "order_code": order_code,
-                        "group_id": matched_group["group_id"],
-                        "group_name": matched_group.get("group_name"),
-                        "sku": m_sku,
-                        "units": units,
-                        "new_stock": new_stock
-                    })
+                old_stock = int(matched_group.get("shared_stock", 0))
+                new_stock = max(0, old_stock - units)
+                matched_group["shared_stock"] = new_stock
+                matched_group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                # Статус, который видно на карточке группы, пока идёт списание
+                # и следующая за ним веерная рассылка.
+                matched_group["status"] = "deducting"
 
-                    logger.info(f"⚡ [AutoDeduction] Заказ #{order_code} списал {units} шт. у группы '{matched_group.get('group_name')}'. Остаток: {new_stock}")
+                now_time = datetime.datetime.now().strftime("%H:%M:%S")
+                log_entry = (
+                    f"[{now_time}] 🛒 Списание по заказу #{order_code} ({m_sku}): "
+                    f"-{units} шт. (было {old_stock} → стало {new_stock})"
+                )
+                logs = matched_group.setdefault("sync_logs", [])
+                logs.insert(0, log_entry)
+                matched_group["sync_logs"] = logs[:30]
+                matched_group["last_sync_log"] = log_entry
 
-                    trigger_info = {
-                        "order_code": order_code,
-                        "sku": m_sku,
-                        "units": units,
-                        "title": title or item.get("title") or "Товар",
-                        "customer": order.get("customer") or "Покупатель"
-                    }
+                groups_modified = True
+                orders_marked = True
 
-                    # Запускаем веерное списание остатка на Kaspi с информацией о заказе
-                    asyncio.create_task(execute_broadcast_sync(matched_group["group_id"], token, store_id=store_id, trigger_order_info=trigger_info))
-                    break
+                processed_orders[pkey] = {
+                    "deducted_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "group_id": matched_group.get("group_id"),
+                    "sku": m_sku,
+                    "units": units,
+                    "old_stock": old_stock,
+                    "new_stock": new_stock,
+                }
+
+                new_deductions.append({
+                    "order_code": order_code,
+                    "group_id": matched_group.get("group_id"),
+                    "group_name": matched_group.get("group_name"),
+                    "sku": m_sku,
+                    "units": units,
+                    "new_stock": new_stock,
+                })
+
+                logger.info(
+                    f"⚡ [AutoDeduction] Заказ #{order_code} списал {units} шт. "
+                    f"у группы '{matched_group.get('group_name')}'. Остаток: {new_stock}"
+                )
+
+                to_broadcast[matched_group.get("group_id") or gid] = {
+                    "order_code": order_code,
+                    "sku": m_sku,
+                    "units": units,
+                    "title": title or "Товар",
+                    "customer": order.get("customer") or "Покупатель",
+                }
 
         if groups_modified:
             await asyncio.to_thread(_save_master_stock_groups, groups, store_id=store_id)
         if groups_modified or orders_marked:
-            # Отметку об обработке сохраняем и когда списания не было (заказ
-            # уже вычел радар) — иначе тот же заказ переспрашивался бы каждые
-            # 30 секунд до бесконечности.
+            # Отметку сохраняем и когда списания не было (право уже занято) —
+            # иначе та же позиция переспрашивалась бы каждые 30 секунд.
             await asyncio.to_thread(_save_processed_packaging_orders, processed_orders, store_id)
+
+    for gid, trigger_info in to_broadcast.items():
+        asyncio.create_task(
+            execute_broadcast_sync(gid, token, store_id=store_id, trigger_order_info=trigger_info)
+        )
 
     return {
         "success": True,
         "deducted_orders_count": len(new_deductions),
-        "deductions": new_deductions
+        "deductions": new_deductions,
     }
 
 

@@ -25,6 +25,27 @@
 
 ---
 
+### 2.4-bis ⚠️ Определение вида доставки — наши прежние обозначения были НЕВЕРНЫ
+
+Реверс на живых данных Бархана 2026-08-13 (60 заказов в `state=PICKUP`, 600 в `KASPI_DELIVERY`). Счёт совпал с тем, что владелец видит в кабинете, — это и есть подтверждение.
+
+**Ключевая ошибка:** поле `deliveryMode` **не различает** постамат и самовывоз — у обоих оно равно `DELIVERY_PICKUP`. Поле `pickupPointId` тоже не различитель: оно заполнено у обоих и содержит точку продавца (`20186986_001`), а не идентификатор постамата.
+
+**Настоящий различитель — `attributes.isKaspiDelivery`** (дублируется наличием блока `attributes.kaspiDelivery`):
+
+| `deliveryMode` | `isKaspiDelivery` | `kaspiDelivery` | Смысл | Замер 13.08 |
+| :--- | :--- | :--- | :--- | :--- |
+| `DELIVERY_PICKUP` | `true` | объект | Kaspi везёт до постамата/пункта выдачи | 51 в `PICKUP`, 478 в `KASPI_DELIVERY` |
+| `DELIVERY_PICKUP` | `false` | `null` | **Самовывоз клиентом из точки продавца** | **8** в `PICKUP` |
+| `DELIVERY_REGIONAL_TODOOR` | `true` | объект | Межгородская курьерская до двери | 121 |
+| `DELIVERY_LOCAL` | `true` | объект | Локальная доставка по городу | 1 |
+
+Логика в `backend/kaspi_wrapper.py::_parse_delivery_type` до 2026-08-13 возвращала `"Postomat"` для любого `DELIVERY_PICKUP` (строка `dm == "DELIVERY_PICKUP"` в проверке на постамат). Следствие: **самовывоз не существовал в системе как класс**, а кампания «Самовывоз» не могла сработать ни при каких условиях.
+
+Самовывозные заказы живут в `state=PICKUP` со `status=ACCEPTED_BY_MERCHANT`. Состояние `DELIVERY` у этого магазина всегда пустое.
+
+---
+
 ### 2.5 Пример эталонного cURL-запроса (CLI)
 ```bash
 curl -g -i -m 10 '[https://kaspi.kz/shop/api/v2/orders?page](https://kaspi.kz/shop/api/v2/orders?page)[size]=1&page[number]=0&filter[orders][creationDate][$ge]=1783300000000&filter[orders][creationDate][$le]=1783700000000' \
