@@ -22,6 +22,10 @@ export function usePriceFeedImport(onImported: () => void) {
   const [preview, setPreview] = useState<PriceFeedPreviewResult | null>(null);
   const [applyResult, setApplyResult] = useState<PriceFeedApplyResult | null>(null);
   const [overwrite, setOverwrite] = useState(false);
+  // По умолчанию импорт спящий — см. комментарий у activate в
+  // backend/routers/pricefeed_import.py: включать сотни товаров разом нельзя,
+  // квота Kaspi на запись офферов такого залпа не выдержит.
+  const [activate, setActivate] = useState(false);
   const [error, setError] = useState('');
 
   const openModal = () => setStep('credentials');
@@ -34,6 +38,7 @@ export function usePriceFeedImport(onImported: () => void) {
     setPreview(null);
     setApplyResult(null);
     setOverwrite(false);
+    setActivate(false);
     setError('');
   };
 
@@ -69,7 +74,7 @@ export function usePriceFeedImport(onImported: () => void) {
     setError('');
     setStep('applying');
     try {
-      const result = await pricefeedApply(preview.import_id, overwrite);
+      const result = await pricefeedApply(preview.import_id, overwrite, activate);
       setApplyResult(result);
       setPassword('');
       setStep('done');
@@ -93,6 +98,8 @@ export function usePriceFeedImport(onImported: () => void) {
     applyResult,
     overwrite,
     setOverwrite,
+    activate,
+    setActivate,
     error,
     openModal,
     closeModal,

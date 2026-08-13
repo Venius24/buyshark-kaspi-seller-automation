@@ -12,6 +12,8 @@ interface PriceFeedImportModalProps {
   applyResult: PriceFeedApplyResult | null;
   overwrite: boolean;
   onOverwriteChange: (value: boolean) => void;
+  activate: boolean;
+  onActivateChange: (value: boolean) => void;
   error: string;
   onClose: () => void;
   onSubmitCredentials: () => void;
@@ -40,6 +42,8 @@ export function PriceFeedImportModal({
   applyResult,
   overwrite,
   onOverwriteChange,
+  activate,
+  onActivateChange,
   error,
   onClose,
   onSubmitCredentials,
@@ -218,7 +222,24 @@ export function PriceFeedImportModal({
               Перезаписать уже настроенные у нас товары ({preview.already_configured || 0})
             </label>
 
-            <button className="btn btn-primary" style={{ width: '100%' }} onClick={onApply} disabled={!preview.importable}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '13px', marginBottom: '8px' }}>
+              <input
+                type="checkbox"
+                checked={activate}
+                onChange={(e) => onActivateChange(e.target.checked)}
+                style={{ marginTop: '3px' }}
+              />
+              <span>
+                Сразу включить демпинг по этим товарам
+                <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '12px', marginTop: '2px' }}>
+                  Без галочки настройки лягут выключенными — включите их партиями на вкладке
+                  «Демпинг». Kaspi разрешает всего 250 обновлений цен за 30 минут на весь магазин,
+                  и разом поднятые {preview.importable} товар(ов) в это окно не поместятся.
+                </span>
+              </span>
+            </label>
+
+            <button className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }} onClick={onApply} disabled={!preview.importable}>
               Импортировать {preview.importable} товар(ов)
             </button>
           </div>
@@ -247,6 +268,12 @@ export function PriceFeedImportModal({
               Добавлено: {applyResult.created}, обновлено: {applyResult.updated}
               {applyResult.skipped_existing ? `, пропущено (уже настроено): ${applyResult.skipped_existing}` : ''}.
             </p>
+            {!applyResult.activated && (
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px' }}>
+                Настройки лежат выключенными и цены пока не трогают. Включайте их партиями
+                на вкладке «Демпинг», следя за остатком квоты Kaspi.
+              </p>
+            )}
             <button className="btn btn-primary" style={{ width: '100%' }} onClick={onFinish}>
               Закрыть
             </button>

@@ -982,6 +982,8 @@ export default function App() {
         applyResult={priceFeedImport.applyResult}
         overwrite={priceFeedImport.overwrite}
         onOverwriteChange={priceFeedImport.setOverwrite}
+        activate={priceFeedImport.activate}
+        onActivateChange={priceFeedImport.setActivate}
         error={priceFeedImport.error}
         onClose={priceFeedImport.closeModal}
         onSubmitCredentials={priceFeedImport.submitCredentials}

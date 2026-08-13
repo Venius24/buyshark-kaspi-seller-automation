@@ -309,6 +309,8 @@ export interface PriceFeedApplyResult {
   updated: number;
   skipped_existing: number;
   total: number;
+  /** Импортированные конфиги сразу включены в бой (иначе легли спящими). */
+  activated?: boolean;
 }
 
 /**

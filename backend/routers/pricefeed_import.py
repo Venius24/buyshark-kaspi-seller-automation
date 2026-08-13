@@ -91,6 +91,13 @@ class PriceFeedPreviewRequest(BaseModel):
 class PriceFeedApplyRequest(BaseModel):
     import_id: str
     overwrite: bool = False
+    # Импорт по умолчанию СПЯЩИЙ: конфиги ложатся выключенными, демпинг по ним
+    # не стартует. Иначе один клик поднимает сотни товаров разом — а глобального
+    # рубильника у демпинга нет (backend/dumper/__init__.py крутит всё, у чего
+    # enabled=True), то есть откатить можно только вручную по одному. Плюс
+    # квота Kaspi на запись офферов — 250 за 30 минут на весь магазин, и залп
+    # выравнивания цен по всему ассортименту в неё не влезает.
+    activate: bool = False
 
 
 def _check_cooldown(store_id: str):
@@ -238,12 +245,19 @@ async def apply_pricefeed_import(
             skipped_existing += 1
             continue
         if already:
-            to_write[sku] = pricefeed_mapping.merge_with_existing(new_config, existing_configs[sku])
+            merged = pricefeed_mapping.merge_with_existing(new_config, existing_configs[sku])
+            if not req.activate:
+                # Не трогаем чужой рубильник: товар, который уже демпинговался,
+                # продолжает демпинговаться, выключенный остаётся выключенным.
+                merged["enabled"] = bool(existing_configs[sku].get("enabled", False))
+            to_write[sku] = merged
             updated += 1
         else:
             cfg = dict(new_config)
             cfg.pop("_source_title", None)
             cfg.pop("sku", None)
+            if not req.activate:
+                cfg["enabled"] = False
             to_write[sku] = cfg
             created += 1
 
@@ -254,8 +268,8 @@ async def apply_pricefeed_import(
         _PENDING.pop(req.import_id, None)
 
     logger.info(
-        "PriceFeed apply store_id=%s created=%d updated=%d skipped_existing=%d",
-        ctx.store_id, created, updated, skipped_existing,
+        "PriceFeed apply store_id=%s created=%d updated=%d skipped_existing=%d activate=%s",
+        ctx.store_id, created, updated, skipped_existing, req.activate,
     )
 
     return {
@@ -264,4 +278,5 @@ async def apply_pricefeed_import(
         "updated": updated,
         "skipped_existing": skipped_existing,
         "total": created + updated,
+        "activated": req.activate,
     }

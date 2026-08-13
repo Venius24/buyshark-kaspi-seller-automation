@@ -161,12 +161,13 @@ export const pricefeedPreview = async (
 
 export const pricefeedApply = async (
   import_id: string,
-  overwrite: boolean
+  overwrite: boolean,
+  activate: boolean
 ): Promise<import('./types').PriceFeedApplyResult> => {
   const res = await apiFetch(`${API_URL}/api/dumping/pricefeed/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ import_id, overwrite }),
+    body: JSON.stringify({ import_id, overwrite, activate }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

@@ -219,6 +219,67 @@ class TestApplyFlow(PriceFeedRouterTestBase):
         self.assertEqual(written["blacklisted_merchants"], ["evil-merchant"])
         self.assertEqual(written["target_position"], 7)
 
+    @patch("backend.routers.pricefeed_import._save_dumping_configs")
+    @patch("backend.routers.pricefeed_import._load_dumping_configs", return_value={})
+    def test_apply_lands_dormant_by_default(self, mock_load, mock_save):
+        """Импорт по умолчанию не поднимает товары в бой.
+
+        Иначе один клик включает демпинг сразу по сотням SKU: глобального
+        рубильника нет, а квота Kaspi — 250 записей за 30 минут на магазин.
+        """
+        app.dependency_overrides[get_store_context_billed] = _ctx("store-1")
+        self._seed_pending(store_id="store-1")
+
+        resp = self.client.post("/api/dumping/pricefeed/apply", json={"import_id": "import-1"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["activated"])
+        self.assertFalse(mock_save.call_args[0][0]["X1"]["enabled"])
+
+    @patch("backend.routers.pricefeed_import._save_dumping_configs")
+    @patch("backend.routers.pricefeed_import._load_dumping_configs", return_value={})
+    def test_apply_with_activate_enables_configs(self, mock_load, mock_save):
+        app.dependency_overrides[get_store_context_billed] = _ctx("store-1")
+        self._seed_pending(store_id="store-1")
+
+        resp = self.client.post(
+            "/api/dumping/pricefeed/apply", json={"import_id": "import-1", "activate": True}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["activated"])
+        self.assertTrue(mock_save.call_args[0][0]["X1"]["enabled"])
+
+    @patch("backend.routers.pricefeed_import._save_dumping_configs")
+    @patch("backend.routers.pricefeed_import._load_dumping_configs")
+    def test_dormant_overwrite_keeps_existing_switch_position(self, mock_load, mock_save):
+        """Спящий импорт правит цифры, но не трогает чужой рубильник:
+        работавший товар продолжает работать, выключенный остаётся выключенным."""
+        app.dependency_overrides[get_store_context_billed] = _ctx("store-1")
+        base = {
+            "min_price": 1, "max_price": 2, "dump_step": 1, "mode": "TOP_1",
+            "target_position": 1, "max_delivery_days": None, "min_seller_rating": None,
+            "same_city_only": False, "blacklisted_merchants": [], "city_code": "999",
+        }
+        rows = {
+            "ON": {**base, "min_price": 100, "max_price": 500, "enabled": True, "sku": "ON"},
+            "OFF": {**base, "min_price": 100, "max_price": 500, "enabled": True, "sku": "OFF"},
+        }
+        mock_load.return_value = {
+            "ON": {**base, "enabled": True},
+            "OFF": {**base, "enabled": False},
+        }
+        self._seed_pending(store_id="store-1", rows=rows)
+
+        resp = self.client.post(
+            "/api/dumping/pricefeed/apply",
+            json={"import_id": "import-1", "overwrite": True},
+        )
+        self.assertEqual(resp.status_code, 200)
+        written = mock_save.call_args[0][0]
+        self.assertTrue(written["ON"]["enabled"])
+        self.assertFalse(written["OFF"]["enabled"])
+        # Цифры при этом обновились — импорт не выродился в no-op.
+        self.assertEqual(written["OFF"]["min_price"], 100)
+
     def test_apply_unknown_import_id_returns_410(self):
         app.dependency_overrides[get_store_context_billed] = _ctx("store-1")
         resp = self.client.post("/api/dumping/pricefeed/apply", json={"import_id": "does-not-exist"})
