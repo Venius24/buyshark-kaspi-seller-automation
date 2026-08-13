@@ -48,7 +48,7 @@ from backend.routers import (
     auth, products, orders, dumping, ws, analytics,
     chatbot, stock_groups, api_keys, print_batcher,
     auth_v1, stores_v1, chats, autolist, auto_assembly, telegram_link,
-    pricefeed_import,
+    pricefeed_import, stores_auto_connect,
 )
 from backend.routers import billing as billing_router, admin_billing, referral as referral_router
 from backend.routers import webhooks_incoming_email
@@ -128,6 +128,7 @@ app.mount("/ping-pong", StaticFiles(directory="api-ping-pong", html=True), name=
 # Подключение роутеров v1 и стандартных
 app.include_router(auth_v1.router)
 app.include_router(stores_v1.router)
+app.include_router(stores_auto_connect.router)
 
 app.include_router(auth.router)
 app.include_router(products.router)
