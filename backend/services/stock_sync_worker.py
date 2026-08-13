@@ -90,7 +90,61 @@ async def broadcast_ws_event(event_type: str, data: dict, store_id: Optional[str
         logger.error(f"Error broadcasting WS event {event_type}: {e}")
 
 
+# Сколько ждём завершения рассылки, прежде чем счесть её оборванной. Реальная
+# рассылка укладывается в секунды, так что запас тут десятикратный.
+STUCK_STATUS_AFTER_SECONDS = 600
+
+
+async def _release_stuck_broadcast_status(group_id: str, store_id: Optional[str], reason: str):
+    """Снять с группы индикатор «идёт списание», когда рассылка не дошла до конца.
+
+    Само списание при этом уже состоялось и остаток уменьшен — теряется только
+    рассылка нового остатка по SKU, поэтому статус «предупреждение», а не
+    «синхронизировано»: владелец должен увидеть, что до Kaspi дошло не всё.
+    """
+    try:
+        async with get_stock_lock(store_id):
+            groups = _load_master_stock_groups(store_id=store_id)
+            g = groups.get(group_id)
+            if not g or g.get("status") not in ("deducting", "updating"):
+                return
+            g["status"] = "warning"
+            g.pop("status_since", None)
+            msg = f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ⚠️ Рассылка остатка не завершилась ({reason})"
+            g["last_sync_log"] = msg
+            g["sync_logs"] = ([msg] + list(g.get("sync_logs") or []))[:30]
+            _save_master_stock_groups(groups, store_id=store_id)
+        await broadcast_ws_event("stock_group_updated", g, store_id=store_id)
+    except Exception:
+        logger.exception("[Broadcast Sync] Не удалось снять залипший статус группы %s", group_id)
+
+
 async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[str] = None, trigger_order_info: Optional[dict] = None):
+    """
+    Точка входа в веерную рассылку. Тонкая обёртка, и вот зачем она нужна.
+
+    Рассылку ВСЕГДА запускают в фоне — `asyncio.create_task` в упаковщике и
+    `BackgroundTasks` в роутерах. У фоновой задачи исключение никто не читает,
+    оно исчезает молча. А статус «идёт списание» ставится в самом начале, до
+    похода в Kaspi: упади рассылка после этого — карточка группы навсегда
+    осталась бы со спиннером, который уже некому снять.
+    """
+    try:
+        await _execute_broadcast_sync_impl(
+            group_id, token, store_id=store_id, trigger_order_info=trigger_order_info
+        )
+    except asyncio.CancelledError:
+        await _release_stuck_broadcast_status(group_id, store_id, "остановлена")
+        raise
+    except Exception as e:
+        logger.exception(
+            "❌ [Broadcast Sync] Группа %s: рассылка упала (%s) — снимаю индикатор списания.",
+            group_id, e,
+        )
+        await _release_stuck_broadcast_status(group_id, store_id, f"{type(e).__name__}: {e}")
+
+
+async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Optional[str] = None, trigger_order_info: Optional[dict] = None):
     """
     Веерная рассылка обновлённого остатка по всем SKU группы.
 
@@ -126,6 +180,9 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
         else:
             group["status"] = "updating"
             group["last_sync_log"] = "Запуск веерной синхронизации..."
+        # Метка времени, по которой сторож отличает идущую рассылку от
+        # оборванной (например, сервис перезапустили в середине).
+        group["status_since"] = datetime.datetime.now().isoformat()
         _save_master_stock_groups(groups, store_id=store_id)
 
     await broadcast_ws_event("stock_group_updated", group, store_id=store_id)
@@ -266,6 +323,8 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
                 g["status"] = "warning"
             else:
                 g["status"] = "error"
+            # Рассылка дошла до конца — сторожу больше нечего сторожить.
+            g.pop("status_since", None)
 
             # Строку о списании (её пишет упаковщик ДО запуска рассылки) не
             # затираем: раньше здесь стояло присваивание, и журнал группы терял
@@ -283,6 +342,54 @@ async def execute_broadcast_sync(group_id: str, token: str, store_id: Optional[s
             "group_name": group_name,
             "message": f"Группа [{group_name}] снята с продажи на Kaspi (остаток {shared_stock} <= стоп кол-во {stop_qty})!"
         }, store_id=store_id)
+
+def _sweep_stuck_statuses(active_groups: dict) -> bool:
+    """Снять индикатор списания с групп, чья рассылка оборвалась вместе с процессом.
+
+    Обёртка `execute_broadcast_sync` ловит исключения сама, но от `kill -9` и
+    рестарта сервиса она не спасает: группа остаётся в состоянии «идёт
+    списание» навсегда, и на карточке крутится спиннер, которого уже некому
+    снять. Проверка стоит на горячем тике упаковки — она чисто локальная, ни
+    одного запроса наружу.
+
+    Возвращает True, если что-то поправили (значит, группы надо сохранить).
+    """
+    now = datetime.datetime.now()
+    touched = False
+    for g in active_groups.values():
+        if g.get("status") not in ("deducting", "updating"):
+            continue
+        since_raw = g.get("status_since")
+        if not since_raw:
+            # Метки нет — это группа, зависшая ещё до появления сторожа.
+            # Ставим метку сейчас, снимем на следующем тике после таймаута.
+            g["status_since"] = now.isoformat()
+            touched = True
+            continue
+        try:
+            since = datetime.datetime.fromisoformat(str(since_raw))
+        except ValueError:
+            g["status_since"] = now.isoformat()
+            touched = True
+            continue
+        if (now - since).total_seconds() < STUCK_STATUS_AFTER_SECONDS:
+            continue
+
+        g["status"] = "warning"
+        g.pop("status_since", None)
+        msg = (
+            f"[{now.strftime('%H:%M:%S')}] ⚠️ Рассылка остатка оборвалась "
+            f"(статус висел больше {STUCK_STATUS_AFTER_SECONDS // 60} мин) — индикатор снят"
+        )
+        g["last_sync_log"] = msg
+        g["sync_logs"] = ([msg] + list(g.get("sync_logs") or []))[:30]
+        touched = True
+        logger.warning(
+            "🧹 [StockSweep] Группа '%s' висела в состоянии списания — статус снят.",
+            g.get("group_name"),
+        )
+    return touched
+
 
 async def _run_pickup_campaign_pass(token: str, store_id: Optional[str] = None):
     """
@@ -557,7 +664,7 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
     async with get_stock_lock(store_id):
         groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
         active_groups = {gid: g for gid, g in groups.items() if g.get("is_active", True)}
-        groups_modified = False
+        groups_modified = _sweep_stuck_statuses(active_groups)
         orders_marked = False
 
         for order in orders:
@@ -604,6 +711,7 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                 # Статус, который видно на карточке группы, пока идёт списание
                 # и следующая за ним веерная рассылка.
                 matched_group["status"] = "deducting"
+                matched_group["status_since"] = datetime.datetime.now().isoformat()
 
                 now_time = datetime.datetime.now().strftime("%H:%M:%S")
                 log_entry = (

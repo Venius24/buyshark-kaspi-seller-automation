@@ -242,5 +242,90 @@ class TestVisibility(DeductionTestCase):
         self.assertEqual(trigger["units"], 2)
 
 
+class TestStatusNeverSticks(unittest.TestCase):
+    """Индикатор «идёт списание» обязан гаснуть — даже когда рассылка упала.
+
+    Рассылку всегда запускают в фоне, поэтому её исключение никто не читает, а
+    статус ставится ДО похода в Kaspi. Без этих двух предохранителей карточка
+    группы осталась бы со спиннером навсегда.
+    """
+
+    def setUp(self):
+        self.groups = {"a": group("a", "A", ["T219-0005"])}
+        p = [
+            patch.object(worker, "_load_master_stock_groups", side_effect=lambda store_id=None: self.groups),
+            patch.object(worker, "_save_master_stock_groups", side_effect=lambda g, store_id=None: None),
+            patch.object(worker, "broadcast_ws_event", side_effect=self._noop_ws),
+        ]
+        for x in p:
+            x.start()
+            self.addCleanup(x.stop)
+
+    async def _noop_ws(self, *a, **kw):
+        return None
+
+    def test_failed_broadcast_releases_the_badge(self):
+        self.groups["a"]["status"] = "deducting"
+        with patch.object(worker, "_execute_broadcast_sync_impl", side_effect=RuntimeError("Kaspi 500")):
+            asyncio.run(worker.execute_broadcast_sync("a", "tok", store_id=STORE,
+                                                      trigger_order_info={"order_code": "1"}))
+        self.assertEqual(self.groups["a"]["status"], "warning")
+        self.assertIn("не завершилась", self.groups["a"]["last_sync_log"])
+
+    def test_failed_broadcast_does_not_raise_into_the_task(self):
+        """Иначе упадёт весь тик упаковки, а не одна группа."""
+        with patch.object(worker, "_execute_broadcast_sync_impl", side_effect=RuntimeError("boom")):
+            asyncio.run(worker.execute_broadcast_sync("a", "tok", store_id=STORE))
+
+    def test_successful_broadcast_is_not_touched(self):
+        self.groups["a"]["status"] = "synced"
+        with patch.object(worker, "_execute_broadcast_sync_impl", side_effect=self._noop_ws):
+            asyncio.run(worker.execute_broadcast_sync("a", "tok", store_id=STORE))
+        self.assertEqual(self.groups["a"]["status"], "synced")
+
+
+class TestStuckStatusSweep(unittest.TestCase):
+    """От kill -9 обёртка не спасает — статус снимает сторож на тике упаковки."""
+
+    def _aged(self, seconds):
+        import datetime as dt
+        return (dt.datetime.now() - dt.timedelta(seconds=seconds)).isoformat()
+
+    def test_old_deducting_is_released(self):
+        g = group("a", "A", ["X"])
+        g["status"], g["status_since"] = "deducting", self._aged(3600)
+        self.assertTrue(worker._sweep_stuck_statuses({"a": g}))
+        self.assertEqual(g["status"], "warning")
+        self.assertNotIn("status_since", g)
+        self.assertIn("оборвалась", g["sync_logs"][0])
+
+    def test_fresh_deducting_is_left_alone(self):
+        """Идущая прямо сейчас рассылка не должна сбрасываться."""
+        g = group("a", "A", ["X"])
+        g["status"], g["status_since"] = "deducting", self._aged(5)
+        self.assertFalse(worker._sweep_stuck_statuses({"a": g}))
+        self.assertEqual(g["status"], "deducting")
+
+    def test_group_without_timestamp_gets_one(self):
+        """Зависшие ещё до появления сторожа: сначала метка, снятие — следующим тиком."""
+        g = group("a", "A", ["X"])
+        g["status"] = "deducting"
+        self.assertTrue(worker._sweep_stuck_statuses({"a": g}))
+        self.assertEqual(g["status"], "deducting")
+        self.assertIn("status_since", g)
+
+    def test_synced_group_is_never_touched(self):
+        g = group("a", "A", ["X"])
+        g["status"] = "synced"
+        self.assertFalse(worker._sweep_stuck_statuses({"a": g}))
+        self.assertEqual(g["status"], "synced")
+
+    def test_broken_timestamp_does_not_crash(self):
+        g = group("a", "A", ["X"])
+        g["status"], g["status_since"] = "updating", "не дата"
+        self.assertTrue(worker._sweep_stuck_statuses({"a": g}))
+        self.assertEqual(g["status"], "updating")
+
+
 if __name__ == "__main__":
     unittest.main()
