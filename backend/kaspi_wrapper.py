@@ -5,6 +5,7 @@ KaspiAPI — чистый REST-клиент для Kaspi Merchant API v2 & MC AP
 
 import os
 import json
+import logging
 import threading
 import time
 import base64
@@ -12,6 +13,8 @@ import datetime
 import requests
 from typing import Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = logging.getLogger(__name__)
 
 
 class KaspiAPI:
@@ -234,6 +237,8 @@ class KaspiAPI:
                 return cached["merchant_id"]
 
         merchant_id = KaspiAPI._resolve_merchant_id(token)
+        # Логируем именно промах кэша — это и есть настоящий поход в Kaspi.
+        logger.info("🎯 Merchant ID определён заново: %s", merchant_id)
 
         ttl = (
             KaspiAPI._MERCHANT_ID_NEGATIVE_TTL_SECONDS

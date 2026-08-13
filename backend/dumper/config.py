@@ -26,7 +26,11 @@ def discover_merchant_id(token: str) -> Optional[str]:
         logger.debug(f"Запрос Merchant ID пропущен: {e}")
         return None
     if merchant_id and merchant_id.isdigit():
-        logger.info(f"🎯 Успешно определен Merchant ID: {merchant_id}")
+        # debug, а не info: get_merchant_id кэширует результат в памяти
+        # процесса, но зовут его горячие циклы — на проде это давало 68 строк
+        # «успешно определён» за 10 минут при ВСЕГО ТРЁХ реальных походах в
+        # Kaspi. Само событие резолва логируется там, где оно происходит.
+        logger.debug(f"Merchant ID: {merchant_id}")
         return merchant_id
     return None
 
