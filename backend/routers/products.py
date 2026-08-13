@@ -1,3 +1,4 @@
+import datetime
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from backend.kaspi_wrapper import KaspiAPI
@@ -175,8 +176,11 @@ def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(get_st
 def refresh_products(ctx: StoreContext = Depends(get_store_context)):
     """Принудительно обновить кеш товаров из Kaspi API."""
     try:
+        fetched_at = datetime.datetime.utcnow()
         products = KaspiAPI.sync_merchant_assortment(ctx.token, store_id=ctx.store_id)
-        products = _apply_overrides(products, store_id=ctx.store_id)
+        # Тот же барьер свежести, что и в products_sync_worker: только что
+        # выкачанную из Kaspi цену не перекрываем вчерашним оверрайдом.
+        products = _apply_overrides(products, store_id=ctx.store_id, fresh_from_kaspi_at=fetched_at)
         _save_products(products, ctx.store_id)
         return {"success": True, "count": len(products), "message": f"Обновлено {len(products)} товаров."}
     except Exception as e:

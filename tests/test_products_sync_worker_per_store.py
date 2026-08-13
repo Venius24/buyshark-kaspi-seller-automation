@@ -1,5 +1,6 @@
 import os
 import sys
+import datetime
 import unittest
 from unittest.mock import patch, AsyncMock, call
 
@@ -89,7 +90,12 @@ class TestSyncStoreProducts(unittest.IsolatedAsyncioTestCase):
 
         count = await worker._sync_store_products("tok", "store-a")
 
-        mock_overrides.assert_called_once_with([{"sku": "X1"}], store_id="store-a")
+        args, kwargs = mock_overrides.call_args
+        self.assertEqual(args, ([{"sku": "X1"}],))
+        self.assertEqual(kwargs["store_id"], "store-a")
+        # Барьер свежести обязателен: без него на только что выкачанные из
+        # Kaspi цены ложатся протухшие оверрайды (см. tests/test_overrides_freshness.py).
+        self.assertIsInstance(kwargs["fresh_from_kaspi_at"], datetime.datetime)
         mock_save.assert_called_once_with([{"sku": "X1", "price_num": 500}], "store-a")
         self.assertEqual(count, 1)
 
@@ -102,7 +108,9 @@ class TestSyncStoreProducts(unittest.IsolatedAsyncioTestCase):
 
         await worker._sync_store_products("tok")
 
-        mock_overrides.assert_called_once_with([{"sku": "X1"}], store_id=None)
+        args, kwargs = mock_overrides.call_args
+        self.assertEqual(args, ([{"sku": "X1"}],))
+        self.assertIsNone(kwargs["store_id"])
         mock_save.assert_called_once_with([{"sku": "X1"}], None)
 
 

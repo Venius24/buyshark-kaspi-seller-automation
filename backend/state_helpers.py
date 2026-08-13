@@ -127,7 +127,11 @@ def _load_overrides(store_id: str) -> dict:
                     "price_num": r.price_num,
                     "stock": r.stock,
                     "brand": r.brand,
-                    "status": r.status
+                    "status": r.status,
+                    # Возраст оверрайда нужен _apply_overrides, чтобы не класть
+                    # позавчерашнюю локальную цену поверх только что выкачанной
+                    # из Kaspi (см. разбор там же).
+                    "updated_at": r.updated_at,
                 }
         except Exception as e:
             logger.debug(f"DB load overrides error: {e}")
@@ -230,10 +234,47 @@ def _save_products(products: list, store_id: str):
     finally:
         session.close()
 
-def _apply_overrides(products: list, store_id: str) -> list:
+def _override_for_product(product: dict, overrides: dict):
+    """
+    Оверрайд для товара: сперва по merchantSku (артикул), потом по Kaspi sku.
+
+    Оверрайды пишутся ДВУМЯ разными путями и в разных ключах: демпер кладёт их
+    по merchantSku (executor.py::save_override_func получает sku_key), а ручное
+    редактирование цены из панели — по Kaspi sku (числовой masterSku, его шлёт
+    фронт). В таблице один столбец sku, так что у одного товара может быть по
+    записи в каждом ключе. Берём merchantSku-запись как основную (тот же
+    приоритет, что у движка — radar.py:216), но если запись по sku СВЕЖЕЕ,
+    выигрывает она: значит пользователь только что поменял цену руками.
+    """
+    m_sku = product.get("merchantSku")
+    by_msku = overrides.get(m_sku) if m_sku else None
+    by_sku = overrides.get(product.get("sku"))
+    if by_msku and by_sku:
+        a = by_msku.get("updated_at")
+        b = by_sku.get("updated_at")
+        if a and b:
+            return by_sku if b > a else by_msku
+        return by_msku
+    return by_msku or by_sku
+
+
+def _apply_overrides(products: list, store_id: str, *, fresh_from_kaspi_at=None) -> list:
+    """
+    Наложить локальные оверрайды на каталог.
+
+    fresh_from_kaspi_at — момент, когда этот список был выкачан из Kaspi.
+    Если он передан, оверрайды СТАРШЕ него не применяются: их цена уже учтена
+    Kaspi (либо отменена там), и класть её поверх свежих данных — значит
+    бесконечно показывать движку несуществующую цену.
+
+    Так и было до 2026-08-13: оверрайд по masterSku 111881073 = 605 ₸ от 12
+    августа ложился поверх честных 595 ₸ из Kaspi при каждой синхронизации.
+    Демпер видел 605, решал «надо 595», ставил намерение, offer_sync сверялся
+    с Kaspi, видел там уже 595 и гасил запись вхолостую — и так каждый цикл.
+    На проде это давало 90-100 фантомных «изменений» за цикл на ~100 SKU.
+    """
     overrides = _load_overrides(store_id)
     for p in products:
-        sku = p.get("sku")
         if "price_num" not in p:
             try:
                 price_str = p.get("price", "0").replace(" ₸", "").replace(" ", "").strip()
@@ -245,8 +286,11 @@ def _apply_overrides(products: list, store_id: str) -> list:
         if "brand" not in p:
             p["brand"] = extract_brand(p.get("name"))
             
-        if sku in overrides:
-            ov = overrides[sku]
+        ov = _override_for_product(p, overrides)
+        if ov:
+            ov_at = ov.get("updated_at")
+            if fresh_from_kaspi_at and ov_at and ov_at < fresh_from_kaspi_at:
+                continue
             if "price_num" in ov:
                 p["price_num"] = ov["price_num"]
                 p["price"] = f"{ov['price_num']} ₸"

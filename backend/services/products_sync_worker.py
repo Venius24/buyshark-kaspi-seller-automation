@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import logging
 from backend.kaspi_wrapper import KaspiAPI
 from backend.state_helpers import _get_token, _apply_overrides, _save_products
@@ -15,13 +16,18 @@ async def _sync_store_products(token: str, store_id=None) -> int:
     store_id=None (легаси) — нескоуп-применение оверрайдов/сохранение в общий
     файл, как было всегда (только dev-бутстрап без Store в БД).
     """
+    fetched_at = datetime.datetime.utcnow()
     products = await asyncio.to_thread(KaspiAPI.sync_merchant_assortment, token, store_id)
 
     if not products:
         logger.warning(f"⚠️ [Products Sync Worker] Получен пустой список товаров из Kaspi API (store {store_id}).")
         return 0
 
-    products = _apply_overrides(products, store_id=store_id)
+    # fetched_at — отсечка свежести: цены в этом списке только что взяты у
+    # Kaspi, и оверрайды старше него класть поверх них нельзя (см.
+    # state_helpers._apply_overrides). Берём момент ДО запроса, чтобы правка
+    # цены, сделанная руками во время выкачки, пережила синхронизацию.
+    products = _apply_overrides(products, store_id=store_id, fresh_from_kaspi_at=fetched_at)
     await asyncio.to_thread(_save_products, products, store_id)
 
     logger.info(f"✅ [Products Sync Worker] Успешно обновлено {len(products)} товаров из Kaspi API (store {store_id}).")
