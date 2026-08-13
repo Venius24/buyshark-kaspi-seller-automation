@@ -224,23 +224,86 @@ class KaspiOfferQuota:
         """Сменилось окно Kaspi — наш счёт в нём начинается заново."""
         own = self._own.get(store_id)
         if own is None:
-            self._own[store_id] = {"window": state.reset_at, "count": 0}
+            self._own[store_id] = {"window": state.reset_at, "count": 0, "seeded": False}
         elif own["window"] != state.reset_at:
             own["window"] = state.reset_at
             own["count"] = 0
+            own["seeded"] = False
 
     def own_used(self, store_id) -> int:
         """
         Сколько офферов в текущем окне записали МЫ (в отличие от used, который
         Kaspi считает по всему мерчанту, включая сторонние интеграции).
 
-        Счёт живёт в памяти процесса: после рестарта он начинается с нуля и до
-        конца текущего окна будет занижен. Это честнее, чем альтернатива —
-        выдавать общемерчантский счётчик за свой.
+        Счёт ведётся в памяти, но переживает рестарт: при первом обращении в
+        каждом окне он досчитывается из `kaspi_offer_sync.pushed_at` — там уже
+        записано, когда мы в последний раз писали каждый SKU, поэтому под это
+        не нужны ни своя таблица, ни миграция (см. «цени БД» в HANDOFF).
+
+        Досев делается один раз на окно (≤2 запроса в час на магазин), дальше
+        считает consume(). Единственная неточность: pushed_at хранит только
+        ПОСЛЕДНЮЮ запись по SKU, так что если в одном окне мы писали один и
+        тот же SKU дважды, после рестарта он зачтётся один раз.
         """
         with self._lock:
             own = self._own.get(store_id)
-            return int(own["count"]) if own else 0
+            if own is not None and own.get("seeded"):
+                return int(own["count"])
+            state = self._states.get(store_id)
+
+        if not state or not state.known:
+            # Без окна Kaspi не от чего отсчитывать — вернём то, что есть.
+            with self._lock:
+                own = self._own.get(store_id)
+                return int(own["count"]) if own else 0
+
+        seeded_count = self._count_our_writes_in_window(store_id, state)
+
+        with self._lock:
+            own = self._own.setdefault(store_id, {"window": state.reset_at, "count": 0})
+            if not own.get("seeded"):
+                # Записи, сделанные этим процессом до досева, уже в count —
+                # берём максимум, чтобы не потерять их и не посчитать дважды.
+                own["count"] = max(int(own["count"]), seeded_count)
+                own["seeded"] = True
+            return int(own["count"])
+
+    @staticmethod
+    def _count_our_writes_in_window(store_id, state: QuotaState) -> int:
+        """Сколько наших SKU помечены отправленными внутри текущего окна."""
+        try:
+            from sqlalchemy import func, select
+
+            from backend.db.models import KaspiOfferSyncDB
+            from backend.state_helpers import _get_sync_db_session
+
+            # Начало окна считаем от нормализованного остатка, а НЕ вычитанием
+            # из reset_at: Kaspi отдаёт его в алматинском времени без смещения,
+            # а сервер живёт в UTC (см. seconds_until_reset).
+            window_start = (
+                datetime.datetime.utcnow()
+                + datetime.timedelta(seconds=state.seconds_until_reset())
+                - datetime.timedelta(seconds=state.window_seconds)
+            )
+
+            session = _get_sync_db_session()
+            if not session:
+                return 0
+            try:
+                return int(session.scalar(
+                    select(func.count())
+                    .select_from(KaspiOfferSyncDB)
+                    .where(
+                        KaspiOfferSyncDB.store_id == store_id,
+                        KaspiOfferSyncDB.pushed_at.isnot(None),
+                        KaspiOfferSyncDB.pushed_at >= window_start,
+                    )
+                ) or 0)
+            finally:
+                session.close()
+        except Exception as e:
+            logger.debug("Не удалось досчитать наши записи за окно: %s", e)
+            return 0
 
     def peek(self, store_id) -> Optional[QuotaState]:
         """
