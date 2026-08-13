@@ -95,11 +95,23 @@ export const PriceWarSummary: React.FC<{ data: PriceWarStats }> = ({ data }) => 
                   <div style={{ fontSize: '12px', color: '#e5e7eb', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {p.name}
                   </div>
-                  {p.best_competitor_name && (
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                      конкурент: {p.best_competitor_name} ({p.best_competitor_price?.toLocaleString('ru-RU')} ₸)
-                    </div>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {p.best_competitor_name && (
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                        конкурент: {p.best_competitor_name} ({p.best_competitor_price?.toLocaleString('ru-RU')} ₸)
+                      </div>
+                    )}
+                    {p.url && (
+                      <a
+                        href={p.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ fontSize: '10px', color: '#3b82f6', textDecoration: 'none', whiteSpace: 'nowrap' }}
+                      >
+                        🔗 Карточка товара
+                      </a>
+                    )}
+                  </div>
                 </div>
                 <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: '#e5e7eb', whiteSpace: 'nowrap' }}>
                   {p.our_price.toLocaleString('ru-RU')} ₸

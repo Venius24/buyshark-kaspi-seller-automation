@@ -1327,6 +1327,7 @@ def _upsert_price_war_snapshot(items: list, store_id: str):
             row.competitors_count = int(it.get("competitors_count") or 0)
             row.best_competitor_price = it.get("best_competitor_price")
             row.best_competitor_name = (str(it["best_competitor_name"])[:300] if it.get("best_competitor_name") else None)
+            row.url = (str(it["url"])[:500] if it.get("url") else None)
             row.updated_at = now
         session.commit()
     except Exception as e:
@@ -1355,6 +1356,7 @@ def _load_price_war_snapshot(store_id: str) -> list:
                 "competitors_count": r.competitors_count,
                 "best_competitor_price": r.best_competitor_price,
                 "best_competitor_name": r.best_competitor_name,
+                "url": r.url,
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
             }
             for r in rows

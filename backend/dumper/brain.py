@@ -321,6 +321,7 @@ class BrainWorker:
             price_war_items.append({
                 "sku": sku_key,
                 "name": p.get("name", sku_key),
+                "url": p.get("url"),
                 "our_price": float(config.my_current_price),
                 "our_rank": res["currentPos"],
                 "competitors_count": len(rival_offers),

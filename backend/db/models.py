@@ -441,6 +441,7 @@ class PriceWarSnapshotDB(Base):
     competitors_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     best_competitor_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     best_competitor_name: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 

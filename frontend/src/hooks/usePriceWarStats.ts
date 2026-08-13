@@ -5,6 +5,7 @@ import { useActiveStoreId } from '../storeContext';
 export interface PriceWarProduct {
   sku: string;
   name: string;
+  url: string | null;
   our_price: number;
   our_rank: number | null;
   competitors_count: number;
