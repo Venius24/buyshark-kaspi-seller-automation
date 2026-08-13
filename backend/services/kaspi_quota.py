@@ -161,6 +161,14 @@ class KaspiOfferQuota:
     def __init__(self):
         self._states: dict = {}
         self._lock = threading.Lock()
+        # Сколько записей в ТЕКУЩЕМ окне сделали МЫ. Счётчик Kaspi (used)
+        # общемерчантский: в него попадают записи всех, кто работает с тем же
+        # кабинетом, и на проде подавляющая часть окна выжигается сторонним
+        # сервисом (см. HANDOFF 3.39). Показывать пользователю только used —
+        # значит выдавать чужой расход за свой: 2026-08-13 замер показал 46
+        # записей в окне при НУЛЕ наших. Ключ store_id, значение
+        # {"window": reset_at, "count": int}; смена окна обнуляет счёт.
+        self._own: dict = {}
 
     def _fetch(self, store_id, merchant_uid: str) -> QuotaState:
         from backend.state_helpers import _mc_api_request
@@ -209,7 +217,30 @@ class KaspiOfferQuota:
 
         with self._lock:
             self._states[store_id] = state
+            self._roll_own_window_locked(store_id, state)
         return state
+
+    def _roll_own_window_locked(self, store_id, state: QuotaState) -> None:
+        """Сменилось окно Kaspi — наш счёт в нём начинается заново."""
+        own = self._own.get(store_id)
+        if own is None:
+            self._own[store_id] = {"window": state.reset_at, "count": 0}
+        elif own["window"] != state.reset_at:
+            own["window"] = state.reset_at
+            own["count"] = 0
+
+    def own_used(self, store_id) -> int:
+        """
+        Сколько офферов в текущем окне записали МЫ (в отличие от used, который
+        Kaspi считает по всему мерчанту, включая сторонние интеграции).
+
+        Счёт живёт в памяти процесса: после рестарта он начинается с нуля и до
+        конца текущего окна будет занижен. Это честнее, чем альтернатива —
+        выдавать общемерчантский счётчик за свой.
+        """
+        with self._lock:
+            own = self._own.get(store_id)
+            return int(own["count"]) if own else 0
 
     def peek(self, store_id) -> Optional[QuotaState]:
         """
@@ -242,6 +273,11 @@ class KaspiOfferQuota:
             state = self._states.get(store_id)
             if state:
                 state.used += count
+            # Это ровно НАШИ записи — сюда приходит длина отправленного батча.
+            own = self._own.setdefault(
+                store_id, {"window": state.reset_at if state else None, "count": 0}
+            )
+            own["count"] += count
 
     def mark_exhausted(self, store_id, merchant_uid: str) -> QuotaState:
         """Вызывается при 429: перечитываем правду у Kaspi и возвращаем её."""

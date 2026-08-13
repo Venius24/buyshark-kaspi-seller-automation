@@ -323,4 +323,9 @@ export interface KaspiQuotaStatus {
   reset_in_seconds: number;
   /** Сколько записей из окна зарезервировано под снятие с продажи. */
   reserved_for_withdraw: number;
+  /**
+   * Сколько записей окна сделал НАШ сервис. `used` — счётчик самого Kaspi по
+   * всему мерчанту, туда попадают и сторонние интеграции того же кабинета.
+   */
+  used_by_us: number;
 }

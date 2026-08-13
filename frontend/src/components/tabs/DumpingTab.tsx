@@ -146,14 +146,23 @@ export function DumpingTab({
               const color = usedRatio >= 1 ? 'var(--danger)'
                 : usedRatio >= 0.75 ? 'var(--warning)'
                 : 'var(--success)';
+              // used — счётчик самого Kaspi, общий на весь кабинет: туда
+              // попадают записи любых других интеграций, работающих с тем же
+              // магазином. Раньше показывали только его, и чужой расход
+              // читался как наш (замер 2026-08-13: 46 записей в окне при нуле
+              // наших). Поэтому наш собственный расход — первым и крупно.
+              const usedByOthers = Math.max(0, kaspiQuota.used - kaspiQuota.used_by_us);
               return (
                 <div
                   title={
-                    `Лимит Kaspi: ${kaspiQuota.limit} обновлений товара за 30 минут на весь магазин.\n` +
-                    `Израсходовано: ${kaspiQuota.used}. Осталось: ${kaspiQuota.remaining}.\n` +
-                    `Из них ${kaspiQuota.reserved_for_withdraw} зарезервировано под снятие с продажи — ` +
+                    `Лимит Kaspi: ${kaspiQuota.limit} обновлений товара за 30 минут на весь магазин.\n\n` +
+                    `Записал наш сервис: ${kaspiQuota.used_by_us}.\n` +
+                    `Записали другие интеграции этого же кабинета: ${usedByOthers}.\n` +
+                    `Итого израсходовано: ${kaspiQuota.used}. Осталось: ${kaspiQuota.remaining}.\n\n` +
+                    `Из лимита ${kaspiQuota.reserved_for_withdraw} зарезервировано под снятие с продажи — ` +
                     `обычные изменения цены и остатка останавливаются на ${usableLimit}.\n` +
-                    `Счётчик обнулится через ${formatTime(kaspiQuota.reset_in_seconds)}.` +
+                    `Счётчик обнулится через ${formatTime(kaspiQuota.reset_in_seconds)}.\n` +
+                    `Наш счёт ведётся в памяти сервиса и после его перезапуска начинается заново.` +
                     (queuePending > 0 ? `\n\nЖдут отправки: ${queuePending}.` : '')
                   }
                   style={{
@@ -169,10 +178,16 @@ export function DumpingTab({
                     cursor: 'help',
                   }}
                 >
-                  <span>Лимит Kaspi:</span>
-                  <strong style={{ color, fontFamily: 'monospace' }}>
-                    {kaspiQuota.used}/{usableLimit}
+                  <span>Записали мы:</span>
+                  <strong style={{ color: 'var(--success)', fontFamily: 'monospace' }}>
+                    {kaspiQuota.used_by_us}
                   </strong>
+                  <span style={{ opacity: 0.6, borderLeft: '1px solid rgba(255,255,255,0.12)', paddingLeft: '8px' }}>
+                    окно Kaspi{' '}
+                    <strong style={{ color, fontFamily: 'monospace' }}>
+                      {kaspiQuota.used}/{usableLimit}
+                    </strong>
+                  </span>
                   <span style={{ opacity: 0.6 }}>сброс {formatTime(kaspiQuota.reset_in_seconds)}</span>
                   {queuePending > 0 && (
                     <span

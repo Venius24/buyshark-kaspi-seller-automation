@@ -188,6 +188,11 @@ def get_dumping_status(ctx: StoreContext = Depends(get_store_context)):
             "remaining": snapshot.remaining,
             "reset_in_seconds": int(snapshot.seconds_until_reset()),
             "reserved_for_withdraw": P0_RESERVE,
+            # used — счётчик Kaspi по ВСЕМУ мерчанту: в него попадают записи
+            # любых других интеграций, работающих с тем же кабинетом. Наш
+            # собственный расход считаем сами (см. quota.own_used), иначе
+            # пользователь видит чужие записи как свои.
+            "used_by_us": quota.own_used(ctx.store_id),
         }
 
     return {
