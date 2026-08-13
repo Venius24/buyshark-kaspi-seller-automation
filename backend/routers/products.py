@@ -38,12 +38,16 @@ def get_products(
             raise HTTPException(status_code=400, detail=f"Не удалось получить товары: {e}")
 
     # Загружаем конфигурации демпинга и обогащаем товары
-    from backend.state_helpers import _load_dumping_configs
+    from backend.state_helpers import _load_dumping_configs, dumping_config_for_product
     dumping_configs = _load_dumping_configs(store_id=ctx.store_id)
 
     for p in all_products:
-        sku = p.get("sku")
-        cfg = dumping_configs.get(sku)
+        # Матч сперва по merchantSku, потом по sku (dumping_config_for_product).
+        # Раньше здесь был матч ТОЛЬКО по sku, а конфиги пишутся по merchantSku:
+        # на проде 374 из 377 конфигов были невидимы для этой ручки — товары
+        # показывались как "демпинг выключен", фильтр «только с демпингом» отдавал
+        # пустоту, и успешный импорт из PriceFeed выглядел как несостоявшийся.
+        cfg = dumping_config_for_product(p, dumping_configs)
         p["dumping_config"] = cfg
         if not cfg or not cfg.get("enabled"):
             p["dumping_status"] = "OFF"

@@ -9,7 +9,8 @@ import json
 import time
 import logging
 from backend.state_helpers import (
-    _load_dumping_configs, _load_products, _load_analytics_snapshot, _load_dumper_logs,
+    _load_dumping_configs, dumping_config_for_product,
+    _load_products, _load_analytics_snapshot, _load_dumper_logs,
     _load_sales_summary, _load_analytics_history, _load_price_war_snapshot,
     _load_competitor_leaderboard, _load_chat_activity, _get_sync_db_session,
     _load_quality_metrics_latest,
@@ -78,10 +79,13 @@ def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
     active_product = None
     active_cfg = None
     for p in products:
-        sku = p.get("sku")
-        if sku in configs and configs[sku].get("enabled"):
+        # Тот же приоритет merchantSku → sku, что и у движка: иначе живой радар
+        # цены не находил ни одного демпингуемого товара и падал в фоллбек на
+        # первый попавшийся товар каталога.
+        p_cfg = dumping_config_for_product(p, configs)
+        if p_cfg and p_cfg.get("enabled"):
             active_product = p
-            active_cfg = configs[sku]
+            active_cfg = p_cfg
             break
             
     # Fallback to any product if no active dumping config is enabled

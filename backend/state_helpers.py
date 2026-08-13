@@ -295,6 +295,20 @@ def _load_dumping_configs(store_id: str) -> dict:
             session.close()
     return configs
 
+def dumping_config_for_product(product: dict, configs: dict):
+    """Конфиг демпинга для товара: сперва по merchantSku, потом по Kaspi sku.
+
+    Один и тот же оффер известен под двумя идентификаторами, а конфиги
+    пишутся по merchantSku (импорт из PriceFeed, панель демпинга). Движок
+    матчит именно в этом порядке (backend/dumper/radar.py:216), и всё, что
+    показывает пользователю состояние демпинга, обязано матчить так же —
+    иначе панель врёт, что демпинг выключен, хотя движок его крутит."""
+    m_sku = product.get("merchantSku")
+    if m_sku and m_sku in configs:
+        return configs[m_sku]
+    return configs.get(product.get("sku"))
+
+
 def _save_dumping_configs(configs: dict, store_id: str):
     session = _get_sync_db_session()
     if not session:
