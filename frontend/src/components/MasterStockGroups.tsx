@@ -74,6 +74,8 @@ interface LinkedCard {
   kaspiSku?: string;
   /** Идентификаторы, схлопнутые в этот чип (для подсказки). */
   aliases: string[];
+  /** Карточка снята с продажи в кабинете. */
+  archived?: boolean;
 }
 
 const KASPI_CARD_URL = (kaspiSku: string) =>
@@ -111,6 +113,7 @@ function buildLinkedCards(linkedSkus: string[], products: ProductItem[]): Linked
       name: p?.name,
       kaspiSku: numeric,
       aliases: [s],
+      archived: isArchived(p),
     });
   }
 
@@ -128,7 +131,13 @@ export interface ProductItem {
   brand?: string;
   merchantSku?: string;
   kaspiSku?: string;
+  /** «Активен» / «Архив» — приходит из кэша ассортимента (см. sync_merchant_assortment). */
+  status?: string;
 }
+
+/** Снятая с продажи карточка: у неё title=null, price=0 и пустой availabilities. */
+const isArchived = (p?: { status?: string } | null): boolean =>
+  String(p?.status || '').trim() === 'Архив';
 
 export const MasterStockGroups: React.FC = () => {
   const queryClient = useQueryClient();
@@ -315,7 +324,13 @@ export const MasterStockGroups: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleToggleSkuSelection = (sku: string) => {
+  const handleToggleSkuSelection = (sku: string, archived: boolean = false) => {
+    // Синхронизация группы шлёт в Kaspi available = (остаток > стоп-кол-ва),
+    // то есть привязка снятой карточки к «живой» группе ВЕРНЁТ её в продажу.
+    // Не запрещаем — владелец может именно этого и хотеть, — но предупреждаем.
+    if (archived && !formSelectedSkus.includes(sku)) {
+      showToast('warning', 'Карточка снята с продажи. Если остаток группы выше стоп-количества, синхронизация вернёт её в продажу на Kaspi.');
+    }
     setFormSelectedSkus(prev =>
       prev.includes(sku) ? prev.filter(s => s !== sku) : [...prev, sku]
     );
@@ -972,9 +987,11 @@ export const MasterStockGroups: React.FC = () => {
                                   const chipStyle: React.CSSProperties = {
                                     padding: '4px 10px',
                                     borderRadius: '20px',
-                                    background: 'rgba(255,255,255,0.05)',
-                                    border: '1px solid var(--card-border)',
-                                    color: card.kaspiSku ? 'var(--primary-hover)' : '#cbd5e1',
+                                    // Снятая карточка — янтарная: её остаток в группе
+                                    // считается, но на витрине товара нет.
+                                    background: card.archived ? 'rgba(245, 158, 11, 0.12)' : 'rgba(255,255,255,0.05)',
+                                    border: card.archived ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid var(--card-border)',
+                                    color: card.archived ? '#f59e0b' : (card.kaspiSku ? 'var(--primary-hover)' : '#cbd5e1'),
                                     fontSize: '12px',
                                     fontWeight: 500,
                                     fontFamily: 'monospace',
@@ -984,6 +1001,7 @@ export const MasterStockGroups: React.FC = () => {
                                     textDecoration: 'none',
                                   };
                                   const hint = [
+                                    card.archived ? '⚠️ Снята с продажи в кабинете' : null,
                                     card.name,
                                     card.aliases.length > 1 ? `Идентификаторы: ${card.aliases.join(', ')}` : null,
                                     card.kaspiSku ? 'Открыть карточку на Kaspi' : null,
@@ -998,7 +1016,7 @@ export const MasterStockGroups: React.FC = () => {
                                       title={hint || card.label}
                                       style={chipStyle}
                                     >
-                                      <Package size={12} color="var(--primary-hover)" />
+                                      <Package size={12} color={card.archived ? '#f59e0b' : 'var(--primary-hover)'} />
                                       {card.label}
                                       <ExternalLink size={11} />
                                     </a>
@@ -1516,11 +1534,12 @@ export const MasterStockGroups: React.FC = () => {
                     modalFilteredProducts.map(p => {
                       const skuVal = p.sku || p.merchantSku || '';
                       const isSelected = formSelectedSkus.includes(skuVal);
+                      const archived = isArchived(p);
 
                       return (
                         <div
                           key={skuVal}
-                          onClick={() => handleToggleSkuSelection(skuVal)}
+                          onClick={() => handleToggleSkuSelection(skuVal, archived)}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -1528,8 +1547,15 @@ export const MasterStockGroups: React.FC = () => {
                             padding: '10px 12px',
                             borderRadius: '8px',
                             cursor: 'pointer',
-                            background: isSelected ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
-                            border: isSelected ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid transparent',
+                            // Снятые с продажи подсвечиваем янтарным: у них title=null и
+                            // price=0, поэтому без метки строка неотличима от активного
+                            // товара, у которого просто кончился остаток.
+                            background: isSelected
+                              ? (archived ? 'rgba(245, 158, 11, 0.18)' : 'rgba(99, 102, 241, 0.15)')
+                              : (archived ? 'rgba(245, 158, 11, 0.06)' : 'transparent'),
+                            border: isSelected
+                              ? (archived ? '1px solid rgba(245, 158, 11, 0.55)' : '1px solid rgba(99, 102, 241, 0.4)')
+                              : (archived ? '1px solid rgba(245, 158, 11, 0.22)' : '1px solid transparent'),
                             marginBottom: '4px',
                             transition: 'all 0.15s'
                           }}
@@ -1542,8 +1568,22 @@ export const MasterStockGroups: React.FC = () => {
                               style={{ width: '16px', height: '16px', accentColor: 'var(--primary)' }}
                             />
                             <div>
-                              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-color)' }}>
+                              <div style={{ fontSize: '13px', fontWeight: 600, color: archived ? '#f59e0b' : 'var(--text-color)' }}>
                                 {p.name}
+                                {archived && (
+                                  <span style={{
+                                    marginLeft: '8px',
+                                    padding: '1px 7px',
+                                    borderRadius: '20px',
+                                    background: 'rgba(245, 158, 11, 0.15)',
+                                    border: '1px solid rgba(245, 158, 11, 0.4)',
+                                    fontSize: '10px',
+                                    fontWeight: 600,
+                                    letterSpacing: '0.02em',
+                                  }}>
+                                    Снят с продажи
+                                  </span>
+                                )}
                               </div>
                               <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '2px' }}>
                                 Kaspi SKU: {skuVal}

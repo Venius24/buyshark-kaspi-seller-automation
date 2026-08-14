@@ -22,7 +22,12 @@ export const fetchGroupsQuery = async (): Promise<MasterStockGroup[]> => {
 };
 
 export const fetchProductsQuery = async (): Promise<ProductItem[]> => {
-  const res = await apiFetch(`${API_URL}/api/products?page=1&page_size=1000&status=all`);
+  // page_size с запасом: это не «страница», а весь кэш ассортимента разом —
+  // из него строится пикер товаров и подписи чипов в Мастер-Группах. При 1000
+  // у Бархана (1150 в продаже + 423 снятых) хвост каталога молча обрезался:
+  // 150 активных карточек и весь архив в пикер не доезжали, а привязанные к
+  // группам товары из хвоста показывались голым артикулом без названия.
+  const res = await apiFetch(`${API_URL}/api/products?page=1&page_size=5000&status=all`);
   const data = await res.json();
   return data.success ? (data.products || []) : [];
 };
