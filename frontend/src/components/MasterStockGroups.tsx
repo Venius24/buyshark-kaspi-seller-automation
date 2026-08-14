@@ -17,7 +17,8 @@ import {
   Boxes,
   Zap,
   FileText,
-  ShoppingCart
+  ShoppingCart,
+  ExternalLink
 } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { LiveTerminalStream } from './LiveTerminalStream';
@@ -45,6 +46,8 @@ export interface MasterStockGroup {
   shared_stock: number;
   /** Долг: продано сверх остатка. Остаток при этом обрезан нулём. */
   oversold?: number;
+  /** Сколько штук остатка съедает одна проданная единица (комплект). */
+  deduct_per_unit?: number;
   linked_skus: string[];
   external_code?: string;
   is_active: boolean;
@@ -60,6 +63,61 @@ export interface MasterStockGroup {
   dumping_excluded_skus?: string[];
 }
 
+
+/** Чип привязанного товара: одна карточка Kaspi, а не один идентификатор. */
+interface LinkedCard {
+  key: string;
+  /** Артикул продавца — то, чем товар зовут в заказах и в 1С. */
+  label: string;
+  name?: string;
+  /** Числовой SKU Kaspi, по нему строится ссылка на карточку. */
+  kaspiSku?: string;
+  /** Идентификаторы, схлопнутые в этот чип (для подсказки). */
+  aliases: string[];
+}
+
+const KASPI_CARD_URL = (kaspiSku: string) =>
+  `https://kaspi.kz/shop/p/-${kaspiSku}/?c=750000000`;
+
+/**
+ * Схлопывает linked_skus в список карточек товара.
+ *
+ * Бэкенд намеренно хранит для каждого товара ВСЕ его идентификаторы сразу
+ * (артикул продавца + числовой SKU Kaspi) — иначе списание по заказу не
+ * находит группу. Но в интерфейсе это выглядит как дубли: один товар занимал
+ * два-три чипа. Здесь идентификаторы одного товара сводятся в один чип.
+ */
+function buildLinkedCards(linkedSkus: string[], products: ProductItem[]): LinkedCard[] {
+  const byKey = new Map<string, LinkedCard>();
+
+  for (const raw of linkedSkus) {
+    const s = String(raw || '').trim();
+    if (!s) continue;
+    const p = products.find(x => x.sku === s || x.merchantSku === s || x.kaspiSku === s);
+    const key = p ? (p.sku || p.merchantSku || s) : s;
+    const numeric = [p?.kaspiSku, p?.sku, s].find(v => v && /^\d+$/.test(v));
+
+    const existing = byKey.get(key);
+    if (existing) {
+      if (!existing.aliases.includes(s)) existing.aliases.push(s);
+      if (!existing.kaspiSku && numeric) existing.kaspiSku = numeric;
+      continue;
+    }
+    byKey.set(key, {
+      key,
+      // Артикул читаем глазами, числовой SKU — нет. Если товара нет в кэше
+      // каталога, показываем то, что привязано.
+      label: p?.merchantSku || (/^\d+$/.test(s) ? s : s),
+      name: p?.name,
+      kaspiSku: numeric,
+      aliases: [s],
+    });
+  }
+
+  return Array.from(byKey.values());
+}
+
+type StockFilter = 'all' | 'critical' | 'low' | 'ok' | 'debt' | 'pack' | 'paused';
 
 export interface ProductItem {
   sku: string;
@@ -90,6 +148,7 @@ export const MasterStockGroups: React.FC = () => {
   const refetchGroups = () => queryClient.invalidateQueries({ queryKey: ['stock-groups'] });
   const [syncingGroupId, setSyncingGroupId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [stockFilter, setStockFilter] = useState<StockFilter>('all');
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -97,6 +156,7 @@ export const MasterStockGroups: React.FC = () => {
   const [formGroupName, setFormGroupName] = useState<string>('');
   const [formSharedStock, setFormSharedStock] = useState<number>(10);
   const [formStopQty, setFormStopQty] = useState<number>(5);
+  const [formDeductPerUnit, setFormDeductPerUnit] = useState<number>(1);
   const [formSelectedSkus, setFormSelectedSkus] = useState<string[]>([]);
   const [formExternalCode, setFormExternalCode] = useState<string>('');
   const [formIsActive, setFormIsActive] = useState<boolean>(true);
@@ -114,6 +174,7 @@ export const MasterStockGroups: React.FC = () => {
 
   // Inline Stock Edit State
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
+  const [expandedSkusGroupId, setExpandedSkusGroupId] = useState<string | null>(null);
   const [inlineStockVal, setInlineStockVal] = useState<number>(0);
 
   const { isConnected: isWsConnected, lastEvent: wsEvent } = useWebSocket(getWsUrl());
@@ -145,16 +206,54 @@ export const MasterStockGroups: React.FC = () => {
   };
 
   // Filtered Groups
+  // Пороги считаются от стоп-количества самой группы, а не от общей константы:
+  // у «щитков» стоп 2, у «палочек» — 50, единая цифра не сказала бы ничего.
+  const matchStockFilter = (g: MasterStockGroup, f: StockFilter): boolean => {
+    const stop = g.stop_qty ?? 5;
+    switch (f) {
+      case 'critical': return g.shared_stock <= stop;
+      case 'low': return g.shared_stock > stop && g.shared_stock <= stop * 2;
+      case 'ok': return g.shared_stock > stop * 2;
+      case 'debt': return (g.oversold ?? 0) > 0;
+      case 'pack': return (g.deduct_per_unit ?? 1) > 1;
+      case 'paused': return !g.is_active;
+      default: return true;
+    }
+  };
+
   const filteredGroups = useMemo(() => {
-    if (!searchQuery.trim()) return groups;
-    const q = searchQuery.toLowerCase();
-    return groups.filter(g =>
-      g.group_name.toLowerCase().includes(q) ||
-      g.group_id.toLowerCase().includes(q) ||
-      (g.external_code && g.external_code.toLowerCase().includes(q)) ||
-      g.linked_skus.some(s => s.toLowerCase().includes(q))
-    );
-  }, [groups, searchQuery]);
+    const q = searchQuery.trim().toLowerCase();
+    return groups.filter(g => {
+      if (!matchStockFilter(g, stockFilter)) return false;
+      if (!q) return true;
+      return (
+        g.group_name.toLowerCase().includes(q) ||
+        g.group_id.toLowerCase().includes(q) ||
+        (g.external_code && g.external_code.toLowerCase().includes(q)) ||
+        g.linked_skus.some(s => s.toLowerCase().includes(q))
+      );
+    });
+  }, [groups, searchQuery, stockFilter]);
+
+  const filterCounts = useMemo(() => ({
+    all: groups.length,
+    critical: groups.filter(g => matchStockFilter(g, 'critical')).length,
+    low: groups.filter(g => matchStockFilter(g, 'low')).length,
+    ok: groups.filter(g => matchStockFilter(g, 'ok')).length,
+    debt: groups.filter(g => matchStockFilter(g, 'debt')).length,
+    pack: groups.filter(g => matchStockFilter(g, 'pack')).length,
+    paused: groups.filter(g => matchStockFilter(g, 'paused')).length,
+  }), [groups]);
+
+  const FILTER_CHIPS: { id: StockFilter; label: string; color: string }[] = [
+    { id: 'all', label: 'Все группы', color: 'var(--primary-hover)' },
+    { id: 'critical', label: 'Снято с продажи', color: 'var(--error)' },
+    { id: 'low', label: 'Мало остатка', color: 'var(--warning)' },
+    { id: 'ok', label: 'Запас в норме', color: 'var(--success)' },
+    { id: 'debt', label: 'С долгом', color: 'var(--error)' },
+    { id: 'pack', label: 'Комплект > 1', color: '#c084fc' },
+    { id: 'paused', label: 'На паузе', color: 'var(--text-muted)' },
+  ];
 
   // Metrics
   const totalGroups = groups.length;
@@ -172,6 +271,7 @@ export const MasterStockGroups: React.FC = () => {
     setFormGroupName('');
     setFormSharedStock(10);
     setFormStopQty(5);
+    setFormDeductPerUnit(1);
     setFormSelectedSkus([]);
     setFormExternalCode('');
     setFormIsActive(true);
@@ -191,6 +291,7 @@ export const MasterStockGroups: React.FC = () => {
     setFormGroupName(group.group_name);
     setFormSharedStock(group.shared_stock);
     setFormStopQty(group.stop_qty ?? 5);
+    setFormDeductPerUnit(group.deduct_per_unit ?? 1);
     setFormSelectedSkus([...group.linked_skus]);
     setFormExternalCode(group.external_code || '');
     setFormIsActive(group.is_active);
@@ -252,6 +353,7 @@ export const MasterStockGroups: React.FC = () => {
           group_name: formGroupName.trim(),
           shared_stock: formSharedStock,
           stop_qty: formStopQty,
+          deduct_per_unit: formDeductPerUnit,
           linked_skus: formSelectedSkus,
           external_code: formExternalCode.trim() || undefined,
           is_active: formIsActive,
@@ -566,7 +668,8 @@ export const MasterStockGroups: React.FC = () => {
       }}>
 
         {/* Toolbar Filter */}
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--card-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--card-border)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
           <div style={{ position: 'relative', width: '320px', maxWidth: '100%' }}>
             <Search size={18} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input
@@ -593,6 +696,56 @@ export const MasterStockGroups: React.FC = () => {
           </div>
         </div>
 
+        {/* Быстрые фильтры по состоянию остатка */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          {FILTER_CHIPS.map(chip => {
+            const isOn = stockFilter === chip.id;
+            const count = filterCounts[chip.id];
+            return (
+              <button
+                key={chip.id}
+                onClick={() => setStockFilter(chip.id)}
+                disabled={count === 0 && chip.id !== 'all'}
+                title={
+                  chip.id === 'critical' ? 'Остаток ниже или равен стоп-количеству — карточки сняты с продажи'
+                  : chip.id === 'low' ? 'Остаток не более двух стоп-количеств — скоро снимется'
+                  : chip.id === 'debt' ? 'Продано больше, чем числилось на остатке'
+                  : chip.id === 'pack' ? 'За одну продажу списывается несколько штук'
+                  : undefined
+                }
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  padding: '6px 12px',
+                  borderRadius: '20px',
+                  fontSize: '12.5px',
+                  fontWeight: 600,
+                  cursor: count === 0 && chip.id !== 'all' ? 'default' : 'pointer',
+                  opacity: count === 0 && chip.id !== 'all' ? 0.4 : 1,
+                  color: isOn ? '#ffffff' : chip.color,
+                  background: isOn ? chip.color : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${isOn ? chip.color : 'var(--card-border)'}`,
+                  transition: 'all 0.15s',
+                }}
+              >
+                <span>{chip.label}</span>
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  padding: '1px 7px',
+                  borderRadius: '10px',
+                  background: isOn ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.07)',
+                  color: isOn ? '#ffffff' : 'var(--text-muted)',
+                }}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        </div>
+
         {/* Table */}
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
@@ -612,7 +765,11 @@ export const MasterStockGroups: React.FC = () => {
                   <td colSpan={6} style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
                     <Layers size={40} style={{ marginBottom: '12px', opacity: 0.5 }} />
                     <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-muted)' }}>
-                      {searchQuery ? 'Мастер-Группы не найдены по запросу' : 'Мастер-Группы пока не созданы'}
+                      {searchQuery
+                        ? 'Мастер-Группы не найдены по запросу'
+                        : stockFilter !== 'all'
+                        ? 'В этом фильтре групп нет'
+                        : 'Мастер-Группы пока не созданы'}
                     </div>
                     <p style={{ margin: '6px 0 0 0', fontSize: '13px' }}>
                       Нажмите «Создать Мастер-Группу», чтобы объединить карточки товаров на Kaspi в единый склад.
@@ -746,6 +903,24 @@ export const MasterStockGroups: React.FC = () => {
                               }}>
                               {group.shared_stock} шт
                             </span>
+                            {(group.deduct_per_unit ?? 1) > 1 && (
+                              // Иначе «заказали 1 — списали 7» снова читается
+                              // как поломка движка, а не как настройка группы.
+                              <span
+                                title={`За одну проданную единицу списывается ${group.deduct_per_unit} шт. остатка`}
+                                style={{
+                                  fontSize: '12px',
+                                  fontWeight: 700,
+                                  color: '#c084fc',
+                                  padding: '4px 10px',
+                                  borderRadius: '8px',
+                                  background: 'rgba(168, 85, 247, 0.12)',
+                                  border: '1px solid rgba(168, 85, 247, 0.35)',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                ×{group.deduct_per_unit} за продажу
+                              </span>
+                            )}
                             {(group.oversold ?? 0) > 0 && (
                               // Остаток обрезан нулём (в Kaspi отрицательное не
                               // уходит), поэтому нехватку показываем отдельно —
@@ -785,37 +960,77 @@ export const MasterStockGroups: React.FC = () => {
                         )}
                       </td>
 
-                      {/* Linked SKU chips */}
-                      <td style={{ padding: '18px 24px', maxWidth: '320px' }}>
+                      {/* Linked SKU chips — один чип на КАРТОЧКУ товара */}
+                      <td style={{ padding: '18px 24px', maxWidth: '340px' }}>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                          {group.linked_skus.map(sku => {
-                            const pMatch = products.find(p => p.sku === sku || p.merchantSku === sku);
-                            const mSku = pMatch?.merchantSku;
-                            const hasDistinctMSku = mSku && mSku !== sku;
+                          {(() => {
+                            const cards = buildLinkedCards(group.linked_skus, products);
+                            const visible = expandedSkusGroupId === group.group_id ? cards : cards.slice(0, 6);
                             return (
-                              <span
-                                key={sku}
-                                title={pMatch ? `${pMatch.name}${hasDistinctMSku ? ` (Merchant SKU: ${mSku})` : ''}` : sku}
-                                style={{
-                                  padding: '4px 10px',
-                                  borderRadius: '20px',
-                                  background: 'rgba(255,255,255,0.05)',
-                                  border: '1px solid var(--card-border)',
-                                  color: '#cbd5e1',
-                                  fontSize: '12px',
-                                  fontWeight: 500,
-                                  fontFamily: 'monospace',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '4px'
-                                }}
-                              >
-                                <Package size={12} color="var(--primary-hover)" />
-                                {hasDistinctMSku ? `${sku} (${mSku})` : sku}
-                              </span>
-                            );
-                          })}
+                              <>
+                                {visible.map(card => {
+                                  const chipStyle: React.CSSProperties = {
+                                    padding: '4px 10px',
+                                    borderRadius: '20px',
+                                    background: 'rgba(255,255,255,0.05)',
+                                    border: '1px solid var(--card-border)',
+                                    color: card.kaspiSku ? 'var(--primary-hover)' : '#cbd5e1',
+                                    fontSize: '12px',
+                                    fontWeight: 500,
+                                    fontFamily: 'monospace',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    textDecoration: 'none',
+                                  };
+                                  const hint = [
+                                    card.name,
+                                    card.aliases.length > 1 ? `Идентификаторы: ${card.aliases.join(', ')}` : null,
+                                    card.kaspiSku ? 'Открыть карточку на Kaspi' : null,
+                                  ].filter(Boolean).join('\n');
 
+                                  return card.kaspiSku ? (
+                                    <a
+                                      key={card.key}
+                                      href={KASPI_CARD_URL(card.kaspiSku)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title={hint || card.label}
+                                      style={chipStyle}
+                                    >
+                                      <Package size={12} color="var(--primary-hover)" />
+                                      {card.label}
+                                      <ExternalLink size={11} />
+                                    </a>
+                                  ) : (
+                                    <span key={card.key} title={hint || card.label} style={chipStyle}>
+                                      <Package size={12} color="var(--text-muted)" />
+                                      {card.label}
+                                    </span>
+                                  );
+                                })}
+
+                                {cards.length > 6 && (
+                                  <button
+                                    onClick={() => setExpandedSkusGroupId(
+                                      expandedSkusGroupId === group.group_id ? null : group.group_id
+                                    )}
+                                    style={{
+                                      padding: '4px 10px',
+                                      borderRadius: '20px',
+                                      background: 'transparent',
+                                      border: '1px dashed var(--card-border)',
+                                      color: 'var(--text-muted)',
+                                      fontSize: '12px',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {expandedSkusGroupId === group.group_id ? 'свернуть' : `+ ещё ${cards.length - 6}`}
+                                  </button>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                       </td>
 
@@ -1025,7 +1240,7 @@ export const MasterStockGroups: React.FC = () => {
               </div>
 
               {/* Shared Stock Input */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' }}>
                     Общий физический остаток *
@@ -1071,6 +1286,36 @@ export const MasterStockGroups: React.FC = () => {
                       boxSizing: 'border-box'
                     }}
                   />
+                </div>
+
+                {/* Deduct Per Unit Input */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' }}>
+                    Списывать за 1 продажу
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={formDeductPerUnit}
+                    onChange={e => setFormDeductPerUnit(Math.max(1, parseInt(e.target.value) || 1))}
+                    title="Сколько штук общего остатка съедает ОДНА проданная единица. Обычный товар — 1. Комплект (продаётся набором, а остаток считается поштучно) — размер набора."
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '10px',
+                      background: 'var(--card-bg)',
+                      border: formDeductPerUnit > 1 ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid var(--card-border)',
+                      color: formDeductPerUnit > 1 ? '#c084fc' : 'var(--text-color)',
+                      fontSize: '14px',
+                      fontWeight: formDeductPerUnit > 1 ? 700 : 400,
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '5px', lineHeight: 1.4 }}>
+                    {formDeductPerUnit > 1
+                      ? `Заказ на 1 шт. уменьшит остаток на ${formDeductPerUnit} шт.`
+                      : 'Обычный товар: сколько заказали, столько и спишется.'}
+                  </div>
                 </div>
 
                 {/* 1C External Code Input */}

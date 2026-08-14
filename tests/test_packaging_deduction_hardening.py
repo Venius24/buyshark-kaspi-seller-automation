@@ -47,6 +47,16 @@ class TestNormalization(unittest.TestCase):
         self.assertEqual(_calculate_physical_units("T219-0005-4 комплект", 1), 1)
         self.assertEqual(_calculate_physical_units("T219-0005-4", 2), 2)
 
+    def test_pack_size_comes_from_the_group_setting(self):
+        """Размер комплекта задаётся руками, а не угадывается по артикулу."""
+        self.assertEqual(_calculate_physical_units("T219-0005-4", 1, 7), 7)
+        self.assertEqual(_calculate_physical_units("T219-0005-4", 3, 7), 21)
+
+    def test_broken_pack_size_falls_back_to_one(self):
+        """Ноль/None/мусор не должны обнулять списание."""
+        self.assertEqual(_calculate_physical_units("T219-0005", 2, 0), 2)
+        self.assertEqual(_calculate_physical_units("T219-0005", 2, None), 2)
+
 
 class TestMatching(unittest.TestCase):
     def test_exact_match(self):
@@ -152,6 +162,22 @@ class TestClaimKeySeparatesAnnotatedSku(unittest.TestCase):
         self.assertFalse(granted)
 
 
+class TestPackSizeSetting(unittest.TestCase):
+    """`deduct_per_unit` — единственный источник размера комплекта."""
+
+    def test_default_group_deducts_one_for_one(self):
+        g = group("a", "A", ["T219-0005"])
+        self.assertEqual(
+            _calculate_physical_units("T219-0005", 1, g.get("deduct_per_unit", 1)), 1
+        )
+
+    def test_group_with_pack_deducts_the_pack(self):
+        g = {**group("a", "Палочки", ["H422-0002-4"]), "deduct_per_unit": 7}
+        self.assertEqual(
+            _calculate_physical_units("H422-0002-4", 2, g["deduct_per_unit"]), 14
+        )
+
+
 class DeductionTestCase(unittest.TestCase):
     """Общая обвязка: список групп в памяти, никаких походов в Kaspi/БД."""
 
@@ -184,6 +210,35 @@ class DeductionTestCase(unittest.TestCase):
     def run_cycle(self, tabs):
         with patch("backend.kaspi_wrapper.KaspiAPI.get_all_packaging_tabs", return_value=tabs):
             return asyncio.run(process_packaging_auto_deduction(TOKEN, STORE))
+
+
+class TestPackSizeInDeductionCycle(DeductionTestCase):
+    """Комплект группы применяется в полном цикле списания."""
+
+    def _sell(self, qty, per_unit, stock=100):
+        g = group("a", "Палочки NG", ["H422-0002-4"], stock=stock)
+        g["deduct_per_unit"] = per_unit
+        self.groups = {"a": g}
+        return self.run_cycle({"cargo_assembly": [
+            {"code": "777", "items": [{"merchant_sku": "H422-0002-4", "title": "t", "quantity": qty}]}
+        ], "wait_for_courier": []})
+
+    def test_pack_multiplies_the_deduction(self):
+        res = self._sell(2, 7)
+        self.assertEqual(res["deductions"][0]["units"], 14)
+        self.assertEqual(self.groups["a"]["shared_stock"], 86)
+
+    def test_journal_explains_where_the_number_came_from(self):
+        self._sell(1, 7)
+        self.assertIn("комплект 7", self.groups["a"]["last_sync_log"])
+
+    def test_group_without_the_field_deducts_one_for_one(self):
+        self.groups = {"a": group("a", "A", ["T219-0005"], stock=10)}
+        res = self.run_cycle({"cargo_assembly": [
+            {"code": "778", "items": [{"merchant_sku": "T219-0005", "title": "t", "quantity": 3}]}
+        ], "wait_for_courier": []})
+        self.assertEqual(res["deductions"][0]["units"], 3)
+        self.assertNotIn("комплект", self.groups["a"]["last_sync_log"])
 
 
 class TestSafetyNetTab(DeductionTestCase):

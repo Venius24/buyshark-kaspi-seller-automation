@@ -685,9 +685,13 @@ def claim_stock_deduction(
     return True
 
 
-def _calculate_physical_units(merchant_sku: str, quantity: int = 1) -> int:
+def _calculate_physical_units(merchant_sku: str, quantity: int = 1, per_unit: int = 1) -> int:
     """
-    Физическое количество штук по позиции заказа. Ровно то, что заказали.
+    Физическое количество штук по позиции заказа: заказанное количество,
+    умноженное на размер комплекта группы (`deduct_per_unit`, по умолчанию 1).
+
+    `per_unit` задаётся руками в карточке Мастер-Группы — это единственный
+    источник размера комплекта. Из артикула он больше не выводится:
 
     До 14.08 хвост артикула после последнего дефиса считался размером
     упаковки: "T219-0005-4" -> множитель 4. Правило описано в
@@ -709,7 +713,7 @@ def _calculate_physical_units(merchant_sku: str, quantity: int = 1) -> int:
     не угадываем: если у товара действительно комплект, размер должен
     задаваться явно, а не выводиться из артикула.
     """
-    return int(quantity)
+    return int(quantity) * max(1, int(per_unit or 1))
 
 
 async def process_packaging_auto_deduction(token: str, store_id: Optional[str] = None) -> dict:
@@ -771,7 +775,9 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                 if not matched_group:
                     continue
 
-                units = _calculate_physical_units(m_sku, item.get("quantity", 1))
+                ordered = int(item.get("quantity", 1) or 1)
+                per_unit = max(1, int(matched_group.get("deduct_per_unit", 1) or 1))
+                units = _calculate_physical_units(m_sku, ordered, per_unit)
 
                 if not await asyncio.to_thread(
                     claim_stock_deduction, store_id, order_code, "packaging",
@@ -814,9 +820,12 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                         order_code, units, matched_group.get("group_name"),
                         old_stock, shortfall, debt,
                     )
+                # Комплект показываем прямо в журнале: иначе "заказали 1 —
+                # списали 7" снова выглядит как поломка, а не как настройка.
+                pack = f" [заказано {ordered} × комплект {per_unit}]" if per_unit > 1 else ""
                 log_entry = (
                     f"[{now_time}] 🛒 Списание по заказу #{order_code} ({m_sku}): "
-                    f"-{units} шт. (было {old_stock} → стало {new_stock}{tail})"
+                    f"-{units} шт.{pack} (было {old_stock} → стало {new_stock}{tail})"
                 )
                 logs = matched_group.setdefault("sync_logs", [])
                 logs.insert(0, log_entry)

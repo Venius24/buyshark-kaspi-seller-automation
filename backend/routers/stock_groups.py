@@ -135,6 +135,8 @@ async def create_stock_group(
         raise HTTPException(status_code=400, detail="Выберите хотя бы один товар (SKU) для связывания.")
     if req.stop_qty is not None and req.stop_qty < 0:
         raise HTTPException(status_code=400, detail="Стоп кол-во не может быть отрицательным.")
+    if req.deduct_per_unit is not None and req.deduct_per_unit < 1:
+        raise HTTPException(status_code=400, detail="Списание за единицу не может быть меньше 1 шт.")
 
     group_id = f"grp_{uuid.uuid4().hex[:8]}"
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -148,6 +150,7 @@ async def create_stock_group(
         "external_code": (req.external_code or "").strip() or None,
         "is_active": req.is_active if req.is_active is not None else True,
         "stop_qty": int(req.stop_qty) if req.stop_qty is not None else 5,
+        "deduct_per_unit": int(req.deduct_per_unit) if req.deduct_per_unit else 1,
         "dumping_config": req.dumping_config.dict() if req.dumping_config else None,
         "dumping_excluded_skus": [s for s in (req.dumping_excluded_skus or []) if s in expanded_skus],
         "status": "updating",
@@ -183,6 +186,8 @@ async def update_stock_group(
 
     if req.stop_qty is not None and req.stop_qty < 0:
         raise HTTPException(status_code=400, detail="Стоп кол-во не может быть отрицательным.")
+    if req.deduct_per_unit is not None and req.deduct_per_unit < 1:
+        raise HTTPException(status_code=400, detail="Списание за единицу не может быть меньше 1 шт.")
 
     async with get_stock_lock(ctx.store_id):
         groups = _load_master_stock_groups(store_id=ctx.store_id)
@@ -211,6 +216,8 @@ async def update_stock_group(
             group["is_active"] = req.is_active
         if req.stop_qty is not None:
             group["stop_qty"] = int(req.stop_qty)
+        if req.deduct_per_unit is not None:
+            group["deduct_per_unit"] = int(req.deduct_per_unit)
         if "dumping_config" in provided:
             group["dumping_config"] = req.dumping_config.model_dump() if req.dumping_config else None
         if req.dumping_excluded_skus is not None:

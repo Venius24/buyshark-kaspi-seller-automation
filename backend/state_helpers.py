@@ -460,6 +460,7 @@ def _load_master_stock_groups(store_id: str) -> dict:
                     "group_name": r.group_name,
                     "shared_stock": r.shared_stock,
                     "oversold": r.oversold or 0,
+                    "deduct_per_unit": r.deduct_per_unit or 1,
                     "linked_skus": linked_skus,
                     "external_code": r.external_code,
                     "is_active": r.is_active,
@@ -498,6 +499,7 @@ def _save_master_stock_groups(groups: dict, store_id: str):
                     group_name=g.get("group_name", "Группа"),
                     shared_stock=int(g.get("shared_stock", 0)),
                     oversold=int(g.get("oversold", 0)),
+                    deduct_per_unit=max(1, int(g.get("deduct_per_unit", 1) or 1)),
                     linked_skus=linked_str,
                     external_code=g.get("external_code"),
                     is_active=bool(g.get("is_active", True)),
@@ -516,6 +518,7 @@ def _save_master_stock_groups(groups: dict, store_id: str):
                 db_obj.group_name = g.get("group_name", "Группа")
                 db_obj.shared_stock = int(g.get("shared_stock", 0))
                 db_obj.oversold = int(g.get("oversold", 0))
+                db_obj.deduct_per_unit = max(1, int(g.get("deduct_per_unit", 1) or 1))
                 db_obj.linked_skus = linked_str
                 db_obj.external_code = g.get("external_code")
                 db_obj.is_active = bool(g.get("is_active", True))

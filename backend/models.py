@@ -73,6 +73,8 @@ class MasterStockGroupCreateRequest(BaseModel):
     external_code: Optional[str] = None
     is_active: Optional[bool] = True
     stop_qty: Optional[int] = 5
+    # Сколько штук остатка списывать за одну проданную единицу (комплект).
+    deduct_per_unit: Optional[int] = 1
     dumping_config: Optional[GroupDumpingConfig] = None
     dumping_excluded_skus: Optional[List[str]] = None
 
@@ -83,6 +85,7 @@ class MasterStockGroupUpdateRequest(BaseModel):
     external_code: Optional[str] = None
     is_active: Optional[bool] = None
     stop_qty: Optional[int] = None
+    deduct_per_unit: Optional[int] = None
     dumping_config: Optional[GroupDumpingConfig] = None
     dumping_excluded_skus: Optional[List[str]] = None
 

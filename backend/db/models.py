@@ -182,6 +182,12 @@ class MasterStockGroupDB(Base):
     # нулю (отрицательный остаток нельзя слать в Kaspi), и без этого поля
     # факт перепродажи терялся молча — см. миграцию 031.
     oversold: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Сколько штук общего остатка съедает ОДНА проданная единица товара. Для
+    # обычного товара 1. Для группы, где остаток считается в мелких единицах, а
+    # продаётся комплектом ("Палочки NG, 7 шт" при остатке в палочках) — 7.
+    # Раньше это число угадывалось по хвосту артикула и угадывалось неверно,
+    # см. миграцию 034 и AUTO_DEDUCTION_ENGINE.md.
+    deduct_per_unit: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     dumping_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-stringified dict
     # SKU из linked_skus, исключённые из ГРУППОВОГО демпинга (dumping_config
     # выше их игнорирует) — но их собственный individual dumping_config (см.

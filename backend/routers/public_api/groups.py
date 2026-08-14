@@ -33,6 +33,8 @@ def get_public_groups(auth_user: dict = Depends(get_api_key_user)):
             # Долг: продано сверх остатка. Остаток обрезан нулём, так что без
             # этого поля внешняя учётка не увидит нехватку.
             "oversold": g.get("oversold", 0),
+            # Сколько штук остатка съедает одна проданная единица (комплект).
+            "deduct_per_unit": g.get("deduct_per_unit", 1),
             "linked_skus": g.get("linked_skus", []),
             "linked_skus_count": len(g.get("linked_skus", [])),
             "is_active": g.get("is_active", True),
