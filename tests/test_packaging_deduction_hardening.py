@@ -96,6 +96,61 @@ class TestMatching(unittest.TestCase):
         self.assertIsNone(g)
 
 
+class TestVerbatimSkuBeatsNormalized(unittest.TestCase):
+    """Регрессия 14.08: приписка через пробел бывает значащей.
+
+    У Бархана "H422-0007-9" (группа «H422-0007 1шт») и "H422-0007-9 2шт"
+    (группа «H422-0007 2 шт») — разные товары. Нормализация схлопывала их в
+    один ключ, обе группы отвечали как на свой, списание пропускалось на
+    каждом проходе: 652 предупреждения за ночь и ни одного вычета.
+    """
+
+    def _groups(self):
+        return {
+            "one": group("one", "H422-0007 1шт", ["H422-0007-9", "H422-0007-8"], stock=59),
+            "two": group("two", "H422-0007 2 шт", ["H422-0007-9 2шт", "H422-0007-6 2 шт"], stock=4),
+        }
+
+    def test_plain_sku_goes_to_single_pack_group(self):
+        self.assertEqual(match_group_for_sku("H422-0007-9", self._groups())[0], "one")
+
+    def test_annotated_sku_goes_to_double_pack_group(self):
+        self.assertEqual(match_group_for_sku("H422-0007-9 2шт", self._groups())[0], "two")
+
+    def test_spacing_and_case_do_not_matter(self):
+        """«2 шт» с пробелом и другим регистром — тот же артикул."""
+        self.assertEqual(match_group_for_sku("h422-0007-6   2  шт", self._groups())[0], "two")
+
+    def test_normalized_fallback_survives(self):
+        """Если группы с точной припиской нет — по-прежнему чистим хвост."""
+        groups = {"a": group("a", "A", ["H422-0007-9"])}
+        self.assertEqual(match_group_for_sku("H422-0007-9 2шт", groups)[0], "a")
+
+    def test_two_groups_on_the_same_verbatim_sku_still_deduct_nothing(self):
+        groups = {
+            "a": group("a", "A", ["H422-0007-9 2шт"]),
+            "b": group("b", "B", ["H422-0007-9 2шт"]),
+        }
+        self.assertIsNone(match_group_for_sku("H422-0007-9 2шт", groups)[0])
+
+
+class TestClaimKeySeparatesAnnotatedSku(unittest.TestCase):
+    """Две позиции одного заказа не должны считаться одной."""
+
+    def test_annotated_and_plain_sku_get_different_keys(self):
+        a = worker._claim_key("123", "H422-0007-9")
+        b = worker._claim_key("123", "H422-0007-9 2шт")
+        self.assertNotEqual(a, b)
+
+    def test_legacy_key_is_still_recognized(self):
+        """Старые брони писались по артикулу без приписки — не списываем заново."""
+        claims = {worker._legacy_claim_key("123", "H422-0007-9 2шт"): {"claimed_by": "old"}}
+        with patch("backend.state_helpers._load_processed_orders_by_kind", side_effect=lambda sid, kind: dict(claims)), \
+             patch("backend.state_helpers._save_processed_orders_by_kind", side_effect=lambda d, sid, kind: None):
+            granted = worker.claim_stock_deduction(STORE, "123", "test", {}, sku="H422-0007-9 2шт")
+        self.assertFalse(granted)
+
+
 class DeductionTestCase(unittest.TestCase):
     """Общая обвязка: список групп в памяти, никаких походов в Kaspi/БД."""
 
