@@ -1028,19 +1028,31 @@ class KaspiAPI:
             "Referer": "https://kaspi.kz/",
         }
 
-        page = 0
         limit = 100
         all_products = []
+        seen_offer_keys = set()
 
         print(f"[BFF Sync] Запуск полной синхронизации ассортимента через BFF (Merchant ID: {merchant_id})...")
 
-        if cookies and "mc-session" in cookies and "mc-sid" in cookies:
+        # `a` у BFF — не «включить фильтр», а ВЫБОР одной из двух непересекающихся
+        # выборок: a=true отдаёт только карточки в продаже, a=false — только снятые
+        # (на Бархане вживую 2026-08-15: 1150 + 423 = 1573, ровно столько же отдаёт
+        # запрос вообще без `a`). Раньше здесь стояло жёстко "true", поэтому снятых
+        # карточек в кэше не существовало ни одной, и вкладка «Сняты» в UI
+        # (status=archive → фильтр по status == "Архив") гарантированно была пустой
+        # при любом состоянии кабинета. Ходим двумя проходами, чтобы каждый оффер
+        # честно получил свой статус из той выборки, в которой Kaspi его отдал.
+        has_mc_session = bool(cookies and "mc-session" in cookies and "mc-sid" in cookies)
+
+        for is_active_pass in ((True, False) if has_mc_session else ()):
+            page = 0
+            pass_count = 0
             while True:
                 params = {
                     "m": str(merchant_id),
                     "p": page,
                     "l": limit,
-                    "a": "true",  # Только активные (в продаже)
+                    "a": "true" if is_active_pass else "false",
                 }
 
                 try:
@@ -1064,6 +1076,13 @@ class KaspiAPI:
 
                         if not master_sku or not merchant_sku:
                             continue
+
+                        # Выборки не пересекаются, но подстраховываемся от дубля:
+                        # каталог может доехать/сняться прямо между проходами.
+                        offer_key = (str(master_sku), str(merchant_sku))
+                        if offer_key in seen_offer_keys:
+                            continue
+                        seen_offer_keys.add(offer_key)
 
                         stock_count = 0
                         availabilities = offer.get("availabilities", [])
@@ -1096,13 +1115,14 @@ class KaspiAPI:
                             "merchantSku": str(merchant_sku),
                             "kaspiSku": str(master_sku),
                             "price": f"{int(price_num)} ₸" if price_num > 0 else "Цена не указана",
-                            "status": "Активен" if offer.get("available", True) else "Архив",
+                            "status": "Активен" if offer.get("available", is_active_pass) else "Архив",
                             "url": f"https://kaspi.kz/shop/p/-{master_sku}/?c=750000000#offers",
                             "price_num": int(price_num),
                             "stock": int(stock_count),
                             "brand": brand_name,
                         }
                         all_products.append(product_entry)
+                        pass_count += 1
 
                     if len(offers) < limit:
                         break
@@ -1112,6 +1132,9 @@ class KaspiAPI:
                 except Exception as err:
                     print(f"[BFF Sync] Исключение во время пагинации: {err}")
                     break
+
+            print(f"[BFF Sync] Проход a={'true' if is_active_pass else 'false'} "
+                  f"({'в продаже' if is_active_pass else 'сняты'}): {pass_count} товаров.")
 
         # Фоллбек 1: Получение товаров из недавних заказов Kaspi API
         if not all_products:
