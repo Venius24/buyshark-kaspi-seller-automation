@@ -22,6 +22,12 @@ from backend.security.store_context import StoreContext, get_store_context
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
+# Казахстан не переходит на летнее время — фиксированный UTC+5 круглый год
+# (тот же оффсет, что в chatbot/outbound.py ALMATY_TZ и billing/catalog.py
+# BILLING_TZ_OFFSET_HOURS). Прод-сервер живёт в UTC, поэтому всё, что
+# показывается продавцу «по часам»/«по дням», надо сдвигать вручную.
+ALMATY_UTC_OFFSET_HOURS = 5
+
 # Фронтенд поллит /api/analytics/widgets каждые 10 секунд, пока открыта вкладка
 # Overview (useAnalyticsWidgets.ts). Без кэша это означало живой синхронный
 # запрос к публичному API конкурентов Kaspi на каждый poll — до 360 запросов/час
@@ -241,7 +247,11 @@ def get_insights(ctx: StoreContext = Depends(get_store_context)):
         "coverage_pct": round((enabled_count / total_products * 100.0), 1) if total_products else 0.0,
     }
 
-    # Продажи по часам/дням недели (за последние 90 дней, из sales_orders)
+    # Продажи по часам/дням недели (за последние 90 дней, из sales_orders).
+    # created_at в sales_orders — UTC (см. _upsert_sales_orders), а продавец
+    # смотрит на график в алматинском времени. Без сдвига на +5 вся тепловая
+    # карта была смещена на 5 часов назад: ночной провал 03-06 по Алматы
+    # рисовался в 22-01, а вечерний пик 22:00 — в 17:00.
     session = _get_sync_db_session()
     hourly_grid = [[0] * 24 for _ in range(7)]  # [day_of_week 0=Пн..6=Вс][hour]
     if session:
@@ -253,7 +263,8 @@ def get_insights(ctx: StoreContext = Depends(get_store_context)):
                 .where(SalesOrderDB.store_id == ctx.store_id, SalesOrderDB.created_at >= since)
             ).all()
             for r in rows:
-                hourly_grid[r.created_at.weekday()][r.created_at.hour] += 1
+                local = r.created_at + _dt.timedelta(hours=ALMATY_UTC_OFFSET_HOURS)
+                hourly_grid[local.weekday()][local.hour] += 1
         finally:
             session.close()
 
