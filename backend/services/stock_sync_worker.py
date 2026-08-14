@@ -82,6 +82,41 @@ async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus
     except Exception as e:
         logger.error(f"Failed to execute notify_zero_stock_telegram: {e}")
 
+async def notify_oversold_telegram(
+    group_name: str, group_id: str, store_id: Optional[str],
+    order_code: str, sku: str, units: int, old_stock: int, debt: int,
+) -> None:
+    """Заказов пришло больше, чем числилось остатка.
+
+    Отдельно от notify_zero_stock_telegram: то — «остаток подошёл к стопу,
+    сняли с продажи», штатная ситуация. А здесь товар УЖЕ продан и его нечем
+    закрыть — владельцу надо узнать сразу, а не из журнала группы.
+    """
+    if store_id is None:
+        return
+    try:
+        from backend.chatbot import notify_dispatch
+        from backend.chatbot.notifications import _esc_md
+
+        shortfall = max(0, units - old_stock)
+        text = (
+            f"🚨 *ПЕРЕПРОДАЖА: заказов больше, чем остатка*\n\n"
+            f"📦 *Группа:* {_esc_md(group_name)}\n"
+            f"🛒 *Заказ:* `#{_esc_md(str(order_code))}` — списал {units} шт. "
+            f"по артикулу `{_esc_md(str(sku))}`\n"
+            f"📉 *Было на остатке:* {old_stock} шт., не хватает *{shortfall} шт.*\n"
+            + (f"🧾 *Всего долг по группе:* {debt} шт.\n" if debt != shortfall else "")
+            + f"\n⚠️ Позиции группы сняты с продажи. Заказ уже принят — его нужно "
+              f"закрыть физически или отменить в кабинете."
+        )
+        await notify_dispatch.dispatch(
+            store_id, "problems", text, urgent=True,
+            dedup_key=f"oversold:{group_id}:{order_code}",
+        )
+    except Exception as e:
+        logger.error(f"Failed to execute notify_oversold_telegram: {e}")
+
+
 async def broadcast_ws_event(event_type: str, data: dict, store_id: Optional[str] = None):
     """Вещание WebSocket события на клиентские UI-подключения того же стора."""
     try:
@@ -746,7 +781,15 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
 
                 old_stock = int(matched_group.get("shared_stock", 0))
                 new_stock = max(0, old_stock - units)
+                # Сколько штук заказали сверх того, что числилось. max(0, ...)
+                # обрезает остаток по нулю — иначе отрицательное число утечёт
+                # в оверрайд каталога и в Kaspi. Но сам факт нехватки терялся
+                # прямо здесь: журнал показывал "было 4 → стало 0" и ни слова
+                # о том, что трёх штук нет. Копим долг отдельным полем.
+                shortfall = max(0, units - old_stock)
+                debt = int(matched_group.get("oversold", 0)) + shortfall
                 matched_group["shared_stock"] = new_stock
+                matched_group["oversold"] = debt
                 matched_group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 # Статус, который видно на карточке группы, пока идёт списание
                 # и следующая за ним веерная рассылка.
@@ -754,9 +797,18 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                 matched_group["status_since"] = datetime.datetime.now().isoformat()
 
                 now_time = datetime.datetime.now().strftime("%H:%M:%S")
+                tail = ""
+                if shortfall:
+                    tail = f", не хватило {shortfall} шт. — продано больше, чем числилось"
+                    logger.warning(
+                        "🚨 [AutoDeduction] Перепродажа: заказ #%s списал %d шт. у группы '%s' "
+                        "при остатке %d. Не хватает %d шт. (всего долг %d).",
+                        order_code, units, matched_group.get("group_name"),
+                        old_stock, shortfall, debt,
+                    )
                 log_entry = (
                     f"[{now_time}] 🛒 Списание по заказу #{order_code} ({m_sku}): "
-                    f"-{units} шт. (было {old_stock} → стало {new_stock})"
+                    f"-{units} шт. (было {old_stock} → стало {new_stock}{tail})"
                 )
                 logs = matched_group.setdefault("sync_logs", [])
                 logs.insert(0, log_entry)
@@ -773,6 +825,7 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                     "units": units,
                     "old_stock": old_stock,
                     "new_stock": new_stock,
+                    "shortfall": shortfall,
                 }
 
                 new_deductions.append({
@@ -782,12 +835,26 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                     "sku": m_sku,
                     "units": units,
                     "new_stock": new_stock,
+                    "shortfall": shortfall,
                 })
 
                 logger.info(
                     f"⚡ [AutoDeduction] Заказ #{order_code} списал {units} шт. "
                     f"у группы '{matched_group.get('group_name')}'. Остаток: {new_stock}"
+                    + (f" (долг {debt} шт.)" if debt else "")
                 )
+
+                if shortfall:
+                    asyncio.create_task(notify_oversold_telegram(
+                        group_name=matched_group.get("group_name") or "Без названия",
+                        group_id=matched_group.get("group_id") or gid,
+                        store_id=store_id,
+                        order_code=order_code,
+                        sku=m_sku,
+                        units=units,
+                        old_stock=old_stock,
+                        debt=debt,
+                    ))
 
                 to_broadcast[matched_group.get("group_id") or gid] = {
                     "order_code": order_code,

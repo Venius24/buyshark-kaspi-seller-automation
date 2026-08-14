@@ -30,6 +30,9 @@ def get_public_groups(auth_user: dict = Depends(get_api_key_user)):
             "group_name": g.get("group_name"),
             "external_code": g.get("external_code"),
             "shared_stock": g.get("shared_stock", 0),
+            # Долг: продано сверх остатка. Остаток обрезан нулём, так что без
+            # этого поля внешняя учётка не увидит нехватку.
+            "oversold": g.get("oversold", 0),
             "linked_skus": g.get("linked_skus", []),
             "linked_skus_count": len(g.get("linked_skus", [])),
             "is_active": g.get("is_active", True),
@@ -96,10 +99,21 @@ async def update_public_stock(
         else:
             new_stock = max(0, req.new_stock)
 
+        debt = int(target_group.get("oversold", 0))
+        if mode != "DELTA":
+            # SET — это пересчёт по факту склада, он закрывает долг
+            # перепродажи. DELTA (приход/расход) долг не трогает: сколько
+            # штук ушло в минус, решает владелец, мы только показываем.
+            target_group["oversold"] = 0
+
         target_group["shared_stock"] = new_stock
         target_group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         target_group["status"] = "updating"
-        target_group["last_sync_log"] = f"Обновлено через Public API ({mode}): {new_stock} шт."
+        target_group["last_sync_log"] = (
+            f"Обновлено через Public API ({mode}): {new_stock} шт."
+            + (f" (долг {debt} шт. списан)" if debt and mode != "DELTA"
+               else f" (непокрытый долг: {debt} шт.)" if debt else "")
+        )
 
         groups[matched_gid] = target_group
         _save_master_stock_groups(groups, store_id=store_id)

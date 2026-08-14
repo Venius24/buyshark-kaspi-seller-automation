@@ -202,6 +202,7 @@ async def update_stock_group(
             group["group_name"] = req.group_name.strip()
         if req.shared_stock is not None and req.shared_stock >= 0:
             group["shared_stock"] = int(req.shared_stock)
+            group["oversold"] = 0  # пересчёт по факту склада закрывает долг
         if req.linked_skus is not None and req.linked_skus:
             group["linked_skus"] = _expand_linked_skus(req.linked_skus, ctx.store_id)
         if "external_code" in provided:
@@ -246,9 +247,16 @@ async def update_stock_qty(
 
         group = groups[group_id]
         group["shared_stock"] = int(req.shared_stock)
+        # Ручной ввод — это пересчёт по факту склада, он закрывает долг
+        # перепродажи: владелец уже видит реальное число штук.
+        debt = int(group.get("oversold", 0))
+        group["oversold"] = 0
         group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         group["status"] = "updating"
-        group["last_sync_log"] = f"Ручной ввод остатка: {req.shared_stock} шт."
+        group["last_sync_log"] = (
+            f"Ручной ввод остатка: {req.shared_stock} шт."
+            + (f" (долг {debt} шт. списан)" if debt else "")
+        )
         _save_master_stock_groups(groups, store_id=ctx.store_id)
 
     background_tasks.add_task(execute_broadcast_sync, group_id, token, ctx.store_id)

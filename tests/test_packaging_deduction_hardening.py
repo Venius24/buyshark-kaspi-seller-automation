@@ -273,6 +273,79 @@ class TestNoDoubleDeduction(DeductionTestCase):
         self.assertEqual(self.groups["b"]["shared_stock"], 10)
 
 
+class TestOversold(DeductionTestCase):
+    """Заказов пришло больше, чем числилось остатка.
+
+    Остаток обрезается по нулю — отрицательное число нельзя слать в Kaspi, —
+    и до 14.08 нехватка на этом терялась: журнал писал «было 4 → стало 0» и
+    ни слова о том, что трёх штук нет. На проде так ушла в минус группа
+    «H422-0007 2 шт»: заказ на 7 шт. при остатке 4.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.alerts = []
+        p = patch.object(worker, "notify_oversold_telegram", side_effect=self._record_alert)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _record_alert(self, **kwargs):
+        self.alerts.append(kwargs)
+        async def noop():
+            return None
+        return noop()
+
+    def _sell(self, qty, stock=4, code="1034264977"):
+        self.groups = {"a": group("a", "H422-0007 2 шт", ["H422-0007 2шт"], stock=stock)}
+        return self.run_cycle({"cargo_assembly": [
+            {"code": code, "items": [{"merchant_sku": "H422-0007 2шт", "title": "t", "quantity": qty}]}
+        ], "wait_for_courier": []})
+
+    def test_stock_is_clamped_at_zero(self):
+        self._sell(7)
+        self.assertEqual(self.groups["a"]["shared_stock"], 0)
+
+    def test_shortfall_is_recorded_as_debt(self):
+        self._sell(7)
+        self.assertEqual(self.groups["a"]["oversold"], 3)
+
+    def test_shortfall_is_written_to_the_journal(self):
+        self._sell(7)
+        self.assertIn("не хватило 3 шт.", self.groups["a"]["last_sync_log"])
+
+    def test_shortfall_is_reported_in_the_result(self):
+        res = self._sell(7)
+        self.assertEqual(res["deductions"][0]["shortfall"], 3)
+
+    def test_debt_accumulates_across_orders(self):
+        self.groups = {"a": group("a", "A", ["H422-0007 2шт"], stock=1)}
+        self.run_cycle({"cargo_assembly": [
+            {"code": "1", "items": [{"merchant_sku": "H422-0007 2шт", "title": "t", "quantity": 3}]},
+            {"code": "2", "items": [{"merchant_sku": "H422-0007 2шт", "title": "t", "quantity": 4}]},
+        ], "wait_for_courier": []})
+        self.assertEqual(self.groups["a"]["shared_stock"], 0)
+        self.assertEqual(self.groups["a"]["oversold"], 6)  # (3-1) + 4
+
+    def test_urgent_alert_is_sent_once_per_order(self):
+        self._sell(7)
+        self.assertEqual(len(self.alerts), 1)
+        self.assertEqual(self.alerts[0]["debt"], 3)
+        self.assertEqual(self.alerts[0]["old_stock"], 4)
+
+    def test_normal_deduction_neither_alerts_nor_owes(self):
+        self._sell(2)
+        self.assertEqual(self.groups["a"]["shared_stock"], 2)
+        self.assertEqual(self.groups["a"]["oversold"], 0)
+        self.assertEqual(self.alerts, [])
+        self.assertNotIn("не хватило", self.groups["a"]["last_sync_log"])
+
+    def test_exactly_enough_stock_is_not_a_debt(self):
+        self._sell(4)
+        self.assertEqual(self.groups["a"]["shared_stock"], 0)
+        self.assertEqual(self.groups["a"]["oversold"], 0)
+        self.assertEqual(self.alerts, [])
+
+
 class TestVisibility(DeductionTestCase):
     def test_group_status_and_journal_show_the_order(self):
         self.groups = {"a": group("a", "A", ["T219-0005"], stock=10)}

@@ -43,6 +43,8 @@ export interface MasterStockGroup {
   group_id: string;
   group_name: string;
   shared_stock: number;
+  /** Долг: продано сверх остатка. Остаток при этом обрезан нулём. */
+  oversold?: number;
   linked_skus: string[];
   external_code?: string;
   is_active: boolean;
@@ -744,6 +746,25 @@ export const MasterStockGroups: React.FC = () => {
                               }}>
                               {group.shared_stock} шт
                             </span>
+                            {(group.oversold ?? 0) > 0 && (
+                              // Остаток обрезан нулём (в Kaspi отрицательное не
+                              // уходит), поэтому нехватку показываем отдельно —
+                              // иначе перепродажа выглядит как обычный ноль.
+                              <span
+                                title={`Продано на ${group.oversold} шт. больше, чем числилось. Сбросится при вводе остатка вручную.`}
+                                style={{
+                                  fontSize: '13px',
+                                  fontWeight: 700,
+                                  color: 'var(--error)',
+                                  padding: '4px 10px',
+                                  borderRadius: '8px',
+                                  background: 'rgba(239, 68, 68, 0.12)',
+                                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                ⚠ долг {group.oversold}
+                              </span>
+                            )}
                             <button
                               onClick={() => handleStartInlineEdit(group)}
                               title="Быстрое изменение остатка"

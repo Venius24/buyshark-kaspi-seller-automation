@@ -178,6 +178,10 @@ class MasterStockGroupDB(Base):
     # Стоп кол-во: при shared_stock <= stop_qty группа снимается с продажи
     # (архивируется на Kaspi) и шлётся телеграм-уведомление — см. миграцию 024.
     stop_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    # Долг: сколько штук продано сверх остатка. shared_stock обрезается по
+    # нулю (отрицательный остаток нельзя слать в Kaspi), и без этого поля
+    # факт перепродажи терялся молча — см. миграцию 031.
+    oversold: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     dumping_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-stringified dict
     # SKU из linked_skus, исключённые из ГРУППОВОГО демпинга (dumping_config
     # выше их игнорирует) — но их собственный individual dumping_config (см.
