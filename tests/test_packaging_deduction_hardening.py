@@ -42,9 +42,10 @@ class TestNormalization(unittest.TestCase):
     def test_empty(self):
         self.assertEqual(_normalize_sku(None), "")
 
-    def test_units_use_normalized_sku(self):
-        """Мультипак считается и по грязному артикулу."""
-        self.assertEqual(_calculate_physical_units("T219-0005-4 комплект", 1), 4)
+    def test_units_are_exactly_the_ordered_quantity(self):
+        """Хвост артикула — номер варианта, а не размер упаковки."""
+        self.assertEqual(_calculate_physical_units("T219-0005-4 комплект", 1), 1)
+        self.assertEqual(_calculate_physical_units("T219-0005-4", 2), 2)
 
 
 class TestMatching(unittest.TestCase):
@@ -223,7 +224,7 @@ class TestMultiPosition(DeductionTestCase):
         }], "wait_for_courier": []})
         self.assertEqual(res["deducted_orders_count"], 2)
         self.assertEqual(self.groups["a"]["shared_stock"], 9)
-        self.assertEqual(self.groups["b"]["shared_stock"], 18)
+        self.assertEqual(self.groups["b"]["shared_stock"], 19)
 
     def test_two_positions_of_one_group_broadcast_once(self):
         """Две позиции одной группы — одна веерная рассылка, а не две."""

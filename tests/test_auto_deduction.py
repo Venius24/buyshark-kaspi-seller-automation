@@ -32,13 +32,18 @@ class TestAutoDeductionEngine(unittest.TestCase):
         app.dependency_overrides.pop(get_store_context, None)
 
     def test_calculate_physical_units(self):
-        """Тест вычисления физических единиц списания для обычных SKU и мульти-паков."""
+        """Списываем ровно заказанное количество, хвост артикула не множитель.
+
+        Раньше "-N" считался размером упаковки. В каталоге Бархана это номер
+        варианта: T219-0005-2 — «Термосумка 20284592_LB4 3 л», одна сумка, а
+        списывалось две. Заказ #1034264977 на 1 шт. списал 7.
+        """
         self.assertEqual(_calculate_physical_units("T219-0005", 1), 1)
         self.assertEqual(_calculate_physical_units("T219-0005-1", 1), 1)
-        self.assertEqual(_calculate_physical_units("T219-0005-2", 1), 2)
-        self.assertEqual(_calculate_physical_units("T219-0005-3", 1), 3)
-        self.assertEqual(_calculate_physical_units("T219-0005-4", 1), 4)
-        self.assertEqual(_calculate_physical_units("T219-0005-6", 1), 6)
+        self.assertEqual(_calculate_physical_units("T219-0005-2", 1), 1)
+        self.assertEqual(_calculate_physical_units("H422-0007-9", 1), 1)
+        self.assertEqual(_calculate_physical_units("H422-0007-7 2шт", 1), 1)
+        self.assertEqual(_calculate_physical_units("T219-0005-6", 3), 3)
         self.assertEqual(_calculate_physical_units("S517-0076", 2), 2)
 
     @patch("backend.services.stock_sync_worker.execute_broadcast_sync")
@@ -56,7 +61,11 @@ class TestAutoDeductionEngine(unittest.TestCase):
         mock_tabs,
         mock_sync
     ):
-        """Тест списания остатка группы при обнаружении нового заказа на мультипак."""
+        """Тест списания остатка группы при обнаружении нового заказа.
+
+        Позиция на 1 шт. вычитает одну штуку: "-4" в артикуле — номер
+        варианта товара, а не размер упаковки.
+        """
         mock_load_proc.return_value = {}
         mock_load_groups.return_value = {
             "grp_test": {
@@ -83,8 +92,8 @@ class TestAutoDeductionEngine(unittest.TestCase):
         
         self.assertTrue(res["success"])
         self.assertEqual(res["deducted_orders_count"], 1)
-        self.assertEqual(res["deductions"][0]["units"], 4)
-        self.assertEqual(res["deductions"][0]["new_stock"], 6)
+        self.assertEqual(res["deductions"][0]["units"], 1)
+        self.assertEqual(res["deductions"][0]["new_stock"], 9)
 
     @patch("backend.services.stock_sync_worker.process_packaging_auto_deduction")
     def test_check_packaging_deduction_endpoint(self, mock_deduction):
