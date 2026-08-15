@@ -3,15 +3,22 @@
 Каталог структурен: движок ветвится на is_free (DEV — никогда не списывается,
 не блокируется, не лимитируется) и max_products is None (безлимит). Строка в
 БД, разошедшаяся с этой логикой, была бы молчаливым багом в биллинге, который
-не поймает ни один тип-чекер. Единственное, что реально должно быть
-изменяемым в рантайме — договорная цена ГигаПредприятие, и это
-store_tariffs.custom_monthly_price_minor (колонка нужна в любом случае).
-Каждое списание снапшотит фактическую сумму в billing_transactions, поэтому
-история не зависит от неизменности каталога — цены можно менять деплоем кода
-без порчи прошлых начислений.
+не поймает ни один тип-чекер. Реально изменяемое в рантайме — только две вещи
+для ГигаПредприятие (договорная цена и договорной дневной лимит кредитов),
+и это store_tariffs.custom_monthly_price_minor/custom_daily_credits_milli
+(колонки нужны в любом случае). Каждое списание снапшотит фактическую сумму в
+billing_transactions, поэтому история не зависит от неизменности каталога —
+цены можно менять деплоем кода без порчи прошлых начислений.
+
+Дневной лимит кредитов ответов ИИ теперь зашит в САМ тариф (не отдельная
+надбавка поверх плоской базы в 50 — решение владельца, 2026-08-16): каждый
+план несёт свой фиксированный лимит, включённый в его цену. ГигаПредприятие —
+безлимит по умолчанию (None), договорной лимит задаётся per-store через
+custom_daily_credits_milli. DEV — безлимит через is_free (бай-пас в
+backend/billing/credits.py, не через каталог).
 
 Деньги — целые числа в тиын (1/100 ₸), никакого float. Кредиты — целые числа
-в милли-кредитах (×1000): 50/день = 50_000, сообщение при множителе 1.2 =
+в милли-кредитах (×1000): 20/день = 20_000, сообщение при множителе 1.2 =
 1200. Дробных величин во float нигде нет.
 """
 from dataclasses import dataclass, field
@@ -24,6 +31,7 @@ class Plan:
     name: str
     max_products: Optional[int]  # None = безлимит
     monthly_price_minor: Optional[int]  # None = договорная (ГигаПредприятие)
+    daily_credit_limit_milli: Optional[int] = None  # None = договорной/безлимит (GIGA/DEV)
     badge: Optional[str] = None
     is_free: bool = False
     is_public: bool = True  # показывать ли в публичном прайс-листе кабинета
@@ -33,43 +41,38 @@ PLANS: dict[str, Plan] = {
     "START": Plan(
         code="START", name="Бодрый старт",
         max_products=50, monthly_price_minor=640_000,
+        daily_credit_limit_milli=20_000,
     ),
     "HUNTER": Plan(
         code="HUNTER", name="Охотник",
         max_products=200, monthly_price_minor=1_130_000,
+        daily_credit_limit_milli=50_000,
     ),
     "PREDATOR": Plan(
         code="PREDATOR", name="Хищник",
         max_products=1000, monthly_price_minor=1_790_000,
+        daily_credit_limit_milli=100_000,
         badge="ХИТ ПРОДАЖ",
     ),
     "PREDATOR_PLUS": Plan(
         code="PREDATOR_PLUS", name="Хищник+",
         max_products=2000, monthly_price_minor=2_980_000,
+        daily_credit_limit_milli=200_000,
     ),
     "GIGA": Plan(
         code="GIGA", name="ГигаПредприятие",
         max_products=None, monthly_price_minor=None,
+        daily_credit_limit_milli=None,  # договорной, см. custom_daily_credits_milli
     ),
     "DEV": Plan(
         code="DEV", name="DEV",
         max_products=None, monthly_price_minor=0,
+        daily_credit_limit_milli=None,  # безлимит через is_free, не через каталог
         is_free=True, is_public=False,
     ),
 }
 
 DEFAULT_PLAN_CODE = "DEV"
-
-# (daily_credit_limit_milli, monthly_price_minor). Ступени ЗАМЕНЯЮТ друг
-# друга — одна колонка store_tariffs.credit_addon_code структурно не даёт
-# им суммироваться (владелец: "это замена, у магазина должны быть ежедневно
-# ответы как кредиты").
-CREDIT_TIERS: dict[str, tuple[int, int]] = {
-    "NONE": (50_000, 0),
-    "C70": (70_000, 200_000),
-    "C100": (100_000, 400_000),
-}
-DEFAULT_CREDIT_ADDON = "NONE"
 
 
 @dataclass(frozen=True)
@@ -120,14 +123,14 @@ def multiplier_milli(band_code: str) -> int:
     return band.multiplier_milli if band else 1000
 
 
-def effective_daily_credits(credit_addon_code: str) -> int:
-    tier = CREDIT_TIERS.get(credit_addon_code, CREDIT_TIERS[DEFAULT_CREDIT_ADDON])
-    return tier[0]
-
-
-def credit_addon_price_minor(credit_addon_code: str) -> int:
-    tier = CREDIT_TIERS.get(credit_addon_code, CREDIT_TIERS[DEFAULT_CREDIT_ADDON])
-    return tier[1]
+def effective_daily_credits(plan_code: str, custom_daily_credits_milli: Optional[int] = None) -> Optional[int]:
+    """Дневной лимит кредитов ответов ИИ, милли-кредиты. custom_daily_credits_milli
+    (договорной лимит ГигаПредприятие) перекрывает лимит из каталога, если задан.
+    None = безлимит (DEV, либо GIGA без договорного лимита)."""
+    if custom_daily_credits_milli is not None:
+        return custom_daily_credits_milli
+    plan = get_plan(plan_code)
+    return plan.daily_credit_limit_milli
 
 
 def plan_price_minor(plan_code: str, custom_monthly_price_minor: Optional[int]) -> int:

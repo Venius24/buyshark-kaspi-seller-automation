@@ -59,7 +59,7 @@ class ChatbotBillingIntegrationTest(unittest.TestCase):
         session = state_helpers._get_sync_db_session()
         session.add(Store(id="store-a", merchant_id="m_a", name="Магазин А"))
         session.add(StoreTariffDB(
-            store_id="store-a", plan_code="START", credit_addon_code="NONE",
+            store_id="store-a", plan_code="START",
             billing_status="ACTIVE", billing_anchor_day=15,
             period_start=now, period_end=now + _dt.timedelta(days=30),
             next_charge_at=now + _dt.timedelta(days=30), activated_at=now,
@@ -129,8 +129,8 @@ class ChatbotBillingIntegrationTest(unittest.TestCase):
 
     def test_exhausted_credits_skip_generate_ai_reply_and_logs(self):
         from backend.billing import credits as billing_credits
-        # Исчерпываем дневной лимит START (50_000 milli) заранее.
-        result = billing_credits.try_consume("store-a", 50_000)
+        # Исчерпываем дневной лимит START (20_000 milli) заранее.
+        result = billing_credits.try_consume("store-a", 20_000)
         self.assertTrue(result.ok)
 
         now_ms = int(_dt.datetime.utcnow().timestamp() * 1000)
@@ -148,7 +148,7 @@ class ChatbotBillingIntegrationTest(unittest.TestCase):
         """mark_chat_replied должен сработать ДО резерва кредита — иначе
         5-секундный цикл вечно переоценивал бы одно и то же сообщение."""
         from backend.billing import credits as billing_credits
-        billing_credits.try_consume("store-a", 50_000)
+        billing_credits.try_consume("store-a", 20_000)
 
         now_ms = int(_dt.datetime.utcnow().timestamp() * 1000)
         resp = _fake_response(groups=[_one_group(now_ms)])

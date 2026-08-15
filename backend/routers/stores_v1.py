@@ -214,7 +214,6 @@ async def connect_full_store(
             db.add(StoreTariffDB(
                 store_id=existing_store.id,
                 plan_code=billing_catalog.DEFAULT_PLAN_CODE,
-                credit_addon_code=billing_catalog.DEFAULT_CREDIT_ADDON,
                 billing_status="ACTIVE",
                 billing_anchor_day=now.day,
                 period_start=now,
@@ -284,7 +283,6 @@ async def connect_full_store(
         db.add(StoreTariffDB(
             store_id=new_store.id,
             plan_code=trial_plan.code,
-            credit_addon_code=billing_catalog.DEFAULT_CREDIT_ADDON,
             billing_status="ACTIVE",
             billing_anchor_day=now.day,
             period_start=now,
@@ -296,7 +294,6 @@ async def connect_full_store(
         db.add(StoreTariffDB(
             store_id=new_store.id,
             plan_code=billing_catalog.DEFAULT_PLAN_CODE,
-            credit_addon_code=billing_catalog.DEFAULT_CREDIT_ADDON,
             billing_status="ACTIVE",
             billing_anchor_day=now.day,
             period_start=now,

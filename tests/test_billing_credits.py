@@ -39,7 +39,7 @@ class BillingCreditsTest(unittest.TestCase):
         session = state_helpers._get_sync_db_session()
         session.add(Store(id="store-a", merchant_id="m_a", name="Магазин А"))
         session.add(StoreTariffDB(
-            store_id="store-a", plan_code="START", credit_addon_code="NONE",
+            store_id="store-a", plan_code="START",
             billing_status="ACTIVE", billing_anchor_day=1,
             period_start=_dt.datetime.utcnow(), period_end=_dt.datetime.utcnow(),
             next_charge_at=_dt.datetime.utcnow(), activated_at=_dt.datetime.utcnow(),
@@ -59,25 +59,25 @@ class BillingCreditsTest(unittest.TestCase):
         result = self.credits.try_consume("store-a", 1000)
         self.assertTrue(result.ok)
         self.assertEqual(result.used_milli, 1000)
-        self.assertEqual(result.limit_milli, 50_000)
+        self.assertEqual(result.limit_milli, 20_000)
 
     def test_cas_rejects_over_limit(self):
-        self.credits.try_consume("store-a", 49_000)
+        self.credits.try_consume("store-a", 19_000)
         result = self.credits.try_consume("store-a", 2000)
         self.assertFalse(result.ok)
-        self.assertEqual(result.used_milli, 49_000)
+        self.assertEqual(result.used_milli, 19_000)
 
     def test_exact_boundary_allowed(self):
-        self.credits.try_consume("store-a", 49_000)
+        self.credits.try_consume("store-a", 19_000)
         result = self.credits.try_consume("store-a", 1000)
         self.assertTrue(result.ok)
-        self.assertEqual(result.used_milli, 50_000)
+        self.assertEqual(result.used_milli, 20_000)
 
     def test_new_day_resets_without_job(self):
         import datetime as _dt
         yesterday = _dt.datetime.utcnow() - _dt.timedelta(days=1)
-        self.credits.try_consume("store-a", 49_000, now=yesterday)
-        result = self.credits.try_consume("store-a", 49_000)
+        self.credits.try_consume("store-a", 19_000, now=yesterday)
+        result = self.credits.try_consume("store-a", 19_000)
         self.assertTrue(result.ok)
 
     def test_release_does_not_go_below_zero(self):
@@ -96,10 +96,37 @@ class BillingCreditsTest(unittest.TestCase):
         result = self.credits.try_consume("store-a", 500_000)
         self.assertTrue(result.ok)
 
+    def test_giga_custom_daily_credits_override_is_honored(self):
+        from backend.db.models import StoreTariffDB
+        session = self.state_helpers._get_sync_db_session()
+        tariff = session.get(StoreTariffDB, "store-a")
+        tariff.plan_code = "GIGA"
+        tariff.custom_daily_credits_milli = 5000
+        session.commit()
+        session.close()
+
+        result = self.credits.try_consume("store-a", 5000)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.limit_milli, 5000)
+
+        result2 = self.credits.try_consume("store-a", 1)
+        self.assertFalse(result2.ok)
+
+    def test_giga_without_override_is_practically_unlimited(self):
+        from backend.db.models import StoreTariffDB
+        session = self.state_helpers._get_sync_db_session()
+        tariff = session.get(StoreTariffDB, "store-a")
+        tariff.plan_code = "GIGA"
+        session.commit()
+        session.close()
+
+        result = self.credits.try_consume("store-a", 500_000)
+        self.assertTrue(result.ok)
+
     def test_today_usage_read_only_does_not_create_row(self):
         usage = self.credits.today_usage("store-a")
         self.assertEqual(usage.used_milli, 0)
-        self.assertEqual(usage.limit_milli, 50_000)
+        self.assertEqual(usage.limit_milli, 20_000)
 
         from backend.db.models import StoreDailyCreditDB
         session = self.state_helpers._get_sync_db_session()

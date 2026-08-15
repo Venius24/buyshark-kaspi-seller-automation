@@ -14,7 +14,6 @@ const KIND_LABEL: Record<string, string> = {
   topup_manual: 'Пополнение (админ)',
   topup_gateway: 'Пополнение',
   charge_subscription: 'Списание — тариф',
-  charge_credit_addon: 'Списание — кредиты ИИ',
   charge_prompt_addon: 'Списание — расширенный промпт',
   referral_payout: 'Выплата рефереру',
   adjustment: 'Корректировка',

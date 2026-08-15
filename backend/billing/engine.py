@@ -57,13 +57,11 @@ def charge_period(store_id: str, now: Optional[_dt.datetime] = None) -> int:
             period_key = period_start.strftime("%Y-%m-%d")
 
             base_price = catalog.plan_price_minor(tariff.plan_code, tariff.custom_monthly_price_minor)
-            credit_price = catalog.credit_addon_price_minor(tariff.credit_addon_code)
             prompt_band_code = _current_prompt_band(store_id)
             prompt_price = catalog.PROMPT_BANDS_BY_CODE.get(prompt_band_code, catalog.PROMPT_BANDS_BY_CODE[catalog.DEFAULT_PROMPT_BAND]).monthly_price_minor
 
             lines = [
                 ("charge_subscription", base_price, "base"),
-                ("charge_credit_addon", credit_price, "credits"),
                 ("charge_prompt_addon", prompt_price, "prompt"),
             ]
             for kind, amount, line in lines:

@@ -57,15 +57,16 @@ class TariffCatalogTest(unittest.TestCase):
 
     def test_plan_codes_and_prices(self):
         expected = {
-            "START": (50, 640_000),
-            "HUNTER": (200, 1_130_000),
-            "PREDATOR": (1000, 1_790_000),
-            "PREDATOR_PLUS": (2000, 2_980_000),
+            "START": (50, 640_000, 20_000),
+            "HUNTER": (200, 1_130_000, 50_000),
+            "PREDATOR": (1000, 1_790_000, 100_000),
+            "PREDATOR_PLUS": (2000, 2_980_000, 200_000),
         }
-        for code, (max_products, price) in expected.items():
+        for code, (max_products, price, daily_credits) in expected.items():
             plan = self.catalog.PLANS[code]
             self.assertEqual(plan.max_products, max_products)
             self.assertEqual(plan.monthly_price_minor, price)
+            self.assertEqual(plan.daily_credit_limit_milli, daily_credits)
 
     def test_dev_plan_is_free_and_unlimited_and_not_public(self):
         dev = self.catalog.PLANS["DEV"]
@@ -79,17 +80,22 @@ class TariffCatalogTest(unittest.TestCase):
         giga = self.catalog.PLANS["GIGA"]
         self.assertIsNone(giga.monthly_price_minor)
         self.assertIsNone(giga.max_products)
+        self.assertIsNone(giga.daily_credit_limit_milli)
         self.assertFalse(giga.is_free)
 
-    def test_credit_tiers_replace_not_stack(self):
-        # Одна колонка credit_addon_code на магазин ⇒ структурно возможен
-        # только один активный уровень за раз, тарифы не суммируются.
-        self.assertEqual(self.catalog.effective_daily_credits("NONE"), 50_000)
-        self.assertEqual(self.catalog.effective_daily_credits("C70"), 70_000)
-        self.assertEqual(self.catalog.effective_daily_credits("C100"), 100_000)
-        self.assertEqual(self.catalog.credit_addon_price_minor("NONE"), 0)
-        self.assertEqual(self.catalog.credit_addon_price_minor("C70"), 200_000)
-        self.assertEqual(self.catalog.credit_addon_price_minor("C100"), 400_000)
+    def test_effective_daily_credits_uses_plan_fixed_limit(self):
+        self.assertEqual(self.catalog.effective_daily_credits("START"), 20_000)
+        self.assertEqual(self.catalog.effective_daily_credits("HUNTER"), 50_000)
+        self.assertEqual(self.catalog.effective_daily_credits("PREDATOR"), 100_000)
+        self.assertEqual(self.catalog.effective_daily_credits("PREDATOR_PLUS"), 200_000)
+
+    def test_effective_daily_credits_giga_unlimited_without_override(self):
+        self.assertIsNone(self.catalog.effective_daily_credits("GIGA"))
+
+    def test_effective_daily_credits_giga_honors_custom_override(self):
+        self.assertEqual(self.catalog.effective_daily_credits("GIGA", 500_000), 500_000)
+        # Override перекрывает даже нулевое значение (явный ноль — не "нет override").
+        self.assertEqual(self.catalog.effective_daily_credits("GIGA", 0), 0)
 
     def test_plan_price_minor_uses_custom_override_when_present(self):
         self.assertEqual(self.catalog.plan_price_minor("START", None), 640_000)

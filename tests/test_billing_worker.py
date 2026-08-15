@@ -47,7 +47,7 @@ class BillingWorkerTest(unittest.TestCase):
         # отфильтровал бы, но абонентка должна продолжать списываться.
         session.add(Store(id="paused-store", merchant_id="m_paused", name="На паузе", status="PAUSED", encrypted_api_key="garbage-not-decryptable"))
         session.add(StoreTariffDB(
-            store_id="paused-store", plan_code="START", credit_addon_code="NONE",
+            store_id="paused-store", plan_code="START",
             billing_status="ACTIVE", billing_anchor_day=15,
             period_start=now - _dt.timedelta(days=31), period_end=now - _dt.timedelta(hours=1),
             next_charge_at=now - _dt.timedelta(hours=1), activated_at=now - _dt.timedelta(days=31),
@@ -56,7 +56,7 @@ class BillingWorkerTest(unittest.TestCase):
         # предохранитель миграции 027).
         session.add(Store(id="dev-store", merchant_id="m_dev", name="Дев магазин"))
         session.add(StoreTariffDB(
-            store_id="dev-store", plan_code="DEV", credit_addon_code="NONE",
+            store_id="dev-store", plan_code="DEV",
             billing_status="ACTIVE", billing_anchor_day=15,
             period_start=now, period_end=now + _dt.timedelta(days=36500),
             next_charge_at=now + _dt.timedelta(days=36500), activated_at=now,

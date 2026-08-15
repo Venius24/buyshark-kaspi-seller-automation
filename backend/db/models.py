@@ -743,9 +743,10 @@ class StoreTariffDB(Base):
     # Договорная цена ГигаПредприятие — перекрывает цену плана из каталога,
     # если задана. NULL = использовать catalog.PLANS[plan_code].monthly_price_minor.
     custom_monthly_price_minor: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    # 'NONE'|'C70'|'C100' — одна колонка, поэтому ступени кредитов структурно
-    # не могут суммироваться (владелец: "это замена").
-    credit_addon_code: Mapped[str] = mapped_column(String(20), nullable=False, default="NONE")
+    # Договорной дневной лимит кредитов ответов ИИ (только ГигаПредприятие) —
+    # перекрывает catalog.PLANS[plan_code].daily_credit_limit_milli, если задан.
+    # NULL = использовать лимит из каталога плана.
+    custom_daily_credits_milli: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     auto_upgrade_credits: Mapped[bool] = mapped_column(Boolean, default=False)
     # 'ACTIVE'|'BLOCKED_LIMIT'|'BLOCKED_BALANCE'
     billing_status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
@@ -789,7 +790,7 @@ class BillingTransactionDB(Base):
     store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)  # знаковое: + начисление, - списание
     balance_after_minor: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    # topup_manual|topup_gateway|charge_subscription|charge_credit_addon|
+    # topup_manual|topup_gateway|charge_subscription|
     # charge_prompt_addon|referral_payout|adjustment|refund
     kind: Mapped[str] = mapped_column(String(30), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="completed")  # pending|completed|failed|canceled

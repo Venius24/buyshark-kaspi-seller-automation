@@ -57,7 +57,7 @@ def accrue_on_topup(store_id: str, source_transaction_id: str, amount_minor: int
             select(func.coalesce(func.sum(func.abs(BillingTransactionDB.amount_minor)), 0))
             .where(
                 BillingTransactionDB.store_id == store_id,
-                BillingTransactionDB.kind.in_(["charge_subscription", "charge_credit_addon", "charge_prompt_addon"]),
+                BillingTransactionDB.kind.in_(["charge_subscription", "charge_prompt_addon"]),
                 BillingTransactionDB.created_at >= ref.window_start,
                 BillingTransactionDB.created_at < ref.window_end,
             )

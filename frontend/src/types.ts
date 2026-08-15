@@ -240,7 +240,6 @@ export interface BillingSummary {
   plan_name: string;
   max_products: number | null;
   monthly_price_minor: number;
-  credit_addon_code: string;
   billing_status: 'ACTIVE' | 'BLOCKED_LIMIT' | 'BLOCKED_BALANCE';
   blocked_reason: string | null;
   balance_minor: number;

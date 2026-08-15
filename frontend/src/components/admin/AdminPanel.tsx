@@ -14,7 +14,7 @@ interface AdminStoreRow {
   plan_name: string;
   billing_status: string;
   balance_minor: number;
-  credit_addon_code: string;
+  daily_credit_limit_milli: number | null;
   next_charge_at: string | null;
   referrer_user_id: string | null;
 }
@@ -303,19 +303,33 @@ const ReferrerAssignModal: React.FC<{ store: AdminStoreRow; referrers: ReferrerR
 const TariffModal: React.FC<{ store: AdminStoreRow; plans: BillingPlan[]; onClose: () => void; onSaved: () => void }> = ({ store, plans, onClose, onSaved }) => {
   const [planCode, setPlanCode] = useState(store.plan_code);
   const [trialDays, setTrialDays] = useState('');
+  const [customPrice, setCustomPrice] = useState('');
+  const [customDailyCredits, setCustomDailyCredits] = useState('');
   const [saving, setSaving] = useState(false);
 
   const wasFree = store.plan_code === 'DEV';
   const switchingToPaid = wasFree && planCode !== 'DEV';
+  const isGiga = planCode === 'GIGA';
 
   const submit = async () => {
     setSaving(true);
     try {
       const trial = switchingToPaid && trialDays.trim() ? parseInt(trialDays, 10) : undefined;
+      const customMonthlyPriceMinor = isGiga && customPrice.trim()
+        ? Math.round(parseFloat(customPrice) * 100)
+        : undefined;
+      const customDailyCreditsMilli = isGiga && customDailyCredits.trim()
+        ? Math.round(parseFloat(customDailyCredits) * 1000)
+        : undefined;
       await apiFetch(`${API_URL}/api/admin/stores/${store.store_id}/tariff`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan_code: planCode, trial_days: trial }),
+        body: JSON.stringify({
+          plan_code: planCode,
+          trial_days: trial,
+          custom_monthly_price_minor: customMonthlyPriceMinor,
+          custom_daily_credits_milli: customDailyCreditsMilli,
+        }),
       });
       onSaved();
     } finally {
@@ -331,6 +345,30 @@ const TariffModal: React.FC<{ store: AdminStoreRow; plans: BillingPlan[]; onClos
           {plans.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
           <option value="DEV">DEV</option>
         </select>
+        {isGiga && (
+          <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={styles.formLabel}>Договорная цена, ₸/мес</div>
+              <input
+                className="form-input"
+                type="number"
+                placeholder="напр. 50000"
+                value={customPrice}
+                onChange={(e) => setCustomPrice(e.target.value)}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={styles.formLabel}>Договорной лимит ответов/день</div>
+              <input
+                className="form-input"
+                type="number"
+                placeholder="напр. 500"
+                value={customDailyCredits}
+                onChange={(e) => setCustomDailyCredits(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
         {switchingToPaid && (
           <div style={{ marginTop: '12px' }}>
             <div style={styles.formLabel}>Бесплатный триал, дней (необязательно)</div>

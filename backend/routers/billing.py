@@ -32,7 +32,6 @@ class BillingSummaryOut(BaseModel):
     plan_name: str
     max_products: Optional[int]
     monthly_price_minor: int
-    credit_addon_code: str
     billing_status: str
     blocked_reason: Optional[str]
     balance_minor: int
@@ -54,7 +53,6 @@ async def get_billing_summary(
 
     plan_code = tariff.plan_code if tariff else catalog.DEFAULT_PLAN_CODE
     plan = catalog.get_plan(plan_code)
-    credit_addon_code = tariff.credit_addon_code if tariff else catalog.DEFAULT_CREDIT_ADDON
 
     usage = await asyncio.to_thread(billing_credits.today_usage, ctx.store_id)
 
@@ -67,7 +65,6 @@ async def get_billing_summary(
         plan_name=plan.name,
         max_products=plan.max_products,
         monthly_price_minor=catalog.plan_price_minor(plan_code, tariff.custom_monthly_price_minor if tariff else None),
-        credit_addon_code=credit_addon_code,
         billing_status=tariff.billing_status if tariff else "ACTIVE",
         blocked_reason=tariff.blocked_reason if tariff else None,
         balance_minor=balance_row.balance_minor if balance_row else 0,

@@ -12,8 +12,9 @@ sys.path.append(os.getcwd())
 class BillingEngineTest(unittest.TestCase):
     """charge_period()/evaluate_block() (Слайс 5): DEV не списывается и не
     блокируется (главный предохранитель миграции 027), продление списывает
-    три строки по каталогу, повтор без сдвига периода не дублирует, кламп
-    anchor-day не дрейфует."""
+    ДВЕ строки по каталогу (base/prompt — дневные кредиты теперь зашиты в
+    цену тарифа, отдельной строки charge_credit_addon больше нет), повтор
+    без сдвига периода не дублирует, кламп anchor-day не дрейфует."""
 
     def setUp(self):
         self._orig_cwd = os.getcwd()
@@ -71,7 +72,7 @@ class BillingEngineTest(unittest.TestCase):
         from backend.db.models import StoreTariffDB
         now = _dt.datetime.utcnow()
         defaults = dict(
-            store_id="store-a", plan_code=plan_code, credit_addon_code="NONE",
+            store_id="store-a", plan_code=plan_code,
             billing_status="ACTIVE", billing_anchor_day=15,
             period_start=now - _dt.timedelta(days=31), period_end=now - _dt.timedelta(hours=1),
             next_charge_at=now - _dt.timedelta(hours=1), activated_at=now - _dt.timedelta(days=31),
@@ -103,17 +104,29 @@ class BillingEngineTest(unittest.TestCase):
         status = self.engine.evaluate_block("store-a")
         self.assertEqual(status, "ACTIVE")
 
-    def test_charge_creates_three_ledger_lines_for_start_plan(self):
+    def test_charge_writes_only_base_and_prompt_lines_not_credits(self):
         self._make_tariff(plan_code="START")
         charged = self.engine.charge_period("store-a")
         self.assertEqual(charged, 1)
         txns = self.ledger.list_transactions("store-a")
         kinds = {t["kind"] for t in txns}
         self.assertIn("charge_subscription", kinds)
-        # START имеет базовую цену > 0, кредиты/промпт по умолчанию 0 —
-        # значит только charge_subscription должен попасть в леджер.
+        self.assertNotIn("charge_credit_addon", kinds)
+        # START имеет базовую цену > 0, промпт по умолчанию 0 — значит
+        # только charge_subscription должен попасть в леджер (не 3 строки,
+        # как раньше, когда была ещё отдельная кредитная надбавка).
         self.assertEqual(len(txns), 1)
         self.assertEqual(self.ledger.balance("store-a"), -640_000)
+
+    def test_charge_writes_exactly_two_lines_when_prompt_band_charges(self):
+        self._make_tariff(plan_code="START")
+        with patch("backend.chatbot.prompt.get_profile", return_value={"prompt_tier": "band1"}):
+            self.engine.charge_period("store-a")
+        txns = self.ledger.list_transactions("store-a")
+        kinds = {t["kind"] for t in txns}
+        self.assertEqual(kinds, {"charge_subscription", "charge_prompt_addon"})
+        self.assertEqual(len(txns), 2)
+        self.assertEqual(self.ledger.balance("store-a"), -740_000)
 
     def test_charge_advances_period_and_next_charge_moves_forward(self):
         self._make_tariff(plan_code="START")

@@ -34,13 +34,20 @@ class ConsumeResult:
 def _daily_limit_milli(store_id: str, session) -> int:
     from backend.db.models import StoreTariffDB
     tariff = session.get(StoreTariffDB, store_id)
-    if not tariff:
-        return catalog.effective_daily_credits(catalog.DEFAULT_CREDIT_ADDON)
-    if catalog.is_free_plan(tariff.plan_code):
-        # DEV — практически безлимит; крупное число вместо None, чтобы
-        # арифметика CAS оставалась целочисленной без спецкейсов.
+    plan_code = tariff.plan_code if tariff else catalog.DEFAULT_PLAN_CODE
+    custom_milli = tariff.custom_daily_credits_milli if tariff else None
+
+    if catalog.is_free_plan(plan_code):
+        # DEV (и отсутствующая тарифная строка, которая по умолчанию тоже
+        # резолвится в DEV) — практически безлимит; крупное число вместо
+        # None, чтобы арифметика CAS оставалась целочисленной без спецкейсов.
         return 10 ** 12
-    return catalog.effective_daily_credits(tariff.credit_addon_code)
+
+    limit = catalog.effective_daily_credits(plan_code, custom_milli)
+    if limit is None:
+        # ГигаПредприятие без договорного лимита — тоже безлимит.
+        return 10 ** 12
+    return limit
 
 
 def try_consume(store_id: str, units_milli: int, now: Optional[_dt.datetime] = None) -> ConsumeResult:

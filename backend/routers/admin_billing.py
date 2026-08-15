@@ -29,8 +29,8 @@ router = APIRouter(prefix="/api/admin", tags=["Admin Billing"], dependencies=[De
 
 class TariffUpdateRequest(BaseModel):
     plan_code: str
-    credit_addon_code: Optional[str] = None
     custom_monthly_price_minor: Optional[int] = None
+    custom_daily_credits_milli: Optional[int] = None
     trial_days: Optional[int] = None
 
 
@@ -81,7 +81,9 @@ async def list_stores(db: AsyncSession = Depends(get_db)):
             "plan_name": plan.name,
             "billing_status": tariff.billing_status if tariff else "ACTIVE",
             "balance_minor": balance_row.balance_minor if balance_row else 0,
-            "credit_addon_code": tariff.credit_addon_code if tariff else catalog.DEFAULT_CREDIT_ADDON,
+            "daily_credit_limit_milli": catalog.effective_daily_credits(
+                plan.code, tariff.custom_daily_credits_milli if tariff else None
+            ),
             "next_charge_at": tariff.next_charge_at.isoformat() if tariff and tariff.next_charge_at else None,
             "referrer_user_id": referral.referrer_user_id if referral else None,
         })
@@ -103,8 +105,12 @@ async def get_store_detail(store_id: str, db: AsyncSession = Depends(get_db)):
         "merchant_id": store.merchant_id,
         "tariff": {
             "plan_code": tariff.plan_code if tariff else catalog.DEFAULT_PLAN_CODE,
-            "credit_addon_code": tariff.credit_addon_code if tariff else catalog.DEFAULT_CREDIT_ADDON,
             "custom_monthly_price_minor": tariff.custom_monthly_price_minor if tariff else None,
+            "custom_daily_credits_milli": tariff.custom_daily_credits_milli if tariff else None,
+            "daily_credit_limit_milli": catalog.effective_daily_credits(
+                tariff.plan_code if tariff else catalog.DEFAULT_PLAN_CODE,
+                tariff.custom_daily_credits_milli if tariff else None,
+            ),
             "billing_status": tariff.billing_status if tariff else "ACTIVE",
             "blocked_reason": tariff.blocked_reason if tariff else None,
             "period_start": tariff.period_start.isoformat() if tariff and tariff.period_start else None,
@@ -121,8 +127,8 @@ async def get_store_detail(store_id: str, db: AsyncSession = Depends(get_db)):
 async def set_store_tariff(store_id: str, req: TariffUpdateRequest, db: AsyncSession = Depends(get_db)):
     if req.plan_code not in catalog.PLANS:
         raise HTTPException(status_code=400, detail="Неизвестный код тарифа")
-    if req.credit_addon_code and req.credit_addon_code not in catalog.CREDIT_TIERS:
-        raise HTTPException(status_code=400, detail="Неизвестный код надбавки кредитов")
+    if req.custom_daily_credits_milli is not None and req.plan_code != "GIGA":
+        raise HTTPException(status_code=400, detail="Договорной лимит кредитов доступен только для ГигаПредприятие")
     if req.trial_days is not None and not (1 <= req.trial_days <= 90):
         raise HTTPException(status_code=400, detail="Триал должен быть от 1 до 90 дней")
 
@@ -134,9 +140,8 @@ async def set_store_tariff(store_id: str, req: TariffUpdateRequest, db: AsyncSes
     now = datetime.utcnow()
 
     tariff.plan_code = req.plan_code
-    if req.credit_addon_code:
-        tariff.credit_addon_code = req.credit_addon_code
     tariff.custom_monthly_price_minor = req.custom_monthly_price_minor
+    tariff.custom_daily_credits_milli = req.custom_daily_credits_milli
     tariff.updated_at = now
 
     # Первый переход с DEV/бесплатного плана на платный — здесь начинается

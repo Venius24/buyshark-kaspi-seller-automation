@@ -43,7 +43,7 @@ class BillingBlockingTest(unittest.TestCase):
         session = state_helpers._get_sync_db_session()
         session.add(Store(id="store-a", merchant_id="m_a", name="Магазин А"))
         session.add(StoreTariffDB(
-            store_id="store-a", plan_code="START", credit_addon_code="NONE",
+            store_id="store-a", plan_code="START",
             billing_status="ACTIVE", billing_anchor_day=15,
             period_start=now, period_end=now + _dt.timedelta(days=30),
             next_charge_at=now + _dt.timedelta(days=30), activated_at=now,
