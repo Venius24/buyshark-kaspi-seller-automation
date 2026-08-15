@@ -24,6 +24,7 @@ class PlanOut(BaseModel):
     name: str
     max_products: Optional[int]
     monthly_price_minor: Optional[int]
+    daily_credit_limit_milli: Optional[int]
     badge: Optional[str]
 
 
@@ -80,7 +81,7 @@ async def get_billing_summary(
 @router.get("/plans", response_model=list[PlanOut])
 async def get_billing_plans():
     return [
-        PlanOut(code=p.code, name=p.name, max_products=p.max_products, monthly_price_minor=p.monthly_price_minor, badge=p.badge)
+        PlanOut(code=p.code, name=p.name, max_products=p.max_products, monthly_price_minor=p.monthly_price_minor, daily_credit_limit_milli=p.daily_credit_limit_milli, badge=p.badge)
         for p in catalog.public_plans()
     ]
 

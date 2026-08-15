@@ -256,6 +256,7 @@ export interface BillingPlan {
   name: string;
   max_products: number | null;
   monthly_price_minor: number | null;
+  daily_credit_limit_milli: number | null;
   badge: string | null;
 }
 

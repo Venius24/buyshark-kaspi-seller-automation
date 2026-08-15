@@ -92,7 +92,8 @@ export const BillingTab: React.FC = () => {
               {plan.badge && <span className="badge badge-warning" style={styles.planBadge}>{plan.badge}</span>}
               <div style={styles.planName}>{plan.name}</div>
               <div style={styles.planPrice}>{plan.monthly_price_minor != null ? `${formatTenge(plan.monthly_price_minor)}/мес` : 'Договорная цена'}</div>
-              <div style={styles.cardSub}>{plan.max_products ? `до ${plan.max_products} товаров` : 'без лимита'}</div>
+              <div style={styles.cardSub}>{plan.max_products ? `до ${plan.max_products} товаров` : 'без лимита товаров'}</div>
+              <div style={styles.cardSub}>{plan.daily_credit_limit_milli != null ? `до ${plan.daily_credit_limit_milli / 1000} ответов ИИ/день` : 'договорной лимит ответов ИИ'}</div>
               {plan.code === summary.plan_code && <div style={styles.planCurrentTag}>Ваш тариф</div>}
             </div>
           ))}
