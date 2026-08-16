@@ -80,3 +80,33 @@
     display: none;
   }
 }
+
+/* На телефоне две кнопки в шапке переносились на вторую строку, и липкая
+   шапка вырастала до ~104px — это шестая часть экрана, которая едет за
+   пользователем всю страницу. Оставляем один основной CTA: «Войти» ведёт
+   ровно туда же (app.buyshark.kz), просто короче формулировкой. */
+@media (max-width: 600px) {
+  .nav {
+    padding: 12px 16px;
+    gap: 12px;
+  }
+
+  .wordmark {
+    font-size: 17px;
+  }
+
+  .logo {
+    width: 32px;
+    height: 32px;
+  }
+
+  .btnGhost {
+    display: none;
+  }
+
+  .btnPrimary {
+    padding: 10px 14px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+}

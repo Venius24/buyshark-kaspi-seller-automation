@@ -69,7 +69,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
   };
 
   return (
-    <div className="modal-overlay">
+    // auth-screen: это не поверх-модалка, а весь экран входа — на мобильном
+    // он не должен превращаться в «шторку» снизу (см. mobile.css).
+    <div className="modal-overlay auth-screen">
       <div className="glass-card" style={styles.card}>
         <div style={styles.logoRow}>
           <img src="/buyshark-logo.svg" alt="BuyShark" style={styles.logoIcon} />

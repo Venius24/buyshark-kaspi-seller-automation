@@ -86,9 +86,11 @@ export const BillingTab: React.FC = () => {
 
       <div className="glass-card" style={styles.card}>
         <h3 style={styles.sectionTitle}>Тарифы</h3>
-        <div style={styles.plansGrid}>
+        {/* plans-grid: на телефоне превращается в карусель со свайпом
+            (см. mobile.css) — пять тарифов в колонку занимали три экрана. */}
+        <div className="plans-grid" style={styles.plansGrid}>
           {plans.map((plan) => (
-            <div key={plan.code} style={{ ...styles.planCard, ...(plan.code === summary.plan_code ? styles.planCardActive : {}) }}>
+            <div key={plan.code} className="plan-card" style={{ ...styles.planCard, ...(plan.code === summary.plan_code ? styles.planCardActive : {}) }}>
               {plan.badge && <span className="badge badge-warning" style={styles.planBadge}>{plan.badge}</span>}
               <div style={styles.planName}>{plan.name}</div>
               <div style={styles.planPrice}>{plan.monthly_price_minor != null ? `${formatTenge(plan.monthly_price_minor)}/мес` : 'Договорная цена'}</div>
@@ -98,6 +100,8 @@ export const BillingTab: React.FC = () => {
             </div>
           ))}
         </div>
+        {/* Виден только на телефоне (см. .plans-swipe-hint в mobile.css). */}
+        <p className="plans-swipe-hint">Листайте вбок, чтобы сравнить тарифы →</p>
       </div>
 
       <div className="glass-card" style={styles.card}>

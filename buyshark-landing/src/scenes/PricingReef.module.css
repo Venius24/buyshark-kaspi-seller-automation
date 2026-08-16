@@ -274,3 +274,70 @@
     transform: translateY(-6px) translateZ(0);
   }
 }
+
+/* Подсказка о свайпе — только на телефоне, включается в медиазапросе ниже. */
+.swipeHint {
+  display: none;
+  margin: 0;
+  font-size: 13px;
+  color: var(--fog);
+  text-align: center;
+  opacity: 0.75;
+}
+
+/* ── Телефон: карусель со свайпом вместо колонки из пяти карточек ──────
+   На 360px `flex-wrap: wrap` ставил карточки друг под друга — секция
+   вырастала до ~2500px (около трёх с половиной экранов на пять тарифов),
+   и главное: пропадала сама идея раздела — рост «от дешёвого к золотому»
+   слева направо, ради которой и сделан горизонтальный градиент
+   `.absurdityGradient` и escalating-свечение по `--tier-index`.
+
+   Свайп её возвращает и складывает секцию в один экран. Механика —
+   нативный scroll-snap, без библиотек и без JS: инерция, скроллбар и
+   доступность остаются браузерными. Соседняя карточка подглядывает
+   из-за края — это и есть подсказка, что список листается. */
+@media (max-width: 700px) {
+  .grid {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    /* `.copy` — колонка с `align-items: center`, поэтому флекс-элемент
+       внутри неё тянется по содержимому (5 карточек = 1456px) и лента
+       никуда не скроллится. Растягиваем на всю ширину секции и гасим
+       её горизонтальный padding, чтобы карусель шла от края до края. */
+    align-self: stretch;
+    width: auto;
+    max-width: none;
+    margin-inline: calc(var(--section-pad-x) * -1);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    gap: 14px;
+    /* Боковой отступ центрирует первую и последнюю карточку: без него
+       крайние прилипают к краю экрана и снап выглядит сломанным. */
+    padding: 10px max(16px, calc(50vw - 130px)) 18px;
+    /* Полоса прокрутки под карточками только мешает — снап и так
+       показывает положение. */
+    scrollbar-width: none;
+  }
+
+  .grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .card {
+    flex: 0 0 260px;
+    scroll-snap-align: center;
+    /* Ховер-подъём на тач-экране залипает после тапа. */
+    transition: box-shadow 0.25s ease;
+  }
+
+  .card:hover,
+  .card[data-variant='popular']:hover {
+    transform: translateZ(0);
+  }
+
+  .swipeHint {
+    display: block;
+  }
+}

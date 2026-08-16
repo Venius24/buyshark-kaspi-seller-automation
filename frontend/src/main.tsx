@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
 import * as Sentry from '@sentry/react'
 import './index.css'
+import './mobile.css'
 import App from './App.tsx'
 import { queryClient, queryPersister, CACHE_BUSTER } from './queryClient'
 

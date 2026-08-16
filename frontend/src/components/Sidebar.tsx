@@ -11,7 +11,10 @@ interface SidebarProps {
   isWsConnected: boolean;
   isSuperadmin?: boolean;
   isReferrer?: boolean;
+  isBetaTester?: boolean;
   billingBlocked?: boolean;
+  /** Мобильный drawer: открыт ли он сейчас. На десктопе класс ни на что не влияет. */
+  isOpen?: boolean;
 }
 
 export function Sidebar({
@@ -25,10 +28,12 @@ export function Sidebar({
   isWsConnected,
   isSuperadmin,
   isReferrer,
+  isBetaTester,
   billingBlocked,
+  isOpen,
 }: SidebarProps) {
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isOpen ? 'sidebar-open' : ''}`}>
       <div className="sidebar-header">
         <img src="/buyshark-logo.svg" alt="BuyShark" className="sidebar-logo-icon" style={{ objectFit: 'cover' }} />
         <div>
@@ -119,27 +124,31 @@ export function Sidebar({
             <span className="sidebar-pill">Master</span>
           </button>
 
-          <button
-            className={`sidebar-item ${activeTab === 'autolist' ? 'active' : ''}`}
-            onClick={() => onSelectTab('autolist')}
-          >
-            <div className="sidebar-item-left">
-              <span className="sidebar-icon">✨</span>
-              <span>Автодобавление</span>
-            </div>
-            <span className="sidebar-pill">AI</span>
-          </button>
+          {isBetaTester && (
+            <button
+              className={`sidebar-item ${activeTab === 'autolist' ? 'active' : ''}`}
+              onClick={() => onSelectTab('autolist')}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">✨</span>
+                <span>Автодобавление</span>
+              </div>
+              <span className="sidebar-pill">AI</span>
+            </button>
+          )}
 
-          <button
-            className={`sidebar-item ${activeTab === 'public-api' ? 'active' : ''}`}
-            onClick={() => onSelectTab('public-api')}
-          >
-            <div className="sidebar-item-left">
-              <span className="sidebar-icon">💻</span>
-              <span>Для разработчиков</span>
-            </div>
-            <span className="sidebar-pill">API</span>
-          </button>
+          {isBetaTester && (
+            <button
+              className={`sidebar-item ${activeTab === 'public-api' ? 'active' : ''}`}
+              onClick={() => onSelectTab('public-api')}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon">💻</span>
+                <span>Для разработчиков</span>
+              </div>
+              <span className="sidebar-pill">API</span>
+            </button>
+          )}
 
           <button
             className={`sidebar-item ${activeTab === 'billing' ? 'active' : ''}`}

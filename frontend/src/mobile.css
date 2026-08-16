@@ -1,0 +1,371 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Мобильная адаптация кабинета (app.buyshark.kz)
+
+   Кабинет писался под десктоп: почти вся вёрстка живёт в инлайновых
+   style-объектах внутри .tsx, поэтому «переписать всё на классы» — это
+   правка сорока файлов. Вместо этого здесь собран один мобильный слой.
+
+   Ключевой приём: инлайновый стиль задаёт `display: flex` и `gap`, но НЕ
+   задаёт `flex-wrap`, поэтому обычное CSS-правило по атрибуту style
+   выигрывает без всяких !important — строки шапок/тулбаров начинают
+   переноситься вместо того, чтобы вылезать за край экрана.
+
+   Точка перелома — 768px (планшет в портрете и телефоны). Шелл с боковым
+   меню переключается на выдвижной drawer раньше, на 900px, — там уже не
+   помещается колонка меню в 270px плюс контент.
+   ───────────────────────────────────────────────────────────────────── */
+
+/* ══ 1. Шелл: бургер + выдвижное меню ══════════════════════════════════ */
+
+/* Кнопка-бургер и затемнение существуют только на мобильном. */
+.mobile-topbar,
+.sidebar-scrim {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    flex-direction: column;
+  }
+
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 120;
+    padding: 10px 14px;
+    background: rgba(11, 12, 16, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .mobile-topbar-burger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+  }
+
+  .mobile-topbar-burger:active {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .mobile-topbar-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .mobile-topbar-logo {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    object-fit: cover;
+    flex: 0 0 30px;
+  }
+
+  /* Меню уезжает за левый край и выезжает поверх контента. */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: 100dvh;
+    width: 82vw;
+    max-width: 320px;
+    min-width: 0;
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow: 24px 0 60px rgba(0, 0, 0, 0.55);
+  }
+
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+
+  /* Пункты меню остаются вертикальным списком со скроллом — «лента»
+     из 18 вкладок в одну строку была нечитаемой на телефоне. */
+  .sidebar-nav {
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding: 16px 12px;
+  }
+
+  .sidebar-group-title {
+    display: block;
+  }
+
+  .sidebar-item {
+    padding: 12px;
+    font-size: 14px;
+  }
+
+  /* Футер с кнопкой выхода на мобильном раньше просто скрывался. */
+  .sidebar-footer {
+    display: flex;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 150;
+    background: rgba(4, 6, 15, 0.6);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    animation: modal-fade-in 0.2s ease forwards;
+  }
+
+  /* Меню открыто — фон под ним не скроллится. */
+  body.sidebar-locked {
+    overflow: hidden;
+  }
+
+  .main-content {
+    min-height: 0;
+  }
+}
+
+/* ══ 2. Контент: отступы, шапка, типографика ═══════════════════════════ */
+
+@media (max-width: 768px) {
+  .main-content {
+    padding: 16px 12px 32px;
+  }
+
+  .dashboard-container {
+    padding: 20px 12px;
+  }
+
+  .glass-card {
+    padding: 16px;
+    border-radius: 14px;
+  }
+
+  /* Ховер-подъём карточек на тач-экране только мешает (залипает после тапа). */
+  .glass-card:hover {
+    transform: none;
+  }
+
+  .content-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+  }
+
+  .content-title-area {
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .content-title-icon {
+    font-size: 22px;
+  }
+
+  .content-title-text h1 {
+    font-size: 17px;
+    line-height: 1.25;
+  }
+
+  .content-title-text p {
+    font-size: 11.5px;
+  }
+
+  h1 {
+    font-size: 20px;
+  }
+
+  h2 {
+    font-size: 16px;
+  }
+
+  /* ── Главное: инлайновые flex-СТРОКИ переносятся ───────────────────── */
+  /* Колонки (`flex-direction: column`) исключены сознательно: wrap на
+     колоночном флексе раскладывает содержимое в НЕСКОЛЬКО колонок и
+     раздувает страницу по горизонтали — на «Обзоре» это давало 666px
+     вместо 375px. Переносить надо только горизонтальные строки. */
+  .main-content [style*="display: flex"]:not([style*="flex-direction: column"]) {
+    flex-wrap: wrap;
+  }
+
+  /* Длинный текст/чипы внутри flex и grid должны иметь право сжаться —
+     иначе `flex: 1` с длинным названием товара распирает строку. */
+  .main-content [style*="display: flex"] > *,
+  .main-content [style*="display: grid"] > * {
+    min-width: 0;
+  }
+
+  /* Сетки с фиксированной минимальной колонкой (`minmax(280px, 1fr)` и
+     подобные) на экране 360px дают колонку шире экрана. */
+  .main-content [style*="minmax("] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Длинные артикулы/email/ссылки без пробелов рвём по символам. */
+  .main-content {
+    overflow-wrap: anywhere;
+  }
+}
+
+/* ══ 3. Формы, кнопки, тач-таргеты ════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* < 16px в поле ввода = iOS Safari зумит страницу при фокусе. */
+  .main-content input,
+  .main-content select,
+  .main-content textarea,
+  .modal-overlay input,
+  .modal-overlay select,
+  .modal-overlay textarea {
+    font-size: 16px;
+  }
+
+  .form-input {
+    padding: 11px 14px;
+  }
+
+  /* Поля с инлайновой шириной в px (`width: 70px`, `width: 260px`)
+     на мобильном тянутся по контейнеру. */
+  .main-content .form-input {
+    max-width: 100%;
+  }
+
+  .btn {
+    min-height: 40px;
+    padding: 10px 16px;
+  }
+
+  /* Формы поиска: поле на всю ширину, кнопки под ним. */
+  .main-content form [style*="flex-grow: 1"],
+  .main-content form [style*="flexGrow: 1"] {
+    flex-basis: 100%;
+  }
+}
+
+/* ══ 4. Таблицы и широкие блоки ═══════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* Таблицы (админка, биллинг, рефералы, мастер-группы, импорт цен)
+     скроллятся горизонтально внутри себя, а не растягивают страницу. */
+  .main-content table,
+  .modal-overlay table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+
+  /* Тепловые карты и терминал — свой горизонтальный скролл. */
+  .console-box {
+    height: 220px;
+    font-size: 12px;
+  }
+}
+
+/* ══ 4b. Тарифы: карусель со свайпом ══════════════════════════════════ */
+
+/* Подсказка о свайпе — только на телефоне. Базовое правило обязано стоять
+   ДО медиазапроса, иначе при равной специфичности победит оно. */
+.plans-swipe-hint {
+  display: none;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #9ca3af;
+  text-align: center;
+  opacity: 0.85;
+}
+
+@media (max-width: 768px) {
+  /* Инлайновый `grid-template-columns: repeat(auto-fit, minmax(180px,1fr))`
+     выше по файлу схлопывается в одну колонку — пять тарифов вставали
+     друг под друга. Здесь вместо этого горизонтальная лента со снапом,
+     как на лендинге: нативный scroll-snap, без JS. */
+  .main-content .plans-grid {
+    /* !important обязателен: `display: grid` задан инлайновым стилем в
+       BillingTab.tsx, а инлайн выигрывает у обычного правила. */
+    display: flex !important;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    gap: 12px;
+    /* Гасим инлайновый паддинг карточки-контейнера (20px), чтобы лента
+       шла до её краёв и было видно, что справа есть продолжение. */
+    margin-inline: -20px;
+    padding: 4px 20px 8px;
+    /* Снап по левому краю, а не по центру: ширина ленты здесь зависит от
+       вложенных паддингов (main-content + wrap + glass-card), и
+       центрирование пришлось бы считать через хрупкий calc от 50vw. */
+    scroll-padding-inline-start: 20px;
+    scrollbar-width: none;
+  }
+
+  .main-content .plans-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .main-content .plans-grid .plan-card {
+    flex: 0 0 220px;
+    scroll-snap-align: start;
+  }
+
+  .plans-swipe-hint {
+    display: block;
+  }
+}
+
+/* ══ 5. Модалки ═══════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .modal-overlay:not(.auth-screen) {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  /* Модалка становится «шторкой» на всю ширину с ограничением по высоте. */
+  .modal-overlay:not(.auth-screen) > div {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 92dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 18px 18px 0 0 !important;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+
+  /* Экран входа/регистрации: обычная центрированная карточка во всю ширину. */
+  .auth-screen {
+    padding: 16px;
+  }
+
+  .auth-screen > div {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}

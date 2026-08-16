@@ -35,6 +35,10 @@ import { ReferralTab } from './components/tabs/ReferralTab';
 import { fetchProfile, fetchBillingSummary } from './queries';
 import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig, KaspiQuotaStatus } from './types';
 
+// Сырые фичи (Автодобавление, Для разработчиков) — доступны только этим email,
+// пока не будут готовы к общему релизу. См. isBetaTester ниже.
+const BETA_TESTER_EMAILS = ['owner@example.com'];
+
 export default function App() {
   const queryClient = useQueryClient();
   const [isLoaded, setIsLoaded] = useState(false);
@@ -65,12 +69,18 @@ export default function App() {
 
   // Tabs navigation, packaging and transfer states
   const [activeTab, setActiveTab] = useState<ActiveTab>('stores');
+  // Мобильное меню (drawer). На десктопе состояние ни на что не влияет —
+  // .sidebar там статичен, класс sidebar-open просто игнорируется.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Тарификация (Слайс 6/7): роли читаются из того же ['auth','me'] кэша,
   // что уже прогревает BackgroundSync — второго запроса не заводим.
   const { data: profile } = useQuery({ queryKey: ['auth', 'me'], queryFn: fetchProfile, refetchInterval: 30_000 });
   const isSuperadmin = !!profile?.user.is_superadmin;
   const isReferrer = !!profile?.user.is_referrer;
+  // Автодобавление и «Для разработчиков» ещё сырые — временно видны только этому
+  // списку email. Whitelist, не deployment-флаг: снять ограничение — просто удалить.
+  const isBetaTester = !!profile?.user.email && BETA_TESTER_EMAILS.includes(profile.user.email.toLowerCase());
 
   const { data: billingSummary } = useQuery({
     queryKey: ['billing', 'summary', activeStoreId],
@@ -80,10 +90,17 @@ export default function App() {
   });
   const billingBlocked = !!billingSummary && billingSummary.billing_status !== 'ACTIVE';
 
+  // Открытый drawer блокирует скролл фона (иначе под меню уезжает контент).
+  useEffect(() => {
+    document.body.classList.toggle('sidebar-locked', mobileNavOpen);
+    return () => document.body.classList.remove('sidebar-locked');
+  }, [mobileNavOpen]);
+
   useEffect(() => {
     if (activeTab === 'admin' && !isSuperadmin) setActiveTab('stores');
     if (activeTab === 'referral' && !isReferrer) setActiveTab('stores');
-  }, [activeTab, isSuperadmin, isReferrer]);
+    if ((activeTab === 'autolist' || activeTab === 'public-api') && !isBetaTester) setActiveTab('stores');
+  }, [activeTab, isSuperadmin, isReferrer, isBetaTester]);
 
 
 
@@ -639,6 +656,9 @@ export default function App() {
 
   const handleTabClick = (tab: ActiveTab) => {
     setActiveTab(tab);
+    // Мобильный drawer закрывается сразу после выбора вкладки — иначе меню
+    // остаётся поверх контента, ради которого его и открывали.
+    setMobileNavOpen(false);
     if (tab === 'products') {
       loadProducts(1, statusFilter, searchQuery, pageSize, false);
       loadDumpingConfigs();
@@ -703,8 +723,36 @@ export default function App() {
   return (
     <div className="app-shell">
       <BackgroundSync />
+
+      {/* ── МОБИЛЬНАЯ ВЕРХНЯЯ ПАНЕЛЬ (только <=900px, см. mobile.css) ── */}
+      <div className="mobile-topbar">
+        <button
+          className="mobile-topbar-burger"
+          onClick={() => setMobileNavOpen((v) => !v)}
+          aria-label={mobileNavOpen ? 'Закрыть меню' : 'Открыть меню'}
+          aria-expanded={mobileNavOpen}
+        >
+          {mobileNavOpen ? '✕' : '☰'}
+        </button>
+        <img src="/buyshark-logo.svg" alt="" className="mobile-topbar-logo" />
+        <span className="mobile-topbar-title">BuyShark</span>
+        <button
+          className="btn btn-secondary"
+          style={{ padding: '8px 12px', fontSize: '12px' }}
+          onClick={handleLogout}
+          title="Выйти из аккаунта"
+        >
+          🚪
+        </button>
+      </div>
+
+      {mobileNavOpen && (
+        <div className="sidebar-scrim" onClick={() => setMobileNavOpen(false)} />
+      )}
+
       {/* ── STITCH MCP SIDEBAR ─────────────────────────────────── */}
       <Sidebar
+        isOpen={mobileNavOpen}
         activeTab={activeTab}
         onSelectTab={handleTabClick}
         onLogout={handleLogout}
@@ -715,6 +763,7 @@ export default function App() {
         isWsConnected={isWsConnected}
         isSuperadmin={isSuperadmin}
         isReferrer={isReferrer}
+        isBetaTester={isBetaTester}
         billingBlocked={billingBlocked}
       />
 
