@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Optional, List
 from pydantic import BaseModel
@@ -38,14 +39,21 @@ def _require_chat_session(ctx: StoreContext) -> dict:
     return cookies
 
 
-def _resolve_merchant_id(ctx: StoreContext) -> str:
+def _resolve_merchant_id_sync(ctx: StoreContext) -> str:
     return discover_merchant_id(ctx.token) or ctx.merchant_id
+
+
+async def _resolve_merchant_id(ctx: StoreContext) -> str:
+    # discover_merchant_id при промахе кэша делает до двух последовательных
+    # сетевых запросов к Kaspi (счёт секунд, см. HANDOFF) — в to_thread,
+    # иначе морозит event loop на всех, а не только на этом запросе.
+    return await asyncio.to_thread(_resolve_merchant_id_sync, ctx)
 
 
 @router.get("")
 async def list_chats(ctx: StoreContext = Depends(get_store_context)):
     cookies = _require_chat_session(ctx)
-    merchant_id = _resolve_merchant_id(ctx)
+    merchant_id = await _resolve_merchant_id(ctx)
     groups = await chat_client.list_groups(cookies, merchant_id)
     for g in groups:
         g["is_human_override"] = chatbot_config.is_chat_human_override(ctx.store_id, g.get("id"))
@@ -55,7 +63,7 @@ async def list_chats(ctx: StoreContext = Depends(get_store_context)):
 @router.get("/{group_id}/messages")
 async def get_chat_messages(group_id: str, ctx: StoreContext = Depends(get_store_context)):
     cookies = _require_chat_session(ctx)
-    merchant_id = _resolve_merchant_id(ctx)
+    merchant_id = await _resolve_merchant_id(ctx)
     messages = await chat_client.get_history(group_id, cookies, merchant_id)
     return {"success": True, "messages": messages}
 
@@ -66,7 +74,7 @@ async def send_chat_message(group_id: str, req: SendMessageRequest, ctx: StoreCo
     if not text:
         raise HTTPException(status_code=400, detail="Текст сообщения не может быть пустым.")
     cookies = _require_chat_session(ctx)
-    merchant_id = _resolve_merchant_id(ctx)
+    merchant_id = await _resolve_merchant_id(ctx)
     result = await chat_client.send_message(group_id, text, cookies, merchant_id)
     if not result.get("success"):
         raise HTTPException(status_code=502, detail=f"Kaspi отклонил отправку: {result.get('error')}")
@@ -91,7 +99,7 @@ async def take_over_chat(group_id: str, ctx: StoreContext = Depends(get_store_co
 @router.post("/{group_id}/read")
 async def mark_chat_read(group_id: str, req: MarkReadRequest, ctx: StoreContext = Depends(get_store_context)):
     cookies = _require_chat_session(ctx)
-    merchant_id = _resolve_merchant_id(ctx)
+    merchant_id = await _resolve_merchant_id(ctx)
     ok = await chat_client.mark_read(
         group_id,
         [{"id": m.id, "created": m.created} for m in req.messages],

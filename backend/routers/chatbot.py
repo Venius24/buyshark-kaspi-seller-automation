@@ -233,7 +233,7 @@ async def test_send_outbound(req: OutboundTestSendRequest, ctx: StoreContext = D
     if not cookies:
         return {"success": True, "message": "Поставлено в очередь, но нет активной сессии чата (SMS) — отправится, когда сессия появится."}
 
-    merchant_id = discover_merchant_id(ctx.token)
+    merchant_id = await asyncio.to_thread(discover_merchant_id, ctx.token)
     if not merchant_id:
         return {"success": True, "message": "Поставлено в очередь, но не удалось определить merchant_id — отправится на следующем тике."}
 
