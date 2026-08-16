@@ -36,6 +36,11 @@ class KaspiAPI:
     # store_id — старый кэш в stock_groups.py был НЕ ключирован вообще).
     _packaging_tabs_cache: Dict[str, dict] = {}
     _packaging_tabs_cache_lock = threading.Lock()
+    # Отдельный лок НА ТОКЕН — single-flight обхода (см.
+    # get_all_packaging_tabs_cached). Держать для этого _packaging_tabs_cache_lock
+    # нельзя: он общий на все сторы и охраняет сам словарь, а обход идёт минуты.
+    _packaging_tabs_refresh_locks: Dict[str, threading.Lock] = {}
+    _PACKAGING_TABS_WAIT_TIMEOUT = 60.0
 
     # merchant_id для токена не меняется, а резолвится он дорого: шаг через
     # /pointofservices на проде стабильно отдаёт 500, после чего идёт фоллбек
@@ -841,12 +846,45 @@ class KaspiAPI:
         гоняли один и тот же тяжёлый постраничный обход. TTL поднят с 45с до
         120с: экран "Мастер-Группы"/"Упаковка" — это просмотр, не движок
         списания, отставание на пару минут не влияет на корректность остатка.
+
+        Single-flight + stale-while-revalidate. Кэш держал только TTL, но не
+        защищал сам промах: в момент истечения TTL все запросы, пришедшие
+        одновременно, промахивались вместе и каждый запускал СВОЙ полный
+        обход (13 дней, постранично, до 185с — замер на проде). Отсюда и
+        p95=27с у `GET /api/stock-groups` при p50=1.6с, и заметная часть из
+        12 тысяч вызовов `/shop/api/v2/orders` за 8 часов.
+
+        Теперь обновляет ровно один поток на токен; остальные, если есть
+        протухшая копия, получают её МГНОВЕННО, а не ждут обход. Это
+        сознательный размен: отдать данные на пару минут старше вместо того,
+        чтобы держать пользователя (и его поток из threadpool) три минуты.
+        Ждут только те, у кого кэш вообще холодный — им отдавать нечего.
         """
         now = time.time()
         with KaspiAPI._packaging_tabs_cache_lock:
             cached = KaspiAPI._packaging_tabs_cache.get(token)
             if cached and now < cached["expires_at"]:
                 return cached["data"]
+            refresh_lock = KaspiAPI._packaging_tabs_refresh_locks.get(token)
+            if refresh_lock is None:
+                refresh_lock = threading.Lock()
+                KaspiAPI._packaging_tabs_refresh_locks[token] = refresh_lock
+
+        if not refresh_lock.acquire(blocking=False):
+            # Обход уже идёт в другом потоке. Протухшие данные лучше ожидания.
+            if cached:
+                return cached["data"]
+            # Кэш холодный — отдавать нечего, приходится дождаться чужого
+            # обхода. Таймаут страхует от того, чтобы залипнуть тут навсегда,
+            # если обход зависнет на медленном Kaspi.
+            if not refresh_lock.acquire(timeout=KaspiAPI._PACKAGING_TABS_WAIT_TIMEOUT):
+                return {}
+            try:
+                with KaspiAPI._packaging_tabs_cache_lock:
+                    fresh = KaspiAPI._packaging_tabs_cache.get(token)
+                return fresh["data"] if fresh else {}
+            finally:
+                refresh_lock.release()
 
         try:
             data = KaspiAPI.get_all_packaging_tabs(token)
@@ -857,6 +895,8 @@ class KaspiAPI:
             with KaspiAPI._packaging_tabs_cache_lock:
                 cached = KaspiAPI._packaging_tabs_cache.get(token)
             return cached["data"] if cached else {}
+        finally:
+            refresh_lock.release()
 
     # ── 6. update order status ───────────────────────────────
 

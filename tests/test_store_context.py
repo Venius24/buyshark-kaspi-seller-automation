@@ -33,6 +33,33 @@ def make_scalar_result(value):
     return result
 
 
+def patch_session(db):
+    """
+    get_store_context сам открывает и закрывает свою сессию (`async with
+    AsyncSessionLocal()`), а не принимает её через Depends(get_db) — так
+    соединение возвращается в пул до того, как ручка уйдёт в Kaspi на минуты
+    (см. докстринг резолвера). Тесты подменяют саму фабрику сессий.
+
+    Счётчик вызовов фабрики (`opened`) — не украшение: «за соединением вообще
+    не сходили» это отдельное от «сходили и ничего не выбрали» поведение, и
+    для неавторизованного запроса важно именно первое.
+    """
+    calls = {"opened": 0}
+
+    class _SessionCM:
+        async def __aenter__(self):
+            return db
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+    def _factory():
+        calls["opened"] += 1
+        return _SessionCM()
+
+    return patch("backend.security.store_context.AsyncSessionLocal", _factory), calls
+
+
 class TestStoreContextRejectsUnresolvable(unittest.IsolatedAsyncioTestCase):
     """
     Слайс 7: legacy-фоллбек на общую сессию убран целиком — запрос без
@@ -42,22 +69,27 @@ class TestStoreContextRejectsUnresolvable(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_auth_header_rejected(self):
         db = AsyncMock()
-        with self.assertRaises(HTTPException) as cm:
-            await get_store_context(make_request(), db)
+        session_patch, calls = patch_session(db)
+        with session_patch, self.assertRaises(HTTPException) as cm:
+            await get_store_context(make_request())
         self.assertEqual(cm.exception.status_code, 401)
         db.execute.assert_not_called()
+        self.assertEqual(calls["opened"], 0, "запрос без токена не должен брать соединение из пула")
 
     async def test_malformed_bearer_header_rejected(self):
         db = AsyncMock()
-        with self.assertRaises(HTTPException) as cm:
-            await get_store_context(make_request(auth_header="NotBearer garbage"), db)
+        session_patch, _ = patch_session(db)
+        with session_patch, self.assertRaises(HTTPException) as cm:
+            await get_store_context(make_request(auth_header="NotBearer garbage"))
         self.assertEqual(cm.exception.status_code, 401)
 
     async def test_expired_or_invalid_jwt_rejected(self):
         db = AsyncMock()
-        with self.assertRaises(HTTPException) as cm:
-            await get_store_context(make_request(auth_header="Bearer not.a.valid.jwt"), db)
+        session_patch, calls = patch_session(db)
+        with session_patch, self.assertRaises(HTTPException) as cm:
+            await get_store_context(make_request(auth_header="Bearer not.a.valid.jwt"))
         self.assertEqual(cm.exception.status_code, 401)
+        self.assertEqual(calls["opened"], 0, "протухший токен отсекается до похода в БД")
 
     async def test_refresh_type_token_rejected(self):
         """An Authorization header carrying a refresh (not access) token must not be
@@ -65,8 +97,9 @@ class TestStoreContextRejectsUnresolvable(unittest.IsolatedAsyncioTestCase):
         from backend.security.auth import create_refresh_token
         refresh_tok = create_refresh_token({"sub": "user-1"})
         db = AsyncMock()
-        with self.assertRaises(HTTPException) as cm:
-            await get_store_context(make_request(auth_header=f"Bearer {refresh_tok}"), db)
+        session_patch, _ = patch_session(db)
+        with session_patch, self.assertRaises(HTTPException) as cm:
+            await get_store_context(make_request(auth_header=f"Bearer {refresh_tok}"))
         self.assertEqual(cm.exception.status_code, 401)
         db.execute.assert_not_called()
 
@@ -74,8 +107,9 @@ class TestStoreContextRejectsUnresolvable(unittest.IsolatedAsyncioTestCase):
         access_tok = create_access_token({"sub": "ghost-user-id"})
         db = AsyncMock()
         db.execute.return_value = make_scalar_result(None)  # user not found
-        with self.assertRaises(HTTPException) as cm:
-            await get_store_context(make_request(auth_header=f"Bearer {access_tok}"), db)
+        session_patch, _ = patch_session(db)
+        with session_patch, self.assertRaises(HTTPException) as cm:
+            await get_store_context(make_request(auth_header=f"Bearer {access_tok}"))
         self.assertEqual(cm.exception.status_code, 401)
 
     async def test_valid_jwt_but_no_accessible_store_rejected(self):
@@ -84,8 +118,9 @@ class TestStoreContextRejectsUnresolvable(unittest.IsolatedAsyncioTestCase):
 
         db = AsyncMock()
         db.execute.side_effect = [make_scalar_result(user), make_scalar_result(None)]
-        with self.assertRaises(HTTPException) as cm:
-            await get_store_context(make_request(auth_header=f"Bearer {access_tok}"), db)
+        session_patch, _ = patch_session(db)
+        with session_patch, self.assertRaises(HTTPException) as cm:
+            await get_store_context(make_request(auth_header=f"Bearer {access_tok}"))
         self.assertEqual(cm.exception.status_code, 401)
 
 
@@ -101,11 +136,14 @@ class TestStoreContextNewPath(unittest.IsolatedAsyncioTestCase):
 
         db = AsyncMock()
         db.execute.side_effect = [make_scalar_result(user), make_scalar_result(store)]
-        ctx = await get_store_context(make_request(auth_header=f"Bearer {access_tok}"), db)
+        session_patch, calls = patch_session(db)
+        with session_patch:
+            ctx = await get_store_context(make_request(auth_header=f"Bearer {access_tok}"))
 
         self.assertEqual(ctx.store_id, "store-1")
         self.assertEqual(ctx.merchant_id, "m_123")
         self.assertEqual(ctx.token, "plaintext_token")
+        self.assertEqual(calls["opened"], 1, "оба запроса должны уложиться в одну сессию")
 
     @patch("backend.security.store_context.decrypt_data")
     async def test_explicit_store_id_header_is_respected(self, mock_decrypt):
@@ -116,9 +154,11 @@ class TestStoreContextNewPath(unittest.IsolatedAsyncioTestCase):
 
         db = AsyncMock()
         db.execute.side_effect = [make_scalar_result(user), make_scalar_result(store)]
-        ctx = await get_store_context(
-            make_request(auth_header=f"Bearer {access_tok}", store_id_header="store-2"), db
-        )
+        session_patch, _ = patch_session(db)
+        with session_patch:
+            ctx = await get_store_context(
+                make_request(auth_header=f"Bearer {access_tok}", store_id_header="store-2")
+            )
         self.assertEqual(ctx.store_id, "store-2")
         self.assertEqual(ctx.merchant_id, "m_456")
 
@@ -134,8 +174,9 @@ class TestStoreContextNewPath(unittest.IsolatedAsyncioTestCase):
 
         db = AsyncMock()
         db.execute.side_effect = [make_scalar_result(user), make_scalar_result(store)]
-        with self.assertRaises(HTTPException) as cm:
-            await get_store_context(make_request(auth_header=f"Bearer {access_tok}"), db)
+        session_patch, _ = patch_session(db)
+        with session_patch, self.assertRaises(HTTPException) as cm:
+            await get_store_context(make_request(auth_header=f"Bearer {access_tok}"))
         self.assertEqual(cm.exception.status_code, 401)
 
 

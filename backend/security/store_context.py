@@ -5,7 +5,7 @@ from fastapi import Request, WebSocket, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from backend.db.database import get_db
+from backend.db.database import AsyncSessionLocal
 from backend.db.models import User, Store, UserStore
 from backend.security.auth import decode_token
 from backend.security.crypto import decrypt_data
@@ -42,10 +42,7 @@ async def _resolve_store_for_user(request: Request, db: AsyncSession, user_id: s
     return res.scalars().first()
 
 
-async def get_store_context(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-) -> StoreContext:
+async def get_store_context(request: Request) -> StoreContext:
     """
     Резолвит (token, merchant_id, store_id) для store-scoped эндпоинтов.
 
@@ -55,6 +52,16 @@ async def get_store_context(
     старейший магазин) получает явный 401, а не тихий доступ к общей/чужой
     сессии. Раньше это было переходным поведением на время dual-auth
     миграции (Phase 4b-4e) — миграция завершена, все клиенты шлют JWT.
+
+    Сессия БД тут СВОЯ и закрывается до возврата — намеренно, а не через
+    Depends(get_db). Зависимость-генератор FastAPI держит соединение до конца
+    ОТВЕТА, а этот резолвер охраняет в том числе ручки, которые после него
+    минутами сидят в Kaspi (`GET /api/stock-groups` — p95 27с, max 185с на
+    проде). Соединение простаивало занятым всё это время, и при пуле 10+20
+    три десятка таких запросов выедали его целиком: за неделю 1061 ошибка
+    `QueuePool limit ... connection timed out`, залпами по 80 штук за 20
+    секунд, с трейсом ровно через этот резолвер. Все запросы тут read-only,
+    коммит не нужен, так что раннее закрытие ничего не теряет.
     """
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
@@ -63,19 +70,20 @@ async def get_store_context(
         if payload and payload.get("type") == "access":
             user_id = payload.get("sub")
             if user_id:
-                stmt = select(User).where(User.id == user_id)
-                res = await db.execute(stmt)
-                user = res.scalar_one_or_none()
-                if user and user.is_active:
-                    store = await _resolve_store_for_user(request, db, user.id)
-                    if store and store.encrypted_api_key:
-                        decrypted_token = decrypt_data(store.encrypted_api_key)
-                        if decrypted_token:
-                            return StoreContext(
-                                token=decrypted_token,
-                                merchant_id=store.merchant_id,
-                                store_id=store.id,
-                            )
+                async with AsyncSessionLocal() as db:
+                    stmt = select(User).where(User.id == user_id)
+                    res = await db.execute(stmt)
+                    user = res.scalar_one_or_none()
+                    if user and user.is_active:
+                        store = await _resolve_store_for_user(request, db, user.id)
+                        if store and store.encrypted_api_key:
+                            decrypted_token = decrypt_data(store.encrypted_api_key)
+                            if decrypted_token:
+                                return StoreContext(
+                                    token=decrypted_token,
+                                    merchant_id=store.merchant_id,
+                                    store_id=store.id,
+                                )
 
     raise HTTPException(status_code=401, detail="Требуется вход в аккаунт с подключённым магазином.")
 

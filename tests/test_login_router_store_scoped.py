@@ -13,6 +13,8 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 sys.path.append(os.getcwd())
 
+from tests.store_context_stub import install_store_context_db
+
 from fastapi.testclient import TestClient
 
 from backend.main import app
@@ -79,6 +81,8 @@ class TestLoginRouterStoreScoped(unittest.TestCase):
 
         from backend.db.database import get_db as real_get_db
         app.dependency_overrides[real_get_db] = fake_get_db_gen
+        # get_store_context держит свою сессию, не Depends(get_db) — см. store_context_stub.
+        install_store_context_db(self, fake_db)
         try:
             resp = self.client.post(
                 "/api/login",
