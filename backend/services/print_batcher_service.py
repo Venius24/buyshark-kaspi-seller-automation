@@ -556,6 +556,33 @@ def _find_stamp_band(src_page: fitz.Page, clip: fitz.Rect, box_w: float, box_h: 
     return None
 
 
+def _insert_textbox_fitted(target_page: fitz.Page, rect: fitz.Rect, text: str, fontname: str,
+                           fontsize: float, color: tuple, min_fontsize: float) -> bool:
+    """
+    insert_textbox молча НЕ рисует ничего и возвращает отрицательное значение,
+    если текст не влезает в прямоугольник. Из-за этого в штампе оставалось
+    только слово "ГРУППА": название группы длиннее одного короткого слова
+    переносилось на вторую строку, не помещалось по высоте и исчезало
+    целиком. Подбираем кегль вниз, а если и минимальный не помог — режем
+    название с многоточием.
+    """
+    step = max(0.25, fontsize * 0.06)
+    fs = fontsize
+    while fs >= min_fontsize:
+        if target_page.insert_textbox(rect, text, fontname=fontname, fontsize=fs,
+                                      color=color, align=0) >= 0:
+            return True
+        fs -= step
+
+    trimmed = text
+    while len(trimmed) > 4:
+        trimmed = trimmed[:-2]
+        if target_page.insert_textbox(rect, trimmed + "…", fontname=fontname, fontsize=min_fontsize,
+                                      color=color, align=0) >= 0:
+            return True
+    return False
+
+
 def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: fitz.Page, src_clip: fitz.Rect, label: str) -> None:
     """
     Штамп "ГРУППА: <название>" — контурная рамка с подписью, вставляется в
@@ -570,8 +597,14 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
         return
 
     box_w = src_clip.width * 0.54
-    box_h = src_clip.height * 0.078
+    # Две строки названия при читаемом кегле требуют более высокой рамки, чем
+    # прежние 7.8% высоты накладной. Если такой полосы на накладной не нашлось —
+    # откатываемся к прежней высоте, чтобы штамп не пропал совсем.
+    box_h = src_clip.height * 0.105
     band = _find_stamp_band(src_page, src_clip, box_w, box_h)
+    if band is None:
+        box_h = src_clip.height * 0.078
+        band = _find_stamp_band(src_page, src_clip, box_w, box_h)
     if band is None:
         return
 
@@ -609,8 +642,9 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
                                 color=(0.55, 0.55, 0.55), align=0)
 
     name_rect = fitz.Rect(box.x0 + pad, label_rect.y1, box.x1 - pad, box.y1 - 1.5 * size_ref)
-    target_page.insert_textbox(name_rect, label, fontname="F_STAMP_B", fontsize=name_fs,
-                                color=(0.3, 0.3, 0.3), align=0)
+    if not _insert_textbox_fitted(target_page, name_rect, label, "F_STAMP_B", name_fs,
+                                  (0.3, 0.3, 0.3), max(3.5, 5.0 * size_ref)):
+        logger.warning(f"Print Batcher: название группы '{label}' не поместилось в штамп")
 
 
 class PageItem:

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, API_URL } from '../api';
 import { useActiveStoreId } from '../storeContext';
@@ -40,6 +40,38 @@ interface ManifestResponse {
   batches: Record<string, BatchInfo>;
 }
 
+// Настройки склейки запоминаются на устройстве и отдельно для каждого магазина:
+// раскладка и формат печати завязаны на конкретный принтер/склад, поэтому
+// общий на все магазины набор значений сбрасывал бы чужие настройки.
+interface PrintPrefs {
+  sortPreset: string;
+  autoRotate: boolean;
+  expressMode: string;
+  outputLayout: string;
+  deduplicateHistory: boolean;
+}
+
+const DEFAULT_PREFS: PrintPrefs = {
+  sortPreset: 'filename',
+  autoRotate: true,
+  expressMode: 'separate',
+  outputLayout: 'auto',
+  deduplicateHistory: true,
+};
+
+const prefsKey = (storeId: string | null | undefined) => `printBatcherPrefs:${storeId || 'default'}`;
+
+const loadPrefs = (storeId: string | null | undefined): PrintPrefs => {
+  try {
+    const raw = localStorage.getItem(prefsKey(storeId));
+    if (!raw) return DEFAULT_PREFS;
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_PREFS, ...parsed };
+  } catch {
+    return DEFAULT_PREFS;
+  }
+};
+
 const fetchHistoryStats = async (): Promise<number> => {
   try {
     const res = await apiFetch(`${API_URL}/api/print-batcher/history-stats`);
@@ -60,11 +92,12 @@ export const PrintBatcher: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
-  const [sortPreset, setSortPreset] = useState<string>('filename');
-  const [autoRotate, setAutoRotate] = useState<boolean>(true);
-  const [expressMode, setExpressMode] = useState<string>('separate');
-  const [outputLayout, setOutputLayout] = useState<string>('auto'); // 'auto' | 'a4_4' | 'a4_8' | 'a4_9' | 'a4_1' | 'thermal_75_120' | 'thermal_100_150' | 'just_merge'
-  const [deduplicateHistory, setDeduplicateHistory] = useState<boolean>(true);
+  const initialPrefs = loadPrefs(activeStoreId);
+  const [sortPreset, setSortPreset] = useState<string>(initialPrefs.sortPreset);
+  const [autoRotate, setAutoRotate] = useState<boolean>(initialPrefs.autoRotate);
+  const [expressMode, setExpressMode] = useState<string>(initialPrefs.expressMode);
+  const [outputLayout, setOutputLayout] = useState<string>(initialPrefs.outputLayout); // 'auto' | 'a4_4' | 'a4_8' | 'a4_9' | 'a4_1' | 'thermal_75_120' | 'thermal_100_150' | 'just_merge'
+  const [deduplicateHistory, setDeduplicateHistory] = useState<boolean>(initialPrefs.deduplicateHistory);
   const [resultManifest, setResultManifest] = useState<ManifestResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -77,6 +110,33 @@ export const PrintBatcher: React.FC = () => {
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const prefsStoreRef = useRef<string | null | undefined>(activeStoreId);
+
+  // При смене магазина подтягиваем его собственный набор настроек.
+  useEffect(() => {
+    if (prefsStoreRef.current === activeStoreId) return;
+    const prefs = loadPrefs(activeStoreId);
+    setSortPreset(prefs.sortPreset);
+    setAutoRotate(prefs.autoRotate);
+    setExpressMode(prefs.expressMode);
+    setOutputLayout(prefs.outputLayout);
+    setDeduplicateHistory(prefs.deduplicateHistory);
+    prefsStoreRef.current = activeStoreId;
+  }, [activeStoreId]);
+
+  // Сохраняем только когда состояние уже относится к текущему магазину —
+  // иначе первый рендер после переключения записал бы чужие значения.
+  useEffect(() => {
+    if (prefsStoreRef.current !== activeStoreId) return;
+    try {
+      localStorage.setItem(
+        prefsKey(activeStoreId),
+        JSON.stringify({ sortPreset, autoRotate, expressMode, outputLayout, deduplicateHistory })
+      );
+    } catch {
+      // приватный режим / переполненное хранилище — настройки просто не запомнятся
+    }
+  }, [activeStoreId, sortPreset, autoRotate, expressMode, outputLayout, deduplicateHistory]);
 
   const handleResetHistory = async () => {
     if (!window.confirm('Вы уверены, что хотите сбросить историю напечатанных заказов за сегодня?')) {
