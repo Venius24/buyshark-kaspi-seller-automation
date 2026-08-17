@@ -453,36 +453,145 @@ def extract_product_name(text: str, filename: str) -> Optional[str]:
     return None
 
 
-def match_master_group(product_name: Optional[str], master_groups: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+# Сопоставление накладной с Мастер-Группой идёт ПО НАЗВАНИЯМ ТОВАРОВ.
+#
+# В linked_skus группы лежат артикулы (X147-0002, 175489569), а на накладной
+# Kaspi печатает название витрины — артикул попадает в него далеко не всегда.
+# Прежняя реализация искала артикул/название группы подстрокой прямо в
+# названии товара и на живой партии Бархана ловила 341 накладную из 1141.
+# Теперь linked_skus сначала разворачиваются в НАЗВАНИЯ товаров каталога, и
+# сравнивается название с названием — 816 из 1141 на той же партии.
+_NAME_STOP_TOKENS = {"шт", "см", "мл", "кг", "г", "л", "мм", "и", "для", "с", "на", "в"}
+
+# "Код" в названии — артикул продавца (S517-0045, X147-0002, WL0043) или
+# модель производителя (7665-106, 429078). Именно он отличает друг от друга
+# соседние почти одинаковые карточки ("Выжимка для цепи Barkhan S517-0045 1"
+# против "...S517-0049 1"), поэтому по нему нельзя ошибаться.
+_CODE_TOKEN_RE = re.compile(r"^(?=.*\d)(?=.*[a-zа-я])[a-zа-я0-9-]+$|^\d[\d-]{3,}$")
+
+# Порог для "похожего названия" — применяется только когда в названии
+# накладной кода нет вообще и спутать соседние карточки нечем.
+_NAME_SIMILARITY_THRESHOLD = 0.6
+# Для совпадения по коду порог мягче: код уже сам по себе сильный признак,
+# названия при этом могут расходиться ("Ключ Barkhan S517-0013 1" против
+# "Товар S517-0013").
+_CODE_SIMILARITY_THRESHOLD = 0.35
+
+
+def normalize_name_tokens(name: str) -> List[str]:
+    """Название → значимые токены: нижний регистр, без пунктуации и единиц."""
+    s = (name or "").lower().replace("ё", "е")
+    s = re.sub(r"[^\wЀ-ӿ-]+", " ", s)
+    out = []
+    for raw in s.split():
+        t = raw.strip("-")
+        if t and t not in _NAME_STOP_TOKENS:
+            out.append(t)
+    return out
+
+
+def _code_tokens(tokens: List[str]) -> Set[str]:
+    return {t for t in tokens if _CODE_TOKEN_RE.match(t)}
+
+
+def _name_similarity(a: Set[str], b: Set[str]) -> float:
     """
-    Сопоставление названия товара накладной с Мастер-Группой остатка по
-    подстроке (артикул/модель группы или её linked_skus встречается в
-    названии товара). При нескольких совпадениях побеждает самое длинное
-    (более специфичное) — короче 3 символов не рассматриваем, чтобы не
-    ловить случайные буквенные совпадения.
+    Доля общих токенов, взвешенная по их длине: "мыльница" весит больше, чем
+    "1", иначе любые два товара с "1 шт" выглядели бы похожими.
     """
-    if not product_name:
-        return None
+    inter = a & b
+    if not inter:
+        return 0.0
+    weight = lambda s: sum(len(t) for t in s)
+    return weight(inter) / max(weight(a), weight(b))
 
-    name_lower = product_name.lower()
-    best_group = None
-    best_len = 0
 
-    for group in master_groups:
-        if not group.get("is_active", True):
-            continue
-        candidates = [group.get("group_name") or ""]
-        candidates.extend(str(sku) for sku in (group.get("linked_skus") or []) if sku)
+class MasterGroupMatcher:
+    """
+    Индекс Мастер-Групп для одной партии печати: строится один раз, дальше
+    match() зовётся на каждую накладную.
+    """
 
-        for raw in candidates:
-            token = raw.strip()
-            if len(token) < 3:
+    def __init__(self, master_groups: List[Dict[str, Any]], products: Optional[List[Dict[str, Any]]] = None):
+        # Артикул (в любом из трёх видов) → товар каталога
+        by_sku: Dict[str, Dict[str, Any]] = {}
+        for p in products or []:
+            for key in ("sku", "merchantSku", "kaspiSku"):
+                val = p.get(key)
+                if val:
+                    by_sku.setdefault(str(val).strip(), p)
+
+        # Группа → названия её товаров (разложенные на токены)
+        self._groups: List[Tuple[Dict[str, Any], List[Tuple[Set[str], Set[str]]]]] = []
+        # Артикул → группа: фолбэк для накладных, где артикул напечатан прямо
+        # в названии, а названия товаров группы на него не похожи
+        # ("Barkhan мыльница X147-0002 1 шт" ↔ группа "X147-0002 мыльница Urban White").
+        self._by_code: Dict[str, Dict[str, Any]] = {}
+
+        for group in master_groups:
+            if not group.get("is_active", True):
                 continue
-            if token.lower() in name_lower and len(token) > best_len:
-                best_group = group
-                best_len = len(token)
 
-    return best_group
+            names: Set[str] = set()
+            for sku in group.get("linked_skus") or []:
+                sku = str(sku).strip()
+                if not sku:
+                    continue
+                low = sku.lower()
+                if _CODE_TOKEN_RE.match(low):
+                    self._by_code.setdefault(low, group)
+                product = by_sku.get(sku)
+                if product and product.get("name"):
+                    names.add(product["name"])
+
+            entries = []
+            for name in names:
+                tokens = normalize_name_tokens(name)
+                if tokens:
+                    entries.append((set(tokens), _code_tokens(tokens)))
+            if entries:
+                self._groups.append((group, entries))
+
+    def match(self, product_name: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not product_name:
+            return None
+
+        tokens = normalize_name_tokens(product_name)
+        if not tokens:
+            return None
+        name_set = set(tokens)
+        name_codes = _code_tokens(tokens)
+
+        best_by_code: Tuple[Optional[Dict[str, Any]], float] = (None, 0.0)
+        best_by_name: Tuple[Optional[Dict[str, Any]], float] = (None, 0.0)
+
+        for group, entries in self._groups:
+            for group_tokens, group_codes in entries:
+                if name_set == group_tokens:
+                    return group  # то же самое название — сомнений нет
+
+                score = _name_similarity(name_set, group_tokens)
+                if name_codes and group_codes:
+                    # Коды есть с обеих сторон: совпали — сильный признак,
+                    # разошлись — это соседняя карточка, а не наша.
+                    if name_codes & group_codes and score > best_by_code[1]:
+                        best_by_code = (group, score)
+                elif not name_codes and score > best_by_name[1]:
+                    best_by_name = (group, score)
+
+        if best_by_code[0] and best_by_code[1] >= _CODE_SIMILARITY_THRESHOLD:
+            return best_by_code[0]
+        if best_by_name[0] and best_by_name[1] >= _NAME_SIMILARITY_THRESHOLD:
+            return best_by_name[0]
+
+        # По названиям не сошлось — но если в названии накладной напечатан
+        # артикул и он есть в linked_skus группы, товар всё равно её.
+        for code in name_codes:
+            group = self._by_code.get(code)
+            if group:
+                return group
+
+        return None
 
 
 _STAMP_FONT_BOLD: Optional[str] = None
@@ -869,11 +978,14 @@ def process_zip_or_pdfs(
     deduplicated_pages_count = 0
     new_keys_to_save: Set[str] = set()
 
-    master_groups: List[Dict[str, Any]] = []
+    group_matcher: Optional[MasterGroupMatcher] = None
     if sort_preset == "master_group" and store_id:
-        from backend.state_helpers import _load_master_stock_groups
-        # Мастер-Группы остатка грузятся ОДИН раз на всю очередь, а не на каждую страницу
+        from backend.state_helpers import _load_master_stock_groups, _load_products
+        # Группы и каталог грузятся ОДИН раз на всю очередь, а не на каждую
+        # страницу: каталог нужен, чтобы развернуть linked_skus группы в
+        # названия товаров — сопоставление идёт название-к-названию.
         master_groups = list((_load_master_stock_groups(store_id) or {}).values())
+        group_matcher = MasterGroupMatcher(master_groups, _load_products(store_id) or [])
 
     # 1. Извлечение страниц и анализ геометрии
     unreadable_files: List[str] = []
@@ -907,7 +1019,7 @@ def process_zip_or_pdfs(
                 if sort_preset in ("product_name", "master_group"):
                     product_name = extract_product_name(text, basename)
                     if sort_preset == "master_group":
-                        matched_group = match_master_group(product_name, master_groups)
+                        matched_group = group_matcher.match(product_name) if group_matcher else None
                         if matched_group:
                             stamp_label = matched_group.get("group_name") or product_name
                             group_sort_key = f"0_{stamp_label}"
