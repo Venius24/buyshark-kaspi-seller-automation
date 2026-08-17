@@ -20,6 +20,7 @@ import { StoreHub } from './components/StoreHub';
 import { BackgroundSync } from './components/BackgroundSync';
 import { McAuthModal } from './components/McAuthModal';
 import { PriceFeedImportModal } from './components/PriceFeedImportModal';
+import { ImageLightbox } from './components/shared/ImageLightbox';
 import { Sidebar } from './components/Sidebar';
 import { ContentHeader } from './components/ContentHeader';
 import { PackagingTab } from './components/tabs/PackagingTab';
@@ -1040,6 +1041,7 @@ export default function App() {
         onApply={priceFeedImport.applyImport}
         onFinish={priceFeedImport.finish}
       />
+      <ImageLightbox />
     </div>
   );
 }

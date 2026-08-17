@@ -1,3 +1,5 @@
+import { openImageLightbox } from './ImageLightbox';
+
 interface ProductCardHeaderProps {
   name: string;
   sku: string;
@@ -15,7 +17,8 @@ export function ProductCardHeader({ name, sku, kaspiSku, merchantSku, image }: P
           src={image}
           alt=""
           loading="lazy"
-          style={{ width: '60px', height: '60px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}
+          style={{ width: '60px', height: '60px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)', cursor: 'zoom-in' }}
+          onClick={(e) => { e.stopPropagation(); openImageLightbox(image); }}
           onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
         />
       ) : (

@@ -1,4 +1,5 @@
 import type { Order } from '../../types';
+import { openImageLightbox } from '../shared/ImageLightbox';
 
 interface PackagingTabProps {
   filteredOrders: Order[];
@@ -246,7 +247,8 @@ export function PackagingTab({
                                   src={item.image}
                                   alt=""
                                   loading="lazy"
-                                  style={{ width: '44px', height: '44px', borderRadius: '8px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}
+                                  style={{ width: '44px', height: '44px', borderRadius: '8px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)', cursor: 'zoom-in' }}
+                                  onClick={(e) => { e.stopPropagation(); openImageLightbox(item.image!); }}
                                   onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
                                 />
                               ) : (

@@ -25,6 +25,7 @@ import { LiveTerminalStream } from './LiveTerminalStream';
 import { apiFetch, API_URL, getWsUrl } from '../api';
 import { fetchGroupsQuery, fetchProductsQuery } from '../queries';
 import { useActiveStoreId } from '../storeContext';
+import { openImageLightbox } from './shared/ImageLightbox';
 
 interface GroupDumpingConfig {
   enabled: boolean;
@@ -820,7 +821,8 @@ export const MasterStockGroups: React.FC = () => {
                                 src={img}
                                 alt=""
                                 loading="lazy"
-                                style={{ width: '48px', height: '48px', borderRadius: '8px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}
+                                style={{ width: '48px', height: '48px', borderRadius: '8px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)', cursor: 'zoom-in' }}
+                                onClick={(e) => { e.stopPropagation(); openImageLightbox(img); }}
                                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
                               />
                             ) : (
