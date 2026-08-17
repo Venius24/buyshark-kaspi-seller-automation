@@ -6,6 +6,7 @@ import hashlib
 import logging
 import tempfile
 import zipfile
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple, Set
@@ -669,6 +670,63 @@ class PageItem:
         self.group_sort_key = group_sort_key
 
 
+# Архив Kaspi — это ОДИН PDF на заказ, и на партии в 1200+ накладных склейка
+# упиралась в лимит открытых файлов процесса (у systemd по умолчанию 1024):
+# наружу это вылезало как "Failed to open file ... as type pdf", а внутри было
+# OSError 24 (Too many open files), который заодно ронял приём HTTP-соединений
+# всего сервиса.
+#
+# Причин было две, и лечить нужно обе:
+#  1) словарь открытых документов рос без ограничения — теперь это LRU;
+#  2) show_pdf_page/insert_pdf прививают исходный документ к результирующему,
+#     и MuPDF держит файловый хэндл источника ДАЖЕ ПОСЛЕ .close() — до тех пор,
+#     пока жив итоговый документ. Проверено: при открытии по пути склейка падала
+#     на 509-й накладной, при открытии из памяти 1400 проходят штатно.
+#     Поэтому источник читается в память и открывается как stream — файловый
+#     дескриптор не удерживается вообще.
+DOC_CACHE_LIMIT = 32
+
+
+class _DocCache:
+    """LRU-кэш исходных PDF, открытых из памяти (без файловых дескрипторов)."""
+
+    def __init__(self, limit: int = DOC_CACHE_LIMIT):
+        self.limit = max(1, limit)
+        self._docs: "OrderedDict[str, fitz.Document]" = OrderedDict()
+
+    def get(self, path: str) -> fitz.Document:
+        doc = self._docs.get(path)
+        if doc is not None:
+            self._docs.move_to_end(path)
+            return doc
+
+        with open(path, "rb") as fh:
+            data = fh.read()
+        doc = fitz.open(stream=data, filetype="pdf")
+        self._docs[path] = doc
+        while len(self._docs) > self.limit:
+            _, oldest = self._docs.popitem(last=False)
+            try:
+                oldest.close()
+            except Exception:
+                pass
+        return doc
+
+    def close_all(self) -> None:
+        for doc in self._docs.values():
+            try:
+                doc.close()
+            except Exception:
+                pass
+        self._docs.clear()
+
+    def __enter__(self) -> "_DocCache":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close_all()
+
+
 def generate_nup_a4_pdf(
     items: List[PageItem],
     cols: int,
@@ -683,7 +741,7 @@ def generate_nup_a4_pdf(
     cell_w = (A4_WIDTH_PT - 2 * margin - (cols - 1) * gap) / cols
     cell_h = (A4_HEIGHT_PT - 2 * margin - (rows - 1) * gap) / rows
 
-    doc_cache: Dict[str, fitz.Document] = {}
+    doc_cache = _DocCache()
 
     try:
         current_a4_page = None
@@ -703,11 +761,9 @@ def generate_nup_a4_pdf(
             y1 = y0 + cell_h
             target_rect = fitz.Rect(x0, y0, x1, y1)
 
-            if item.pdf_path not in doc_cache:
-                doc_cache[item.pdf_path] = fitz.open(item.pdf_path)
-            src_doc = doc_cache[item.pdf_path]
+            src_doc = doc_cache.get(item.pdf_path)
             src_page = src_doc[item.page_num]
-            
+
             c_rect = get_content_rect(src_page)
 
             current_a4_page.show_pdf_page(target_rect, src_doc, item.page_num, clip=c_rect, keep_proportion=True)
@@ -720,8 +776,7 @@ def generate_nup_a4_pdf(
 
         return out_doc
     finally:
-        for d in doc_cache.values():
-            d.close()
+        doc_cache.close_all()
 
 
 def generate_thermal_pdf(
@@ -736,16 +791,15 @@ def generate_thermal_pdf(
     target_rect = fitz.Rect(margin, margin, target_w_pt - margin, target_h_pt - margin)
 
     out_doc = fitz.open()
-    doc_cache: Dict[str, fitz.Document] = {}
+    doc_cache = _DocCache()
 
     try:
         for item in items:
             new_p = out_doc.new_page(width=target_w_pt, height=target_h_pt)
-            if item.pdf_path not in doc_cache:
-                doc_cache[item.pdf_path] = fitz.open(item.pdf_path)
-            src_doc = doc_cache[item.pdf_path]
+            src_doc = doc_cache.get(item.pdf_path)
             src_page = src_doc[item.page_num]
-            
+
+
             c_rect = get_content_rect(src_page)
             new_p.show_pdf_page(target_rect, src_doc, item.page_num, clip=c_rect, keep_proportion=True)
             if item.stamp_label:
@@ -756,8 +810,7 @@ def generate_thermal_pdf(
 
         return out_doc
     finally:
-        for d in doc_cache.values():
-            d.close()
+        doc_cache.close_all()
 
 
 def process_zip_or_pdfs(
@@ -823,72 +876,93 @@ def process_zip_or_pdfs(
         master_groups = list((_load_master_stock_groups(store_id) or {}).values())
 
     # 1. Извлечение страниц и анализ геометрии
+    unreadable_files: List[str] = []
     for pdf_path, orig_order in extracted_pdf_paths:
-        doc = fitz.open(pdf_path)
         basename = os.path.basename(pdf_path)
+        # Один битый файл в архиве не должен ронять печать всей остальной партии
+        try:
+            doc = fitz.open(pdf_path)
+        except Exception as e:
+            logger.warning(f"Print Batcher: не удалось открыть '{basename}': {e}")
+            unreadable_files.append(basename)
+            continue
 
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            rect = page.rect
-            
-            w_mm = rect.width * PT_TO_MM
-            h_mm = rect.height * PT_TO_MM
-            base_category = classify_page_size(w_mm, h_mm)
-            
-            text = page.get_text()
-            order_id = extract_order_id(text, basename)
-            unique_key = get_page_unique_key(text, basename, order_id)
-            express_flag = is_express_page(text, basename, w_mm, h_mm)
+        try:
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                rect = page.rect
 
-            product_name = None
-            stamp_label = None
-            group_sort_key = None
-            if sort_preset in ("product_name", "master_group"):
-                product_name = extract_product_name(text, basename)
-                if sort_preset == "master_group":
-                    matched_group = match_master_group(product_name, master_groups)
-                    if matched_group:
-                        stamp_label = matched_group.get("group_name") or product_name
-                        group_sort_key = f"0_{stamp_label}"
-                    else:
-                        # Товар не привязан ни к одной Мастер-Группе — фолбэк на сортировку по названию товара
-                        group_sort_key = f"1_{product_name or basename}"
+                w_mm = rect.width * PT_TO_MM
+                h_mm = rect.height * PT_TO_MM
+                base_category = classify_page_size(w_mm, h_mm)
 
-            # Фильтрация по суточной истории
-            if deduplicate_history and not force_reprint:
-                if unique_key in history_printed_keys:
-                    deduplicated_pages_count += 1
+                text = page.get_text()
+                order_id = extract_order_id(text, basename)
+                unique_key = get_page_unique_key(text, basename, order_id)
+                express_flag = is_express_page(text, basename, w_mm, h_mm)
+
+                product_name = None
+                stamp_label = None
+                group_sort_key = None
+                if sort_preset in ("product_name", "master_group"):
+                    product_name = extract_product_name(text, basename)
+                    if sort_preset == "master_group":
+                        matched_group = match_master_group(product_name, master_groups)
+                        if matched_group:
+                            stamp_label = matched_group.get("group_name") or product_name
+                            group_sort_key = f"0_{stamp_label}"
+                        else:
+                            # Товар не привязан ни к одной Мастер-Группе — фолбэк на сортировку по названию товара
+                            group_sort_key = f"1_{product_name or basename}"
+
+                # Фильтрация по суточной истории
+                if deduplicate_history and not force_reprint:
+                    if unique_key in history_printed_keys:
+                        deduplicated_pages_count += 1
+                        continue
+
+                # Фильтрация по Экспресс в режиме exclude
+                if express_mode == "exclude" and express_flag:
                     continue
 
-            # Фильтрация по Экспресс в режиме exclude
-            if express_mode == "exclude" and express_flag:
-                continue
+                final_category = base_category
+                if express_mode == "separate" and express_flag:
+                    express_cat_key = f"EXPRESS_{base_category}"
+                    if express_cat_key in CATEGORY_META:
+                        final_category = express_cat_key
 
-            final_category = base_category
-            if express_mode == "separate" and express_flag:
-                express_cat_key = f"EXPRESS_{base_category}"
-                if express_cat_key in CATEGORY_META:
-                    final_category = express_cat_key
+                item = PageItem(
+                    pdf_path=pdf_path,
+                    page_num=page_num,
+                    source_filename=basename,
+                    original_order=orig_order * 1000 + page_num,
+                    w_mm=round(w_mm, 1),
+                    h_mm=round(h_mm, 1),
+                    category=final_category,
+                    order_id=order_id,
+                    rotation=page.rotation,
+                    is_express=express_flag,
+                    unique_key=unique_key,
+                    product_name=product_name,
+                    stamp_label=stamp_label,
+                    group_sort_key=group_sort_key
+                )
+                all_pages.append(item)
+                new_keys_to_save.add(unique_key)
+        except Exception as e:
+            logger.warning(f"Print Batcher: файл '{basename}' пропущен при разборе: {e}")
+            unreadable_files.append(basename)
+        finally:
+            doc.close()
 
-            item = PageItem(
-                pdf_path=pdf_path,
-                page_num=page_num,
-                source_filename=basename,
-                original_order=orig_order * 1000 + page_num,
-                w_mm=round(w_mm, 1),
-                h_mm=round(h_mm, 1),
-                category=final_category,
-                order_id=order_id,
-                rotation=page.rotation,
-                is_express=express_flag,
-                unique_key=unique_key,
-                product_name=product_name,
-                stamp_label=stamp_label,
-                group_sort_key=group_sort_key
-            )
-            all_pages.append(item)
-            new_keys_to_save.add(unique_key)
-        doc.close()
+    if unreadable_files:
+        logger.warning(
+            f"Print Batcher: не прочитано файлов {len(unreadable_files)} из {len(extracted_pdf_paths)}"
+        )
+    if unreadable_files and not all_pages:
+        raise ValueError(
+            f"Ни один PDF из архива не удалось прочитать (файлов в архиве: {len(extracted_pdf_paths)})"
+        )
 
     # 2. Сортировка списка страниц
     if sort_preset == "order_id":
@@ -993,12 +1067,10 @@ def process_zip_or_pdfs(
     elif output_layout == "just_merge":
         if all_pages:
             out_doc = fitz.open()
-            doc_cache: Dict[str, fitz.Document] = {}
+            doc_cache = _DocCache()
             try:
                 for item in all_pages:
-                    if item.pdf_path not in doc_cache:
-                        doc_cache[item.pdf_path] = fitz.open(item.pdf_path)
-                    src_doc = doc_cache[item.pdf_path]
+                    src_doc = doc_cache.get(item.pdf_path)
                     out_doc.insert_pdf(src_doc, from_page=item.page_num, to_page=item.page_num)
                     if item.stamp_label:
                         try:
@@ -1015,8 +1087,7 @@ def process_zip_or_pdfs(
                 total_pdf_pages = len(out_doc)
                 out_doc.close()
             finally:
-                for d in doc_cache.values():
-                    d.close()
+                doc_cache.close_all()
 
             audit = validate_pdf_geometry(str(output_pdf_path))
 
@@ -1042,7 +1113,7 @@ def process_zip_or_pdfs(
             else:
                 categorized_pages[p.category] = [p]
 
-        doc_cache: Dict[str, fitz.Document] = {}
+        doc_cache = _DocCache()
         try:
             for cat, items in categorized_pages.items():
                 if not items:
@@ -1050,9 +1121,7 @@ def process_zip_or_pdfs(
 
                 out_doc = fitz.open()
                 for item in items:
-                    if item.pdf_path not in doc_cache:
-                        doc_cache[item.pdf_path] = fitz.open(item.pdf_path)
-                    src_doc = doc_cache[item.pdf_path]
+                    src_doc = doc_cache.get(item.pdf_path)
                     out_doc.insert_pdf(src_doc, from_page=item.page_num, to_page=item.page_num)
                     last_page = out_doc[-1]
 
@@ -1098,8 +1167,7 @@ def process_zip_or_pdfs(
                     "geometry_audit": audit
                 }
         finally:
-            for d in doc_cache.values():
-                d.close()
+            doc_cache.close_all()
 
     # 3.5. Отдельный VIP-батч Экспресса (см. шаг 2.5) — печатаем 1-на-A4,
     # чтобы трёхпанельный лист сохранил исходные пропорции и читаемость.
@@ -1139,6 +1207,7 @@ def process_zip_or_pdfs(
         "total_files": len(extracted_pdf_paths),
         "total_pages": total_pages_found,
         "deduplicated_pages": deduplicated_pages_count,
+        "skipped_files": len(unreadable_files),
         "new_pages": total_new_pages,
         "all_duplicates": all_duplicates,
         "sort_preset": sort_preset,

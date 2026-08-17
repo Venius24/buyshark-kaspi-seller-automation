@@ -15,6 +15,12 @@ EnvironmentFile=/root/buyshark/.env
 ExecStart=/root/buyshark/venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 5000 --workers 1
 Restart=always
 RestartSec=5
+# Дефолтные 1024 дескриптора съедались склейкой крупных партий накладных,
+# и при исчерпании падал не только батчер, а весь приём соединений сервиса
+# (asyncio: socket.accept() out of system resource). Утечка вылечена в
+# print_batcher_service, но запас держим — один тяжёлый запрос не должен
+# иметь возможности уронить сервис целиком.
+LimitNOFILE=65535
 StandardOutput=journal
 StandardError=journal
 
