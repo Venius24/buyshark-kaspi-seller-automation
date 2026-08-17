@@ -820,11 +820,11 @@ export const MasterStockGroups: React.FC = () => {
                                 src={img}
                                 alt=""
                                 loading="lazy"
-                                style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}
+                                style={{ width: '48px', height: '48px', borderRadius: '8px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}
                                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
                               />
                             ) : (
-                              <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(255,255,255,0.04)', flexShrink: 0 }} />
+                              <div style={{ width: '48px', height: '48px', borderRadius: '8px', background: 'rgba(255,255,255,0.04)', flexShrink: 0 }} />
                             );
                           })()}
                           <div>

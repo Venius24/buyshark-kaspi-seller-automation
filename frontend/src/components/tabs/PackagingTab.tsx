@@ -246,11 +246,11 @@ export function PackagingTab({
                                   src={item.image}
                                   alt=""
                                   loading="lazy"
-                                  style={{ width: '32px', height: '32px', borderRadius: '6px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}
+                                  style={{ width: '44px', height: '44px', borderRadius: '8px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}
                                   onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
                                 />
                               ) : (
-                                <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: 'rgba(255,255,255,0.04)', flexShrink: 0 }} />
+                                <div style={{ width: '44px', height: '44px', borderRadius: '8px', background: 'rgba(255,255,255,0.04)', flexShrink: 0 }} />
                               )}
                               <div>
                                 <div style={{ color: '#fff', fontWeight: 500 }}>{item.productName}</div>

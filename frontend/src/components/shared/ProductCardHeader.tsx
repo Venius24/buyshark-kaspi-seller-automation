@@ -15,11 +15,11 @@ export function ProductCardHeader({ name, sku, kaspiSku, merchantSku, image }: P
           src={image}
           alt=""
           loading="lazy"
-          style={{ width: '40px', height: '40px', borderRadius: '8px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}
+          style={{ width: '60px', height: '60px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}
           onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
         />
       ) : (
-        <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: 'rgba(255,255,255,0.04)', flexShrink: 0 }} />
+        <div style={{ width: '60px', height: '60px', borderRadius: '10px', background: 'rgba(255,255,255,0.04)', flexShrink: 0 }} />
       )}
       <div>
         <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{name}</h3>
