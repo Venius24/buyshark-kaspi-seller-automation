@@ -240,9 +240,22 @@ export function PackagingTab({
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         {order.entries && order.entries.map((item, idx) => (
                           <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.01)', padding: '8px 12px', borderRadius: '8px', fontSize: '13px', border: '1px solid rgba(255,255,255,0.02)' }}>
-                            <div style={{ flexGrow: 1, marginRight: '16px' }}>
-                              <div style={{ color: '#fff', fontWeight: 500 }}>{item.productName}</div>
-                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>SKU: {item.sku}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexGrow: 1, marginRight: '16px' }}>
+                              {item.image ? (
+                                <img
+                                  src={item.image}
+                                  alt=""
+                                  loading="lazy"
+                                  style={{ width: '32px', height: '32px', borderRadius: '6px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}
+                                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                                />
+                              ) : (
+                                <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: 'rgba(255,255,255,0.04)', flexShrink: 0 }} />
+                              )}
+                              <div>
+                                <div style={{ color: '#fff', fontWeight: 500 }}>{item.productName}</div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>SKU: {item.sku}</div>
+                              </div>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '24px', flexShrink: 0 }}>
                               <div style={{ color: 'var(--text-muted)' }}>x{item.quantity}</div>

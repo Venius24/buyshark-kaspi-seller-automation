@@ -352,7 +352,7 @@ export function DumpingTab({
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ maxWidth: '70%' }}>
-                      <ProductCardHeader name={product.name} sku={product.sku} kaspiSku={product.kaspiSku} merchantSku={product.merchantSku} />
+                      <ProductCardHeader name={product.name} sku={product.sku} kaspiSku={product.kaspiSku} merchantSku={product.merchantSku} image={product.image} />
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
                         {getStatusBadge(dStatus)}

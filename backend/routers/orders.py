@@ -4,8 +4,34 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.kaspi_wrapper import KaspiAPI
 from backend.models import PackOrderRequest
 from backend.security.store_context import StoreContext, get_store_context
+from backend.state_helpers import _load_products
 
 router = APIRouter(prefix="/api", tags=["orders"])
+
+
+def _image_map_for_store(store_id: str) -> dict:
+    """sku/merchantSku -> превью из кэша каталога. Orders API Kaspi картинок не отдаёт вообще."""
+    products = _load_products(store_id)
+    image_map = {}
+    for p in products:
+        img = p.get("image")
+        if not img:
+            continue
+        for key in (p.get("sku"), p.get("merchantSku"), p.get("kaspiSku")):
+            if key:
+                image_map[str(key)] = img
+    return image_map
+
+
+def _attach_entry_images(orders: list, image_map: dict):
+    if not image_map:
+        return
+    for order in orders:
+        for entry in order.get("entries", []) or []:
+            img = image_map.get(str(entry.get("sku"))) or image_map.get(str(entry.get("merchantSku")))
+            if img:
+                entry["image"] = img
+
 
 @router.get("/orders/packaging/tabs")
 def get_packaging_tabs(ctx: StoreContext = Depends(get_store_context)):
@@ -15,7 +41,11 @@ def get_packaging_tabs(ctx: StoreContext = Depends(get_store_context)):
         # Общий кэш (TTL 120с, см. kaspi_wrapper.py) — тот же тяжёлый обход
         # дёргает ещё routers/stock_groups.py (30с-тик в stock_sync_worker.py
         # в этот кэш не ходит, ему нужна более свежая выборка).
-        return KaspiAPI.get_all_packaging_tabs_cached(token)
+        data = KaspiAPI.get_all_packaging_tabs_cached(token)
+        image_map = _image_map_for_store(ctx.store_id)
+        for key in ("cargo_assembly", "wait_for_courier", "transmitted"):
+            _attach_entry_images(data.get(key) or [], image_map)
+        return data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -40,6 +70,7 @@ def get_orders(
     token = ctx.token
     try:
         orders = KaspiAPI.get_orders_with_products(token, state=state, status=status, limit=limit, assembled=assembled)
+        _attach_entry_images(orders, _image_map_for_store(ctx.store_id))
         return {"success": True, "orders": orders, "count": len(orders)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

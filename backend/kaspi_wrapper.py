@@ -1148,6 +1148,9 @@ class KaspiAPI:
                         brand_name = offer.get("brandName") or "Без бренда"
                         title = offer.get("title") or f"Товар {merchant_sku}"
 
+                        images_v2 = offer.get("imagesV2") or []
+                        image_url = images_v2[0].get("small") if images_v2 else None
+
                         product_entry = {
                             "id": f"p_{master_sku}",
                             "name": title,
@@ -1160,6 +1163,7 @@ class KaspiAPI:
                             "price_num": int(price_num),
                             "stock": int(stock_count),
                             "brand": brand_name,
+                            "image": image_url,
                         }
                         all_products.append(product_entry)
                         pass_count += 1

@@ -12,6 +12,8 @@ export interface Product {
   brand?: string;
   dumping_status?: string;
   dumping_config?: any;
+  /** Превью с CDN Kaspi (resources.cdn-kaspi.kz), размер "small". */
+  image?: string;
 }
 
 export interface OrderEntry {
@@ -24,6 +26,8 @@ export interface OrderEntry {
   quantity: number;
   basePrice: number;
   totalPrice: number;
+  /** Подставляется бэкендом из каталога товаров по sku/merchantSku, т.к. orders API Kaspi картинок не отдаёт. */
+  image?: string;
 }
 
 export interface Order {

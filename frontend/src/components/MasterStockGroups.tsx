@@ -133,6 +133,18 @@ export interface ProductItem {
   kaspiSku?: string;
   /** «Активен» / «Архив» — приходит из кэша ассортимента (см. sync_merchant_assortment). */
   status?: string;
+  image?: string;
+}
+
+/** Превью первого привязанного товара группы — одна картинка на группу, не на чип. */
+function firstGroupImage(linkedSkus: string[], products: ProductItem[]): string | undefined {
+  for (const raw of linkedSkus) {
+    const s = String(raw || '').trim();
+    if (!s) continue;
+    const p = products.find(x => x.sku === s || x.merchantSku === s || x.kaspiSku === s);
+    if (p?.image) return p.image;
+  }
+  return undefined;
 }
 
 /** Снятая с продажи карточка: у неё title=null, price=0 и пустой availabilities. */
@@ -800,52 +812,70 @@ export const MasterStockGroups: React.FC = () => {
                       
                       {/* Group Name & ID */}
                       <td style={{ padding: '18px 24px' }}>
-                        <div style={{ fontWeight: 600, color: 'var(--text-color)', fontSize: '15px' }}>
-                          {group.group_name}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span>ID: {group.group_id}</span>
-                          {group.external_code && (
-                            <span style={{ color: 'var(--primary-hover)', background: 'rgba(56, 189, 248, 0.12)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
-                              1C: {group.external_code}
-                            </span>
-                          )}
-                        </div>
-                        {group.dumping_config?.enabled && (
-                          <div style={{ marginTop: '4px' }}>
-                            <span style={{
-                              fontSize: '11px',
-                              color: 'var(--warning)',
-                              background: 'rgba(245, 158, 11, 0.12)',
-                              padding: '2px 8px',
-                              borderRadius: '6px',
-                              border: '1px solid rgba(245, 158, 11, 0.3)',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px'
-                            }}>
-                              <Zap size={11} />
-                              <span>Демпинг: {group.dumping_config.min_price} – {group.dumping_config.max_price} ₸ ({group.dumping_config.mode || 'TOP_1'})</span>
-                            </span>
-                            {(group.dumping_excluded_skus?.length ?? 0) > 0 && (
-                              <span
-                                title={`Исключены из демпинга: ${group.dumping_excluded_skus!.join(', ')}`}
-                                style={{
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                          {(() => {
+                            const img = firstGroupImage(group.linked_skus, products);
+                            return img ? (
+                              <img
+                                src={img}
+                                alt=""
+                                loading="lazy"
+                                style={{ width: '36px', height: '36px', borderRadius: '8px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}
+                                onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                              />
+                            ) : (
+                              <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(255,255,255,0.04)', flexShrink: 0 }} />
+                            );
+                          })()}
+                          <div>
+                            <div style={{ fontWeight: 600, color: 'var(--text-color)', fontSize: '15px' }}>
+                              {group.group_name}
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span>ID: {group.group_id}</span>
+                              {group.external_code && (
+                                <span style={{ color: 'var(--primary-hover)', background: 'rgba(56, 189, 248, 0.12)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                                  1C: {group.external_code}
+                                </span>
+                              )}
+                            </div>
+                            {group.dumping_config?.enabled && (
+                              <div style={{ marginTop: '4px' }}>
+                                <span style={{
                                   fontSize: '11px',
-                                  color: 'var(--text-muted)',
-                                  background: 'rgba(255,255,255,0.05)',
+                                  color: 'var(--warning)',
+                                  background: 'rgba(245, 158, 11, 0.12)',
                                   padding: '2px 8px',
                                   borderRadius: '6px',
-                                  border: '1px solid var(--card-border)',
-                                  marginLeft: '6px',
-                                  display: 'inline-block'
-                                }}
-                              >
-                                Исключено: {group.dumping_excluded_skus!.length}
-                              </span>
+                                  border: '1px solid rgba(245, 158, 11, 0.3)',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}>
+                                  <Zap size={11} />
+                                  <span>Демпинг: {group.dumping_config.min_price} – {group.dumping_config.max_price} ₸ ({group.dumping_config.mode || 'TOP_1'})</span>
+                                </span>
+                                {(group.dumping_excluded_skus?.length ?? 0) > 0 && (
+                                  <span
+                                    title={`Исключены из демпинга: ${group.dumping_excluded_skus!.join(', ')}`}
+                                    style={{
+                                      fontSize: '11px',
+                                      color: 'var(--text-muted)',
+                                      background: 'rgba(255,255,255,0.05)',
+                                      padding: '2px 8px',
+                                      borderRadius: '6px',
+                                      border: '1px solid var(--card-border)',
+                                      marginLeft: '6px',
+                                      display: 'inline-block'
+                                    }}
+                                  >
+                                    Исключено: {group.dumping_excluded_skus!.length}
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
-                        )}
+                        </div>
                       </td>
 
                       {/* Shared Stock (Inline Editable) */}
