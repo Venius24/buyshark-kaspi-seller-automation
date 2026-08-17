@@ -316,7 +316,9 @@ def register_handlers():
         sort_title = {
             "filename": "🔤 По имени файла",
             "order_id": "🔢 По Order ID",
-            "original": "📄 В порядке архива"
+            "original": "📄 В порядке архива",
+            "product_name": "📦 По названию товара",
+            "master_group": "🏷️ По Мастер-Группе (со штампом)"
         }.get(sort_p, sort_p)
 
         fmt_title = {
@@ -352,6 +354,10 @@ def register_handlers():
                 InlineKeyboardButton(text=f"🔤 Имя {'✅' if sort_p == 'filename' else ''}", callback_data="stg_srt:filename"),
                 InlineKeyboardButton(text=f"🔢 Order ID {'✅' if sort_p == 'order_id' else ''}", callback_data="stg_srt:order_id"),
                 InlineKeyboardButton(text=f"📄 Архив {'✅' if sort_p == 'original' else ''}", callback_data="stg_srt:original")
+            ],
+            [
+                InlineKeyboardButton(text=f"📦 Товар {'✅' if sort_p == 'product_name' else ''}", callback_data="stg_srt:product_name"),
+                InlineKeyboardButton(text=f"🏷️ Мастер-Группа {'✅' if sort_p == 'master_group' else ''}", callback_data="stg_srt:master_group")
             ],
             [
                 InlineKeyboardButton(text=f"🛡️ Дедупликация: {'ВКЛ ✅' if dedup else 'ВЫКЛ ❌'}", callback_data="stg_toggle:deduplicate_history"),

@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/print-batcher", tags=["Print Batcher Engine"])
 @router.post("/process")
 async def process_print_batch(
     file: UploadFile = File(...),
-    sort_preset: str = Form("filename"),            # 'filename' | 'order_id' | 'original'
+    sort_preset: str = Form("filename"),            # 'filename' | 'order_id' | 'original' | 'product_name' | 'master_group'
     auto_rotate: bool = Form(True),
     express_mode: str = Form("separate"),            # 'separate' | 'exclude' | 'ignore'
     deduplicate_history: bool = Form(True),

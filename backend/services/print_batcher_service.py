@@ -358,10 +358,214 @@ def natural_sort_key(s: str) -> List[Any]:
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
 
+# Пунктирная линия перед "N шт." — основной шаблон термоэтикетки Kaspi:
+# "Barkhan S517-0027 черный . . . . . . . . . . . .  1 шт."
+_PRODUCT_DOT_LEADER_RE = re.compile(r'^\s*(?:\d+\.\s*)?(.+?)\s*(?:\.\s*){4,}\d+\s*шт\.?\s*$', re.MULTILINE)
+_ORDER_ID_LINE_RE = re.compile(r'^\d[\d\s]{8,}\d$')
+
+
+def extract_product_name(text: str, filename: str) -> Optional[str]:
+    """
+    Извлечение названия первого товара накладной из текстового слоя PDF.
+
+    Kaspi использует минимум два шаблона накладных:
+    1) Термоэтикетка с нумерованным списком товаров и пунктирной линией
+       перед "N шт." — основной, покрывает большинство заказов.
+    2) 3-панельная квитанция курьера "НА ТОВАР" — без пунктира, название
+       товара стоит отдельной строкой прямо перед последним вхождением
+       номера заказа (панель "ОБРАЗЕЦ ПАРТНЕРА").
+    Порядок обхода не важен для многотоварных заказов — сортировка/группа
+    берётся по ПЕРВОМУ найденному товару в тексте (решение пользователя).
+    """
+    if not text:
+        return None
+
+    m = _PRODUCT_DOT_LEADER_RE.search(text)
+    if m:
+        name = m.group(1).strip(" .")
+        if name:
+            return name
+
+    if "НА ТОВАР" in text:
+        lines = [l.strip() for l in text.splitlines()]
+        for i in range(len(lines) - 1, 0, -1):
+            digits = lines[i].replace(" ", "")
+            if digits.isdigit() and 9 <= len(digits) <= 10:
+                candidate = lines[i - 1].strip()
+                if candidate and not candidate.replace(" ", "").isdigit():
+                    return candidate
+                break
+
+    return None
+
+
+def match_master_group(product_name: Optional[str], master_groups: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Сопоставление названия товара накладной с Мастер-Группой остатка по
+    подстроке (артикул/модель группы или её linked_skus встречается в
+    названии товара). При нескольких совпадениях побеждает самое длинное
+    (более специфичное) — короче 3 символов не рассматриваем, чтобы не
+    ловить случайные буквенные совпадения.
+    """
+    if not product_name:
+        return None
+
+    name_lower = product_name.lower()
+    best_group = None
+    best_len = 0
+
+    for group in master_groups:
+        if not group.get("is_active", True):
+            continue
+        candidates = [group.get("group_name") or ""]
+        candidates.extend(str(sku) for sku in (group.get("linked_skus") or []) if sku)
+
+        for raw in candidates:
+            token = raw.strip()
+            if len(token) < 3:
+                continue
+            if token.lower() in name_lower and len(token) > best_len:
+                best_group = group
+                best_len = len(token)
+
+    return best_group
+
+
+_STAMP_FONT_BOLD: Optional[str] = None
+_STAMP_FONT_REGULAR: Optional[str] = None
+_STAMP_FONT_RESOLVED = False
+
+
+def _resolve_stamp_fonts() -> Tuple[Optional[str], Optional[str]]:
+    """
+    Поиск кириллического TTF-шрифта для штампа группы. Base14-шрифты
+    PyMuPDF (helv/Helvetica) не содержат кириллицу — без внешнего файла
+    штамп рисуется знаками "?????". Проверяем Linux (прод-VPS, DejaVu/
+    Liberation стоят по умолчанию) и Windows (dev) пути.
+    """
+    global _STAMP_FONT_BOLD, _STAMP_FONT_REGULAR, _STAMP_FONT_RESOLVED
+    if _STAMP_FONT_RESOLVED:
+        return _STAMP_FONT_BOLD, _STAMP_FONT_REGULAR
+
+    bold_candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "C:/Windows/Fonts/arialbd.ttf",
+    ]
+    regular_candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+    ]
+    _STAMP_FONT_BOLD = next((p for p in bold_candidates if os.path.exists(p)), None)
+    _STAMP_FONT_REGULAR = next((p for p in regular_candidates if os.path.exists(p)), None)
+    _STAMP_FONT_RESOLVED = True
+
+    if not _STAMP_FONT_BOLD or not _STAMP_FONT_REGULAR:
+        logger.warning("Print Batcher: кириллический шрифт для штампа Мастер-Группы не найден, штамп пропускается")
+
+    return _STAMP_FONT_BOLD, _STAMP_FONT_REGULAR
+
+
+def _find_stamp_band(src_page: fitz.Page, clip: fitz.Rect, box_w: float, box_h: float, min_gap: float = 3.0) -> Optional[fitz.Rect]:
+    """
+    Ищет первую свободную от текста/картинок горизонтальную полосу внутри
+    clip (по левому краю, шириной box_w) — туда впишется штамп группы, не
+    перекрывая существующее содержимое накладной. Возвращает None, если
+    подходящего места не нашлось (штамп в этом случае просто не рисуется).
+    """
+    blockers = []
+    for b in src_page.get_text("blocks"):
+        r = fitz.Rect(b[:4])
+        if r.width > 2 and r.height > 2 and r.intersects(clip):
+            blockers.append(r)
+    for img in src_page.get_image_info():
+        r = fitz.Rect(img["bbox"])
+        if r.intersects(clip):
+            blockers.append(r)
+
+    x0 = clip.x0
+    x1 = min(clip.x1, x0 + box_w)
+    column_blockers = sorted(
+        (r for r in blockers if r.x0 < x1 and r.x1 > x0),
+        key=lambda r: r.y0
+    )
+
+    cursor = clip.y0
+    for r in column_blockers:
+        if r.y0 - cursor >= box_h + 2 * min_gap:
+            return fitz.Rect(x0, cursor + min_gap, x1, cursor + min_gap + box_h)
+        cursor = max(cursor, r.y1)
+
+    if clip.y1 - cursor >= box_h + 2 * min_gap:
+        return fitz.Rect(x0, cursor + min_gap, x1, cursor + min_gap + box_h)
+
+    return None
+
+
+def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: fitz.Page, src_clip: fitz.Rect, label: str) -> None:
+    """
+    Штамп "ГРУППА: <название>" — контурная рамка с подписью, вставляется в
+    первый найденный свободный участок накладной. Место ищется на ИСХОДНОЙ
+    странице (src_page/src_clip) в её собственных координатах, а рисуется
+    в target_page/target_rect — координаты и размер шрифта масштабируются
+    так же, как show_pdf_page масштабирует src_clip в target_rect (единый
+    механизм для склеенных термоэтикеток, A4-сеток и страниц "как есть").
+    """
+    font_bold, font_regular = _resolve_stamp_fonts()
+    if not font_bold or not font_regular:
+        return
+
+    box_w = src_clip.width * 0.54
+    box_h = src_clip.height * 0.078
+    band = _find_stamp_band(src_page, src_clip, box_w, box_h)
+    if band is None:
+        return
+
+    scale = min(target_rect.width / src_clip.width, target_rect.height / src_clip.height)
+    disp_w = src_clip.width * scale
+    disp_h = src_clip.height * scale
+    off_x = target_rect.x0 + (target_rect.width - disp_w) / 2.0
+    off_y = target_rect.y0 + (target_rect.height - disp_h) / 2.0
+
+    box = fitz.Rect(
+        off_x + (band.x0 - src_clip.x0) * scale,
+        off_y + (band.y0 - src_clip.y0) * scale,
+        off_x + (band.x1 - src_clip.x0) * scale,
+        off_y + (band.y1 - src_clip.y0) * scale,
+    )
+
+    size_ref = max(0.4, min(1.3, target_rect.height / 425.2))
+    border_w = 1.0 * size_ref
+    pad = 5.0 * size_ref
+    label_fs = 6.5 * size_ref
+    name_fs = 12.0 * size_ref
+
+    try:
+        target_page.insert_font(fontname="F_STAMP_B", fontfile=font_bold)
+        target_page.insert_font(fontname="F_STAMP_R", fontfile=font_regular)
+    except Exception:
+        pass
+
+    target_page.draw_rect(box, color=(0.45, 0.45, 0.45), width=border_w)
+
+    top_pad = 2.0 * size_ref
+    label_h = label_fs * 1.5
+    label_rect = fitz.Rect(box.x0 + pad, box.y0 + top_pad, box.x1 - pad, box.y0 + top_pad + label_h)
+    target_page.insert_textbox(label_rect, "ГРУППА", fontname="F_STAMP_R", fontsize=label_fs,
+                                color=(0.55, 0.55, 0.55), align=0)
+
+    name_rect = fitz.Rect(box.x0 + pad, label_rect.y1, box.x1 - pad, box.y1 - 1.5 * size_ref)
+    target_page.insert_textbox(name_rect, label, fontname="F_STAMP_B", fontsize=name_fs,
+                                color=(0.3, 0.3, 0.3), align=0)
+
+
 class PageItem:
     def __init__(self, pdf_path: str, page_num: int, source_filename: str, original_order: int,
                  w_mm: float, h_mm: float, category: str, order_id: Optional[str],
-                 rotation: int, is_express: bool, unique_key: str):
+                 rotation: int, is_express: bool, unique_key: str,
+                 product_name: Optional[str] = None, stamp_label: Optional[str] = None,
+                 group_sort_key: Optional[str] = None):
         self.pdf_path = pdf_path
         self.page_num = page_num
         self.source_filename = source_filename
@@ -373,6 +577,9 @@ class PageItem:
         self.rotation = rotation
         self.is_express = is_express
         self.unique_key = unique_key
+        self.product_name = product_name
+        self.stamp_label = stamp_label
+        self.group_sort_key = group_sort_key
 
 
 def generate_nup_a4_pdf(
@@ -417,6 +624,11 @@ def generate_nup_a4_pdf(
             c_rect = get_content_rect(src_page)
 
             current_a4_page.show_pdf_page(target_rect, src_doc, item.page_num, clip=c_rect, keep_proportion=True)
+            if item.stamp_label:
+                try:
+                    draw_group_stamp(current_a4_page, target_rect, src_page, c_rect, item.stamp_label)
+                except Exception as e:
+                    logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
             item_count_on_page += 1
 
         return out_doc
@@ -449,6 +661,11 @@ def generate_thermal_pdf(
             
             c_rect = get_content_rect(src_page)
             new_p.show_pdf_page(target_rect, src_doc, item.page_num, clip=c_rect, keep_proportion=True)
+            if item.stamp_label:
+                try:
+                    draw_group_stamp(new_p, target_rect, src_page, c_rect, item.stamp_label)
+                except Exception as e:
+                    logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
 
         return out_doc
     finally:
@@ -459,7 +676,7 @@ def generate_thermal_pdf(
 def process_zip_or_pdfs(
     file_bytes: bytes,
     original_filename: str,
-    sort_preset: str = "filename",        # 'filename' | 'order_id' | 'original'
+    sort_preset: str = "filename",        # 'filename' | 'order_id' | 'original' | 'product_name' | 'master_group'
     auto_rotate: bool = True,
     express_mode: str = "separate",        # 'separate' | 'exclude' | 'ignore'
     deduplicate_history: bool = True,
@@ -512,6 +729,12 @@ def process_zip_or_pdfs(
     deduplicated_pages_count = 0
     new_keys_to_save: Set[str] = set()
 
+    master_groups: List[Dict[str, Any]] = []
+    if sort_preset == "master_group" and store_id:
+        from backend.state_helpers import _load_master_stock_groups
+        # Мастер-Группы остатка грузятся ОДИН раз на всю очередь, а не на каждую страницу
+        master_groups = list((_load_master_stock_groups(store_id) or {}).values())
+
     # 1. Извлечение страниц и анализ геометрии
     for pdf_path, orig_order in extracted_pdf_paths:
         doc = fitz.open(pdf_path)
@@ -529,6 +752,20 @@ def process_zip_or_pdfs(
             order_id = extract_order_id(text, basename)
             unique_key = get_page_unique_key(text, basename, order_id)
             express_flag = is_express_page(text, basename)
+
+            product_name = None
+            stamp_label = None
+            group_sort_key = None
+            if sort_preset in ("product_name", "master_group"):
+                product_name = extract_product_name(text, basename)
+                if sort_preset == "master_group":
+                    matched_group = match_master_group(product_name, master_groups)
+                    if matched_group:
+                        stamp_label = matched_group.get("group_name") or product_name
+                        group_sort_key = f"0_{stamp_label}"
+                    else:
+                        # Товар не привязан ни к одной Мастер-Группе — фолбэк на сортировку по названию товара
+                        group_sort_key = f"1_{product_name or basename}"
 
             # Фильтрация по суточной истории
             if deduplicate_history and not force_reprint:
@@ -557,7 +794,10 @@ def process_zip_or_pdfs(
                 order_id=order_id,
                 rotation=page.rotation,
                 is_express=express_flag,
-                unique_key=unique_key
+                unique_key=unique_key,
+                product_name=product_name,
+                stamp_label=stamp_label,
+                group_sort_key=group_sort_key
             )
             all_pages.append(item)
             new_keys_to_save.add(unique_key)
@@ -568,6 +808,13 @@ def process_zip_or_pdfs(
         all_pages.sort(key=lambda p: (p.order_id or "999999999999", natural_sort_key(p.source_filename), p.page_num))
     elif sort_preset == "filename":
         all_pages.sort(key=lambda p: (natural_sort_key(p.source_filename), p.page_num))
+    elif sort_preset == "product_name":
+        all_pages.sort(key=lambda p: (natural_sort_key(p.product_name or p.source_filename), p.page_num))
+    elif sort_preset == "master_group":
+        # group_sort_key: "0_<название группы>" для привязанных к Мастер-Группе
+        # (сортируются вместе по названию группы), "1_<название товара>" — фолбэк
+        # для товаров без группы (сортируются по названию товара после всех групп)
+        all_pages.sort(key=lambda p: (natural_sort_key(p.group_sort_key or p.source_filename), p.page_num))
     else:  # 'original'
         all_pages.sort(key=lambda p: p.original_order)
 
@@ -650,7 +897,14 @@ def process_zip_or_pdfs(
                         doc_cache[item.pdf_path] = fitz.open(item.pdf_path)
                     src_doc = doc_cache[item.pdf_path]
                     out_doc.insert_pdf(src_doc, from_page=item.page_num, to_page=item.page_num)
-                
+                    if item.stamp_label:
+                        try:
+                            last_page = out_doc[-1]
+                            c_rect = get_content_rect(src_doc[item.page_num])
+                            draw_group_stamp(last_page, last_page.rect, src_doc[item.page_num], c_rect, item.stamp_label)
+                        except Exception as e:
+                            logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
+
                 cat_key = "MERGED_ALL"
                 output_pdf_filename = f"PRINT_BATCH_{cat_key}.pdf"
                 output_pdf_path = batch_out_dir / output_pdf_filename
@@ -697,14 +951,21 @@ def process_zip_or_pdfs(
                         doc_cache[item.pdf_path] = fitz.open(item.pdf_path)
                     src_doc = doc_cache[item.pdf_path]
                     out_doc.insert_pdf(src_doc, from_page=item.page_num, to_page=item.page_num)
-                    
+                    last_page = out_doc[-1]
+
+                    if item.stamp_label:
+                        try:
+                            c_rect = get_content_rect(src_doc[item.page_num])
+                            draw_group_stamp(last_page, last_page.rect, src_doc[item.page_num], c_rect, item.stamp_label)
+                        except Exception as e:
+                            logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
+
                     if auto_rotate:
-                        last_page = out_doc[-1]
                         rect = last_page.rect
                         if "STICKER" in cat or "PAPER_A4" in cat:
                             if rect.width > rect.height:
                                 last_page.set_rotation(90)
-                
+
                 output_pdf_filename = f"PRINT_BATCH_{cat}.pdf"
                 output_pdf_path = batch_out_dir / output_pdf_filename
                 out_doc.save(str(output_pdf_path))

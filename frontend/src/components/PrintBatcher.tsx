@@ -314,6 +314,8 @@ export const PrintBatcher: React.FC = () => {
             >
               <option value="filename">По имени исходного файла (алфавитная/числовая)</option>
               <option value="order_id">По номеру заказа (Kaspi Order ID)</option>
+              <option value="product_name">По названию товара</option>
+              <option value="master_group">По Мастер-Группе остатка (с штампом на этикетке)</option>
               <option value="original">Оригинальный порядок из архива</option>
             </select>
           </div>
