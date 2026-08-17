@@ -154,11 +154,41 @@ export const PrintBatcher: React.FC = () => {
     }
   };
 
-  const handlePrint = (previewEndpoint: string) => {
+  const handlePrint = async (previewEndpoint: string) => {
+    // Прямая навигация (window.open на URL API) не несёт Authorization —
+    // токен живёт только в localStorage и цепляется apiFetch'ем, поэтому
+    // голый window.open бил 401 "Требуется вход..." даже у залогиненных.
     const fullUrl = `${API_URL}${previewEndpoint}`;
-    const win = window.open(fullUrl, '_blank');
-    if (win) {
-      win.focus();
+    const win = window.open('', '_blank');
+    try {
+      const res = await apiFetch(fullUrl);
+      if (!res.ok) throw new Error('Не удалось открыть предпросмотр');
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      if (win) {
+        win.location.href = blobUrl;
+      }
+    } catch (err) {
+      if (win) win.close();
+      setError('Не удалось открыть предпросмотр PDF');
+    }
+  };
+
+  const handleDownload = async (downloadEndpoint: string, fileName: string) => {
+    try {
+      const res = await apiFetch(`${API_URL}${downloadEndpoint}`);
+      if (!res.ok) throw new Error('Не удалось скачать файл');
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      setError('Не удалось скачать файл');
     }
   };
 
@@ -506,14 +536,12 @@ export const PrintBatcher: React.FC = () => {
                           🖨️ Предпросмотр / Печать
                         </button>
 
-                        <a
-                          href={`${API_URL}${batch.download_url}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={styles.downloadBtn}
+                        <button
+                          onClick={() => handleDownload(batch.download_url, batch.file_name)}
+                          style={{ ...styles.downloadBtn, cursor: 'pointer' }}
                         >
                           ⬇️ Скачать PDF
-                        </a>
+                        </button>
                       </div>
                     </div>
                   );
