@@ -37,6 +37,16 @@ CATEGORY_META = {
         "printer_type": "Офисный принтер A4 (СРОЧНАЯ СБОРКА)",
         "is_express": True
     },
+    # Настоящий лист Kaspi Express — 656x928 мм (три панели на листе), т.е.
+    # LARGE_FORMAT. Без этой категории режим «Выделять в VIP-батчи» молча не
+    # срабатывал для экспресса: express_cat_key не находился в CATEGORY_META,
+    # и лист оставался в общей крупноформатной пачке.
+    "EXPRESS_LARGE_FORMAT": {
+        "title": "⚡ 🚀 Экспресс-Накладные Kaspi (лист 3 панели)",
+        "icon": "⚡",
+        "printer_type": "Офисный принтер A4 (СРОЧНАЯ СБОРКА)",
+        "is_express": True
+    },
     "STICKER_75x120": {
         "title": "Термоэтикетки Kaspi (75x120 мм)",
         "icon": "🏷️",
@@ -317,13 +327,56 @@ def classify_page_size(width_mm: float, height_mm: float) -> str:
         return "CUSTOM_SIZE"
 
 
-def is_express_page(text: str, filename: str) -> bool:
-    """Определение относится ли страница/файл к Экспресс-доставке"""
-    combined_str = f"{text} {filename}".lower()
-    express_keywords = ["экспресс", "express", "каспи экспресс", "kaspi express", "срочная доставка"]
-    for kw in express_keywords:
-        if kw in combined_str:
-            return True
+# Габариты листа Kaspi Express (три панели на одном листе: «Образец партнёра»,
+# «Образец курьера», «На товар»). Замерено на живых накладных Бархана
+# 2026-08-17: ровно 656.2 x 928.2 мм у всех 8 экспресс-листов пачки, при том
+# что все 69 обычных накладных — строго 210x297. Размер служит запасным
+# признаком на случай, если Kaspi поменяет подписи панелей.
+_EXPRESS_SHEET_MM = (656.2, 928.2)
+_EXPRESS_SHEET_TOLERANCE_MM = 15.0
+
+# Структурные маркеры экспресс-листа — подписи его панелей.
+#
+# ВАЖНО: видимая надпись «Экспресс Доставка» на самом листе — РАСТР (картинка),
+# в текстовом слое её нет. Поэтому старый поиск слова «экспресс»/«express» по
+# тексту страницы не находил НИ ОДНОГО настоящего экспресса, зато давал ложные
+# срабатывания на обычных заказах, у которых слово попадало в адрес ПВЗ клиента
+# («улица Толстого, 1, В экспресс»). На пачке Бархана 2026-08-17 это давало
+# 1 ложный экспресс и 7 просочившихся настоящих из 8.
+#
+# Подписи панелей ниже есть на всех экспресс-листах и ни на одной обычной
+# накладной (проверено: 8/8 попаданий, 0/69 ложных).
+_EXPRESS_TEXT_MARKERS = ("образец курьера", "образец партнера", "образец партнёра")
+
+
+def is_express_page(
+    text: str,
+    filename: str,
+    w_mm: Optional[float] = None,
+    h_mm: Optional[float] = None,
+) -> bool:
+    """Определение относится ли страница/файл к Экспресс-доставке.
+
+    Габариты (w_mm/h_mm) опциональны только ради обратной совместимости со
+    старыми вызовами — при разборе накладных их всегда нужно передавать,
+    иначе теряется запасной признак по размеру листа.
+    """
+    fn = (filename or "").lower()
+    if "express" in fn or "экспресс" in fn:
+        return True
+
+    t = (text or "").lower()
+    if any(marker in t for marker in _EXPRESS_TEXT_MARKERS):
+        return True
+
+    if w_mm is not None and h_mm is not None:
+        exp_w, exp_h = _EXPRESS_SHEET_MM
+        tol = _EXPRESS_SHEET_TOLERANCE_MM
+        # Проверяем обе ориентации — лист может приехать повёрнутым.
+        for page_w, page_h in ((w_mm, h_mm), (h_mm, w_mm)):
+            if abs(page_w - exp_w) <= tol and abs(page_h - exp_h) <= tol:
+                return True
+
     return False
 
 
@@ -751,7 +804,7 @@ def process_zip_or_pdfs(
             text = page.get_text()
             order_id = extract_order_id(text, basename)
             unique_key = get_page_unique_key(text, basename, order_id)
-            express_flag = is_express_page(text, basename)
+            express_flag = is_express_page(text, basename, w_mm, h_mm)
 
             product_name = None
             stamp_label = None
@@ -820,6 +873,22 @@ def process_zip_or_pdfs(
 
     result_batches: Dict[str, Dict[str, Any]] = {}
     total_pages_found = len(all_pages) + deduplicated_pages_count
+
+    # 2.5. Выделение Экспресса в отдельный батч при ЖЁСТКО выбранной раскладке.
+    #
+    # Разделение по категориям живёт только в ветке 'auto', поэтому при выборе
+    # конкретного формата (термо/сетка A4) режим «Выделять в VIP-батчи» молча
+    # ничего не выделял — экспресс уезжал в общую пачку. Для термоэтикеток это
+    # особенно ломало печать: лист Kaspi Express (656x928 мм, три панели) вжимался
+    # в этикетку 75x120 мм и становился нечитаемым.
+    #
+    # Экспресс-лист по пропорциям — ровно A4, увеличенный в ~3.1 раза, поэтому
+    # его собственный батч печатаем 1-на-A4: получается исходный документ 1:1.
+    express_pages_split: List[PageItem] = []
+    if express_mode == "separate" and output_layout not in ("auto", "just_merge"):
+        express_pages_split = [p for p in all_pages if p.is_express]
+        if express_pages_split:
+            all_pages = [p for p in all_pages if not p.is_express]
 
     # 3. Обработка режимов output_layout
     if output_layout in ["a4_4", "a4_8", "a4_9", "a4_1"]:
@@ -998,11 +1067,36 @@ def process_zip_or_pdfs(
             for d in doc_cache.values():
                 d.close()
 
+    # 3.5. Отдельный VIP-батч Экспресса (см. шаг 2.5) — печатаем 1-на-A4,
+    # чтобы трёхпанельный лист сохранил исходные пропорции и читаемость.
+    if express_pages_split:
+        exp_doc = generate_nup_a4_pdf(express_pages_split, 1, 1)
+        exp_cat_key = "EXPRESS_PRIORITY"
+        exp_filename = f"PRINT_BATCH_{exp_cat_key}.pdf"
+        exp_path = batch_out_dir / exp_filename
+        exp_doc.save(str(exp_path))
+        exp_total = len(exp_doc)
+        exp_doc.close()
+
+        result_batches[exp_cat_key] = {
+            "category": exp_cat_key,
+            "title": "⚡ 🚀 Экспресс-заказы (приоритет, 1 на A4)",
+            "icon": "⚡",
+            "printer_type": "Офисный принтер A4 (СРОЧНАЯ СБОРКА)",
+            "is_express": True,
+            "file_name": exp_filename,
+            "total_pages": exp_total,
+            "download_url": f"/api/print-batcher/download/{batch_id}/{exp_cat_key}",
+            "preview_url": f"/api/print-batcher/file-preview/{batch_id}/{exp_cat_key}",
+            "sample_dimensions": "210.0x297.0 мм",
+            "geometry_audit": validate_pdf_geometry(str(exp_path), 210.0, 297.0)
+        }
+
     # Сохранение истории
     if new_keys_to_save and deduplicate_history:
         save_printed_history(new_keys_to_save, store_id=store_id)
 
-    total_new_pages = len(all_pages)
+    total_new_pages = len(all_pages) + len(express_pages_split)
     all_duplicates = (total_pages_found > 0 and total_new_pages == 0)
 
     manifest = {
