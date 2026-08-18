@@ -19,6 +19,7 @@ const TAB_ICON: Record<ActiveTab, string> = {
   referral: '🤝',
   logs: '📜',
   settings: '⚙️',
+  help: '❓',
 };
 
 const TAB_TITLE: Record<ActiveTab, string> = {
@@ -40,6 +41,7 @@ const TAB_TITLE: Record<ActiveTab, string> = {
   referral: 'Реферальная программа',
   logs: 'Терминал Системных Событий',
   settings: 'Статус Сессии & Настройки',
+  help: 'Помощь и Энциклопедия',
 };
 
 const TAB_SUBTITLE: Record<ActiveTab, string> = {
@@ -61,6 +63,7 @@ const TAB_SUBTITLE: Record<ActiveTab, string> = {
   referral: 'Ваша реферальная ссылка, приведённые магазины и начисления',
   logs: 'Поток событий системы в реальном времени через WebSocket',
   settings: 'Состояние авторизации Kaspi REST API и сессии Kaspi MC',
+  help: 'Как устроены все механики сервиса — простым языком',
 };
 
 interface ContentHeaderProps {

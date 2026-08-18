@@ -12,6 +12,7 @@ export function Nav() {
       <div className={styles.links}>
         <a href="#features">Возможности</a>
         <a href="#pricing">Тарифы</a>
+        <a href="/help/">Помощь</a>
         <a href={APP_URL}>Кабинет</a>
       </div>
       <div className={styles.actions}>

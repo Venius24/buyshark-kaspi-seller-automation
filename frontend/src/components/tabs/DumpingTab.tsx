@@ -46,7 +46,6 @@ interface DumpingTabProps {
   dumpingStatusFilter: string;
   onDumpingStatusFilterChange: (val: string) => void;
   onRefreshConfigs: () => void;
-  onOpenPriceFeedImport: () => void;
   dumpingConfigs: Record<string, DumpingConfig>;
   expandedSkus: Set<string>;
   onToggleExpanded: (sku: string) => void;
@@ -90,7 +89,6 @@ export function DumpingTab({
   dumpingStatusFilter,
   onDumpingStatusFilterChange,
   onRefreshConfigs,
-  onOpenPriceFeedImport,
   dumpingConfigs,
   expandedSkus,
   onToggleExpanded,
@@ -291,14 +289,6 @@ export function DumpingTab({
             onClick={onRefreshConfigs}
           >
             🔄 Обновить настройки
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            style={{ padding: '10px 14px' }}
-            onClick={onOpenPriceFeedImport}
-          >
-            📥 Импорт из PriceFeed
           </button>
         </form>
       </div>

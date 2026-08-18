@@ -15,6 +15,7 @@ interface SidebarProps {
   billingBlocked?: boolean;
   /** Мобильный drawer: открыт ли он сейчас. На десктопе класс ни на что не влияет. */
   isOpen?: boolean;
+  onOpenPriceFeedImport: () => void;
 }
 
 export function Sidebar({
@@ -31,6 +32,7 @@ export function Sidebar({
   isBetaTester,
   billingBlocked,
   isOpen,
+  onOpenPriceFeedImport,
 }: SidebarProps) {
   return (
     <aside className={`sidebar ${isOpen ? 'sidebar-open' : ''}`}>
@@ -259,10 +261,37 @@ export function Sidebar({
             </div>
             <span className="sidebar-pill">API</span>
           </button>
+
+          <button
+            className={`sidebar-item ${activeTab === 'help' ? 'active' : ''}`}
+            onClick={() => onSelectTab('help')}
+          >
+            <div className="sidebar-item-left">
+              <span className="sidebar-icon">❓</span>
+              <span>Помощь</span>
+            </div>
+          </button>
         </div>
       </div>
 
       <div className="sidebar-footer">
+        <button
+          type="button"
+          onClick={onOpenPriceFeedImport}
+          title="Импорт из PriceFeed"
+          style={{
+            display: 'flex', alignItems: 'center', gap: '6px', width: '100%',
+            padding: '4px 6px', marginBottom: '6px', background: 'transparent',
+            border: 'none', borderRadius: '6px', cursor: 'pointer',
+            color: 'var(--text-muted)', fontSize: '11px', opacity: 0.6,
+            transition: 'opacity 0.15s ease',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; }}
+        >
+          <span style={{ fontSize: '12px' }}>📥</span>
+          <span>Импорт из PriceFeed</span>
+        </button>
         <div className="sidebar-user-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span className="glow-dot glow-dot-success"></span>

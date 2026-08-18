@@ -11,6 +11,7 @@ import { usePriceFeedImport } from './hooks/usePriceFeedImport';
 import { LogsTab } from './components/tabs/LogsTab';
 import { OverviewTab } from './components/tabs/OverviewTab';
 import { SettingsTab } from './components/tabs/SettingsTab';
+import { HelpTab } from './components/tabs/HelpTab';
 import { AutolistTab } from './components/tabs/AutolistTab';
 import { MasterStockGroups } from './components/MasterStockGroups';
 import { IntegrationsPublicApi } from './components/IntegrationsPublicApi';
@@ -766,6 +767,7 @@ export default function App() {
         isReferrer={isReferrer}
         isBetaTester={isBetaTester}
         billingBlocked={billingBlocked}
+        onOpenPriceFeedImport={priceFeedImport.openModal}
       />
 
       {/* ── MAIN CONTENT AREA ─────────────────────────────────── */}
@@ -832,6 +834,9 @@ export default function App() {
             onCheckMcStatus={() => checkMcStatus(true)}
           />
         )}
+
+        {/* ❓ TAB: HELP / ENCYCLOPEDIA */}
+        {activeTab === 'help' && <HelpTab />}
 
         {/* 🏷️ TAB 1, ⚡ TAB 2, 📦 TAB 3, 🚚 TAB 4: RENDER IN GLASS CARD */}
         {(activeTab === 'products' || activeTab === 'dumping' || activeTab === 'packaging' || activeTab === 'transfer') && (
@@ -901,7 +906,6 @@ export default function App() {
                   loadProducts(1, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, val);
                 }}
                 onRefreshConfigs={loadDumpingConfigs}
-                onOpenPriceFeedImport={priceFeedImport.openModal}
                 dumpingConfigs={dumpingConfigs}
                 expandedSkus={expandedSkus}
                 onToggleExpanded={(sku) => {

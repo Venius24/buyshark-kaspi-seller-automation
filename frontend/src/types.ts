@@ -237,7 +237,8 @@ export type ActiveTab =
   | 'admin'
   | 'referral'
   | 'logs'
-  | 'settings';
+  | 'settings'
+  | 'help';
 
 export interface BillingSummary {
   plan_code: string;

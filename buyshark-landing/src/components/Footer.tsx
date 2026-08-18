@@ -9,7 +9,7 @@ export function Footer() {
       </div>
       <div className={styles.links}>
         <a href="https://app.buyshark.kz/">Кабинет</a>
-        <a href="#features">Поддержка</a>
+        <a href="/help/">Помощь</a>
         <a href="/privacy.html">Политика конфиденциальности</a>
       </div>
     </footer>
