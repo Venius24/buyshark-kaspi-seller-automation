@@ -9,7 +9,7 @@ import zipfile
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple, Set
+from typing import Callable, Dict, List, Any, Optional, Tuple, Set
 import fitz  # PyMuPDF
 
 logger = logging.getLogger(__name__)
@@ -630,12 +630,11 @@ def _resolve_stamp_fonts() -> Tuple[Optional[str], Optional[str]]:
     return _STAMP_FONT_BOLD, _STAMP_FONT_REGULAR
 
 
-def _find_stamp_band(src_page: fitz.Page, clip: fitz.Rect, box_w: float, box_h: float, min_gap: float = 3.0) -> Optional[fitz.Rect]:
+def _collect_blockers(src_page: fitz.Page, clip: fitz.Rect) -> List[fitz.Rect]:
     """
-    Ищет первую свободную от текста/картинок горизонтальную полосу внутри
-    clip (по левому краю, шириной box_w) — туда впишется штамп группы, не
-    перекрывая существующее содержимое накладной. Возвращает None, если
-    подходящего места не нашлось (штамп в этом случае просто не рисуется).
+    Занятые участки накладной (текст + картинки). Разбор текстового слоя —
+    самая дорогая часть поиска места под штамп, поэтому он делается ОДИН раз
+    на страницу и переиспользуется для обеих попыток подобрать высоту рамки.
     """
     blockers = []
     for b in src_page.get_text("blocks"):
@@ -646,7 +645,16 @@ def _find_stamp_band(src_page: fitz.Page, clip: fitz.Rect, box_w: float, box_h: 
         r = fitz.Rect(img["bbox"])
         if r.intersects(clip):
             blockers.append(r)
+    return blockers
 
+
+def _find_stamp_band(blockers: List[fitz.Rect], clip: fitz.Rect, box_w: float, box_h: float, min_gap: float = 3.0) -> Optional[fitz.Rect]:
+    """
+    Ищет первую свободную от текста/картинок горизонтальную полосу внутри
+    clip (по левому краю, шириной box_w) — туда впишется штамп группы, не
+    перекрывая существующее содержимое накладной. Возвращает None, если
+    подходящего места не нашлось (штамп в этом случае просто не рисуется).
+    """
     x0 = clip.x0
     x1 = min(clip.x1, x0 + box_w)
     column_blockers = sorted(
@@ -666,31 +674,86 @@ def _find_stamp_band(src_page: fitz.Page, clip: fitz.Rect, box_w: float, box_h: 
     return None
 
 
-def _insert_textbox_fitted(target_page: fitz.Page, rect: fitz.Rect, text: str, fontname: str,
-                           fontsize: float, color: tuple, min_fontsize: float) -> bool:
+_STAMP_FONT_OBJECTS: Dict[str, "fitz.Font"] = {}
+
+
+def _stamp_font(path: str) -> "fitz.Font":
     """
-    insert_textbox молча НЕ рисует ничего и возвращает отрицательное значение,
-    если текст не влезает в прямоугольник. Из-за этого в штампе оставалось
-    только слово "ГРУППА": название группы длиннее одного короткого слова
-    переносилось на вторую строку, не помещалось по высоте и исчезало
-    целиком. Подбираем кегль вниз, а если и минимальный не помог — режем
-    название с многоточием.
+    fitz.Font кэшируется на процесс: раньше шрифт встраивался в страницу на
+    КАЖДЫЙ штамп (insert_font + CheckFont сканируют ресурсы страницы), и на
+    партии в 1200 накладных это съедало десятки секунд.
     """
+    font = _STAMP_FONT_OBJECTS.get(path)
+    if font is None:
+        font = fitz.Font(fontfile=path)
+        _STAMP_FONT_OBJECTS[path] = font
+    return font
+
+
+def _wrap_text(font: "fitz.Font", text: str, fontsize: float, width: float) -> List[str]:
+    """Перенос по словам под ширину рамки; слово длиннее строки режется."""
+    lines: List[str] = []
+    for word in text.split():
+        if lines and font.text_length(lines[-1] + " " + word, fontsize) <= width:
+            lines[-1] += " " + word
+            continue
+        if font.text_length(word, fontsize) <= width:
+            lines.append(word)
+            continue
+        chunk = ""
+        for ch in word:
+            if font.text_length(chunk + ch, fontsize) <= width:
+                chunk += ch
+            else:
+                if chunk:
+                    lines.append(chunk)
+                chunk = ch
+        if chunk:
+            lines.append(chunk)
+    return lines
+
+
+def _draw_fitted_text(target_page: fitz.Page, rect: fitz.Rect, text: str, font: "fitz.Font",
+                      fontsize: float, color: tuple, min_fontsize: float) -> bool:
+    """
+    Вписывает название группы в рамку: кегль подбирается АРИФМЕТИКОЙ по
+    ширине глифов, а не пробной отрисовкой. Прежняя версия перебирала кегли,
+    каждый раз реально вызывая insert_textbox (тот молча возвращает минус,
+    если текст не влез) — на 816 штампов выходило 5700 отрисовок.
+    Если даже минимальный кегль не помещается, название режется многоточием.
+    """
+    if not text or rect.width <= 1 or rect.height <= 1:
+        return False
+
     step = max(0.25, fontsize * 0.06)
     fs = fontsize
     while fs >= min_fontsize:
-        if target_page.insert_textbox(rect, text, fontname=fontname, fontsize=fs,
-                                      color=color, align=0) >= 0:
-            return True
+        lines = _wrap_text(font, text, fs, rect.width)
+        if lines and len(lines) * fs * 1.25 <= rect.height:
+            break
         fs -= step
+    else:
+        # Не влезло даже минимальным кеглем — режем с многоточием
+        fs = min_fontsize
+        max_lines = max(1, int(rect.height // (fs * 1.25)))
+        trimmed = text
+        while len(trimmed) > 4:
+            trimmed = trimmed[:-2]
+            lines = _wrap_text(font, trimmed + "…", fs, rect.width)
+            if len(lines) <= max_lines:
+                break
+        else:
+            return False
 
-    trimmed = text
-    while len(trimmed) > 4:
-        trimmed = trimmed[:-2]
-        if target_page.insert_textbox(rect, trimmed + "…", fontname=fontname, fontsize=min_fontsize,
-                                      color=color, align=0) >= 0:
-            return True
-    return False
+    writer = fitz.TextWriter(target_page.rect, color=color)
+    y = rect.y0 + fs * font.ascender
+    for line in lines:
+        if y > rect.y1:
+            break
+        writer.append(fitz.Point(rect.x0, y), line, font=font, fontsize=fs)
+        y += fs * 1.25
+    writer.write_text(target_page)
+    return True
 
 
 def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: fitz.Page, src_clip: fitz.Rect, label: str) -> None:
@@ -711,10 +774,11 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
     # прежние 7.8% высоты накладной. Если такой полосы на накладной не нашлось —
     # откатываемся к прежней высоте, чтобы штамп не пропал совсем.
     box_h = src_clip.height * 0.105
-    band = _find_stamp_band(src_page, src_clip, box_w, box_h)
+    blockers = _collect_blockers(src_page, src_clip)
+    band = _find_stamp_band(blockers, src_clip, box_w, box_h)
     if band is None:
         box_h = src_clip.height * 0.078
-        band = _find_stamp_band(src_page, src_clip, box_w, box_h)
+        band = _find_stamp_band(blockers, src_clip, box_w, box_h)
     if band is None:
         return
 
@@ -737,23 +801,20 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
     label_fs = 6.5 * size_ref
     name_fs = 12.0 * size_ref
 
-    try:
-        target_page.insert_font(fontname="F_STAMP_B", fontfile=font_bold)
-        target_page.insert_font(fontname="F_STAMP_R", fontfile=font_regular)
-    except Exception:
-        pass
+    bold = _stamp_font(font_bold)
+    regular = _stamp_font(font_regular)
 
     target_page.draw_rect(box, color=(0.45, 0.45, 0.45), width=border_w)
 
     top_pad = 2.0 * size_ref
     label_h = label_fs * 1.5
     label_rect = fitz.Rect(box.x0 + pad, box.y0 + top_pad, box.x1 - pad, box.y0 + top_pad + label_h)
-    target_page.insert_textbox(label_rect, "ГРУППА", fontname="F_STAMP_R", fontsize=label_fs,
-                                color=(0.55, 0.55, 0.55), align=0)
+    _draw_fitted_text(target_page, label_rect, "ГРУППА", regular, label_fs,
+                      (0.55, 0.55, 0.55), label_fs * 0.7)
 
     name_rect = fitz.Rect(box.x0 + pad, label_rect.y1, box.x1 - pad, box.y1 - 1.5 * size_ref)
-    if not _insert_textbox_fitted(target_page, name_rect, label, "F_STAMP_B", name_fs,
-                                  (0.3, 0.3, 0.3), max(3.5, 5.0 * size_ref)):
+    if not _draw_fitted_text(target_page, name_rect, label, bold, name_fs,
+                             (0.3, 0.3, 0.3), max(3.5, 5.0 * size_ref)):
         logger.warning(f"Print Batcher: название группы '{label}' не поместилось в штамп")
 
 
@@ -836,10 +897,27 @@ class _DocCache:
         self.close_all()
 
 
+def _report(progress_cb: Optional[Callable[[str, int, int], None]], stage: str, done: int, total: int) -> None:
+    """
+    Отчёт о прогрессе наружу (в фоновую задачу роутера). Партия в 1200
+    накладных считается около минуты — без этого пользователь минуту смотрит
+    в неподвижный спиннер. Дёргаем не чаще, чем раз в 25 шагов.
+    """
+    if progress_cb is None:
+        return
+    if done != total and done % 25:
+        return
+    try:
+        progress_cb(stage, done, total)
+    except Exception:
+        pass
+
+
 def generate_nup_a4_pdf(
     items: List[PageItem],
     cols: int,
-    rows: int
+    rows: int,
+    progress_cb: Optional[Callable[[str, int, int], None]] = None
 ) -> fitz.Document:
     """Генератор N-up раскладки на листах A4 с подгонкой"""
     out_doc = fitz.open()
@@ -882,6 +960,7 @@ def generate_nup_a4_pdf(
                 except Exception as e:
                     logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
             item_count_on_page += 1
+            _report(progress_cb, "Компоновка страниц", idx + 1, len(items))
 
         return out_doc
     finally:
@@ -891,7 +970,8 @@ def generate_nup_a4_pdf(
 def generate_thermal_pdf(
     items: List[PageItem],
     target_w_mm: float,
-    target_h_mm: float
+    target_h_mm: float,
+    progress_cb: Optional[Callable[[str, int, int], None]] = None
 ) -> fitz.Document:
     """Трансформация с ПОДГОНКОЙ во весь размер термоэтикетки (75x120 / 100x150 мм)"""
     target_w_pt = target_w_mm * 72.0 / 25.4
@@ -903,7 +983,7 @@ def generate_thermal_pdf(
     doc_cache = _DocCache()
 
     try:
-        for item in items:
+        for idx, item in enumerate(items):
             new_p = out_doc.new_page(width=target_w_pt, height=target_h_pt)
             src_doc = doc_cache.get(item.pdf_path)
             src_page = src_doc[item.page_num]
@@ -916,6 +996,7 @@ def generate_thermal_pdf(
                     draw_group_stamp(new_p, target_rect, src_page, c_rect, item.stamp_label)
                 except Exception as e:
                     logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
+            _report(progress_cb, "Компоновка страниц", idx + 1, len(items))
 
         return out_doc
     finally:
@@ -931,7 +1012,8 @@ def process_zip_or_pdfs(
     deduplicate_history: bool = True,
     force_reprint: bool = False,
     output_layout: str = "auto",          # 'auto' | 'a4_4' | 'a4_8' | 'a4_9' | 'a4_1' | 'thermal_75_120' | 'thermal_100_150' | 'just_merge'
-    store_id: Optional[str] = None
+    store_id: Optional[str] = None,
+    progress_cb: Optional[Callable[[str, int, int], None]] = None
 ) -> Dict[str, Any]:
     """
     Основной пайплайн обработки, подгонки и аудита геометрии накладных.
@@ -989,7 +1071,8 @@ def process_zip_or_pdfs(
 
     # 1. Извлечение страниц и анализ геометрии
     unreadable_files: List[str] = []
-    for pdf_path, orig_order in extracted_pdf_paths:
+    for scanned, (pdf_path, orig_order) in enumerate(extracted_pdf_paths, start=1):
+        _report(progress_cb, "Чтение накладных", scanned, len(extracted_pdf_paths))
         basename = os.path.basename(pdf_path)
         # Один битый файл в архиве не должен ронять печать всей остальной партии
         try:
@@ -1120,7 +1203,7 @@ def process_zip_or_pdfs(
                 "a4_1": (1, 1, "1 на A4 (По центру)", "🖨️ Офисный принтер A4 (1 на листе)"),
             }
             cols, rows, layout_title, printer_desc = grid_map[output_layout]
-            nup_doc = generate_nup_a4_pdf(all_pages, cols, rows)
+            nup_doc = generate_nup_a4_pdf(all_pages, cols, rows, progress_cb)
             
             cat_key = f"LAYOUT_{output_layout.upper()}"
             output_pdf_filename = f"PRINT_BATCH_{cat_key}.pdf"
@@ -1152,7 +1235,7 @@ def process_zip_or_pdfs(
                 "thermal_100_150": (100.0, 150.0, "THERMAL_100x150", "🏷️ Термоэтикетки (100×150 мм)", "Термопринтер этикеток 100x150 / Xprinter / Zebra")
             }
             t_w, t_h, cat_key, title, printer_desc = thermal_map[output_layout]
-            thermal_doc = generate_thermal_pdf(all_pages, t_w, t_h)
+            thermal_doc = generate_thermal_pdf(all_pages, t_w, t_h, progress_cb)
             
             output_pdf_filename = f"PRINT_BATCH_{cat_key}.pdf"
             output_pdf_path = batch_out_dir / output_pdf_filename
@@ -1284,7 +1367,7 @@ def process_zip_or_pdfs(
     # 3.5. Отдельный VIP-батч Экспресса (см. шаг 2.5) — печатаем 1-на-A4,
     # чтобы трёхпанельный лист сохранил исходные пропорции и читаемость.
     if express_pages_split:
-        exp_doc = generate_nup_a4_pdf(express_pages_split, 1, 1)
+        exp_doc = generate_nup_a4_pdf(express_pages_split, 1, 1, progress_cb)
         exp_cat_key = "EXPRESS_PRIORITY"
         exp_filename = f"PRINT_BATCH_{exp_cat_key}.pdf"
         exp_path = batch_out_dir / exp_filename

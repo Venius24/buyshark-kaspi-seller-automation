@@ -1,5 +1,9 @@
 import asyncio
-import functools
+import logging
+import threading
+import time
+import uuid
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
@@ -11,7 +15,57 @@ from backend.services.print_batcher_service import (
 )
 from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/print-batcher", tags=["Print Batcher Engine"])
+
+# Склейка крупной партии — это десятки секунд чистого CPU (1200 накладных ≈ 55с
+# на проде). Держать на это открытый HTTP-запрос нельзя: перед сервисом стоит
+# Cloudflare с жёстким лимитом 100с, и он обрывает соединение, отдавая в
+# браузер HTML-страницу ошибки — фронт спотыкался об неё как об
+# "Unexpected token '<'". Поэтому обработка уходит в фоновую задачу, а клиент
+# опрашивает её статус короткими запросами.
+_JOBS: Dict[str, Dict[str, Any]] = {}
+_JOBS_LOCK = threading.Lock()
+_JOB_TTL_SECONDS = 3600
+
+
+def _prune_jobs() -> None:
+    """Задачи живут час — дальше манифест всё равно не нужен, а файлы батчей чистятся отдельно."""
+    deadline = time.time() - _JOB_TTL_SECONDS
+    for job_id in [j for j, v in _JOBS.items() if v["updated_at"] < deadline]:
+        _JOBS.pop(job_id, None)
+
+
+def _set_job(job_id: str, **fields: Any) -> None:
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job is None:
+            return
+        job.update(fields)
+        job["updated_at"] = time.time()
+
+
+def _make_progress_cb(job_id: str):
+    def _cb(stage: str, done: int, total: int) -> None:
+        _set_job(job_id, progress={"stage": stage, "done": done, "total": total})
+    return _cb
+
+
+def _run_job(job_id: str, kwargs: Dict[str, Any]) -> None:
+    """
+    Выполняется в отдельном потоке, а не задачей event loop: конвейер
+    синхронный и CPU-тяжёлый, и он обязан пережить завершение HTTP-запроса,
+    который его породил.
+    """
+    try:
+        manifest = process_zip_or_pdfs(**kwargs)
+        _set_job(job_id, status="done", manifest=manifest)
+    except ValueError as ve:
+        _set_job(job_id, status="error", detail=str(ve))
+    except Exception as e:
+        logger.exception("Print Batcher: фоновая склейка упала")
+        _set_job(job_id, status="error", detail=f"Ошибка обработки печати: {e}")
 
 
 @router.post("/process")
@@ -36,31 +90,61 @@ async def process_print_batch(
     if not (filename.endswith(".zip") or filename.endswith(".pdf")):
         raise HTTPException(status_code=400, detail="Формат файла не поддерживается. Загрузите .zip или .pdf")
 
-    try:
-        content = await file.read()
-        # process_zip_or_pdfs is a synchronous, CPU-heavy PyMuPDF pipeline
-        # (page-by-page parsing/rendering, PDF re-composition) — running it
-        # inline on the event loop froze the whole single-worker app for
-        # the duration of every print job.
-        manifest = await asyncio.to_thread(
-            functools.partial(
-                process_zip_or_pdfs,
-                file_bytes=content,
-                original_filename=file.filename,
-                sort_preset=sort_preset,
-                auto_rotate=auto_rotate,
-                express_mode=express_mode,
-                deduplicate_history=deduplicate_history,
-                force_reprint=force_reprint,
-                output_layout=output_layout,
-                store_id=ctx.store_id,
-            )
-        )
-        return JSONResponse(content=manifest)
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка обработки печати: {str(e)}")
+    content = await file.read()
+
+    job_id = uuid.uuid4().hex
+    with _JOBS_LOCK:
+        _prune_jobs()
+        _JOBS[job_id] = {
+            "store_id": ctx.store_id,
+            "status": "processing",
+            "manifest": None,
+            "detail": None,
+            "progress": None,
+            "updated_at": time.time(),
+        }
+
+    # process_zip_or_pdfs — синхронный CPU-тяжёлый конвейер PyMuPDF: в потоке,
+    # чтобы не морозить единственный воркер uvicorn на всё время склейки.
+    threading.Thread(target=_run_job, daemon=True, name=f"print-batch-{job_id[:8]}", args=(job_id, dict(
+        file_bytes=content,
+        original_filename=file.filename,
+        sort_preset=sort_preset,
+        auto_rotate=auto_rotate,
+        express_mode=express_mode,
+        deduplicate_history=deduplicate_history,
+        force_reprint=force_reprint,
+        output_layout=output_layout,
+        store_id=ctx.store_id,
+        progress_cb=_make_progress_cb(job_id),
+    ))).start()
+
+    return JSONResponse(status_code=202, content={"job_id": job_id, "status": "processing"})
+
+
+@router.get("/process-status/{job_id}")
+async def get_process_status(job_id: str, ctx: StoreContext = Depends(get_store_context)):
+    """
+    Статус фоновой склейки. Пока status == "processing", фронт продолжает
+    опрашивать; "done" отдаёт манифест, "error" — текст ошибки.
+    """
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        snapshot = dict(job) if job else None
+
+    if snapshot is None:
+        # Перезапуск сервиса теряет задачи — честно говорим об этом, иначе
+        # фронт будет опрашивать несуществующий job до бесконечности.
+        raise HTTPException(status_code=404, detail="Задача не найдена или устарела — запустите обработку заново")
+    if snapshot["store_id"] != ctx.store_id:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+
+    return {
+        "status": snapshot["status"],
+        "progress": snapshot["progress"],
+        "manifest": snapshot["manifest"],
+        "detail": snapshot["detail"],
+    }
 
 
 @router.post("/reset-history")

@@ -92,6 +92,13 @@ export const PrintBatcher: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  // Опрос статуса переживает уход со вкладки только до размонтирования:
+  // таймер обязан гаситься, иначе он продолжит стучаться в API из мёртвого компонента.
+  const pollTimerRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (pollTimerRef.current !== null) window.clearTimeout(pollTimerRef.current);
+  }, []);
   const initialPrefs = loadPrefs(activeStoreId);
   const [sortPreset, setSortPreset] = useState<string>(initialPrefs.sortPreset);
   const [autoRotate, setAutoRotate] = useState<boolean>(initialPrefs.autoRotate);
@@ -194,23 +201,64 @@ export const PrintBatcher: React.FC = () => {
     formData.append('force_reprint', String(forceReprint));
 
     try {
+      // Склейка крупной партии идёт около минуты — держать на это открытый
+      // HTTP-запрос нельзя: Cloudflare рвёт соединение на 100 секундах и
+      // отдаёт HTML-страницу ошибки, на которой ломался разбор JSON
+      // ("Unexpected token '<'"). Поэтому сервер сразу возвращает job_id,
+      // а мы опрашиваем статус.
       const response = await apiFetch(`${API_URL}/api/print-batcher/process`, {
         method: 'POST',
         body: formData,
       });
 
       if (!response.ok) {
-        const errData = await response.json();
+        const errData = await response.json().catch(() => ({}));
         throw new Error(errData.detail || 'Ошибка при обработке печатного пакета');
       }
 
-      const data: ManifestResponse = await response.json();
+      const { job_id: jobId } = await response.json();
+      if (!jobId) throw new Error('Сервер не вернул идентификатор задачи');
+
+      setProgress('Обработка запущена...');
+
+      const data = await new Promise<ManifestResponse>((resolve, reject) => {
+        const poll = async () => {
+          try {
+            const res = await apiFetch(`${API_URL}/api/print-batcher/process-status/${jobId}`);
+            if (!res.ok) {
+              const errData = await res.json().catch(() => ({}));
+              throw new Error(errData.detail || 'Не удалось получить статус обработки');
+            }
+            const job = await res.json();
+
+            if (job.status === 'done') {
+              resolve(job.manifest as ManifestResponse);
+              return;
+            }
+            if (job.status === 'error') {
+              reject(new Error(job.detail || 'Ошибка при обработке печатного пакета'));
+              return;
+            }
+            if (job.progress) {
+              const { stage, done, total } = job.progress;
+              const pct = total ? Math.round((done / total) * 100) : 0;
+              setProgress(`${stage}: ${done} из ${total} (${pct}%)`);
+            }
+            pollTimerRef.current = window.setTimeout(poll, 1500);
+          } catch (e) {
+            reject(e);
+          }
+        };
+        poll();
+      });
+
       setResultManifest(data);
       queryClient.invalidateQueries({ queryKey: historyStatsKey });
     } catch (err: any) {
       setError(err.message || 'Произошла непредвиденная ошибка');
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   };
 
@@ -494,7 +542,7 @@ export const PrintBatcher: React.FC = () => {
               ...(!file || loading ? styles.btnDisabled : {}),
             }}
           >
-            {loading ? '⏳ Обрезка полей и подгонка...' : '⚡ Сформировать пакеты для печати'}
+            {loading ? `⏳ ${progress || 'Обрезка полей и подгонка...'}` : '⚡ Сформировать пакеты для печати'}
           </button>
         </div>
       </div>
