@@ -348,8 +348,11 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
                 f" Причина: заказ #{trigger_order_info.get('order_code')}."
                 if trigger_order_info else ""
             )
+            # Знаменатель — число РЕАЛЬНЫХ товаров (после дедупа по physical_key
+            # выше), а не сырых identifiers linked_skus (merchantSku+kaspiSku на
+            # каждый товар) — иначе счётчик всегда выглядел вдвое "недоделанным".
             g["last_sync_log"] = (
-                f"В очередь: {success_count}/{len(linked_skus)}. "
+                f"В очередь: {success_count}/{len(processed_physical_skus)}. "
                 f"Пропущено по шагу: {skipped_count}. Ошибок: {fail_count}.{order_tail}"
             )
             if fail_count == 0:

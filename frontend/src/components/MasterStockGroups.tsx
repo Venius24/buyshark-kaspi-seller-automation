@@ -337,7 +337,13 @@ export const MasterStockGroups: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleToggleSkuSelection = (sku: string, archived: boolean = false) => {
+  const handleToggleSkuSelection = (p: ProductItem, archived: boolean = false) => {
+    const sku = p.sku || p.merchantSku || '';
+    // Бэкенд при сохранении сам докидывает недостающие identifiers товара в
+    // linked_skus (_expand_linked_skus), поэтому при отвязке нужно убрать ВСЕ
+    // его identifiers сразу — иначе один из них молча остаётся висеть в группе
+    // (тот самый видимый "дубль", из-за которого казалось, что товаров меньше).
+    const aliases = [p.sku, p.merchantSku, p.kaspiSku].filter((v): v is string => !!v);
     // Синхронизация группы шлёт в Kaspi available = (остаток > стоп-кол-ва),
     // то есть привязка снятой карточки к «живой» группе ВЕРНЁТ её в продажу.
     // Не запрещаем — владелец может именно этого и хотеть, — но предупреждаем.
@@ -345,16 +351,20 @@ export const MasterStockGroups: React.FC = () => {
       showToast('warning', 'Карточка снята с продажи. Если остаток группы выше стоп-количества, синхронизация вернёт её в продажу на Kaspi.');
     }
     setFormSelectedSkus(prev =>
-      prev.includes(sku) ? prev.filter(s => s !== sku) : [...prev, sku]
+      prev.includes(sku) ? prev.filter(s => !aliases.includes(s)) : [...prev, sku]
     );
     // SKU, снятый с привязки, не может оставаться исключённым из демпинга.
-    setFormDumpingExcludedSkus(prev => prev.filter(s => s !== sku));
+    setFormDumpingExcludedSkus(prev => prev.filter(s => !aliases.includes(s)));
   };
 
-  const handleToggleDumpingExclusion = (sku: string) => {
-    setFormDumpingExcludedSkus(prev =>
-      prev.includes(sku) ? prev.filter(s => s !== sku) : [...prev, sku]
-    );
+  /** Переключает исключение из демпинга сразу для ВСЕХ идентификаторов одной
+   * карточки товара (aliases из buildLinkedCards) — иначе можно было исключить
+   * только один из двух identifiers товара, а второй молча остался бы демпиться. */
+  const handleToggleDumpingExclusion = (skus: string[]) => {
+    setFormDumpingExcludedSkus(prev => {
+      const allExcluded = skus.every(s => prev.includes(s));
+      return allExcluded ? prev.filter(s => !skus.includes(s)) : Array.from(new Set([...prev, ...skus]));
+    });
   };
 
   const handleSubmitModal = async (e: React.FormEvent) => {
@@ -1480,13 +1490,12 @@ export const MasterStockGroups: React.FC = () => {
                       Исключить из группового демпинга (эти товары демпинг группы не тронет — при наличии у них собственного индивидуального демпинга он продолжит работать как обычно)
                     </label>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
-                      {formSelectedSkus.map(sku => {
-                        const pMatch = products.find(p => p.sku === sku || p.merchantSku === sku);
-                        const isExcluded = formDumpingExcludedSkus.includes(sku);
+                      {buildLinkedCards(formSelectedSkus, products).map(card => {
+                        const isExcluded = card.aliases.some(a => formDumpingExcludedSkus.includes(a));
                         return (
                           <label
-                            key={sku}
-                            onClick={() => handleToggleDumpingExclusion(sku)}
+                            key={card.key}
+                            onClick={() => handleToggleDumpingExclusion(card.aliases)}
                             style={{
                               display: 'flex',
                               alignItems: 'center',
@@ -1505,8 +1514,8 @@ export const MasterStockGroups: React.FC = () => {
                               style={{ width: '14px', height: '14px', accentColor: 'var(--error)', cursor: 'pointer' }}
                             />
                             <span style={{ fontSize: '12px', color: isExcluded ? 'var(--error)' : '#cbd5e1' }}>
-                              {pMatch?.name ? `${pMatch.name} ` : ''}
-                              <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>({sku})</span>
+                              {card.name ? `${card.name} ` : ''}
+                              <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>({card.label})</span>
                             </span>
                           </label>
                         );
@@ -1523,7 +1532,7 @@ export const MasterStockGroups: React.FC = () => {
                     Привязать товары Kaspi (Multi-Select SKU) *
                   </label>
                   <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: 600 }}>
-                    Выбрано: {formSelectedSkus.length} SKU
+                    Выбрано: {buildLinkedCards(formSelectedSkus, products).length} товаров
                   </span>
                 </div>
 
@@ -1571,7 +1580,7 @@ export const MasterStockGroups: React.FC = () => {
                       return (
                         <div
                           key={skuVal}
-                          onClick={() => handleToggleSkuSelection(skuVal, archived)}
+                          onClick={() => handleToggleSkuSelection(p, archived)}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
