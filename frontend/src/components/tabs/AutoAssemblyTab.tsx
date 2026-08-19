@@ -47,6 +47,7 @@ interface RuleCardProps {
 }
 
 function RuleCard({ rule, onSave, saving }: RuleCardProps) {
+  const { t } = useTranslation('tab_auto_assembly');
   const [draft, setDraft] = useState<AutoAssemblyRule>(rule);
   const [blacklistText, setBlacklistText] = useState((rule.sku_blacklist || []).join(', '));
   const [scheduleOn, setScheduleOn] = useState(!!rule.schedule);
@@ -242,7 +243,6 @@ function RuleCard({ rule, onSave, saving }: RuleCardProps) {
 }
 
 export function AutoAssemblyTab() {
-  const { t } = useTranslation('tab_auto_assembly');
   const queryClient = useQueryClient();
   const activeStoreId = useActiveStoreId();
   const [savingType, setSavingType] = useState<string | null>(null);

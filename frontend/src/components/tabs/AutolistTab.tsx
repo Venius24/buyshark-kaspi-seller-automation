@@ -280,7 +280,7 @@ function DraftEditor({ draft, onClose, t }: { draft: AutolistDraft; onClose: () 
 
         {!payload.category_code && (
           <div style={{ padding: '10px 12px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#fca5a5', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
-            {t('category_not_found').replace('%query%', payload.category_search_query)}
+            {t('category_not_found').replace('%query%', payload.category_search_query || '')}
           </div>
         )}
 

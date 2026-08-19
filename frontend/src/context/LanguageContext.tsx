@@ -22,7 +22,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     <LanguageContext.Provider value={{
       language: i18n.language as Language,
       setLanguage,
-      t,
+      t: t as unknown as (key: string, defaultValue?: string) => string,
     }}>
       {children}
     </LanguageContext.Provider>
