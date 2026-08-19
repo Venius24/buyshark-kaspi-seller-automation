@@ -1,4 +1,5 @@
 import type { FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Product, DumpingConfig, KaspiQuotaStatus } from '../../types';
 import { Pagination } from '../shared/Pagination';
 import { ProductCardHeader } from '../shared/ProductCardHeader';
@@ -11,20 +12,20 @@ const EMPTY_CONFIG: DumpingConfig = {
   min_seller_rating: null, same_city_only: false, blacklisted_merchants: []
 };
 
-function getStatusBadge(status: string) {
+function getStatusBadge(status: string, t: (key: string) => string) {
   switch (status) {
     case 'WINNING_1ST':
-      return <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>👑 1-е место</span>;
+      return <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>{t('status_winning_1st')}</span>;
     case 'HOLDING_2ND':
-      return <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)' }}>🥈 2-е место</span>;
+      return <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)' }}>{t('status_holding_2nd')}</span>;
     case 'TARGET_POS_REACHED':
-      return <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#a855f7', border: '1px solid rgba(168, 85, 247, 0.3)' }}>🎯 На целевой позиции</span>;
+      return <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#a855f7', border: '1px solid rgba(168, 85, 247, 0.3)' }}>{t('status_target_reached')}</span>;
     case 'AT_MIN_PRICE':
-      return <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)' }}>⚠️ Достигнут минималки</span>;
+      return <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)' }}>{t('status_at_min_price')}</span>;
     case 'MAX_PRICE_SINGLE':
-      return <span className="badge" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#ec4899', border: '1px solid rgba(236, 72, 153, 0.3)' }}>💎 Max Price (Единственный)</span>;
+      return <span className="badge" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#ec4899', border: '1px solid rgba(236, 72, 153, 0.3)' }}>{t('status_max_price_single')}</span>;
     default:
-      return <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)', color: '#888', border: '1px solid rgba(255, 255, 255, 0.1)' }}>⏸️ Отключен</span>;
+      return <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)', color: '#888', border: '1px solid rgba(255, 255, 255, 0.1)' }}>{t('status_disabled')}</span>;
   }
 }
 
@@ -101,6 +102,7 @@ export function DumpingTab({
   totalPages,
   onPageChange,
 }: DumpingTabProps) {
+  const { t } = useTranslation('tab_dumping');
   const priceWarStats = usePriceWarStats();
   const priceWarBySku: Record<string, PriceWarProduct> = {};
   priceWarStats.products.forEach((p) => { priceWarBySku[p.sku] = p; });
@@ -114,7 +116,7 @@ export function DumpingTab({
       <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <h2 style={{ fontSize: '16px' }}>
-            ⚡ Настройка авто-демпинга ({totalCount ? `${totalCount} поз.` : '0 поз.'})
+            {totalCount ? t('title').replace('%count%', String(totalCount)) : t('title_no_products')}
           </h2>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -131,7 +133,7 @@ export function DumpingTab({
                 gap: '6px'
               }}>
                 <span className="glow-dot glow-dot-success" style={{ display: 'inline-block', position: 'static', marginRight: '4px' }}></span>
-                Следующий запуск через: <strong style={{ color: 'var(--success)', fontFamily: 'monospace' }}>{formatTime(nextRunSeconds)}</strong>
+                {t('next_run')} <strong style={{ color: 'var(--success)', fontFamily: 'monospace' }}>{formatTime(nextRunSeconds)}</strong>
               </div>
             )}
 
@@ -219,7 +221,7 @@ export function DumpingTab({
               onClick={onRunDumpingCycle}
               disabled={isRunningDumping || products.length === 0}
             >
-              {isRunningDumping ? '⏳ Расчет выполняется...' : '⚡ Запустить авто-демпинг'}
+              {isRunningDumping ? t('btn_calculating') : t('btn_run_dumping')}
             </button>
           </div>
         </div>
@@ -229,7 +231,7 @@ export function DumpingTab({
           <input
             type="text"
             className="form-input"
-            placeholder="Поиск по артикулу / названию..."
+            placeholder={t('search_placeholder')}
             value={searchQuery}
             onChange={(e) => onSearchQueryChange(e.target.value)}
             style={{ flexGrow: 1 }}
@@ -247,7 +249,7 @@ export function DumpingTab({
               }}
               onClick={() => onDumpingOnlyFilterChange(false)}
             >
-              Все товары
+              {t('filter_all_products')}
             </button>
             <button
               type="button"
@@ -259,7 +261,7 @@ export function DumpingTab({
               }}
               onClick={() => onDumpingOnlyFilterChange(true)}
             >
-              Активный демпинг
+              {t('filter_active_dumping')}
             </button>
           </div>
 
@@ -270,17 +272,17 @@ export function DumpingTab({
             className="form-input"
             style={{ background: 'var(--input-bg)', color: '#fff', border: '1px solid var(--input-border)', height: '38px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px' }}
           >
-            <option value="">Все статусы</option>
-            <option value="WINNING_1ST">👑 1-е место</option>
-            <option value="HOLDING_2ND">🥈 2-е место</option>
-            <option value="TARGET_POS_REACHED">🎯 На целевой позиции</option>
-            <option value="AT_MIN_PRICE">⚠️ Достигнут минималки</option>
-            <option value="MAX_PRICE_SINGLE">💎 Max Price (Единственный)</option>
-            <option value="OFF">⏸️ Отключен</option>
+            <option value="">{t('all_statuses')}</option>
+            <option value="WINNING_1ST">{t('option_1st_place')}</option>
+            <option value="HOLDING_2ND">{t('option_2nd_place')}</option>
+            <option value="TARGET_POS_REACHED">{t('option_target_position')}</option>
+            <option value="AT_MIN_PRICE">{t('option_min_price')}</option>
+            <option value="MAX_PRICE_SINGLE">{t('option_max_price')}</option>
+            <option value="OFF">{t('option_disabled')}</option>
           </select>
 
           <button type="submit" className="btn btn-primary" style={{ padding: '10px 16px' }}>
-            Найти
+            {t('btn_search')}
           </button>
           <button
             type="button"
@@ -288,7 +290,7 @@ export function DumpingTab({
             style={{ padding: '10px 14px' }}
             onClick={onRefreshConfigs}
           >
-            🔄 Обновить настройки
+            {t('btn_refresh_config')}
           </button>
         </form>
       </div>
@@ -298,11 +300,11 @@ export function DumpingTab({
         {fetchingProducts && products.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
             <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-            <p>Загрузка товаров...</p>
+            <p>{t('loading_message')}</p>
           </div>
         ) : products.length === 0 && !fetchingProducts ? (
           <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-            <p>Товары не найдены. Смените фильтр поиска.</p>
+            <p>{t('no_products')}</p>
           </div>
         ) : (
           <div style={{
@@ -345,10 +347,10 @@ export function DumpingTab({
                       <ProductCardHeader name={product.name} sku={product.sku} kaspiSku={product.kaspiSku} merchantSku={product.merchantSku} image={product.image} />
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
-                        {getStatusBadge(dStatus)}
+                        {getStatusBadge(dStatus, t)}
 
                         <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: '#ccc', border: '1px solid rgba(255,255,255,0.08)' }}>
-                          Режим: {cfg.mode || 'TOP_1'}
+                          {t('mode_label')} {cfg.mode || 'TOP_1'}
                         </span>
 
                         {product.url && (
@@ -358,7 +360,7 @@ export function DumpingTab({
                             rel="noreferrer"
                             style={{ fontSize: '12px', color: '#3b82f6', textDecoration: 'none' }}
                           >
-                            🔗 Карточка товара
+                            {t('link_product_card')}
                           </a>
                         )}
                       </div>
@@ -366,13 +368,13 @@ export function DumpingTab({
 
                     <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '16px' }}>
                       <div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Цена 1-го места:</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('leader_price_label')}:</div>
                         <div style={{ fontSize: '16px', fontWeight: 700, color: '#9ca3af' }}>
                           {pwLeaderPrice !== null ? `${pwLeaderPrice.toLocaleString('ru-RU')} ₸` : '—'}
                         </div>
                       </div>
                       <div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Текущая цена:</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('current_price_label')}:</div>
                         <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>
                           {product.price && product.price !== "0 ₸" ? product.price : (product.price_num ? `${product.price_num} ₸` : '—')}
                         </div>
@@ -383,7 +385,7 @@ export function DumpingTab({
                         style={{ padding: '8px 12px', fontSize: '12px', borderColor: isExpanded ? 'var(--secondary)' : 'transparent' }}
                         onClick={() => onToggleExpanded(sku)}
                       >
-                        ⚙️ {isExpanded ? 'Закрыть' : 'Настроить'}
+                        {isExpanded ? t('btn_close_config') : t('btn_configure')}
                       </button>
                     </div>
                   </div>
@@ -401,12 +403,12 @@ export function DumpingTab({
                       }}
                     >
                       <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--secondary)' }}>
-                        ⚙️ Стратегия демпинга и Лимиты цен
+                        {t('dumping_strategy_title')}
                       </h4>
 
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
                         <div>
-                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Режим демпинга</label>
+                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('dumping_mode_label')}</label>
                           <select
                             id={`mode-${sku}`}
                             className="form-input"
@@ -414,49 +416,49 @@ export function DumpingTab({
                             onChange={(e) => onModeChange(sku, e.target.value)}
                             style={{ background: 'var(--input-bg)', color: '#fff', border: '1px solid var(--input-border)', height: '38px', borderRadius: '8px' }}
                           >
-                            <option value="TOP_1">🏆 1-е место (Демпинг с шагом)</option>
-                            <option value="TOP_2">🥈 2-е место (Демпинг от 2-й цены)</option>
-                            <option value="MATCH_FIRST">🎯 Прижиматься к 1-му месту (-1 ₸)</option>
-                            <option value="TARGET_POSITION">📍 N-е место (Целевая позиция)</option>
-                            <option value="OFF">⏸️ Отключен</option>
+                            <option value="TOP_1">{t('mode_top1')}</option>
+                            <option value="TOP_2">{t('mode_top2')}</option>
+                            <option value="MATCH_FIRST">{t('mode_match_first')}</option>
+                            <option value="TARGET_POSITION">{t('mode_target_position')}</option>
+                            <option value="OFF">{t('mode_off')}</option>
                           </select>
                         </div>
 
                         {selectedMode === 'TARGET_POSITION' && (
                           <div>
-                            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Целевая позиция (N)</label>
+                            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('target_position_label')}</label>
                             <input
                               type="number"
                               id={`target_pos-${sku}`}
                               className="form-input"
                               defaultValue={cfg.target_position || 1}
-                              placeholder="Позиция 1..N"
+                              placeholder={t('target_position_placeholder')}
                             />
                           </div>
                         )}
 
                         <div>
-                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Минимальная цена (₸)</label>
+                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('min_price_label')}</label>
                           <input
                             type="number"
                             id={`min-${sku}`}
                             className="form-input"
                             defaultValue={cfg.min_price || ''}
-                            placeholder="Стоп-цена"
+                            placeholder={t('min_price_placeholder')}
                           />
                         </div>
                         <div>
-                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Максимальная цена (₸)</label>
+                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('max_price_label')}</label>
                           <input
                             type="number"
                             id={`max-${sku}`}
                             className="form-input"
                             defaultValue={cfg.max_price || ''}
-                            placeholder="Базовая / RRP"
+                            placeholder={t('max_price_placeholder')}
                           />
                         </div>
                         <div>
-                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Шаг демпинга (₸)</label>
+                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('dump_step_label')}</label>
                           <input
                             type="number"
                             id={`step-${sku}`}
@@ -484,7 +486,7 @@ export function DumpingTab({
                           }}
                           onClick={() => onToggleFiltersExpanded(sku)}
                         >
-                          <span>🛡️ Фильтры конкурентов (доставка, рейтинг, блэклист)</span>
+                          <span>{t('competitor_filters_title')}</span>
                           <span style={{ fontSize: '12px', fontWeight: 'bold' }}>{isFiltersExpanded ? '▲' : '•••'}</span>
                         </button>
 
@@ -492,36 +494,36 @@ export function DumpingTab({
                           <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' }}>
                               <div>
-                                <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Макс. дней доставки (предзаказ)</label>
+                                <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('max_delivery_days_label')}</label>
                                 <input
                                   type="number"
                                   id={`max_deliv-${sku}`}
                                   className="form-input"
                                   defaultValue={cfg.max_delivery_days ?? ''}
-                                  placeholder="Например, 5 дней"
+                                  placeholder={t('max_delivery_days_placeholder')}
                                 />
                               </div>
 
                               <div>
-                                <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Мин. рейтинг конкурента</label>
+                                <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('min_seller_rating_label')}</label>
                                 <input
                                   type="number"
                                   step="0.1"
                                   id={`min_rating-${sku}`}
                                   className="form-input"
                                   defaultValue={cfg.min_seller_rating ?? ''}
-                                  placeholder="Например, 4.0"
+                                  placeholder={t('min_seller_rating_placeholder')}
                                 />
                               </div>
 
                               <div style={{ gridColumn: 'span 2' }}>
-                                <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Черный список магазинов (через запятую)</label>
+                                <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('blacklist_label')}</label>
                                 <input
                                   type="text"
                                   id={`blacklist-${sku}`}
                                   className="form-input"
                                   defaultValue={(cfg.blacklisted_merchants || []).join(', ')}
-                                  placeholder="ID или имя продавца"
+                                  placeholder={t('blacklist_placeholder')}
                                 />
                               </div>
                             </div>
@@ -533,7 +535,7 @@ export function DumpingTab({
                                 defaultChecked={cfg.same_city_only || false}
                                 style={{ width: '16px', height: '16px', cursor: 'pointer' }}
                               />
-                              Учитывать только свой город
+                              {t('same_city_only_label')}
                             </label>
                           </div>
                         )}
@@ -547,7 +549,7 @@ export function DumpingTab({
                             defaultChecked={cfg.enabled ?? true}
                             style={{ width: '16px', height: '16px', cursor: 'pointer' }}
                           />
-                          <strong>Включить демпинг для этого SKU</strong>
+                          <strong>{t('enable_dumping_label')}</strong>
                         </label>
                       </div>
 
@@ -580,7 +582,7 @@ export function DumpingTab({
                             );
                           }}
                         >
-                          💾 Сохранить параметры демпинга
+                          {t('btn_save_dumping_config')}
                         </button>
                       </div>
                     </div>

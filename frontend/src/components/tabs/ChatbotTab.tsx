@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { useChatAuth } from '../../hooks/useChatAuth';
 import { ChatSmsAuthModal } from '../ChatSmsAuthModal';
 import { BotProfileCard } from './BotProfileCard';
@@ -15,6 +16,7 @@ interface ChatbotTabProps {
 }
 
 export function ChatbotTab({ chatbotStatus, onSaveChatbotConfig, onUnblockChatbotGroup }: ChatbotTabProps) {
+  const { t } = useTranslation('tab_chatbot');
   const {
     phoneInput, setPhoneInput,
     codeInput, setCodeInput,
@@ -53,18 +55,18 @@ export function ChatbotTab({ chatbotStatus, onSaveChatbotConfig, onUnblockChatbo
       <div className="glass-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h2 style={{ fontSize: '18px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', color: '#fff' }}>
-            🤖 Kaspi ИИ-Автоответчик (DeepSeek + Telegram)
+            {t('title')}
           </h2>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Автоматические умные ответы клиентам Kaspi, курьерские шаблоны логистики и эскалация менеджеру через Telegram.
+            {t('description')}
           </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Сессия чата (SMS):</span>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('chat_session_label')}</span>
             <span className={`badge ${hasChatSession ? 'badge-success' : 'badge-warning'}`}>
-              {hasChatSession ? '🟢 Подключена' : '🔴 Требуется вход'}
+              {hasChatSession ? t('chat_session_connected') : t('chat_session_required')}
             </span>
           </div>
 
@@ -73,13 +75,13 @@ export function ChatbotTab({ chatbotStatus, onSaveChatbotConfig, onUnblockChatbo
             style={{ padding: '10px 20px', fontSize: '13px', fontWeight: 600, borderRadius: '8px' }}
             onClick={openChatAuthModal}
           >
-            📱 {hasChatSession ? 'Переподключить чат' : 'Войти в чат (SMS)'}
+            {hasChatSession ? t('btn_chat_login_new') : t('btn_chat_login')}
           </button>
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Статус автоответчика:</span>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('chatbot_status_label')}</span>
             <span className={`badge ${chatbotStatus.enabled ? 'badge-success' : 'badge-warning'}`}>
-              {chatbotStatus.enabled ? '🟢 Автоответчик Активен' : '⏸️ Приостановлен'}
+              {chatbotStatus.enabled ? t('chatbot_enabled') : t('chatbot_paused')}
             </span>
           </div>
 
@@ -95,7 +97,7 @@ export function ChatbotTab({ chatbotStatus, onSaveChatbotConfig, onUnblockChatbo
             }}
             onClick={() => onSaveChatbotConfig({ enabled: !chatbotStatus.enabled })}
           >
-            {chatbotStatus.enabled ? '⏸️ Приостановить бота' : '▶️ Включить автоответчик'}
+            {chatbotStatus.enabled ? t('btn_pause') : t('btn_enable')}
           </button>
         </div>
       </div>
@@ -110,25 +112,25 @@ export function ChatbotTab({ chatbotStatus, onSaveChatbotConfig, onUnblockChatbo
         {/* 🔒 Передача менеджеру (Human Override) */}
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600 }}>🔒 Заблокированные чаты (Вызов менеджера)</h3>
-            <span className="badge badge-warning">{chatbotStatus.blocked_chats_count} чатов</span>
+            <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600 }}>{t('blocked_title')}</h3>
+            <span className="badge badge-warning">{t('blocked_count_badge').replace('%count%', String(chatbotStatus.blocked_chats_count))}</span>
           </div>
 
           <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Диалоги, в которых покупатель попросил менеджера/возврат/брак. ИИ приостановлен по этим чатам до разблокировки.
+            {t('blocked_description')}
           </p>
 
           {chatbotStatus.blocked_chats.length === 0 ? (
             <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-              🎉 Нет заблокированных диалогов. ИИ отвечает на все входящие!
+              {t('no_blocked_chats')}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '320px', overflowY: 'auto' }}>
               {chatbotStatus.blocked_chats.map((item) => (
                 <div key={item.group_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
                   <div>
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>Чат #{item.group_id}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--warning)', marginTop: '2px' }}>Причина: {item.reason}</div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>{t('blocked_chat_title').replace('%id%', item.group_id)}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--warning)', marginTop: '2px' }}>{t('blocked_chat_reason')} {item.reason}</div>
                   </div>
 
                   <button
@@ -136,7 +138,7 @@ export function ChatbotTab({ chatbotStatus, onSaveChatbotConfig, onUnblockChatbo
                     style={{ padding: '6px 12px', fontSize: '11px' }}
                     onClick={() => onUnblockChatbotGroup(item.group_id)}
                   >
-                    ✅ Разблокировать для ИИ
+                    {t('btn_unblock')}
                   </button>
                 </div>
               ))}

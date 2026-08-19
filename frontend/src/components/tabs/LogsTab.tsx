@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { LiveTerminalStream } from '../LiveTerminalStream';
 
 interface LogsTabProps {
@@ -7,6 +8,7 @@ interface LogsTabProps {
 }
 
 export function LogsTab({ logs, isConnected, onClear }: LogsTabProps) {
+  const { t } = useTranslation('tab_logs');
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <LiveTerminalStream
@@ -15,13 +17,13 @@ export function LogsTab({ logs, isConnected, onClear }: LogsTabProps) {
       />
       <div className="glass-card" style={{ display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <h2>Подробный системный журнал</h2>
+          <h2>{t('detailed_log')}</h2>
           <button
             className="btn btn-secondary"
             style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '6px' }}
             onClick={onClear}
           >
-            Очистить
+            {t('btn_clear')}
           </button>
         </div>
         <div className="console-box" style={{ height: '420px' }}>

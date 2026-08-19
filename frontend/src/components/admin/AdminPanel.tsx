@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { apiFetch, API_URL } from '../../api';
 import { formatTenge } from '../../utils/money';
 import type { BillingPlan } from '../../types';
@@ -43,6 +44,7 @@ const fetchReferrers = async (): Promise<ReferrerRow[]> => {
 type SubTab = 'stores' | 'referrers';
 
 export const AdminPanel: React.FC = () => {
+  const { t } = useTranslation('component_admin_panel');
   const queryClient = useQueryClient();
   const [subTab, setSubTab] = useState<SubTab>('stores');
   const [tariffModalStore, setTariffModalStore] = useState<AdminStoreRow | null>(null);
@@ -68,24 +70,24 @@ export const AdminPanel: React.FC = () => {
   return (
     <div style={styles.wrap}>
       <div style={styles.subTabs}>
-        <button className={`btn ${subTab === 'stores' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSubTab('stores')}>Магазины</button>
-        <button className={`btn ${subTab === 'referrers' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSubTab('referrers')}>Рефереры</button>
+        <button className={`btn ${subTab === 'stores' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSubTab('stores')}>{t('tab_stores')}</button>
+        <button className={`btn ${subTab === 'referrers' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSubTab('referrers')}>{t('tab_referrers')}</button>
       </div>
 
       {subTab === 'stores' && (
         <div className="glass-card" style={styles.card}>
-          {isLoading ? <div>Загрузка...</div> : (
+          {isLoading ? <div>{t('loading')}</div> : (
             <div style={{ overflowX: 'auto' }}>
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    <th style={styles.th}>Магазин</th>
-                    <th style={styles.th}>Владелец</th>
-                    <th style={styles.th}>Тариф</th>
-                    <th style={styles.th}>Статус</th>
-                    <th style={styles.th}>Баланс</th>
-                    <th style={styles.th}>Реферер</th>
-                    <th style={styles.th}>Действия</th>
+                    <th style={styles.th}>{t('table_store')}</th>
+                    <th style={styles.th}>{t('table_owner')}</th>
+                    <th style={styles.th}>{t('table_plan')}</th>
+                    <th style={styles.th}>{t('table_status')}</th>
+                    <th style={styles.th}>{t('table_balance')}</th>
+                    <th style={styles.th}>{t('table_referrer')}</th>
+                    <th style={styles.th}>{t('table_actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -101,11 +103,11 @@ export const AdminPanel: React.FC = () => {
                       <td style={styles.td}>{s.referrer_user_id ? (referrers.find(r => r.user_id === s.referrer_user_id)?.email || s.referrer_user_id) : '—'}</td>
                       <td style={styles.td}>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                          <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => setTariffModalStore(s)}>Тариф</button>
-                          <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => setTopupModalStore(s)}>Пополнить</button>
-                          <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => setReferrerModalStore(s)}>Реферер</button>
-                          <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => reevaluate(s.store_id)}>Пересчитать</button>
-                          <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => chargeNow(s.store_id)}>Списать сейчас</button>
+                          <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => setTariffModalStore(s)}>{t('btn_plan')}</button>
+                          <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => setTopupModalStore(s)}>{t('btn_topup')}</button>
+                          <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => setReferrerModalStore(s)}>{t('btn_referrer')}</button>
+                          <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => reevaluate(s.store_id)}>{t('btn_reevaluate')}</button>
+                          <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => chargeNow(s.store_id)}>{t('btn_charge_now')}</button>
                         </div>
                       </td>
                     </tr>
@@ -124,11 +126,11 @@ export const AdminPanel: React.FC = () => {
             <table style={styles.table}>
               <thead>
                 <tr>
-                  <th style={styles.th}>Email</th>
-                  <th style={styles.th}>Код</th>
+                  <th style={styles.th}>{t('table_email')}</th>
+                  <th style={styles.th}>{t('table_code')}</th>
                   <th style={styles.th}>%</th>
-                  <th style={styles.th}>Месяцев</th>
-                  <th style={styles.th}>Активен</th>
+                  <th style={styles.th}>{t('table_months')}</th>
+                  <th style={styles.th}>{t('table_active')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -138,7 +140,7 @@ export const AdminPanel: React.FC = () => {
                     <td style={styles.td}><code>{r.code}</code></td>
                     <td style={styles.td}>{r.commission_percent}%</td>
                     <td style={styles.td}>{r.commission_months}</td>
-                    <td style={styles.td}>{r.is_active ? 'Да' : 'Нет'}</td>
+                    <td style={styles.td}>{r.is_active ? t('yes') : t('no')}</td>
                   </tr>
                 ))}
               </tbody>

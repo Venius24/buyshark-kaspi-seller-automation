@@ -1,16 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { apiFetch, API_URL } from '../../api';
 import type { AutolistDraft } from '../../types';
-
-const STATUS_LABEL: Record<string, string> = {
-  draft: 'Черновик',
-  needs_review: 'Нужна проверка',
-  approved: 'Подтверждено',
-  submitting: 'Отправка…',
-  submitted: 'Отправлено на модерацию',
-  error: 'Ошибка',
-};
 
 const STATUS_COLOR: Record<string, string> = {
   draft: '#888',
@@ -19,13 +11,6 @@ const STATUS_COLOR: Record<string, string> = {
   submitting: '#818cf8',
   submitted: '#34d399',
   error: '#f87171',
-};
-
-const MISSING_LABEL: Record<string, string> = {
-  __sku__: 'Артикул',
-  __category__: 'Категория',
-  __price__: 'Цена',
-  __stock__: 'Остаток',
 };
 
 async function fetchDrafts(): Promise<AutolistDraft[]> {
@@ -86,9 +71,10 @@ interface FeatureFieldProps {
   schema: { minValue?: number | null; maxValue?: number | null; unit?: string; defaultValues: Array<{ code: string; name: string }> };
   value: any;
   onChange: (value: any) => void;
+  t: (key: string) => string;
 }
 
-function FeatureField({ meta, schema, value, onChange }: FeatureFieldProps) {
+function FeatureField({ meta, schema, value, onChange, t }: FeatureFieldProps) {
   const label = `${meta.name}${meta.mandatory ? ' *' : ''}${schema.unit ? ` (${schema.unit})` : ''}`;
 
   if (meta.type === 'enum' && meta.multiValued) {
@@ -141,8 +127,8 @@ function FeatureField({ meta, schema, value, onChange }: FeatureFieldProps) {
         <label style={{ display: 'block', fontSize: '12px', color: meta.mandatory ? '#fbbf24' : 'var(--text-muted)', marginBottom: '6px' }}>{label}</label>
         <select className="form-input" value={value === true ? 'yes' : value === false ? 'no' : ''} onChange={(e) => onChange(e.target.value === 'yes' ? true : e.target.value === 'no' ? false : null)}>
           <option value="">—</option>
-          <option value="yes">Да</option>
-          <option value="no">Нет</option>
+          <option value="yes">{t('yes')}</option>
+          <option value="no">{t('no')}</option>
         </select>
       </div>
     );
@@ -172,7 +158,29 @@ function FeatureField({ meta, schema, value, onChange }: FeatureFieldProps) {
   );
 }
 
-function DraftEditor({ draft, onClose }: { draft: AutolistDraft; onClose: () => void }) {
+function getStatusLabel(status: string, t: (key: string) => string): string {
+  const labels: Record<string, string> = {
+    draft: t('status_draft'),
+    needs_review: t('status_needs_review'),
+    approved: t('status_approved'),
+    submitting: t('status_submitting'),
+    submitted: t('status_submitted'),
+    error: t('status_error'),
+  };
+  return labels[status] || status;
+}
+
+function getMissingLabel(field: string, t: (key: string) => string): string {
+  const labels: Record<string, string> = {
+    __sku__: t('field_sku'),
+    __category__: t('field_category'),
+    __price__: t('field_price'),
+    __stock__: t('field_stock'),
+  };
+  return labels[field] || field;
+}
+
+function DraftEditor({ draft, onClose, t }: { draft: AutolistDraft; onClose: () => void; t: (key: string) => string }) {
   const queryClient = useQueryClient();
   const payload = draft.draft_payload;
   const featureSchema = useMemo(() => flattenClassifications(payload.classifications), [payload.classifications]);
@@ -205,11 +213,11 @@ function DraftEditor({ draft, onClose }: { draft: AutolistDraft; onClose: () => 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ patch: { sku: sku || null, price: price === '' ? null : price, stock: stock === '' ? null : stock, description, features } }),
       });
-      if (!res.ok) throw new Error('Не удалось сохранить');
+      if (!res.ok) throw new Error(t('save_error'));
       return res.json();
     },
     onSuccess: invalidate,
-    onError: () => setActionError('Не удалось сохранить изменения'),
+    onError: () => setActionError(t('save_changes_error')),
   });
 
   const approveMutation = useMutation({
@@ -217,7 +225,7 @@ function DraftEditor({ draft, onClose }: { draft: AutolistDraft; onClose: () => 
       const res = await apiFetch(`${API_URL}/api/autolist/drafts/${draft.id}/approve`, { method: 'POST' });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Не заполнены обязательные поля');
+        throw new Error(err.detail || t('approve_error'));
       }
       return res.json();
     },
@@ -230,7 +238,7 @@ function DraftEditor({ draft, onClose }: { draft: AutolistDraft; onClose: () => 
       const res = await apiFetch(`${API_URL}/api/autolist/drafts/${draft.id}/submit`, { method: 'POST' });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Не удалось отправить в Kaspi');
+        throw new Error(err.detail || t('submit_error'));
       }
       return res.json();
     },
@@ -241,7 +249,7 @@ function DraftEditor({ draft, onClose }: { draft: AutolistDraft; onClose: () => 
   const deleteMutation = useMutation({
     mutationFn: async () => {
       const res = await apiFetch(`${API_URL}/api/autolist/drafts/${draft.id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Не удалось удалить');
+      if (!res.ok) throw new Error(t('delete_error'));
     },
     onSuccess: () => {
       invalidate();
@@ -260,10 +268,10 @@ function DraftEditor({ draft, onClose }: { draft: AutolistDraft; onClose: () => 
           <div style={{ display: 'flex', gap: '14px' }}>
             <DraftPhoto draftId={draft.id} style={{ width: '84px', height: '84px' }} />
             <div>
-              <h3 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '4px' }}>{payload.category_name || 'Категория не определена'}</h3>
+              <h3 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '4px' }}>{payload.category_name || t('no_category')}</h3>
               <p style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '480px' }}>{draft.raw_title}</p>
               <span className="badge" style={{ marginTop: '6px', display: 'inline-block', color: STATUS_COLOR[draft.status] }}>
-                {STATUS_LABEL[draft.status] || draft.status}
+                {getStatusLabel(draft.status, t)}
               </span>
             </div>
           </div>
@@ -272,7 +280,7 @@ function DraftEditor({ draft, onClose }: { draft: AutolistDraft; onClose: () => 
 
         {!payload.category_code && (
           <div style={{ padding: '10px 12px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#fca5a5', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
-            Kaspi не нашёл категорию по запросу «{payload.category_search_query}». Автозаполнение характеристик недоступно для этого черновика — выберите категорию вручную через кабинет Kaspi, либо удалите черновик и попробуйте с более точным названием.
+            {t('category_not_found').replace('%query%', payload.category_search_query)}
           </div>
         )}
 
@@ -284,13 +292,13 @@ function DraftEditor({ draft, onClose }: { draft: AutolistDraft; onClose: () => 
 
         {draft.status === 'submitted' && draft.kaspi_result && (
           <div style={{ padding: '10px 12px', background: 'rgba(52, 211, 153, 0.12)', border: '1px solid rgba(52, 211, 153, 0.3)', color: '#6ee7b7', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
-            ✅ Отправлено на модерацию Kaspi (артикул {draft.kaspi_result.sku}). Проверка занимает до 3 дней. Цену/остаток Kaspi не принимает на этом шаге — выставите их после одобрения модерации через обычное управление товарами.
+            {t('submitted_success').replace('%sku%', draft.kaspi_result.sku)}
           </div>
         )}
 
         {payload.existing_candidates && payload.existing_candidates.length > 0 && (
           <details style={{ marginBottom: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>
-            <summary style={{ cursor: 'pointer' }}>Похожие товары уже есть на Kaspi ({payload.existing_candidates.length}) — возможно не стоит плодить дубликат</summary>
+            <summary style={{ cursor: 'pointer' }}>{t('similar_products').replace('%count%', String(payload.existing_candidates.length))}</summary>
             <ul style={{ marginTop: '8px', paddingLeft: '18px' }}>
               {payload.existing_candidates.slice(0, 5).map((c) => (
                 <li key={c.id}><a href={`https://kaspi.kz${c.shopLink}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)' }}>{c.title}</a></li>
@@ -301,22 +309,22 @@ function DraftEditor({ draft, onClose }: { draft: AutolistDraft; onClose: () => 
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginBottom: '10px' }}>
           <div>
-            <label style={{ display: 'block', fontSize: '12px', color: '#fbbf24', marginBottom: '6px' }}>Артикул *</label>
+            <label style={{ display: 'block', fontSize: '12px', color: '#fbbf24', marginBottom: '6px' }}>{t('field_sku')} *</label>
             <input className="form-input" value={sku} onChange={(e) => setSku(e.target.value)} />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '12px', color: '#fbbf24', marginBottom: '6px' }}>Цена, ₸ *</label>
+            <label style={{ display: 'block', fontSize: '12px', color: '#fbbf24', marginBottom: '6px' }}>{t('field_price')}, ₸ *</label>
             <input type="number" className="form-input" value={price} onChange={(e) => setPrice(e.target.value === '' ? '' : Number(e.target.value))} />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '12px', color: '#fbbf24', marginBottom: '6px' }}>Остаток, шт *</label>
+            <label style={{ display: 'block', fontSize: '12px', color: '#fbbf24', marginBottom: '6px' }}>{t('field_stock')}, {t('unit_pcs')} *</label>
             <input type="number" className="form-input" value={stock} onChange={(e) => setStock(e.target.value === '' ? '' : Number(e.target.value))} />
           </div>
         </div>
 
         {Object.keys(payload.feature_meta).length > 0 && (
           <>
-            <h4 style={{ fontSize: '13px', margin: '18px 0 10px', color: 'var(--text-muted)' }}>Характеристики Kaspi</h4>
+            <h4 style={{ fontSize: '13px', margin: '18px 0 10px', color: 'var(--text-muted)' }}>{t('kaspi_features')}</h4>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
               {Object.entries(payload.feature_meta).map(([code, meta]) => (
                 <FeatureField
@@ -326,6 +334,7 @@ function DraftEditor({ draft, onClose }: { draft: AutolistDraft; onClose: () => 
                   schema={featureSchema[code] || { defaultValues: [] }}
                   value={features[code]}
                   onChange={(v) => setFeatures((prev) => ({ ...prev, [code]: v }))}
+                  t={t}
                 />
               ))}
             </div>
@@ -333,13 +342,13 @@ function DraftEditor({ draft, onClose }: { draft: AutolistDraft; onClose: () => 
         )}
 
         <div style={{ marginBottom: '10px' }}>
-          <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>Описание</label>
+          <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>{t('description')}</label>
           <textarea className="form-input" style={{ minHeight: '70px', resize: 'vertical' }} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={7000} />
         </div>
 
         {draft.missing_mandatory.length > 0 && (
           <div style={{ padding: '10px 12px', background: 'rgba(251, 191, 36, 0.12)', border: '1px solid rgba(251, 191, 36, 0.3)', color: '#fcd34d', borderRadius: '8px', marginBottom: '16px', fontSize: '12px' }}>
-            Не заполнено: {draft.missing_mandatory.map((c) => MISSING_LABEL[c] || payload.feature_meta[c]?.name || c).join(', ')}
+            {t('missing_fields')}: {draft.missing_mandatory.map((c) => getMissingLabel(c, t) || payload.feature_meta[c]?.name || c).join(', ')}
           </div>
         )}
 
@@ -354,23 +363,23 @@ function DraftEditor({ draft, onClose }: { draft: AutolistDraft; onClose: () => 
             className="btn"
             style={{ color: '#f87171', border: '1px solid rgba(248,113,113,0.4)' }}
             disabled={busy}
-            onClick={() => { if (confirm('Удалить черновик безвозвратно?')) deleteMutation.mutate(); }}
+            onClick={() => { if (confirm(t('confirm_delete'))) deleteMutation.mutate(); }}
           >
-            🗑 Удалить
+            {t('btn_delete')}
           </button>
 
           <div style={{ display: 'flex', gap: '10px' }}>
             <button className="btn btn-secondary" disabled={busy || draft.status === 'submitted'} onClick={() => { setActionError(''); saveMutation.mutate(); }}>
-              {saveMutation.isPending ? 'Сохранение…' : '💾 Сохранить'}
+              {saveMutation.isPending ? t('btn_saving') : t('btn_save')}
             </button>
             {canApprove && (
               <button className="btn btn-primary" disabled={busy} onClick={() => { setActionError(''); approveMutation.mutate(); }}>
-                {approveMutation.isPending ? 'Проверка…' : '✅ Подтвердить'}
+                {approveMutation.isPending ? t('btn_checking') : t('btn_confirm')}
               </button>
             )}
             {canSubmit && (
               <button className="btn btn-primary" disabled={busy} onClick={() => { setActionError(''); submitMutation.mutate(); }}>
-                {submitMutation.isPending ? 'Отправка…' : '🚀 Отправить в Kaspi'}
+                {submitMutation.isPending ? t('btn_submitting') : t('btn_submit_kaspi')}
               </button>
             )}
           </div>
@@ -381,6 +390,7 @@ function DraftEditor({ draft, onClose }: { draft: AutolistDraft; onClose: () => 
 }
 
 export function AutolistTab() {
+  const { t } = useTranslation('tab_autolist');
   const queryClient = useQueryClient();
   const { data: drafts = [], isLoading } = useQuery({
     queryKey: ['autolist-drafts'],
@@ -395,14 +405,14 @@ export function AutolistTab() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      if (!photoFile || !titleInput.trim()) throw new Error('Загрузите фото и укажите название товара');
+      if (!photoFile || !titleInput.trim()) throw new Error(t('upload_required'));
       const form = new FormData();
       form.append('photo', photoFile);
       form.append('title', titleInput.trim());
       const res = await apiFetch(`${API_URL}/api/autolist/drafts`, { method: 'POST', body: form });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Не удалось обработать товар');
+        throw new Error(err.detail || t('upload_error'));
       }
       return res.json() as Promise<AutolistDraft>;
     },
@@ -413,7 +423,7 @@ export function AutolistTab() {
       setUploadError('');
       setSelectedId(draft.id);
     },
-    onError: (e: any) => setUploadError(e.message || 'Ошибка загрузки'),
+    onError: (e: any) => setUploadError(e.message || t('upload_failed')),
   });
 
   const selectedDraft = drafts.find((d) => d.id === selectedId) || null;
@@ -421,7 +431,7 @@ export function AutolistTab() {
   return (
     <>
       <div className="glass-card" style={{ padding: '20px', marginBottom: '20px' }}>
-        <h3 style={{ fontSize: '14px', marginBottom: '12px' }}>Загрузить новый товар</h3>
+        <h3 style={{ fontSize: '14px', marginBottom: '12px' }}>{t('upload_new_product')}</h3>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <input
             type="file"
@@ -432,7 +442,7 @@ export function AutolistTab() {
           <input
             type="text"
             className="form-input"
-            placeholder="Название товара от поставщика (можно неполное, ИИ дозаполнит)"
+            placeholder={t('product_name_placeholder')}
             value={titleInput}
             onChange={(e) => setTitleInput(e.target.value)}
             style={{ flexGrow: 1, minWidth: '260px' }}
@@ -442,19 +452,19 @@ export function AutolistTab() {
             disabled={createMutation.isPending || !photoFile || !titleInput.trim()}
             onClick={() => createMutation.mutate()}
           >
-            {createMutation.isPending ? '🤖 Анализирую фото…' : '✨ Распознать'}
+            {createMutation.isPending ? t('btn_analyzing') : t('btn_recognize')}
           </button>
         </div>
         {uploadError && <p style={{ color: '#f87171', fontSize: '12px', marginTop: '10px' }}>{uploadError}</p>}
         <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '10px' }}>
-          ИИ заполняет категорию и характеристики по фото и названию. Проверьте каждое поле перед подтверждением — модель иногда ошибается, особенно на цвете и мелких деталях.
+          {t('ai_description')}
         </p>
       </div>
 
       {isLoading ? (
-        <p style={{ color: 'var(--text-muted)' }}>Загрузка…</p>
+        <p style={{ color: 'var(--text-muted)' }}>{t('loading')}</p>
       ) : drafts.length === 0 ? (
-        <p style={{ color: 'var(--text-muted)' }}>Черновиков пока нет — загрузите первое фото выше.</p>
+        <p style={{ color: 'var(--text-muted)' }}>{t('no_drafts')}</p>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '14px' }}>
           {drafts.map((d) => (
@@ -469,20 +479,20 @@ export function AutolistTab() {
                 {d.draft_payload.category_name || d.raw_title}
               </p>
               <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {d.draft_payload.sku || 'без артикула'}
+                {d.draft_payload.sku || t('no_sku')}
               </p>
               <span className="badge" style={{ color: STATUS_COLOR[d.status] }}>
-                {STATUS_LABEL[d.status] || d.status}
+                {getStatusLabel(d.status, t)}
               </span>
               {d.missing_mandatory.length > 0 && d.status === 'needs_review' && (
-                <span style={{ fontSize: '11px', color: '#fbbf24', marginLeft: '8px' }}>· {d.missing_mandatory.length} не заполнено</span>
+                <span style={{ fontSize: '11px', color: '#fbbf24', marginLeft: '8px' }}>· {d.missing_mandatory.length} {t('not_filled')}</span>
               )}
             </div>
           ))}
         </div>
       )}
 
-      {selectedDraft && <DraftEditor draft={selectedDraft} onClose={() => setSelectedId(null)} />}
+      {selectedDraft && <DraftEditor draft={selectedDraft} onClose={() => setSelectedId(null)} t={t} />}
     </>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { apiFetch, setUnauthorizedHandler, API_URL, getWsUrl } from './api';
 import { clearPersistedQueryCache } from './queryClient';
 import { useActiveStoreId } from './storeContext';
@@ -42,6 +43,7 @@ import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus,
 const BETA_TESTER_EMAILS = ['owner@example.com'];
 
 export default function App() {
+  const { t } = useTranslation('app_main');
   const queryClient = useQueryClient();
   const [isLoaded, setIsLoaded] = useState(false);
   const [isAuthed, setIsAuthed] = useState<boolean>(() => !!localStorage.getItem('access_token'));
@@ -237,7 +239,7 @@ export default function App() {
     sameCityOnly: boolean = false,
     blacklistedMerchants: string[] = []
   ) => {
-    addLog(`Сохранение настроек демпинга для ${sku} (Режим: ${mode})...`);
+    addLog(t('log_dumping_save_start', { sku, mode }));
     try {
       const res = await apiFetch(`${API_URL}/api/dumping/config`, {
         method: 'POST',
@@ -258,7 +260,7 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        addLog(`Настройки демпинга для ${sku} успешно сохранены.`);
+        addLog(t('log_dumping_save_ok', { sku }));
         loadDumpingConfigs();
         loadProducts(currentPage, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, dumpingStatusFilter);
         // Закрываем панель редактирования
@@ -268,15 +270,15 @@ export default function App() {
           return next;
         });
       } else {
-        addLog(`Ошибка сохранения настроек: ${data.detail || 'Неизвестная ошибка'}`);
+        addLog(t('log_dumping_save_error', { detail: data.detail || 'Неизвестная ошибка' }));
       }
     } catch {
-      addLog('Сбой сети при сохранении настроек демпинга.');
+      addLog(t('log_dumping_save_network_error'));
     }
   };
 
   const saveProductUpdate = async (sku: string, price: number, stock: number, brand: string | undefined, status: string | undefined) => {
-    addLog(`Сохранение параметров товара ${sku}...`);
+    addLog(t('log_product_save_start', { sku }));
     try {
       const res = await apiFetch(`${API_URL}/api/products/update`, {
         method: 'POST',
@@ -291,7 +293,7 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        addLog(`Товар ${sku} успешно обновлен.`);
+        addLog(t('log_product_save_ok', { sku }));
         loadProducts(currentPage, statusFilter, searchQuery, pageSize);
         // Закрываем панель редактирования
         setExpandedEditSkus(prev => {
@@ -300,16 +302,16 @@ export default function App() {
           return next;
         });
       } else {
-        addLog(`Ошибка обновления товара: ${data.detail || 'Неизвестная ошибка'}`);
+        addLog(t('log_product_save_error', { detail: data.detail || 'Неизвестная ошибка' }));
       }
     } catch {
-      addLog('Сетевая ошибка при обновлении товара.');
+      addLog(t('log_product_save_network_error'));
     }
   };
 
   const runDumpingCycle = async () => {
     setIsRunningDumping(true);
-    addLog('Запуск автоматического расчета демпинга цен...');
+    addLog(t('log_dumping_run_start'));
     try {
       const res = await apiFetch(`${API_URL}/api/dumping/run`, { method: 'POST' });
       const data = await res.json();
@@ -318,14 +320,14 @@ export default function App() {
         if (data.logs && data.logs.length > 0) {
           data.logs.forEach((logMsg: string) => addLog(logMsg));
         } else {
-          addLog('Цены всех товаров соответствуют оптимальным, изменений нет.');
+          addLog(t('log_dumping_no_changes'));
         }
         loadProducts(currentPage, statusFilter, searchQuery, pageSize);
       } else {
-        addLog(`Сбой демпинга: ${data.detail || 'Неизвестная ошибка'}`);
+        addLog(t('log_dumping_error', { detail: data.detail || 'Неизвестная ошибка' }));
       }
     } catch {
-      addLog('Сетевая ошибка при выполнении расчета демпинга.');
+      addLog(t('log_dumping_network_error'));
     } finally {
       setIsRunningDumping(false);
     }
@@ -348,13 +350,13 @@ export default function App() {
           const data = await res.json();
           if (data.valid) {
             setIsAuthed(true);
-            addLog('Сессия REST API активна, токен подтвержден.');
+            addLog(t('log_session_active'));
             loadProducts(1, 'active', '', 10);
             checkMcStatus(true).then((valid) => {
               if (valid) {
-                addLog('Куки Kaspi MC активны ✓');
+                addLog(t('log_mc_cookies_ok'));
               } else {
-                addLog('⚠️ Куки Kaspi MC недействительны или отсутствуют. Требуется повторный вход.');
+                addLog(t('log_mc_cookies_required'));
               }
             });
             loadDumpingConfigs();
@@ -416,7 +418,7 @@ export default function App() {
     statusFilterParam: string = dumpingStatusFilter
   ) => {
     setFetchingProducts(true);
-    addLog(`Загрузка товаров (Стр: ${pageNum}, Лимит: ${pSize}, Статус: ${status}, Демпинг: ${dumpingOnly}, Фильтр статуса: ${statusFilterParam || 'Все'})...`);
+    addLog(t('log_products_loading', { page: pageNum, limit: pSize, status, dumping: dumpingOnly, filter: statusFilterParam || 'Все' }));
     try {
       const res = await apiFetch(
         `${API_URL}/api/products?page=${pageNum}&status=${status}&search=${encodeURIComponent(search)}&page_size=${pSize}&dumping_only=${dumpingOnly}&dumping_status_filter=${encodeURIComponent(statusFilterParam)}`
@@ -426,12 +428,12 @@ export default function App() {
         setProducts(data.products);
         setTotalPages(data.total_pages || 1);
         setTotalCount(data.total_count || 0);
-        addLog(`Загружено ${data.products.length} товаров (Всего: ${data.total_count}).`);
+        addLog(t('log_products_loaded', { count: data.products.length, total: data.total_count }));
       } else {
-        addLog(`Ошибка загрузки товаров: ${data.detail || 'Ошибка бэкенда'}`);
+        addLog(t('log_products_error', { detail: data.detail || 'Ошибка бэкенда' }));
       }
     } catch {
-      addLog('Ошибка сети при загрузке товаров.');
+      addLog(t('log_products_network_error'));
     } finally {
       setFetchingProducts(false);
     }
@@ -439,18 +441,18 @@ export default function App() {
 
   const refreshProducts = async () => {
     setFetchingProducts(true);
-    addLog('Принудительное обновление кэша товаров из Kaspi API...');
+    addLog(t('log_products_refresh_start'));
     try {
       const res = await apiFetch(`${API_URL}/api/products/refresh`, { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.success) {
-        addLog(`Кэш обновлен: ${data.count} товаров.`);
+        addLog(t('log_products_refresh_ok', { count: data.count }));
         loadProducts(1, statusFilter, searchQuery, pageSize);
       } else {
-        addLog(`Ошибка обновления: ${data.detail || 'Ошибка бэкенда'}`);
+        addLog(t('log_products_refresh_error', { detail: data.detail || 'Ошибка бэкенда' }));
       }
     } catch {
-      addLog('Ошибка сети при обновлении кэша товаров.');
+      addLog(t('log_products_refresh_network_error'));
     } finally {
       setFetchingProducts(false);
     }
@@ -494,7 +496,7 @@ export default function App() {
   }, [orderStatusFilter, orderLimit]);
 
   const packOrder = async (orderId: string, internalId: string) => {
-    addLog(`Сборка заказа #${orderId}...`);
+    addLog(t('log_order_pack_start', { id: orderId }));
     try {
       const res = await apiFetch(`${API_URL}/api/orders/pack`, {
         method: 'POST',
@@ -503,19 +505,19 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        addLog(`Заказ #${orderId} успешно обработан.`);
+        addLog(t('log_order_pack_ok', { id: orderId }));
         refetchOrders();
       } else {
-        addLog(`Ошибка сборки #${orderId}: ${data.detail || 'Ошибка'}`);
+        addLog(t('log_order_pack_error', { id: orderId, detail: data.detail || 'Ошибка' }));
       }
     } catch {
-      addLog(`Ошибка сети при сборке заказа #${orderId}.`);
+      addLog(t('log_order_pack_network_error', { id: orderId }));
     }
   };
 
   const packAllOrders = async () => {
     setPackingAll(true);
-    addLog('Массовая сборка всех заказов...');
+    addLog(t('log_pack_all_start'));
     try {
       const res = await apiFetch(`${API_URL}/api/orders/pack-all`, { method: 'POST' });
       const data = await res.json();
@@ -524,10 +526,10 @@ export default function App() {
         setSelectedOrderIds(new Set());
         refetchOrders();
       } else {
-        addLog(`Ошибка массовой сборки: ${data.detail || 'Ошибка'}`);
+        addLog(t('log_pack_all_error', { detail: data.detail || 'Ошибка' }));
       }
     } catch {
-      addLog('Ошибка сети при массовой сборке.');
+      addLog(t('log_pack_all_network_error'));
     } finally {
       setPackingAll(false);
     }
@@ -537,11 +539,11 @@ export default function App() {
     if (selectedOrderIds.size === 0) return;
     const idsToPack = Array.from(selectedOrderIds);
     setSelectedOrderIds(new Set());
-    addLog(`Запуск сборки для ${idsToPack.length} выбранных заказов...`);
+    addLog(t('log_pack_selected_start', { count: idsToPack.length }));
     for (const id of idsToPack) {
       const order = orders.find(o => o.id === id);
       if (order) {
-        addLog(`Сборка заказа #${order.id}...`);
+        addLog(t('log_pack_selected_item_start', { id: order.id }));
         try {
           const res = await apiFetch(`${API_URL}/api/orders/pack`, {
             method: 'POST',
@@ -550,12 +552,12 @@ export default function App() {
           });
           const data = await res.json();
           if (res.ok && data.success) {
-            addLog(`Заказ #${order.id} успешно обработан.`);
+            addLog(t('log_pack_selected_item_ok', { id: order.id }));
           } else {
-            addLog(`Ошибка сборки #${order.id}: ${data.detail || 'Ошибка'}`);
+            addLog(t('log_pack_selected_item_error', { id: order.id, detail: data.detail || 'Ошибка' }));
           }
         } catch {
-          addLog(`Ошибка сети при сборке заказа #${order.id}.`);
+          addLog(t('log_pack_selected_item_network_error', { id: order.id }));
         }
       }
     }
@@ -617,7 +619,7 @@ export default function App() {
   };
 
   const saveChatbotConfig = async (newCfg: Partial<typeof chatbotConfig>) => {
-    addLog('Сохранение конфигурации ИИ-автоответчика...');
+    addLog(t('log_chatbot_config_save'));
     try {
       const res = await apiFetch(`${API_URL}/api/chatbot/config`, {
         method: 'POST',
@@ -630,15 +632,15 @@ export default function App() {
         loadChatbotConfig();
         loadChatbotStatus();
       } else {
-        addLog(`Ошибка сохранения конфигурации чат-бота: ${data.detail || 'Ошибка'}`);
+        addLog(t('log_chatbot_config_error', { detail: data.detail || 'Ошибка' }));
       }
     } catch {
-      addLog('Сетевая ошибка при сохранении конфига чат-бота.');
+      addLog(t('log_chatbot_config_network_error'));
     }
   };
 
   const unblockChatbotGroup = async (groupId: string) => {
-    addLog(`Разблокировка чата ${groupId} для ИИ...`);
+    addLog(t('log_chatbot_unblock_start', { id: groupId }));
     try {
       const res = await apiFetch(`${API_URL}/api/chatbot/unblock`, {
         method: 'POST',
@@ -651,7 +653,7 @@ export default function App() {
         loadChatbotStatus();
       }
     } catch {
-      addLog('Ошибка при разблокировке чата.');
+      addLog(t('log_chatbot_unblock_error'));
     }
   };
 

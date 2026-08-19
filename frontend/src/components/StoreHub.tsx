@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { apiFetch, API_URL } from '../api';
 import { fetchProfile, fetchStores, fetchBillingPlans } from '../queries';
 import { useActiveStoreId, setActiveStoreId as setSharedActiveStoreId } from '../storeContext';
@@ -32,6 +33,7 @@ export interface UserProfile {
 }
 
 export const StoreHub: React.FC = () => {
+  const { t } = useTranslation('component_store_hub');
   const queryClient = useQueryClient();
   // Слайс 6: выбор магазина живёт в общем модуле (storeContext.ts), не в
   // локальном useState — переживает переключение вкладок и реально доходит
@@ -107,11 +109,11 @@ export const StoreHub: React.FC = () => {
   const handleConnectFullStore = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!storeName.trim()) {
-      setErrorMsg('Укажите название магазина (напр. Barkhan)');
+      setErrorMsg(t('enter_store_name'));
       return;
     }
     if (!apiToken.trim()) {
-      setErrorMsg('Введите API Токен (X-Auth-Token) из кабинета Kaspi');
+      setErrorMsg(t('enter_api_token'));
       return;
     }
 
@@ -133,14 +135,14 @@ export const StoreHub: React.FC = () => {
 
       if (!res.ok) {
         const errJson = await res.json();
-        throw new Error(errJson.detail || 'Ошибка подключения магазина');
+        throw new Error(errJson.detail || t('store_connection_error'));
       }
 
       setShowAddModal(false);
       resetModalState();
       refetchStoresAndProfile();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Ошибка подключения магазина');
+      setErrorMsg(err.message || t('store_connection_error'));
     } finally {
       setSubmitting(false);
     }

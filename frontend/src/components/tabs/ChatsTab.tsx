@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { apiFetch, API_URL } from '../../api';
 import { useActiveStoreId } from '../../storeContext';
 
@@ -78,6 +79,7 @@ function formatTime(ts?: number): string {
 }
 
 function AttachmentView({ attachment }: { attachment: ChatAttachment }) {
+  const { t } = useTranslation('tab_chats');
   const icon = attachment.type === 'image' ? '🖼️' : attachment.type === 'video' ? '🎬' : '🎤';
   return (
     <a
@@ -87,12 +89,13 @@ function AttachmentView({ attachment }: { attachment: ChatAttachment }) {
       style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'inherit', textDecoration: 'underline' }}
     >
       <span>{icon}</span>
-      <span>{attachment.fileName || `Вложение (${attachment.type})`}</span>
+      <span>{attachment.fileName || t('attachment_file', { type: attachment.type })}</span>
     </a>
   );
 }
 
 export function ChatsTab() {
+  const { t } = useTranslation('tab_chats');
   const queryClient = useQueryClient();
   const activeStoreId = useActiveStoreId();
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -140,10 +143,10 @@ export function ChatsTab() {
         refreshAfterAction();
         return true;
       }
-      setSendError(data.detail || 'Не удалось отправить сообщение.');
+      setSendError(data.detail || t('error_send_failed'));
       return false;
     } catch {
-      setSendError('Ошибка сети при отправке.');
+      setSendError(t('error_network_send'));
       return false;
     } finally {
       setSending(false);
@@ -168,10 +171,10 @@ export function ChatsTab() {
       if (res.ok && data.success) {
         refreshAfterAction();
       } else {
-        setSendError(data.detail || 'Не удалось забрать диалог у ИИ.');
+        setSendError(data.detail || t('error_takeover_failed'));
       }
     } catch {
-      setSendError('Ошибка сети.');
+      setSendError(t('error_network'));
     } finally {
       setTakingOver(false);
     }
@@ -186,14 +189,14 @@ export function ChatsTab() {
       {/* Список диалогов */}
       <div style={{ width: '320px', borderRight: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ padding: '16px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-          <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#fff', margin: 0 }}>💬 Чаты Kaspi</h3>
+          <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#fff', margin: 0 }}>{t('list_title')}</h3>
         </div>
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {chatsLoading && chats.length === 0 ? (
-            <div style={{ padding: '20px', color: 'var(--text-muted)', fontSize: '13px' }}>⏳ Загрузка диалогов...</div>
+            <div style={{ padding: '20px', color: 'var(--text-muted)', fontSize: '13px' }}>{t('chats_loading')}</div>
           ) : chats.length === 0 ? (
             <div style={{ padding: '20px', color: 'var(--text-muted)', fontSize: '13px' }}>
-              Нет диалогов. Если это неожиданно — проверьте статус сессии чата во вкладке «ИИ-Автоответчик».
+              {t('empty_message')}
             </div>
           ) : (
             chats.map((chat) => (
@@ -209,10 +212,10 @@ export function ChatsTab() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
                   <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>
-                    {chat.subtitle || chat.title || 'Без имени'}
+                    {chat.subtitle || chat.title || t('unnamed_chat')}
                   </div>
                   {chat.is_human_override && (
-                    <span className="badge badge-warning" style={{ fontSize: '9px', padding: '1px 6px' }}>1-на-1</span>
+                    <span className="badge badge-warning" style={{ fontSize: '9px', padding: '1px 6px' }}>{t('override_badge_short')}</span>
                   )}
                 </div>
                 {chat.subtitle && chat.title && (
@@ -233,7 +236,7 @@ export function ChatsTab() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {!selectedGroupId ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-            Выберите диалог слева
+            {t('select_placeholder')}
           </div>
         ) : (
           <>
@@ -241,24 +244,24 @@ export function ChatsTab() {
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ fontSize: '14px', fontWeight: 700, color: '#fff' }}>
-                    {selectedChat?.subtitle || selectedChat?.title || 'Диалог'}
+                    {selectedChat?.subtitle || selectedChat?.title || t('dialog_title')}
                   </span>
                   {selectedChat?.is_human_override && (
-                    <span className="badge badge-warning" style={{ fontSize: '10px' }}>Взято под контроль (1-на-1)</span>
+                    <span className="badge badge-warning" style={{ fontSize: '10px' }}>{t('override_badge')}</span>
                   )}
                 </div>
                 {selectedChat?.title && (
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    📦 Товар: {selectedChat.title}
-                    {selectedChat?.analytics?.order_id && <> · Заказ №{selectedChat.analytics.order_id}</>}
+                    {t('product_label')} {selectedChat.title}
+                    {selectedChat?.analytics?.order_id && <> · {t('order_label')}{selectedChat.analytics.order_id}</>}
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
                   <a href={kaspiWebLink} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: 'var(--primary)' }}>
-                    🔗 Открыть в чате Kaspi (медиа)
+                    {t('link_web')}
                   </a>
                   <a href={kaspiPayLink} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: 'var(--primary)' }}>
-                    📱 Через Pay-ссылку
+                    {t('link_pay')}
                   </a>
                 </div>
               </div>
@@ -269,13 +272,13 @@ export function ChatsTab() {
                 onClick={handleTakeOver}
                 disabled={takingOver || selectedChat?.is_human_override}
               >
-                {selectedChat?.is_human_override ? '✅ Уже под контролем' : takingOver ? '...' : '🙋 Вмешаться'}
+                {selectedChat?.is_human_override ? t('takeover_button_done') : takingOver ? '...' : t('takeover_button')}
               </button>
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {messagesLoading && messages.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>⏳ Загрузка переписки...</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>{t('messages_loading')}</div>
               ) : (
                 messages.map((m) => {
                   const isOurs = m.sender === 'client'; // см. предупреждение в типе выше
@@ -310,7 +313,7 @@ export function ChatsTab() {
 
             <div style={{ padding: '10px 16px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Быстрые ответы:</span>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('quick_replies_label')}</span>
                 <div style={{ display: 'flex', gap: '4px' }}>
                   {(['ru', 'kk'] as const).map((lang) => (
                     <button
@@ -348,7 +351,7 @@ export function ChatsTab() {
                   type="text"
                   className="form-input"
                   style={{ flex: 1 }}
-                  placeholder="Сообщение..."
+                  placeholder={t('input_placeholder')}
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -359,7 +362,7 @@ export function ChatsTab() {
                   }}
                 />
                 <button className="btn btn-primary" onClick={handleSend} disabled={sending || !messageInput.trim()}>
-                  {sending ? '...' : 'Отправить'}
+                  {sending ? '...' : t('send_button')}
                 </button>
               </div>
             </div>

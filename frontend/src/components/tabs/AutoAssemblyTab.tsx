@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { apiFetch, API_URL } from '../../api';
 import { useActiveStoreId } from '../../storeContext';
 import type { AutoAssemblyLogEntry, AutoAssemblyRule, AutoAssemblySpoolItem } from '../../types';
@@ -13,7 +14,7 @@ const DELIVERY_TYPE_META: Record<string, { label: string; icon: string }> = {
   'Kaspi Доставка': { label: 'Kaspi Доставка — стандарт', icon: '🚚' },
 };
 
-const DAY_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; // TODO: use t() from component
 
 function decisionColor(decision: string): string {
   if (decision === 'DONE') return '#34d399';
@@ -87,7 +88,7 @@ function RuleCard({ rule, onSave, saving }: RuleCardProps) {
             onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
             style={{ width: '16px', height: '16px', cursor: 'pointer' }}
           />
-          <strong style={{ color: draft.enabled ? '#34d399' : '#888' }}>{draft.enabled ? 'Включено' : 'Выключено'}</strong>
+          <strong style={{ color: draft.enabled ? '#34d399' : '#888' }}>{draft.enabled ? t('enabled') : t('disabled')}</strong>
         </label>
       </div>
 
@@ -241,6 +242,7 @@ function RuleCard({ rule, onSave, saving }: RuleCardProps) {
 }
 
 export function AutoAssemblyTab() {
+  const { t } = useTranslation('tab_auto_assembly');
   const queryClient = useQueryClient();
   const activeStoreId = useActiveStoreId();
   const [savingType, setSavingType] = useState<string | null>(null);

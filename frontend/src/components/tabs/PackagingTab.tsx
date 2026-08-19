@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import type { Order } from '../../types';
 import { openImageLightbox } from '../shared/ImageLightbox';
 
@@ -38,19 +39,20 @@ export function PackagingTab({
   packingAll,
   onRefresh,
 }: PackagingTabProps) {
+  const { t } = useTranslation('tab_packaging');
   return (
     <>
       {/* Header with Search, Filter & Limit */}
       <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
           <h2 style={{ fontSize: '16px' }}>
-            📦 Упаковка заказов ({filteredOrders.length ? `${filteredOrders.length} поз.` : '0 поз.'})
+            {filteredOrders.length ? t('title').replace('%count%', String(filteredOrders.length)) : t('title_no_orders')}
           </h2>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
             {/* Limit Selector */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Лимит:</span>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('limit_label')}</span>
               <select
                 value={orderLimit}
                 onChange={(e) => onOrderLimitChange(parseInt(e.target.value))}
@@ -74,7 +76,7 @@ export function PackagingTab({
                 }}
                 onClick={() => onOrderStatusFilterChange('NEW')}
               >
-                Новые
+                {t('status_new')}
               </button>
               <button
                 className="btn"
@@ -84,7 +86,7 @@ export function PackagingTab({
                 }}
                 onClick={() => onOrderStatusFilterChange('ASSEMBLY')}
               >
-                На сборке
+                {t('status_assembly')}
               </button>
             </div>
 
@@ -100,10 +102,10 @@ export function PackagingTab({
                   }}
                   onClick={() => onPkgDeliveryFilterChange(filterVal)}
                 >
-                  {filterVal === 'ALL' && 'Все'}
-                  {filterVal === 'EXPRESS' && 'Экспресс'}
-                  {filterVal === 'POSTOMAT' && 'Постамат'}
-                  {filterVal === 'STANDARD' && 'Обычные'}
+                  {filterVal === 'ALL' && t('delivery_all')}
+                  {filterVal === 'EXPRESS' && t('delivery_express')}
+                  {filterVal === 'POSTOMAT' && t('delivery_postomat')}
+                  {filterVal === 'STANDARD' && t('delivery_standard')}
                 </button>
               ))}
             </div>
@@ -120,7 +122,7 @@ export function PackagingTab({
               onClick={onToggleSelectAll}
               disabled={filteredOrders.length === 0}
             >
-              {selectedOrderIds.size === filteredOrders.length && filteredOrders.length > 0 ? '🚫 Снять выбор' : '☑️ Выбрать все'}
+              {selectedOrderIds.size === filteredOrders.length && filteredOrders.length > 0 ? t('btn_deselect_all') : t('btn_select_all')}
             </button>
 
             {selectedOrderIds.size > 0 && (
@@ -130,7 +132,7 @@ export function PackagingTab({
                 style={{ padding: '8px 14px', fontSize: '13px', background: 'linear-gradient(100deg, var(--secondary), var(--secondary-hover))', boxShadow: '0 4px 12px var(--secondary-glow)' }}
                 onClick={onPackSelectedOrders}
               >
-                📦 Собрать выбранные ({selectedOrderIds.size})
+                {t('btn_pack_selected').replace('%count%', String(selectedOrderIds.size))}
               </button>
             )}
           </div>
@@ -143,7 +145,7 @@ export function PackagingTab({
               onClick={onPackAllOrders}
               disabled={packingAll || filteredOrders.length === 0}
             >
-              {packingAll ? '⏳ Выполняется...' : '🚀 Сформировать все накладные'}
+              {packingAll ? t('btn_loading') : t('btn_form_all')}
             </button>
 
             <button
@@ -153,7 +155,7 @@ export function PackagingTab({
               onClick={onRefresh}
               disabled={fetchingOrders}
             >
-              {fetchingOrders ? '🔄' : '♻️ Обновить'}
+              {fetchingOrders ? '🔄' : t('btn_refresh')}
             </button>
           </div>
         </div>
@@ -164,11 +166,11 @@ export function PackagingTab({
         {fetchingOrders && filteredOrders.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
             <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-            <p>Загрузка заказов через Kaspi API...</p>
+            <p>{t('loading_message')}</p>
           </div>
         ) : filteredOrders.length === 0 && !fetchingOrders ? (
           <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-            <p>Заказы не найдены. Нажмите «♻️ Обновить» или смените фильтр.</p>
+            <p>{t('no_orders')}</p>
           </div>
         ) : (
           <div style={{
@@ -197,23 +199,23 @@ export function PackagingTab({
                       />
                       <div>
                         <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          Заказ #{order.id}
+                          {t('order_title').replace('%id%', order.id)}
                           <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)' }}>({order.createdAt})</span>
                         </h3>
                         <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
                           {order.deliveryType === 'Express' ? (
-                            <span className="badge badge-error">⚡ Экспресс</span>
+                            <span className="badge badge-error">{t('delivery_express_badge')}</span>
                           ) : order.deliveryType === 'Today' ? (
-                            <span className="badge badge-warning">🕒 Сегодня</span>
+                            <span className="badge badge-warning">{t('delivery_today_badge')}</span>
                           ) : order.deliveryType === 'Tomorrow' ? (
-                            <span className="badge badge-warning" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.2)' }}>📅 Завтра</span>
+                            <span className="badge badge-warning" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.2)' }}>{t('delivery_tomorrow_badge')}</span>
                           ) : (order.deliveryType === 'Самовывоз' || order.deliveryType === 'Postomat') ? (
-                            <span className="badge" style={{ background: 'rgba(139, 92, 246, 0.1)', color: '#a78bfa', border: '1px solid rgba(139, 92, 246, 0.2)' }}>📦 Постомат</span>
+                            <span className="badge" style={{ background: 'rgba(139, 92, 246, 0.1)', color: '#a78bfa', border: '1px solid rgba(139, 92, 246, 0.2)' }}>{t('delivery_postomat_badge')}</span>
                           ) : (
                             <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>📦 {order.deliveryType}</span>
                           )}
                           <span className="badge" style={{ background: order.status === 'APPROVED_BY_BANK' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(16, 185, 129, 0.1)', color: order.status === 'APPROVED_BY_BANK' ? '#3b82f6' : 'var(--success)' }}>
-                            {order.status === 'APPROVED_BY_BANK' ? 'Новый' : 'Одобрен'}
+                            {order.status === 'APPROVED_BY_BANK' ? t('status_new') : t('status_approved')}
                           </span>
                         </div>
                       </div>
@@ -226,18 +228,18 @@ export function PackagingTab({
                   {/* Card Content (Grid) */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px', padding: '12px 0', borderTop: '1px solid rgba(255,255,255,0.04)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px', fontSize: '13px' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>Получатель:</span>
+                      <span style={{ color: 'var(--text-muted)' }}>{t('recipient_label')}:</span>
                       <span style={{ color: '#fff', fontWeight: 500 }}>
                         {order.customer.name} {order.customer.phone && `(${order.customer.phone})`}
                       </span>
 
-                      <span style={{ color: 'var(--text-muted)' }}>Адрес доставки:</span>
+                      <span style={{ color: 'var(--text-muted)' }}>{t('delivery_address_label')}:</span>
                       <span style={{ color: '#fff' }}>{order.address}</span>
                     </div>
 
                     {/* Items List */}
                     <div>
-                      <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px' }}>Товары:</h4>
+                      <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px' }}>{t('items_header')}:</h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         {order.entries && order.entries.map((item, idx) => (
                           <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.01)', padding: '8px 12px', borderRadius: '8px', fontSize: '13px', border: '1px solid rgba(255,255,255,0.02)' }}>
@@ -278,14 +280,14 @@ export function PackagingTab({
                       style={{ padding: '8px 14px', fontSize: '13px' }}
                       onClick={() => onToggleOrderSelection(order.id)}
                     >
-                      {isSelected ? 'Снять выбор' : 'Выбрать'}
+                      {isSelected ? t('btn_deselect') : t('btn_select')}
                     </button>
                     <button
                       className="btn btn-primary"
                       style={{ padding: '8px 16px', fontSize: '13px' }}
                       onClick={() => onPackOrder(order.id, order.internalId)}
                     >
-                      {order.status === 'APPROVED_BY_BANK' ? '🚀 Принять заказ' : '📦 Упаковать заказ'}
+                      {order.status === 'APPROVED_BY_BANK' ? t('btn_accept_order') : t('btn_pack_order')}
                     </button>
                   </div>
                 </div>

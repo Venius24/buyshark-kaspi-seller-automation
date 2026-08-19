@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { apiFetch, API_URL } from '../../api';
 import { formatTenge } from '../../utils/money';
 
@@ -35,12 +36,13 @@ const fetchReferralStores = async (): Promise<ReferralStoreRow[]> => {
 };
 
 export const ReferralTab: React.FC = () => {
+  const { t } = useTranslation('tab_referral');
   const [copied, setCopied] = useState(false);
   const { data: me } = useQuery({ queryKey: ['referral', 'me'], queryFn: fetchReferralMe });
   const { data: stores = [] } = useQuery({ queryKey: ['referral', 'stores'], queryFn: fetchReferralStores });
 
   if (!me) {
-    return <div style={styles.wrap}><div className="glass-card" style={styles.card}>Загрузка...</div></div>;
+    return <div style={styles.wrap}><div className="glass-card" style={styles.card}>{t('loading')}</div></div>;
   }
 
   const link = `${window.location.origin}/?ref=${me.code}`;
@@ -55,34 +57,34 @@ export const ReferralTab: React.FC = () => {
     <div style={styles.wrap}>
       <div style={styles.grid}>
         <div className="glass-card" style={styles.card}>
-          <div style={styles.cardLabel}>Ваша ссылка</div>
+          <div style={styles.cardLabel}>{t('your_link')}</div>
           <div style={styles.linkRow}>
             <code style={styles.linkText}>{link}</code>
-            <button className="btn btn-secondary" style={styles.smallBtn} onClick={copyLink}>{copied ? 'Скопировано' : 'Копировать'}</button>
+            <button className="btn btn-secondary" style={styles.smallBtn} onClick={copyLink}>{copied ? t('copied') : t('copy')}</button>
           </div>
-          <div style={styles.cardSub}>Код: {me.code} · {me.commission_percent}% за первые {me.commission_months} мес.</div>
+          <div style={styles.cardSub}>{t('code_label')}: {me.code} · {me.commission_percent}% {t('for_months').replace('%months%', String(me.commission_months))}</div>
         </div>
 
         <div className="glass-card" style={styles.card}>
-          <div style={styles.cardLabel}>Заработано всего</div>
+          <div style={styles.cardLabel}>{t('total_earned')}</div>
           <div style={styles.cardValue}>{formatTenge(me.total_earned_minor)}</div>
-          <div style={styles.cardSub}>Приведено магазинов: {me.stores_count}</div>
+          <div style={styles.cardSub}>{t('referred_stores')}: {me.stores_count}</div>
         </div>
       </div>
 
       <div className="glass-card" style={styles.card}>
-        <h3 style={styles.sectionTitle}>Приведённые магазины</h3>
+        <h3 style={styles.sectionTitle}>{t('referred_stores_list')}</h3>
         {stores.length === 0 ? (
-          <div style={styles.cardSub}>Пока никого не привели.</div>
+          <div style={styles.cardSub}>{t('no_referred_stores')}</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={styles.table}>
               <thead>
                 <tr>
-                  <th style={styles.th}>Магазин</th>
-                  <th style={styles.th}>Окно</th>
-                  <th style={styles.th}>Месяцев оплачено</th>
-                  <th style={styles.th}>Заработано</th>
+                  <th style={styles.th}>{t('table_store')}</th>
+                  <th style={styles.th}>{t('table_window')}</th>
+                  <th style={styles.th}>{t('table_months_paid')}</th>
+                  <th style={styles.th}>{t('table_earned')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -91,7 +93,7 @@ export const ReferralTab: React.FC = () => {
                     <td style={styles.td}>{s.store_name}</td>
                     <td style={styles.td}>
                       <span className={`badge ${s.window_active ? 'badge-success' : 'badge-warning'}`}>
-                        {s.window_active ? 'Активно' : 'Завершено'}
+                        {s.window_active ? t('active') : t('completed')}
                       </span>
                     </td>
                     <td style={styles.td}>{s.months_paid} / {s.months_total}</td>

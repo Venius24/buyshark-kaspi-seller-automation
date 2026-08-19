@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { apiFetch, API_URL } from '../../api';
 import { TelegramLinkPanel } from '../TelegramLinkPanel';
 import { NotificationSettingsPanel } from '../NotificationSettingsPanel';
@@ -10,53 +11,55 @@ interface SettingsTabProps {
 }
 
 export function SettingsTab({ mcHasSession, addLog, onOpenMcAuth, onCheckMcStatus }: SettingsTabProps) {
+  const { t } = useTranslation('tab_settings');
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '800px' }}>
       <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        <h2>Статус авторизации и сессии</h2>
+        <h2>{t('title')}</h2>
 
         <div className="status-widget">
           <div>
-            <h3 style={{ fontSize: '15px', fontWeight: 600 }}>Kaspi Merchant API (REST)</h3>
-            <p style={{ marginTop: '4px', fontSize: '12px' }}>Токен X-Auth-Token проверен и сохранен.</p>
+            <h3 style={{ fontSize: '15px', fontWeight: 600 }}>{t('rest_api_title')}</h3>
+            <p style={{ marginTop: '4px', fontSize: '12px' }}>{t('rest_api_description')}</p>
             <div style={{ display: 'flex', alignItems: 'center', marginTop: '8px' }}>
               <span className="glow-dot glow-dot-success"></span>
-              <span className="badge badge-success">Сессия активна</span>
+              <span className="badge badge-success">{t('badge_active')}</span>
             </div>
           </div>
           <button className="btn btn-secondary" onClick={() => {
-            addLog('Проверка состояния сессии REST API...');
+            addLog(t('log_checking'));
             apiFetch(`${API_URL}/api/verify-session`, { method: 'POST' })
               .then(r => r.json())
-              .then(d => addLog(d.valid ? 'Сессия REST API активна ✓' : 'Сессия REST API невалидна ✗'))
-              .catch(() => addLog('Ошибка проверки сессии REST API'));
+              .then(d => addLog(d.valid ? t('log_active') : t('log_invalid')))
+              .catch(() => addLog(t('log_error')));
           }}>
-            🔄 Проверить
+            {t('btn_check')}
           </button>
         </div>
 
         <div className="status-widget">
           <div>
-            <h3 style={{ fontSize: '15px', fontWeight: 600 }}>Kaspi MC (сессионные куки браузера)</h3>
-            <p style={{ marginTop: '4px', fontSize: '12px' }}>Используется для получения цен конкурентов и управления демпингом.</p>
+            <h3 style={{ fontSize: '15px', fontWeight: 600 }}>{t('mc_title')}</h3>
+            <p style={{ marginTop: '4px', fontSize: '12px' }}>{t('mc_description')}</p>
             <div style={{ display: 'flex', alignItems: 'center', marginTop: '8px' }}>
               <span className={`glow-dot ${mcHasSession ? 'glow-dot-success' : 'glow-dot-warning'}`}></span>
               {mcHasSession ? (
-                <span className="badge badge-success">Сессионные куки активны</span>
+                <span className="badge badge-success">{t('badge_mc_active')}</span>
               ) : (
-                <span className="badge badge-warning">Требуется повторный вход</span>
+                <span className="badge badge-warning">{t('badge_mc_required')}</span>
               )}
             </div>
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
             <button className="btn btn-primary" onClick={onOpenMcAuth}>
-              🔑 {mcHasSession ? 'Авторизоваться заново' : 'Войти в Kaspi MC'}
+              {mcHasSession ? t('btn_mc_login_new') : t('btn_mc_login')}
             </button>
             <button className="btn btn-secondary" onClick={() => {
-              addLog('Проверка кук Kaspi MC...');
-              onCheckMcStatus().then(() => addLog('Проверка завершена.'));
+              addLog(t('log_checking_mc'));
+              onCheckMcStatus().then(() => addLog(t('log_check_complete')));
             }}>
-              🔄 Проверить
+              {t('btn_check')}
             </button>
           </div>
         </div>

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import type { Transfer } from '../../types';
 
 interface TransferTabProps {
@@ -9,13 +10,14 @@ interface TransferTabProps {
 }
 
 export function TransferTab({ transfers, fetchingTransfers, transferFilter, onTransferFilterChange, onRefresh }: TransferTabProps) {
+  const { t } = useTranslation('tab_transfer');
   return (
     <>
       {/* Header with Search, Filter & Limit */}
       <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
           <h2 style={{ fontSize: '16px' }}>
-            🚚 Передача заказов курьеру ({transfers.length ? `${transfers.length} поз.` : '0 поз.'})
+            {transfers.length ? t('title').replace('%count%', String(transfers.length)) : t('title_no_transfers')}
           </h2>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -31,9 +33,9 @@ export function TransferTab({ transfers, fetchingTransfers, transferFilter, onTr
                   }}
                   onClick={() => onTransferFilterChange(filterVal)}
                 >
-                  {filterVal === 'ALL' && 'Все'}
-                  {filterVal === 'EXPRESS' && 'Экспресс'}
-                  {filterVal === 'TODAY' && 'Сегодня'}
+                  {filterVal === 'ALL' && t('filter_all')}
+                  {filterVal === 'EXPRESS' && t('filter_express')}
+                  {filterVal === 'TODAY' && t('filter_today')}
                 </button>
               ))}
             </div>
@@ -45,7 +47,7 @@ export function TransferTab({ transfers, fetchingTransfers, transferFilter, onTr
               onClick={onRefresh}
               disabled={fetchingTransfers}
             >
-              {fetchingTransfers ? '🔄' : '♻️ Обновить'}
+              {fetchingTransfers ? '🔄' : t('btn_refresh')}
             </button>
           </div>
         </div>
@@ -56,11 +58,11 @@ export function TransferTab({ transfers, fetchingTransfers, transferFilter, onTr
         {fetchingTransfers && transfers.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
             <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-            <p>Загрузка передач через Kaspi API...</p>
+            <p>{t('loading_message')}</p>
           </div>
         ) : transfers.length === 0 && !fetchingTransfers ? (
           <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-            <p>Передачи не найдены. Нажмите «♻️ Обновить» или смените фильтр.</p>
+            <p>{t('no_transfers')}</p>
           </div>
         ) : (
           <div style={{
@@ -88,7 +90,7 @@ export function TransferTab({ transfers, fetchingTransfers, transferFilter, onTr
               >
                 <div>
                   <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    Заказ #{transfer.id}
+                    {t('order_title').replace('%id%', transfer.id)}
                     <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--error)' }}>
                       {transfer.deadline}
                     </span>
@@ -96,9 +98,9 @@ export function TransferTab({ transfers, fetchingTransfers, transferFilter, onTr
 
                   <div style={{ display: 'flex', gap: '8px', marginTop: '6px', marginBottom: '8px' }}>
                     {transfer.deliveryType === 'Express' ? (
-                      <span className="badge badge-error">⚡ Экспресс</span>
+                      <span className="badge badge-error">{t('delivery_express')}</span>
                     ) : transfer.deliveryType === 'Today' ? (
-                      <span className="badge badge-warning">🕒 Сегодня</span>
+                      <span className="badge badge-warning">{t('delivery_today')}</span>
                     ) : transfer.deliveryType === 'Tomorrow' ? (
                       <span className="badge badge-warning" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.2)' }}>📅 Завтра</span>
                     ) : (

@@ -1,4 +1,5 @@
 import type { FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Product } from '../../types';
 import { Pagination } from '../shared/Pagination';
 import { ProductCardHeader } from '../shared/ProductCardHeader';
@@ -42,19 +43,21 @@ export function ProductsTab({
   totalPages,
   onPageChange,
 }: ProductsTabProps) {
+  const { t } = useTranslation('tab_products');
+
   return (
     <>
       {/* Header with Search, Filter & Page Size */}
       <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <h2 style={{ fontSize: '16px' }}>
-            🏷️ Управление товарами ({totalCount ? `${totalCount} поз.` : '0 поз.'})
+            {totalCount ? t('title').replace('%count%', String(totalCount)) : t('title_no_products')}
           </h2>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             {/* Page Size Selector */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Показывать по:</span>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('show_per_page')}</span>
               <select
                 value={pageSize}
                 onChange={(e) => onPageSizeChange(parseInt(e.target.value))}
@@ -78,7 +81,7 @@ export function ProductsTab({
                 }}
                 onClick={() => onStatusFilterChange('active')}
               >
-                В продаже
+                {t('status_active')}
               </button>
               <button
                 className="btn"
@@ -88,7 +91,7 @@ export function ProductsTab({
                 }}
                 onClick={() => onStatusFilterChange('archive')}
               >
-                Сняты
+                {t('status_archive')}
               </button>
             </div>
           </div>
@@ -99,13 +102,13 @@ export function ProductsTab({
           <input
             type="text"
             className="form-input"
-            placeholder="Поиск по артикулу / названию..."
+            placeholder={t('search_placeholder')}
             value={searchQuery}
             onChange={(e) => onSearchQueryChange(e.target.value)}
             style={{ flexGrow: 1 }}
           />
           <button type="submit" className="btn btn-primary" style={{ padding: '10px 16px' }}>
-            Найти
+            {t('btn_search')}
           </button>
           <button
             type="button"
@@ -114,7 +117,7 @@ export function ProductsTab({
             onClick={onRefresh}
             disabled={fetchingProducts}
           >
-            {fetchingProducts ? '🔄' : '♻️ Обновить'}
+            {fetchingProducts ? '🔄' : t('btn_refresh')}
           </button>
         </form>
       </div>
@@ -124,11 +127,11 @@ export function ProductsTab({
         {fetchingProducts && products.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
             <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-            <p>Загрузка товаров через Kaspi API...</p>
+            <p>{t('loading_message')}</p>
           </div>
         ) : products.length === 0 && !fetchingProducts ? (
           <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-            <p>Товары не найдены. Нажмите «♻️ Обновить» для загрузки из Kaspi API.</p>
+            <p>{t('no_products')}</p>
           </div>
         ) : (
           <div style={{
@@ -165,7 +168,7 @@ export function ProductsTab({
                             border: '1px solid rgba(255,255,255,0.08)'
                           }}
                         >
-                          {product.status === 'Активен' ? 'В продаже' : 'Снят с продажи'}
+                          {product.status === 'Активен' ? t('status_for_sale') : t('status_removed')}
                         </span>
 
                         <span
@@ -176,7 +179,7 @@ export function ProductsTab({
                             border: '1px solid rgba(255,255,255,0.08)'
                           }}
                         >
-                          Остаток: {product.stock ?? 0} шт.
+                          {t('stock_label')} {product.stock ?? 0} {t('unit_pcs')}
                         </span>
 
                         {product.url && (
@@ -186,7 +189,7 @@ export function ProductsTab({
                             rel="noreferrer"
                             style={{ fontSize: '12px', color: 'var(--secondary)', textDecoration: 'none' }}
                           >
-                            🔗 Карточка товара
+                            {t('link_product_card')}
                           </a>
                         )}
                       </div>
@@ -194,7 +197,7 @@ export function ProductsTab({
 
                     <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '16px' }}>
                       <div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Цена:</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('price_label')}:</div>
                         <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary)' }}>{product.price}</div>
                       </div>
                       <button
@@ -203,7 +206,7 @@ export function ProductsTab({
                         style={{ padding: '8px 12px', fontSize: '12px', borderColor: isEditing ? 'var(--secondary)' : 'transparent' }}
                         onClick={() => onToggleEdit(product.sku)}
                       >
-                        ✏️ {isEditing ? 'Закрыть' : 'Изменить'}
+                        {isEditing ? t('btn_close_edit') : t('btn_edit')}
                       </button>
                     </div>
                   </div>
@@ -220,50 +223,50 @@ export function ProductsTab({
                       }}
                     >
                       <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--secondary)' }}>
-                        Параметры товара на Kaspi
+                        {t('edit_form_title')}
                       </h4>
 
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px' }}>
                         <div>
-                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Цена (₸)</label>
+                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('edit_price_label')}</label>
                           <input
                             type="number"
                             id={`edit-price-${product.sku}`}
                             className="form-input"
                             defaultValue={product.price_num || ''}
-                            placeholder="Цена товара"
+                            placeholder={t('edit_price_placeholder')}
                           />
                         </div>
                         <div>
-                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Остаток на складе (шт)</label>
+                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('edit_stock_label')}</label>
                           <input
                             type="number"
                             id={`edit-stock-${product.sku}`}
                             className="form-input"
                             defaultValue={product.stock ?? 10}
-                            placeholder="Остаток"
+                            placeholder={t('edit_stock_placeholder')}
                           />
                         </div>
                         <div>
-                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Бренд</label>
+                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('edit_brand_label')}</label>
                           <input
                             type="text"
                             id={`edit-brand-${product.sku}`}
                             className="form-input"
                             defaultValue={product.brand || ''}
-                            placeholder="Бренд"
+                            placeholder={t('edit_brand_placeholder')}
                           />
                         </div>
                         <div>
-                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Статус</label>
+                          <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('edit_status_label')}</label>
                           <select
                             id={`edit-status-${product.sku}`}
                             className="form-input"
                             defaultValue={product.status || 'Активен'}
                             style={{ background: 'var(--input-bg)', color: '#fff', border: '1px solid var(--input-border)', height: '38px', borderRadius: '8px' }}
                           >
-                            <option value="Активен">В продаже (Активен)</option>
-                            <option value="Архив">Снят с продажи (Архив)</option>
+                            <option value="Активен">{t('edit_status_option_active')}</option>
+                            <option value="Архив">{t('edit_status_option_archive')}</option>
                           </select>
                         </div>
                       </div>
@@ -281,7 +284,7 @@ export function ProductsTab({
                             onSaveProductUpdate(product.sku, priceVal, stockVal, brandVal, statusVal);
                           }}
                         >
-                          Сохранить изменения
+                          {t('btn_save_changes')}
                         </button>
                       </div>
                     </div>

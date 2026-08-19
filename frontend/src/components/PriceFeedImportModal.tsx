@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import type { PriceFeedImportStep } from '../hooks/usePriceFeedImport';
 import type { PriceFeedMerchant, PriceFeedPreviewResult, PriceFeedApplyResult } from '../types';
 
@@ -22,15 +23,6 @@ interface PriceFeedImportModalProps {
   onFinish: () => void;
 }
 
-const SKIP_REASON_LABELS: Record<string, string> = {
-  algorithm_off_no_limits: 'демпинг выключен в PriceFeed',
-  no_min_or_max: 'не задана мин. или макс. цена',
-  min_gte_max: 'мин. цена ≥ макс.',
-  not_in_catalog: 'нет в нашем каталоге',
-  duplicate_sku: 'дубликат SKU',
-  unknown_algorithm: 'незнакомый алгоритм',
-};
-
 export function PriceFeedImportModal({
   step,
   phone,
@@ -51,6 +43,17 @@ export function PriceFeedImportModal({
   onApply,
   onFinish,
 }: PriceFeedImportModalProps) {
+  const { t } = useTranslation('modal_pricefeed_import');
+
+  const SKIP_REASON_KEYS: Record<string, string> = {
+    algorithm_off_no_limits: 'algorithm_off',
+    no_min_or_max: 'no_min_max',
+    min_gte_max: 'min_gte_max',
+    not_in_catalog: 'not_in_catalog',
+    duplicate_sku: 'duplicate_sku',
+    unknown_algorithm: 'unknown_algorithm',
+  };
+
   if (step === 'idle') return null;
 
   return (
@@ -63,7 +66,7 @@ export function PriceFeedImportModal({
         style={{ maxWidth: '520px', width: '100%', padding: '30px', maxHeight: '85vh', overflowY: 'auto' }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h3 style={{ fontSize: '18px', fontWeight: 700 }}>📥 Импорт настроек демпинга из PriceFeed</h3>
+          <h3 style={{ fontSize: '18px', fontWeight: 700 }}>{t('title')}</h3>
           <button
             onClick={step === 'done' ? onFinish : onClose}
             style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer' }}
@@ -81,36 +84,35 @@ export function PriceFeedImportModal({
         {step === 'credentials' && (
           <div>
             <p style={{ fontSize: '13px', marginBottom: '16px', color: 'var(--text-muted)' }}>
-              Введите телефон и пароль от вашего аккаунта PriceFeed.kz. Мы разово залогинимся под вашим аккаунтом,
-              заберём min/max цены и алгоритмы демпинга — <strong>пароль нигде не сохраняется</strong>.
+              {t('credentials_description')}
             </p>
             <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>Телефон</label>
+              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>{t('label_phone')}</label>
               <input
                 type="tel"
                 className="form-input"
-                placeholder="+7 707 000 12 34"
+                placeholder={t('placeholder_phone')}
                 value={phone}
                 autoComplete="off"
                 onChange={(e) => onPhoneChange(e.target.value)}
               />
             </div>
             <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>Пароль</label>
+              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>{t('label_password')}</label>
               <input
                 type="password"
                 className="form-input"
-                placeholder="••••••••"
+                placeholder={t('placeholder_password')}
                 value={password}
                 autoComplete="current-password"
                 onChange={(e) => onPasswordChange(e.target.value)}
               />
             </div>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px' }}>
-              <input type="checkbox" required /> Я подтверждаю, что это мой аккаунт PriceFeed
+              <input type="checkbox" required /> {t('confirmation')}
             </label>
             <button className="btn btn-primary" style={{ width: '100%' }} onClick={onSubmitCredentials} disabled={!phone || !password}>
-              Начать импорт
+              {t('btn_start_import')}
             </button>
           </div>
         )}
@@ -119,7 +121,7 @@ export function PriceFeedImportModal({
           <div style={{ textAlign: 'center', padding: '20px 0' }}>
             <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
             <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              Импорт может занять 1–2 минуты, не закрывайте окно...
+              {t('loading_message')}
             </p>
           </div>
         )}
@@ -127,7 +129,7 @@ export function PriceFeedImportModal({
         {step === 'choose_merchant' && (
           <div>
             <p style={{ fontSize: '13px', marginBottom: '16px', color: 'var(--text-muted)' }}>
-              В этом аккаунте PriceFeed несколько магазинов — выберите нужный:
+              {t('merchant_choice_description')}
             </p>
             {merchants.map((m) => (
               <button
@@ -146,34 +148,33 @@ export function PriceFeedImportModal({
           <div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
               <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '8px', padding: '10px 12px' }}>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Найдено в PriceFeed</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('preview_fetched')}</div>
                 <div style={{ fontSize: '20px', fontWeight: 700 }}>{preview.total_fetched}</div>
               </div>
               <div style={{ background: 'rgba(16, 185, 129, 0.08)', borderRadius: '8px', padding: '10px 12px' }}>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Можно импортировать</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('preview_importable')}</div>
                 <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--success)' }}>{preview.importable}</div>
               </div>
             </div>
 
             {!!preview.already_configured && (
               <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '10px' }}>
-                Из них у {preview.already_configured} уже есть настройки демпинга в нашей системе.
+                {t('already_configured').replace('%count%', String(preview.already_configured))}
               </div>
             )}
 
             {!!preview.unmatched && (
               <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '10px' }}>
-                {preview.unmatched} товар(ов) из PriceFeed не найдены в нашем каталоге — возможно, каталог не
-                синхронизирован. Обновите товары и повторите импорт, если ожидали больше совпадений.
+                {t('unmatched').replace('%count%', String(preview.unmatched))}
               </div>
             )}
 
             {preview.skipped && Object.keys(preview.skipped).length > 0 && (
               <details style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px' }}>
-                <summary style={{ cursor: 'pointer' }}>Что пропущено и почему</summary>
+                <summary style={{ cursor: 'pointer' }}>{t('skipped_summary')}</summary>
                 <ul style={{ marginTop: '6px', paddingLeft: '18px' }}>
                   {Object.entries(preview.skipped).map(([reason, count]) => (
-                    <li key={reason}>{count} — {SKIP_REASON_LABELS[reason] || reason}</li>
+                    <li key={reason}>{count} — {t(SKIP_REASON_KEYS[reason] || reason)}</li>
                   ))}
                 </ul>
               </details>
@@ -195,8 +196,7 @@ export function PriceFeedImportModal({
             )}
 
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px' }}>
-              Не переносится: интервал автообновления, фильтры конкурентов, город — эти настройки остаются как
-              настроены у нас (либо по умолчанию).
+              {t('transfer_note')}
             </div>
 
             {!!preview.sample?.length && (
@@ -234,7 +234,7 @@ export function PriceFeedImportModal({
                 disabled={!preview.already_configured}
                 onChange={(e) => onOverwriteChange(e.target.checked)}
               />
-              Перезаписать уже настроенные у нас товары ({preview.already_configured || 0})
+              {t('overwrite_label').replace('%count%', String(preview.already_configured || 0))}
             </label>
 
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '13px', marginBottom: '8px' }}>
@@ -245,17 +245,15 @@ export function PriceFeedImportModal({
                 style={{ marginTop: '3px' }}
               />
               <span>
-                Сразу включить демпинг по этим товарам
+                {t('activate_label')}
                 <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '12px', marginTop: '2px' }}>
-                  Без галочки настройки лягут выключенными — включите их партиями на вкладке
-                  «Демпинг». Kaspi разрешает всего 250 обновлений цен за 30 минут на весь магазин,
-                  и разом поднятые {preview.importable} товар(ов) в это окно не поместятся.
+                  {t('activate_note').replace('%count%', String(preview.importable))}
                 </span>
               </span>
             </label>
 
             <button className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }} onClick={onApply} disabled={!preview.importable}>
-              Импортировать {preview.importable} товар(ов)
+              {t('btn_import').replace('%count%', String(preview.importable))}
             </button>
           </div>
         )}
@@ -263,7 +261,7 @@ export function PriceFeedImportModal({
         {step === 'applying' && (
           <div style={{ textAlign: 'center', padding: '20px 0' }}>
             <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Записываем настройки...</p>
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{t('applying_message')}</p>
           </div>
         )}
 
@@ -278,19 +276,22 @@ export function PriceFeedImportModal({
               color: 'var(--success)', fontSize: '24px',
               margin: '0 auto 16px auto'
             }}>✓</div>
-            <h4 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>Импорт завершён</h4>
+            <h4 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>{t('done_title')}</h4>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px' }}>
-              Добавлено: {applyResult.created}, обновлено: {applyResult.updated}
-              {applyResult.skipped_existing ? `, пропущено (уже настроено): ${applyResult.skipped_existing}` : ''}.
+              {t('done_message')
+                .replace('%created%', String(applyResult.created))
+                .replace('%updated%', String(applyResult.updated))
+                .replace('%skipped_text%', applyResult.skipped_existing
+                  ? t('skipped_existing').replace('%count%', String(applyResult.skipped_existing))
+                  : '')}
             </p>
             {!applyResult.activated && (
               <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '20px' }}>
-                Настройки лежат выключенными и цены пока не трогают. Включайте их партиями
-                на вкладке «Демпинг», следя за остатком квоты Kaspi.
+                {t('not_activated_message')}
               </p>
             )}
             <button className="btn btn-primary" style={{ width: '100%' }} onClick={onFinish}>
-              Закрыть
+              {t('btn_close')}
             </button>
           </div>
         )}

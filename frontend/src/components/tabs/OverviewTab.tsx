@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { apiFetch, API_URL } from '../../api';
 import { PriceLeadGauge } from '../PriceLeadGauge';
 import { SavedMarginCard } from '../SavedMarginCard';
@@ -44,6 +45,7 @@ export function OverviewTab({
   onOpenPackaging,
   onOpenLogs,
 }: OverviewTabProps) {
+  const { t } = useTranslation('tab_overview');
   const salesStats = useSalesStats();
   const scoreStats = useScoreStats();
   const qualityMetrics = useQualityMetrics();
@@ -94,21 +96,21 @@ export function OverviewTab({
 
       <div className="grid-2">
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <h2>Статус системы</h2>
+          <h2>{t('system_status')}</h2>
           <div className="status-widget">
             <div>
-              <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi Merchant API (REST)</h3>
+              <h3 style={{ fontSize: '14px', fontWeight: 600 }}>{t('rest_api_title')}</h3>
               <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
                 <span className="glow-dot glow-dot-success"></span>
-                <span className="badge badge-success">Сессия активна</span>
+                <span className="badge badge-success">{t('badge_active')}</span>
               </div>
             </div>
             <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => {
-              addLog('Проверка состояния сессии REST API...');
+              addLog(t('log_checking'));
               apiFetch(`${API_URL}/api/verify-session`, { method: 'POST' })
                 .then(r => r.json())
-                .then(d => addLog(d.valid ? 'Сессия REST API активна ✓' : 'Сессия REST API невалидна ✗'))
-                .catch(() => addLog('Ошибка проверки сессии REST API'));
+                .then(d => addLog(d.valid ? t('log_active') : t('log_invalid')))
+                .catch(() => addLog(t('log_error')));
             }}>
               🔄
             </button>
@@ -116,19 +118,19 @@ export function OverviewTab({
 
           <div className="status-widget">
             <div>
-              <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Kaspi MC (сессионные куки)</h3>
+              <h3 style={{ fontSize: '14px', fontWeight: 600 }}>{t('mc_cookies_title')}</h3>
               <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
                 <span className={`glow-dot ${mcHasSession ? 'glow-dot-success' : 'glow-dot-warning'}`}></span>
                 {mcHasSession ? (
-                  <span className="badge badge-success">Активны</span>
+                  <span className="badge badge-success">{t('badge_mc_active')}</span>
                 ) : (
-                  <span className="badge badge-warning">Требуется вход</span>
+                  <span className="badge badge-warning">{t('badge_mc_required')}</span>
                 )}
               </div>
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={onOpenMcAuth}>
-                🔑 {mcHasSession ? 'Войти заново' : 'Войти'}
+                {mcHasSession ? t('btn_mc_login_again') : t('btn_mc_login')}
               </button>
             </div>
           </div>
@@ -136,21 +138,21 @@ export function OverviewTab({
 
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2>Быстрые действия</h2>
+            <h2>{t('quick_actions')}</h2>
             <span className="badge badge-success">Lumina Engine</span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '8px' }}>
             <button className="btn btn-primary" style={{ padding: '14px' }} onClick={onOpenProducts}>
-              🏷️ Открыть каталог
+              {t('btn_open_catalog')}
             </button>
             <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={onOpenDumping}>
-              ⚡ Настроить демпинг
+              {t('btn_setup_dumping')}
             </button>
             <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={onOpenPackaging}>
-              📦 Сборка заказов
+              {t('btn_pack_orders')}
             </button>
             <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={onOpenLogs}>
-              📜 Открыть консоль
+              {t('btn_open_logs')}
             </button>
           </div>
         </div>

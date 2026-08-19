@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { LanguageSwitcher } from './shared/LanguageSwitcher';
 import { API_URL } from '../api';
 import { clearPersistedQueryCache } from '../queryClient';
 
@@ -7,6 +9,7 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
+  const { t } = useTranslation('modal_auth');
   const [isRegister, setIsRegister] = useState<boolean>(false);
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -34,14 +37,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
       });
 
       if (!res.ok) {
-        let msg = `Ошибка сервера (${res.status})`;
+        let msg = t('error_server', { code: res.status });
         try {
           const errJson = await res.json();
           msg = errJson.detail || errJson.message || msg;
         } catch {
-          if (res.status === 502) msg = 'Сервер недоступен (502 Bad Gateway). Проверьте статус бэкенда!';
-          else if (res.status === 500) msg = 'Ошибка на бэкенде (500 Internal Server Error)';
-          else if (res.status === 404) msg = 'Маршрут API не найден (404 Not Found)';
+          if (res.status === 502) msg = t('error_502');
+          else if (res.status === 500) msg = t('error_500');
+          else if (res.status === 404) msg = t('error_404');
         }
         throw new Error(msg);
       }
@@ -50,7 +53,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
       try {
         data = await res.json();
       } catch {
-        throw new Error('Некорректный ответ от сервера (не JSON)');
+        throw new Error(t('error_invalid_response'));
       }
       if (data.access_token) {
         // Кэш react-query персистится в общий localStorage-ключ, не привязан
@@ -62,7 +65,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
         onSuccess();
       }
     } catch (err: any) {
-      setError(err.message || 'Ошибка сети');
+      setError(err.message || t('error_network'));
     } finally {
       setLoading(false);
     }
@@ -72,12 +75,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
     // auth-screen: это не поверх-модалка, а весь экран входа — на мобильном
     // он не должен превращаться в «шторку» снизу (см. mobile.css).
     <div className="modal-overlay auth-screen">
+      <div style={{ position: 'fixed', top: '20px', right: '20px', zIndex: 1000 }}>
+        <LanguageSwitcher />
+      </div>
       <div className="glass-card" style={styles.card}>
         <div style={styles.logoRow}>
           <img src="/buyshark-logo.svg" alt="BuyShark" style={styles.logoIcon} />
         </div>
         <h2 style={styles.title}>
-          {isRegister ? 'Регистрация в BuyShark' : 'Вход в личный кабинет'}
+          {isRegister ? t('title_register') : t('title_login')}
         </h2>
 
         {error && <div style={styles.errorBox}>⚠️ {error}</div>}
@@ -86,10 +92,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
           {isRegister && (
             <>
               <div style={styles.group}>
-                <label style={styles.label}>ФИО / Название ИП:</label>
+                <label style={styles.label}>{t('label_fio')}</label>
                 <input
                   type="text"
-                  placeholder="Иван Иванов"
+                  placeholder={t('placeholder_fio')}
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   className="form-input"
@@ -98,10 +104,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
               </div>
 
               <div style={styles.group}>
-                <label style={styles.label}>Телефон (+7):</label>
+                <label style={styles.label}>{t('label_phone')}</label>
                 <input
                   type="text"
-                  placeholder="+7 (707) 000-0000"
+                  placeholder={t('placeholder_phone')}
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   className="form-input"
@@ -111,10 +117,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
           )}
 
           <div style={styles.group}>
-            <label style={styles.label}>Email адрес:</label>
+            <label style={styles.label}>{t('label_email')}</label>
             <input
               type="email"
-              placeholder="name@company.kz"
+              placeholder={t('placeholder_email')}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="form-input"
@@ -123,10 +129,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
           </div>
 
           <div style={styles.group}>
-            <label style={styles.label}>Пароль:</label>
+            <label style={styles.label}>{t('label_password')}</label>
             <input
               type="password"
-              placeholder="••••••••"
+              placeholder={t('placeholder_password')}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="form-input"
@@ -135,14 +141,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
           </div>
 
           <button type="submit" disabled={loading} className="btn btn-primary" style={styles.submitBtn}>
-            {loading ? '⏳ Проверка...' : isRegister ? 'Зарегистрироваться' : 'Войти в кабинет'}
+            {loading ? t('btn_loading') : isRegister ? t('btn_register') : t('btn_login')}
           </button>
         </form>
 
         <div style={styles.toggleRow}>
-          {isRegister ? 'Уже есть аккаунт?' : 'Впервые в системе?'}
+          {isRegister ? t('toggle_has_account') : t('toggle_create_account')}
           <button onClick={() => setIsRegister(!isRegister)} style={styles.toggleBtn}>
-            {isRegister ? 'Войти' : 'Создать аккаунт'}
+            {isRegister ? t('toggle_btn_login') : t('toggle_btn_register')}
           </button>
         </div>
       </div>
