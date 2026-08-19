@@ -109,11 +109,11 @@ export const StoreHub: React.FC = () => {
   const handleConnectFullStore = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!storeName.trim()) {
-      setErrorMsg(t('enter_store_name'));
+      setErrorMsg(t('error_store_name'));
       return;
     }
     if (!apiToken.trim()) {
-      setErrorMsg(t('enter_api_token'));
+      setErrorMsg(t('error_api_token'));
       return;
     }
 
@@ -135,14 +135,14 @@ export const StoreHub: React.FC = () => {
 
       if (!res.ok) {
         const errJson = await res.json();
-        throw new Error(errJson.detail || t('store_connection_error'));
+        throw new Error(errJson.detail || t('error_connection'));
       }
 
       setShowAddModal(false);
       resetModalState();
       refetchStoresAndProfile();
     } catch (err: any) {
-      setErrorMsg(err.message || t('store_connection_error'));
+      setErrorMsg(err.message || t('error_connection'));
     } finally {
       setSubmitting(false);
     }

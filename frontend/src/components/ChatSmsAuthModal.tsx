@@ -49,14 +49,14 @@ export function ChatSmsAuthModal({
         {chatAuthStep === 'phone' && (
           <div>
             <p style={{ fontSize: '13px', marginBottom: '16px', color: 'var(--text-muted)' }}>
-              {t('phone_step_description')}
+              {t('description')}
             </p>
             <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>{t('phone_label')}</label>
+              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>{t('label_phone')}</label>
               <input
                 type="tel"
                 className="form-input"
-                placeholder={t('phone_placeholder')}
+                placeholder={t('placeholder_phone')}
                 value={phoneInput}
                 onChange={(e) => onPhoneChange(e.target.value)}
               />
@@ -66,7 +66,7 @@ export function ChatSmsAuthModal({
               style={{ width: '100%' }}
               onClick={onSubmitPhone}
             >
-              {t('send_sms_button')}
+              {t('btn_send_sms')}
             </button>
           </div>
         )}
@@ -74,15 +74,15 @@ export function ChatSmsAuthModal({
         {chatAuthStep === 'code' && (
           <div>
             <p style={{ fontSize: '13px', marginBottom: '16px', color: 'var(--text-muted)' }}>
-              {t('code_step_description', { phone: phoneInput })}
+              {t('code_description', { phone: phoneInput })}
             </p>
             <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>{t('code_label')}</label>
+              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>{t('label_code')}</label>
               <input
                 type="text"
                 inputMode="numeric"
                 className="form-input"
-                placeholder={t('code_placeholder')}
+                placeholder={t('placeholder_code')}
                 value={codeInput}
                 onChange={(e) => onCodeChange(e.target.value)}
               />
@@ -92,7 +92,7 @@ export function ChatSmsAuthModal({
               style={{ width: '100%' }}
               onClick={onSubmitCode}
             >
-              {t('confirm_button')}
+              {t('btn_confirm')}
             </button>
           </div>
         )}
@@ -120,7 +120,7 @@ export function ChatSmsAuthModal({
               {t('success_message')}
             </p>
             <button className="btn btn-primary" style={{ width: '100%' }} onClick={onClose}>
-              {t('close_button')}
+              {t('btn_close')}
             </button>
           </div>
         )}

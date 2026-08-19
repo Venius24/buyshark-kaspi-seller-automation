@@ -40,7 +40,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
         let msg = t('error_server', { code: res.status });
         try {
           const errJson = await res.json();
-          msg = errJson.detail || errJson.message || msg;
+          if (Array.isArray(errJson.detail)) {
+            msg = errJson.detail.map((d: any) => d.msg || String(d)).join('; ');
+          } else {
+            msg = errJson.detail || errJson.message || msg;
+          }
         } catch {
           if (res.status === 502) msg = t('error_502');
           else if (res.status === 500) msg = t('error_500');

@@ -6,23 +6,23 @@ import { fetchBillingSummary, fetchBillingPlans, fetchBillingTransactions } from
 import { formatTenge } from '../../utils/money';
 
 const STATUS_LABEL: Record<string, string> = {
-  ACTIVE: 'tab_billing.status_active',
-  BLOCKED_LIMIT: 'tab_billing.status_blocked_limit',
-  BLOCKED_BALANCE: 'tab_billing.status_blocked_balance',
+  ACTIVE: 'status_active',
+  BLOCKED_LIMIT: 'status_blocked_limit',
+  BLOCKED_BALANCE: 'status_blocked_balance',
 };
 
 const KIND_LABEL: Record<string, string> = {
-  topup_manual: 'tab_billing.kind_topup_manual',
-  topup_gateway: 'tab_billing.kind_topup_gateway',
-  charge_subscription: 'tab_billing.kind_charge_subscription',
-  charge_prompt_addon: 'tab_billing.kind_charge_prompt',
-  referral_payout: 'tab_billing.kind_referral_payout',
-  adjustment: 'tab_billing.kind_adjustment',
-  refund: 'tab_billing.kind_refund',
+  topup_manual: 'kind_topup_manual',
+  topup_gateway: 'kind_topup_gateway',
+  charge_subscription: 'kind_charge_subscription',
+  charge_prompt_addon: 'kind_charge_prompt',
+  referral_payout: 'kind_referral_payout',
+  adjustment: 'kind_adjustment',
+  refund: 'kind_refund',
 };
 
 export const BillingTab: React.FC = () => {
-  const { t } = useTranslation();
+  const { t } = useTranslation('tab_billing');
   const activeStoreId = useActiveStoreId() ?? '';
 
   const { data: summary } = useQuery({
@@ -44,7 +44,7 @@ export const BillingTab: React.FC = () => {
   });
 
   if (!summary) {
-    return <div style={styles.wrap}><div className="glass-card" style={styles.card}>{t('tab_billing.loading')}</div></div>;
+    return <div style={styles.wrap}><div className="glass-card" style={styles.card}>{t('loading')}</div></div>;
   }
 
   const blocked = summary.billing_status !== 'ACTIVE';
@@ -56,38 +56,38 @@ export const BillingTab: React.FC = () => {
     <div style={styles.wrap}>
       {blocked && (
         <div className="glass-card" style={{ ...styles.card, borderColor: 'var(--error)', background: 'rgba(239, 68, 68, 0.08)' }}>
-          <strong style={{ color: 'var(--error)' }}>🔒 {t('tab_billing.service_blocked')}</strong>
+          <strong style={{ color: 'var(--error)' }}>🔒 {t('service_blocked')}</strong>
           <p style={{ margin: '6px 0 0', color: '#d1d5db' }}>{summary.blocked_reason || t(STATUS_LABEL[summary.billing_status])}</p>
         </div>
       )}
 
       <div style={styles.grid}>
         <div className="glass-card" style={styles.card}>
-          <div style={styles.cardLabel}>{t('tab_billing.balance_label')}</div>
+          <div style={styles.cardLabel}>{t('balance_label')}</div>
           <div style={styles.cardValue}>{formatTenge(summary.balance_minor)}</div>
-          <div style={styles.cardSub}>{t('tab_billing.block_threshold')} {formatTenge(summary.block_threshold_minor)}</div>
+          <div style={styles.cardSub}>{t('block_threshold')} {formatTenge(summary.block_threshold_minor)}</div>
         </div>
 
         <div className="glass-card" style={styles.card}>
-          <div style={styles.cardLabel}>{t('tab_billing.current_plan')}</div>
+          <div style={styles.cardLabel}>{t('current_plan')}</div>
           <div style={styles.cardValue}>{summary.plan_name}</div>
           <div style={styles.cardSub}>
-            {summary.max_products ? t('tab_billing.up_to_products', { count: summary.max_products }) : t('tab_billing.unlimited_products')} · {formatTenge(summary.monthly_price_minor)}{t('tab_billing.per_month')}
+            {summary.max_products ? `${t('up_to')} ${summary.max_products} ${t('products')}` : t('unlimited_products')} · {formatTenge(summary.monthly_price_minor)}{t('per_month')}
           </div>
         </div>
 
         <div className="glass-card" style={styles.card}>
-          <div style={styles.cardLabel}>{t('tab_billing.ai_credits_today')}</div>
+          <div style={styles.cardLabel}>{t('ai_credits_today')}</div>
           <div style={styles.cardValue}>{(summary.credits_used_milli / 1000).toFixed(1)} / {(summary.credits_limit_milli / 1000).toFixed(0)}</div>
           <div style={styles.progressTrack}>
             <div style={{ ...styles.progressFill, width: `${creditsPercent}%` }} />
           </div>
-          <div style={styles.cardSub}>{t('tab_billing.prompt_multiplier')} {(summary.prompt_multiplier_milli / 1000).toFixed(1)}×</div>
+          <div style={styles.cardSub}>{t('prompt_multiplier')} {(summary.prompt_multiplier_milli / 1000).toFixed(1)}×</div>
         </div>
       </div>
 
       <div className="glass-card" style={styles.card}>
-        <h3 style={styles.sectionTitle}>{t('tab_billing.tariffs_section')}</h3>
+        <h3 style={styles.sectionTitle}>{t('tariffs_section')}</h3>
         {/* plans-grid: на телефоне превращается в карусель со свайпом
             (см. mobile.css) — пять тарифов в колонку занимали три экрана. */}
         <div className="plans-grid" style={styles.plansGrid}>
@@ -95,30 +95,30 @@ export const BillingTab: React.FC = () => {
             <div key={plan.code} className="plan-card" style={{ ...styles.planCard, ...(plan.code === summary.plan_code ? styles.planCardActive : {}) }}>
               {plan.badge && <span className="badge badge-warning" style={styles.planBadge}>{plan.badge}</span>}
               <div style={styles.planName}>{plan.name}</div>
-              <div style={styles.planPrice}>{plan.monthly_price_minor != null ? `${formatTenge(plan.monthly_price_minor)}${t('tab_billing.per_month')}` : t('tab_billing.custom_price')}</div>
-              <div style={styles.cardSub}>{plan.max_products ? t('tab_billing.up_to_products', { count: plan.max_products }) : t('tab_billing.unlimited_products')}</div>
-              <div style={styles.cardSub}>{plan.daily_credit_limit_milli != null ? t('tab_billing.daily_ai_limit', { count: plan.daily_credit_limit_milli / 1000 }) : t('tab_billing.custom_ai_limit')}</div>
-              {plan.code === summary.plan_code && <div style={styles.planCurrentTag}>{t('tab_billing.your_tariff')}</div>}
+              <div style={styles.planPrice}>{plan.monthly_price_minor != null ? `${formatTenge(plan.monthly_price_minor)}${t('per_month')}` : t('custom_price')}</div>
+              <div style={styles.cardSub}>{plan.max_products ? `${t('up_to')} ${plan.max_products} ${t('products')}` : t('unlimited_products')}</div>
+              <div style={styles.cardSub}>{plan.daily_credit_limit_milli != null ? t('daily_ai_limit', { count: plan.daily_credit_limit_milli / 1000 }) : t('custom_ai_limit')}</div>
+              {plan.code === summary.plan_code && <div style={styles.planCurrentTag}>{t('your_tariff')}</div>}
             </div>
           ))}
         </div>
         {/* Виден только на телефоне (см. .plans-swipe-hint в mobile.css). */}
-        <p className="plans-swipe-hint">{t('tab_billing.scroll_hint')}</p>
+        <p className="plans-swipe-hint">{t('scroll_hint')}</p>
       </div>
 
       <div className="glass-card" style={styles.card}>
-        <h3 style={styles.sectionTitle}>{t('tab_billing.transactions_history')}</h3>
+        <h3 style={styles.sectionTitle}>{t('transactions_history')}</h3>
         {transactions.length === 0 ? (
-          <div style={styles.cardSub}>{t('tab_billing.no_transactions')}</div>
+          <div style={styles.cardSub}>{t('no_transactions')}</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={styles.table}>
               <thead>
                 <tr>
-                  <th style={styles.th}>{t('tab_billing.table_date')}</th>
-                  <th style={styles.th}>{t('tab_billing.table_type')}</th>
-                  <th style={styles.th}>{t('tab_billing.table_amount')}</th>
-                  <th style={styles.th}>{t('tab_billing.table_balance_after')}</th>
+                  <th style={styles.th}>{t('table_date')}</th>
+                  <th style={styles.th}>{t('table_type')}</th>
+                  <th style={styles.th}>{t('table_amount')}</th>
+                  <th style={styles.th}>{t('table_balance_after')}</th>
                 </tr>
               </thead>
               <tbody>

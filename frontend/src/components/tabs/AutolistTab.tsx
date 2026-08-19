@@ -172,10 +172,10 @@ function getStatusLabel(status: string, t: (key: string) => string): string {
 
 function getMissingLabel(field: string, t: (key: string) => string): string {
   const labels: Record<string, string> = {
-    __sku__: t('field_sku'),
-    __category__: t('field_category'),
-    __price__: t('field_price'),
-    __stock__: t('field_stock'),
+    __sku__: t('missing_sku'),
+    __category__: t('missing_category'),
+    __price__: t('missing_price'),
+    __stock__: t('missing_stock'),
   };
   return labels[field] || field;
 }
@@ -309,15 +309,15 @@ function DraftEditor({ draft, onClose, t }: { draft: AutolistDraft; onClose: () 
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginBottom: '10px' }}>
           <div>
-            <label style={{ display: 'block', fontSize: '12px', color: '#fbbf24', marginBottom: '6px' }}>{t('field_sku')} *</label>
+            <label style={{ display: 'block', fontSize: '12px', color: '#fbbf24', marginBottom: '6px' }}>{t('missing_sku')} *</label>
             <input className="form-input" value={sku} onChange={(e) => setSku(e.target.value)} />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '12px', color: '#fbbf24', marginBottom: '6px' }}>{t('field_price')}, ₸ *</label>
+            <label style={{ display: 'block', fontSize: '12px', color: '#fbbf24', marginBottom: '6px' }}>{t('missing_price')}, ₸ *</label>
             <input type="number" className="form-input" value={price} onChange={(e) => setPrice(e.target.value === '' ? '' : Number(e.target.value))} />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '12px', color: '#fbbf24', marginBottom: '6px' }}>{t('field_stock')}, {t('unit_pcs')} *</label>
+            <label style={{ display: 'block', fontSize: '12px', color: '#fbbf24', marginBottom: '6px' }}>{t('missing_stock')}, {t('unit_pcs')} *</label>
             <input type="number" className="form-input" value={stock} onChange={(e) => setStock(e.target.value === '' ? '' : Number(e.target.value))} />
           </div>
         </div>

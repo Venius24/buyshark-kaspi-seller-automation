@@ -18,6 +18,8 @@ i18n
     fallbackLng: 'ru',
     interpolation: {
       escapeValue: false,
+      prefix: '%',
+      suffix: '%',
     },
   })
 

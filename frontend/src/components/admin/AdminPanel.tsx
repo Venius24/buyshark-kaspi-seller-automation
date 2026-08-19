@@ -83,7 +83,7 @@ export const AdminPanel: React.FC = () => {
                   <tr>
                     <th style={styles.th}>{t('table_store')}</th>
                     <th style={styles.th}>{t('table_owner')}</th>
-                    <th style={styles.th}>{t('table_plan')}</th>
+                    <th style={styles.th}>{t('table_tariff')}</th>
                     <th style={styles.th}>{t('table_status')}</th>
                     <th style={styles.th}>{t('table_balance')}</th>
                     <th style={styles.th}>{t('table_referrer')}</th>
@@ -103,7 +103,7 @@ export const AdminPanel: React.FC = () => {
                       <td style={styles.td}>{s.referrer_user_id ? (referrers.find(r => r.user_id === s.referrer_user_id)?.email || s.referrer_user_id) : '—'}</td>
                       <td style={styles.td}>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                          <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => setTariffModalStore(s)}>{t('btn_plan')}</button>
+                          <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => setTariffModalStore(s)}>{t('btn_tariff')}</button>
                           <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => setTopupModalStore(s)}>{t('btn_topup')}</button>
                           <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => setReferrerModalStore(s)}>{t('btn_referrer')}</button>
                           <button className="btn btn-secondary" style={styles.smallBtn} onClick={() => reevaluate(s.store_id)}>{t('btn_reevaluate')}</button>
@@ -126,11 +126,11 @@ export const AdminPanel: React.FC = () => {
             <table style={styles.table}>
               <thead>
                 <tr>
-                  <th style={styles.th}>{t('table_email')}</th>
-                  <th style={styles.th}>{t('table_code')}</th>
-                  <th style={styles.th}>%</th>
-                  <th style={styles.th}>{t('table_months')}</th>
-                  <th style={styles.th}>{t('table_active')}</th>
+                  <th style={styles.th}>{t('referrers_table_email')}</th>
+                  <th style={styles.th}>{t('referrers_table_code')}</th>
+                  <th style={styles.th}>{t('referrers_table_percent')}</th>
+                  <th style={styles.th}>{t('referrers_table_months')}</th>
+                  <th style={styles.th}>{t('referrers_table_active')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -140,7 +140,7 @@ export const AdminPanel: React.FC = () => {
                     <td style={styles.td}><code>{r.code}</code></td>
                     <td style={styles.td}>{r.commission_percent}%</td>
                     <td style={styles.td}>{r.commission_months}</td>
-                    <td style={styles.td}>{r.is_active ? t('yes') : t('no')}</td>
+                    <td style={styles.td}>{r.is_active ? t('active_yes') : t('active_no')}</td>
                   </tr>
                 ))}
               </tbody>

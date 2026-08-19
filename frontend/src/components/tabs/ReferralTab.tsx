@@ -60,22 +60,22 @@ export const ReferralTab: React.FC = () => {
           <div style={styles.cardLabel}>{t('your_link')}</div>
           <div style={styles.linkRow}>
             <code style={styles.linkText}>{link}</code>
-            <button className="btn btn-secondary" style={styles.smallBtn} onClick={copyLink}>{copied ? t('copied') : t('copy')}</button>
+            <button className="btn btn-secondary" style={styles.smallBtn} onClick={copyLink}>{copied ? t('btn_copied') : t('btn_copy')}</button>
           </div>
-          <div style={styles.cardSub}>{t('code_label')}: {me.code} · {me.commission_percent}% {t('for_months').replace('%months%', String(me.commission_months))}</div>
+          <div style={styles.cardSub}>{t('code_info', { code: me.code, percent: `${me.commission_percent}%`, months: me.commission_months })}</div>
         </div>
 
         <div className="glass-card" style={styles.card}>
           <div style={styles.cardLabel}>{t('total_earned')}</div>
           <div style={styles.cardValue}>{formatTenge(me.total_earned_minor)}</div>
-          <div style={styles.cardSub}>{t('referred_stores')}: {me.stores_count}</div>
+          <div style={styles.cardSub}>{t('stores_count', { count: me.stores_count })}</div>
         </div>
       </div>
 
       <div className="glass-card" style={styles.card}>
-        <h3 style={styles.sectionTitle}>{t('referred_stores_list')}</h3>
+        <h3 style={styles.sectionTitle}>{t('referred_stores')}</h3>
         {stores.length === 0 ? (
-          <div style={styles.cardSub}>{t('no_referred_stores')}</div>
+          <div style={styles.cardSub}>{t('no_stores')}</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={styles.table}>
@@ -93,7 +93,7 @@ export const ReferralTab: React.FC = () => {
                     <td style={styles.td}>{s.store_name}</td>
                     <td style={styles.td}>
                       <span className={`badge ${s.window_active ? 'badge-success' : 'badge-warning'}`}>
-                        {s.window_active ? t('active') : t('completed')}
+                        {s.window_active ? t('window_active') : t('window_completed')}
                       </span>
                     </td>
                     <td style={styles.td}>{s.months_paid} / {s.months_total}</td>
