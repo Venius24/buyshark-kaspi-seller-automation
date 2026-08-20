@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 SPOOL_DIR = Path(tempfile.gettempdir()) / "auto_assembly_spool"
 SPOOL_DIR.mkdir(parents=True, exist_ok=True)
 
+# Раньше здесь стояло 50 (скопировано из ручной вкладки "Заказы"), из-за чего
+# при очереди >50 заказов за тик обрабатывались только первые 50 из ответа
+# Kaspi — остальные ждали следующего 30с тика. get_orders_with_products уже
+# умеет постранично догружать через _fetch_pages_batched, поэтому лимит можно
+# смело поднять — не более чем на одну лишнюю страницу дороже в редкий пиковый тик.
+FETCH_LIMIT = 5000
+
 
 def _rule_from_row(row) -> AutoAssemblyRule:
     return AutoAssemblyRule(
@@ -227,7 +234,7 @@ async def _run_accept_stage(token: str, store_id: str, rules, excluded, groups, 
         return
     try:
         orders = await asyncio.to_thread(
-            KaspiAPI.get_orders_with_products, token, "NEW", "APPROVED_BY_BANK", 50
+            KaspiAPI.get_orders_with_products, token, "NEW", "APPROVED_BY_BANK", FETCH_LIMIT
         )
     except Exception as e:
         logger.error(f"[AutoAssembly] Accept stage fetch failed for store {store_id}: {e}")
@@ -256,7 +263,7 @@ async def _run_assemble_stage(token: str, store_id: str, rules, excluded, groups
         return
     try:
         orders = await asyncio.to_thread(
-            KaspiAPI.get_orders_with_products, token, "KASPI_DELIVERY", "ACCEPTED_BY_MERCHANT", 50, False
+            KaspiAPI.get_orders_with_products, token, "KASPI_DELIVERY", "ACCEPTED_BY_MERCHANT", FETCH_LIMIT, False
         )
     except Exception as e:
         logger.error(f"[AutoAssembly] Assemble stage fetch failed for store {store_id}: {e}")
@@ -314,7 +321,7 @@ async def _run_waybill_stage(token: str, store_id: str, rules, excluded, groups,
         return
     try:
         orders = await asyncio.to_thread(
-            KaspiAPI.get_orders_with_products, token, "KASPI_DELIVERY", "ACCEPTED_BY_MERCHANT", 50, True
+            KaspiAPI.get_orders_with_products, token, "KASPI_DELIVERY", "ACCEPTED_BY_MERCHANT", FETCH_LIMIT, True
         )
     except Exception as e:
         logger.error(f"[AutoAssembly] Waybill stage fetch failed for store {store_id}: {e}")

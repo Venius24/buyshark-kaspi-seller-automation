@@ -174,7 +174,7 @@ class TestRunAutoAssemblyCycleEarlyExit(BaseDbTestCase):
         self._add_rule(stage_accept=True, stage_assemble=False, stage_waybill=False)
         with patch("backend.kaspi_wrapper.KaspiAPI.get_orders_with_products", return_value=[]) as mock_fetch:
             await worker.run_auto_assembly_cycle("fake-token", "store-1")
-        mock_fetch.assert_called_once_with("fake-token", "NEW", "APPROVED_BY_BANK", 50)
+        mock_fetch.assert_called_once_with("fake-token", "NEW", "APPROVED_BY_BANK", worker.FETCH_LIMIT)
 
 
 class TestSpool(BaseDbTestCase):
