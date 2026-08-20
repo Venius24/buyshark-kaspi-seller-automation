@@ -45,7 +45,7 @@ class TestAutoAssemblyRouter(unittest.TestCase):
         delivery_types = {r["delivery_type"] for r in data["rules"]}
         self.assertEqual(
             delivery_types,
-            {"Express", "Postomat", "Самовывоз", "Today", "Tomorrow", "Kaspi Доставка"},
+            {"Express", "Postomat", "Today", "Tomorrow", "Kaspi Доставка"},
         )
         for r in data["rules"]:
             self.assertFalse(r["enabled"])
