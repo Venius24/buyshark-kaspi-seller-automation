@@ -20,10 +20,12 @@ from backend.services.print_batcher_service import process_zip_or_pdfs
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auto-assembly", tags=["auto-assembly"])
 
-# Те же 6 категорий, что возвращает KaspiAPI._parse_delivery_type — единый
-# список для формирования полной сетки правил на фронте, даже если у стора
-# ещё нет ни одной строки в auto_assembly_rules.
-DELIVERY_TYPES = ["Express", "Postomat", "Самовывоз", "Today", "Tomorrow", "Kaspi Доставка"]
+# Категории, что возвращает KaspiAPI._parse_delivery_type — единый список
+# для формирования полной сетки правил на фронте, даже если у стора ещё нет
+# ни одной строки в auto_assembly_rules. «Самовывоз» намеренно исключён —
+# автосборка/автопринятие/накладная не применимы к заказам, которые клиент
+# забирает сам из точки продавца.
+DELIVERY_TYPES = ["Express", "Postomat", "Today", "Tomorrow", "Kaspi Доставка"]
 
 
 def _default_rule_dict(delivery_type: str) -> dict:

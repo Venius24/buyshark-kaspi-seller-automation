@@ -56,7 +56,10 @@ def _load_rules(store_id: str) -> Dict[str, AutoAssemblyRule]:
         rows = session.scalars(
             select(AutoAssemblyRuleDB).where(AutoAssemblyRuleDB.store_id == store_id)
         ).all()
-        return {r.delivery_type: _rule_from_row(r) for r in rows}
+        # «Самовывоз» исключён из автосборки — забирает клиент сам, накладная
+        # и автопринятие тут не нужны. Пропускаем даже если в БД осталась
+        # старая включённая строка.
+        return {r.delivery_type: _rule_from_row(r) for r in rows if r.delivery_type != "Самовывоз"}
     finally:
         session.close()
 

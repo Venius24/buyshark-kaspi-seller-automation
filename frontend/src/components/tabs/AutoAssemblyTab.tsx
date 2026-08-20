@@ -8,7 +8,6 @@ import type { AutoAssemblyLogEntry, AutoAssemblyRule, AutoAssemblySpoolItem } fr
 const DELIVERY_TYPE_META: Record<string, { label: string; icon: string }> = {
   Express: { label: 'Express', icon: '⚡' },
   Postomat: { label: 'Постамат (Kaspi Box)', icon: '📮' },
-  'Самовывоз': { label: 'Самовывоз', icon: '🏬' },
   Today: { label: 'Kaspi Доставка — сегодня', icon: '🕐' },
   Tomorrow: { label: 'Kaspi Доставка — завтра', icon: '📅' },
   'Kaspi Доставка': { label: 'Kaspi Доставка — стандарт', icon: '🚚' },
@@ -114,17 +113,15 @@ function RuleCard({ rule, onSave, saving }: RuleCardProps) {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Стадии конвейера</div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
-              <input type="checkbox" checked={draft.stage_accept} onChange={(e) => setDraft({ ...draft, stage_accept: e.target.checked })} style={{ width: '16px', height: '16px' }} />
-              1. Автопринятие заказов
-            </label>
+            {/* Стадия "Автопринятие" скрыта из UI по решению пользователя — stage_accept
+                хранится и дальше, но больше не редактируется отсюда. */}
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
               <input type="checkbox" checked={draft.stage_assemble} onChange={(e) => setDraft({ ...draft, stage_assemble: e.target.checked })} style={{ width: '16px', height: '16px' }} />
-              2. Автоупаковка
+              1. Автоупаковка
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
               <input type="checkbox" checked={draft.stage_waybill} onChange={(e) => setDraft({ ...draft, stage_waybill: e.target.checked })} style={{ width: '16px', height: '16px' }} />
-              3. Скачивать накладную в пачку на печать
+              2. Скачивать накладную в пачку на печать
             </label>
           </div>
 
