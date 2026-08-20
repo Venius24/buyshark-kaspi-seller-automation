@@ -371,7 +371,11 @@ DEFAULT_PRINT_SETTINGS = {
     "express_mode": "separate",
     "sort_preset": "filename",
     "deduplicate_history": True,
-    "auto_rotate": True
+    "auto_rotate": True,
+    # Учёт уже распечатанных накладных: always_all (печатать всё, без учёта
+    # истории) | always_new (тихо пропускать дубликаты — прежнее поведение
+    # по умолчанию) | always_ask (спрашивать при каждой печати).
+    "dup_handling_mode": "always_new"
 }
 
 def load_print_settings(store_id: Optional[str] = None) -> dict:

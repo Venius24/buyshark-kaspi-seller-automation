@@ -252,10 +252,17 @@ export const MasterStockGroups: React.FC = () => {
         g.group_name.toLowerCase().includes(q) ||
         g.group_id.toLowerCase().includes(q) ||
         (g.external_code && g.external_code.toLowerCase().includes(q)) ||
-        g.linked_skus.some(s => s.toLowerCase().includes(q))
+        g.linked_skus.some(s => s.toLowerCase().includes(q)) ||
+        // Поиск по названию привязанного товара (из кэша ассортимента), а не
+        // только по его SKU/артикулу — иначе группу не найти по тому, как её
+        // товар реально называется на Kaspi.
+        g.linked_skus.some(s => {
+          const p = products.find(x => x.sku === s || x.merchantSku === s || x.kaspiSku === s);
+          return !!p?.name && p.name.toLowerCase().includes(q);
+        })
       );
     });
-  }, [groups, searchQuery, stockFilter]);
+  }, [groups, searchQuery, stockFilter, products]);
 
   const filterCounts = useMemo(() => ({
     all: groups.length,
@@ -486,16 +493,23 @@ export const MasterStockGroups: React.FC = () => {
     }
   };
 
-  // Filtered Products for Modal SKU Picker
+  // Filtered Products for Modal SKU Picker — уже привязанные к группе товары
+  // всплывают наверх списка, чтобы их не приходилось искать среди всего
+  // каталога при повторном открытии окна редактирования.
   const modalFilteredProducts = useMemo(() => {
-    if (!modalProductSearch.trim()) return products;
-    const q = modalProductSearch.toLowerCase();
-    return products.filter(p =>
+    const q = modalProductSearch.trim().toLowerCase();
+    const base = !q ? products : products.filter(p =>
       (p.name && p.name.toLowerCase().includes(q)) ||
       (p.sku && p.sku.toLowerCase().includes(q)) ||
       (p.merchantSku && p.merchantSku.toLowerCase().includes(q))
     );
-  }, [products, modalProductSearch]);
+    const selectedSet = new Set(formSelectedSkus);
+    return [...base].sort((a, b) => {
+      const aSel = selectedSet.has(a.sku || a.merchantSku || '') ? 0 : 1;
+      const bSel = selectedSet.has(b.sku || b.merchantSku || '') ? 0 : 1;
+      return aSel - bSel;
+    });
+  }, [products, modalProductSearch, formSelectedSkus]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', color: 'var(--text-color)' }}>
@@ -1242,7 +1256,7 @@ export const MasterStockGroups: React.FC = () => {
         }}>
           <div style={{
             width: '100%',
-            maxWidth: '680px',
+            maxWidth: '920px',
             maxHeight: '90vh',
             background: 'rgba(255,255,255,0.05)',
             border: '1px solid var(--card-border)',
@@ -1560,7 +1574,7 @@ export const MasterStockGroups: React.FC = () => {
 
                 {/* Product List Pick Container */}
                 <div style={{
-                  maxHeight: '220px',
+                  maxHeight: '320px',
                   overflowY: 'auto',
                   background: 'var(--card-bg)',
                   border: '1px solid var(--card-border)',
@@ -1572,78 +1586,101 @@ export const MasterStockGroups: React.FC = () => {
                       Товары не найдены в кэше ассортимента
                     </div>
                   ) : (
-                    modalFilteredProducts.map(p => {
+                    modalFilteredProducts.map((p, idx) => {
                       const skuVal = p.sku || p.merchantSku || '';
                       const isSelected = formSelectedSkus.includes(skuVal);
                       const archived = isArchived(p);
+                      const prevSelected = idx > 0
+                        ? formSelectedSkus.includes(modalFilteredProducts[idx - 1].sku || modalFilteredProducts[idx - 1].merchantSku || '')
+                        : null;
+                      const showDivider = idx > 0 && prevSelected === true && !isSelected;
 
                       return (
-                        <div
-                          key={skuVal}
-                          onClick={() => handleToggleSkuSelection(p, archived)}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            padding: '10px 12px',
-                            borderRadius: '8px',
-                            cursor: 'pointer',
-                            // Снятые с продажи подсвечиваем янтарным: у них title=null и
-                            // price=0, поэтому без метки строка неотличима от активного
-                            // товара, у которого просто кончился остаток.
-                            background: isSelected
-                              ? (archived ? 'rgba(245, 158, 11, 0.18)' : 'rgba(99, 102, 241, 0.15)')
-                              : (archived ? 'rgba(245, 158, 11, 0.06)' : 'transparent'),
-                            border: isSelected
-                              ? (archived ? '1px solid rgba(245, 158, 11, 0.55)' : '1px solid rgba(99, 102, 241, 0.4)')
-                              : (archived ? '1px solid rgba(245, 158, 11, 0.22)' : '1px solid transparent'),
-                            marginBottom: '4px',
-                            transition: 'all 0.15s'
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => {}} // handled by parent div onClick
-                              style={{ width: '16px', height: '16px', accentColor: 'var(--primary)' }}
-                            />
-                            <div>
-                              <div style={{ fontSize: '13px', fontWeight: 600, color: archived ? '#f59e0b' : 'var(--text-color)' }}>
-                                {p.name}
-                                {archived && (
-                                  <span style={{
-                                    marginLeft: '8px',
-                                    padding: '1px 7px',
-                                    borderRadius: '20px',
-                                    background: 'rgba(245, 158, 11, 0.15)',
-                                    border: '1px solid rgba(245, 158, 11, 0.4)',
-                                    fontSize: '10px',
-                                    fontWeight: 600,
-                                    letterSpacing: '0.02em',
-                                  }}>
-                                    Снят с продажи
-                                  </span>
-                                )}
-                              </div>
-                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '2px' }}>
-                                Kaspi SKU: {skuVal}
-                                {p.merchantSku && p.merchantSku !== skuVal && (
-                                  <span style={{ color: 'var(--primary-hover)', marginLeft: '8px' }}>
-                                    • Merchant SKU: {p.merchantSku}
-                                  </span>
-                                )}
-                                {p.brand ? ` • Бренд: ${p.brand}` : ''}
-                              </div>
+                        <React.Fragment key={skuVal}>
+                          {showDivider && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '8px 4px 6px' }}>
+                              <div style={{ flex: 1, height: '1px', background: 'var(--card-border)' }} />
+                              <span style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Остальные товары</span>
+                              <div style={{ flex: 1, height: '1px', background: 'var(--card-border)' }} />
+                            </div>
+                          )}
+                          <div
+                            onClick={() => handleToggleSkuSelection(p, archived)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '10px 12px',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              // Снятые с продажи подсвечиваем янтарным: у них title=null и
+                              // price=0, поэтому без метки строка неотличима от активного
+                              // товара, у которого просто кончился остаток.
+                              background: isSelected
+                                ? (archived ? 'rgba(245, 158, 11, 0.18)' : 'rgba(99, 102, 241, 0.15)')
+                                : (archived ? 'rgba(245, 158, 11, 0.06)' : 'transparent'),
+                              border: isSelected
+                                ? (archived ? '1px solid rgba(245, 158, 11, 0.55)' : '1px solid rgba(99, 102, 241, 0.4)')
+                                : (archived ? '1px solid rgba(245, 158, 11, 0.22)' : '1px solid transparent'),
+                              marginBottom: '4px',
+                              transition: 'all 0.15s'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {}} // handled by parent div onClick
+                                style={{ width: '16px', height: '16px', accentColor: 'var(--primary)', flexShrink: 0 }}
+                              />
+                              {p.image ? (
+                                <img
+                                  src={p.image}
+                                  alt=""
+                                  loading="lazy"
+                                  style={{ width: '36px', height: '36px', borderRadius: '6px', objectFit: 'cover', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}
+                                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                                />
+                              ) : (
+                                <div style={{ width: '36px', height: '36px', borderRadius: '6px', background: 'rgba(255,255,255,0.04)', flexShrink: 0 }} />
+                              )}
+                              <div>
+                                <div style={{ fontSize: '13px', fontWeight: 600, color: archived ? '#f59e0b' : 'var(--text-color)' }}>
+                                  {p.name}
+                                  {archived && (
+                                    <span style={{
+                                      marginLeft: '8px',
+                                      padding: '1px 7px',
+                                      borderRadius: '20px',
+                                      background: 'rgba(245, 158, 11, 0.15)',
+                                      border: '1px solid rgba(245, 158, 11, 0.4)',
+                                      fontSize: '10px',
+                                      fontWeight: 600,
+                                      letterSpacing: '0.02em',
+                                    }}>
+                                      Снят с продажи
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '2px' }}>
+                                  Kaspi SKU: {skuVal}
+                                  {p.merchantSku && p.merchantSku !== skuVal && (
+                                    <span style={{ color: 'var(--primary-hover)', marginLeft: '8px' }}>
+                                      • Merchant SKU: {p.merchantSku}
+                                    </span>
+                                  )}
+                                  {p.brand ? ` • Бренд: ${p.brand}` : ''}
+                                </div>
 
+                              </div>
+                            </div>
+
+                            <div style={{ textAlign: 'right', fontSize: '12px' }}>
+                              <div style={{ fontWeight: 600, color: '#cbd5e1' }}>{p.price || (p.price_num ? `${p.price_num} ₸` : 'N/A')}</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Остаток: {p.stock ?? 10} шт</div>
                             </div>
                           </div>
-
-                          <div style={{ textAlign: 'right', fontSize: '12px' }}>
-                            <div style={{ fontWeight: 600, color: '#cbd5e1' }}>{p.price || (p.price_num ? `${p.price_num} ₸` : 'N/A')}</div>
-                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Остаток: {p.stock ?? 10} шт</div>
-                          </div>
-                        </div>
+                        </React.Fragment>
                       );
                     })
                   )}

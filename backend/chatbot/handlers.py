@@ -298,7 +298,19 @@ def register_handlers():
         ])
         await bot.send_message(chat_id=chat_id, text="Готово! Пометить накладные как напечатанные?", reply_markup=mark_kb)
 
-    def get_settings_view(store_id: Optional[str]) -> tuple[str, InlineKeyboardMarkup]:
+    def get_settings_categories_view(store_id: Optional[str]) -> tuple[str, InlineKeyboardMarkup]:
+        """Главный экран /settings — категории конфигов, подробности по
+        клику на каждую (печать/автосборка/уведомления живут раздельно)."""
+        store_line = f"🏪 **{_esc_md(config.get_store_name(store_id))}**\n\n" if store_id else ""
+        text = f"⚙️ **Настройки**\n\n{store_line}Выберите категорию:"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🖨️ Печать", callback_data="stg_cat:print")],
+            [InlineKeyboardButton(text="⚙️ Автосборка", callback_data="stg_cat:assembly")],
+            [InlineKeyboardButton(text="🔔 Уведомления", callback_data="stg_notif_menu")],
+        ])
+        return text, kb
+
+    def get_print_settings_view(store_id: Optional[str]) -> tuple[str, InlineKeyboardMarkup]:
         stg = config.load_print_settings(store_id)
 
         exp_mode = stg.get("express_mode", "separate")
@@ -306,6 +318,7 @@ def register_handlers():
         dedup = stg.get("deduplicate_history", True)
         rot = stg.get("auto_rotate", True)
         def_fmt = stg.get("output_layout", "auto")
+        dup_mode = stg.get("dup_handling_mode", "always_new")
 
         exp_title = {
             "separate": "⚡ Выделять в VIP-батчи",
@@ -332,12 +345,19 @@ def register_handlers():
             "just_merge": "📑 Просто объединить"
         }.get(def_fmt, def_fmt)
 
+        dup_title = {
+            "always_all": "📦 Всегда печатать всё",
+            "always_new": "🆕 Всегда только новые",
+            "always_ask": "❓ Всегда спрашивать"
+        }.get(dup_mode, dup_mode)
+
         store_line = f"🏪 **{_esc_md(config.get_store_name(store_id))}**\n\n" if store_id else ""
         text = (
-            f"⚙️ **Настройки печати:**\n\n"
+            f"🖨️ **Настройки печати:**\n\n"
             f"{store_line}"
             f"⚡ **Каспи Экспресс:** `{exp_title}`\n"
             f"📋 **Сортировка:** `{sort_title}`\n"
+            f"🧾 **Учёт уже распечатанных накладных:** `{dup_title}`\n"
             f"🛡️ **Суточная дедупликация:** `{'Включена ✅' if dedup else 'Выключена ❌'}`\n"
             f"🔄 **Авто-поворот под ленту:** `{'Включен ✅' if rot else 'Выключен ❌'}`\n"
             f"🖼️ **Формат по умолчанию:** `{fmt_title}`\n\n"
@@ -360,6 +380,11 @@ def register_handlers():
                 InlineKeyboardButton(text=f"🏷️ Мастер-Группа {'✅' if sort_p == 'master_group' else ''}", callback_data="stg_srt:master_group")
             ],
             [
+                InlineKeyboardButton(text=f"📦 Всё {'✅' if dup_mode == 'always_all' else ''}", callback_data="stg_dup:always_all"),
+                InlineKeyboardButton(text=f"🆕 Только новые {'✅' if dup_mode == 'always_new' else ''}", callback_data="stg_dup:always_new"),
+                InlineKeyboardButton(text=f"❓ Спрашивать {'✅' if dup_mode == 'always_ask' else ''}", callback_data="stg_dup:always_ask")
+            ],
+            [
                 InlineKeyboardButton(text=f"🛡️ Дедупликация: {'ВКЛ ✅' if dedup else 'ВЫКЛ ❌'}", callback_data="stg_toggle:deduplicate_history"),
                 InlineKeyboardButton(text=f"🔄 Поворот: {'ВКЛ ✅' if rot else 'ВЫКЛ ❌'}", callback_data="stg_toggle:auto_rotate")
             ],
@@ -373,7 +398,7 @@ def register_handlers():
                 InlineKeyboardButton(text="♻️ Сбросить историю печати за сегодня", callback_data="stg_reset_hist")
             ],
             [
-                InlineKeyboardButton(text="🔔 Уведомления", callback_data="stg_notif_menu")
+                InlineKeyboardButton(text="⬅️ Назад к категориям", callback_data="stg_back")
             ]
         ])
         return text, kb
@@ -586,8 +611,38 @@ def register_handlers():
         access = await _require_access(message)
         if not access:
             return
-        text, kb = get_settings_view(access["store_id"])
+        text, kb = get_settings_categories_view(access["store_id"])
         await message.reply(text, reply_markup=kb)
+
+    @dp.callback_query(F.data == "stg_back")
+    async def process_settings_back(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте /settings заново.", show_alert=True)
+            return
+        text, kb = get_settings_categories_view(access["store_id"])
+        try:
+            await callback_query.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+        await callback_query.answer()
+
+    @dp.callback_query(F.data.startswith("stg_cat:"))
+    async def process_settings_category(callback_query: types.CallbackQuery):
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте /settings заново.", show_alert=True)
+            return
+        cat = callback_query.data.split(":", 1)[1]
+        if cat == "assembly":
+            text, kb = await asyncio.to_thread(get_assembly_view, access["store_id"])
+        else:
+            text, kb = get_print_settings_view(access["store_id"])
+        try:
+            await callback_query.message.edit_text(text, reply_markup=kb)
+        except Exception:
+            pass
+        await callback_query.answer()
 
     @dp.message(F.text == "/notif")
     async def cmd_notif(message: types.Message):
@@ -617,7 +672,7 @@ def register_handlers():
         except Exception:
             pass
 
-    @dp.callback_query(F.data.startswith("spool_fmt:") | F.data.startswith("spool_force:"))
+    @dp.callback_query(F.data.startswith("spool_fmt:") | F.data.startswith("spool_force:") | F.data.startswith("spool_dup:"))
     async def process_spool_print(callback_query: types.CallbackQuery):
         access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
         if not access["authorized"] or access["needs_store_selection"]:
@@ -626,9 +681,35 @@ def register_handlers():
         store_id = access["store_id"]
 
         data_parts = callback_query.data.split(":")
-        action_type = data_parts[0]  # 'spool_fmt' или 'spool_force'
-        layout_mode = data_parts[1]
-        force_reprint = (action_type == "spool_force")
+        action_type = data_parts[0]  # 'spool_fmt', 'spool_force' или 'spool_dup'
+
+        if action_type == "spool_force":
+            layout_mode = data_parts[1]
+            deduplicate_history = True
+            force_reprint = True
+        elif action_type == "spool_dup":
+            # data: spool_dup:<all|new>:<layout_mode>
+            choice = data_parts[1]
+            layout_mode = data_parts[2] if len(data_parts) > 2 else "auto"
+            deduplicate_history = (choice == "new")
+            force_reprint = False
+        else:
+            layout_mode = data_parts[1]
+            stg = await asyncio.to_thread(config.load_print_settings, store_id)
+            dup_mode = stg.get("dup_handling_mode", "always_new")
+            if dup_mode == "always_ask":
+                await callback_query.answer()
+                ask_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🖨 Печатать все", callback_data=f"spool_dup:all:{layout_mode}")],
+                    [InlineKeyboardButton(text="🆕 Только новые (пропустить повторы)", callback_data=f"spool_dup:new:{layout_mode}")],
+                ])
+                try:
+                    await callback_query.message.edit_text("Какие накладные печатать?", reply_markup=ask_kb)
+                except Exception:
+                    pass
+                return
+            deduplicate_history = (dup_mode != "always_all")
+            force_reprint = False
 
         await callback_query.answer()
         try:
@@ -649,7 +730,8 @@ def register_handlers():
             # sort_preset/express_mode/auto_rotate фиксированы (не читаем
             # per-store print_settings) — та же раскладка, что и в вебе
             # (routers/auto_assembly.py::download_spool), спул это отдельный
-            # от ручной загрузки в PrintBatcher поток.
+            # от ручной загрузки в PrintBatcher поток. dup_handling_mode —
+            # исключение, читается из настроек (см. выше).
             manifest = await asyncio.to_thread(
                 process_zip_or_pdfs,
                 file_bytes=zip_bytes,
@@ -657,7 +739,7 @@ def register_handlers():
                 sort_preset="order_id",
                 auto_rotate=True,
                 express_mode="separate",
-                deduplicate_history=True,
+                deduplicate_history=deduplicate_history,
                 force_reprint=force_reprint,
                 output_layout=layout_mode,
                 store_id=store_id,
@@ -847,6 +929,12 @@ def register_handlers():
 
         try:
             zip_bytes = await asyncio.to_thread(build_spool_zip_bytes, store_id)
+            stg = await asyncio.to_thread(config.load_print_settings, store_id)
+            dup_mode = stg.get("dup_handling_mode", "always_new")
+            # Утренний сбор автоматический, без диалога — "Всегда спрашивать"
+            # здесь не спрашивает (некому отвечать), падаем на тихий режим
+            # "только новые", как и раньше по умолчанию.
+            deduplicate_history = (dup_mode != "always_all")
             manifest = await asyncio.to_thread(
                 process_zip_or_pdfs,
                 file_bytes=zip_bytes,
@@ -854,7 +942,7 @@ def register_handlers():
                 sort_preset="order_id",
                 auto_rotate=True,
                 express_mode="separate",
-                deduplicate_history=True,
+                deduplicate_history=deduplicate_history,
                 force_reprint=False,
                 output_layout="auto",
                 store_id=store_id,
@@ -894,7 +982,12 @@ def register_handlers():
         count = len(await asyncio.to_thread(load_printed_history, access["store_id"]))
         await message.reply(f"🏷️ **Напечатано заказов за сегодня:** `{count}` шт")
 
-    @dp.callback_query(F.data.startswith("stg_") & ~F.data.startswith("stg_notif_"))
+    @dp.callback_query(
+        F.data.startswith("stg_")
+        & ~F.data.startswith("stg_notif_")
+        & ~F.data.startswith("stg_cat:")
+        & (F.data != "stg_back")
+    )
     async def process_settings_toggle(callback_query: types.CallbackQuery):
         access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
         if not access["authorized"] or access["needs_store_selection"]:
@@ -911,13 +1004,15 @@ def register_handlers():
             stg["sort_preset"] = data.split(":")[1]
         elif data.startswith("stg_fmt:"):
             stg["output_layout"] = data.split(":")[1]
+        elif data.startswith("stg_dup:"):
+            stg["dup_handling_mode"] = data.split(":")[1]
         elif data.startswith("stg_toggle:"):
             key = data.split(":")[1]
             stg[key] = not stg.get(key, True)
         elif data == "stg_reset_hist":
             await asyncio.to_thread(reset_printed_history, store_id)
             await callback_query.answer("♻️ История печати за сегодня сброшена!", show_alert=True)
-            text, kb = get_settings_view(store_id)
+            text, kb = get_print_settings_view(store_id)
             try:
                 await callback_query.message.edit_text(text, reply_markup=kb)
             except Exception:
@@ -927,7 +1022,7 @@ def register_handlers():
         await asyncio.to_thread(config.save_print_settings, stg, store_id)
         await callback_query.answer("⚙️ Настройка сохранена!")
 
-        text, kb = get_settings_view(store_id)
+        text, kb = get_print_settings_view(store_id)
         try:
             await callback_query.message.edit_text(text, reply_markup=kb)
         except Exception:
@@ -952,7 +1047,7 @@ def register_handlers():
         if not access["authorized"] or access["needs_store_selection"]:
             await callback_query.answer()
             return
-        text, kb = get_settings_view(access["store_id"])
+        text, kb = get_settings_categories_view(access["store_id"])
         try:
             await callback_query.message.edit_text(text, reply_markup=kb)
         except Exception:
@@ -1064,57 +1159,19 @@ def register_handlers():
 
         await message.reply("\n".join(lines))
 
-    @dp.message(F.document)
-    async def handle_document(message: types.Message):
-        access = await _require_access(message)
-        if not access:
-            return
-
-        doc = message.document
-        if not doc or not doc.file_name:
-            return
-
-        filename = doc.file_name.lower()
-        if not (filename.endswith(".zip") or filename.endswith(".pdf")):
-            await message.reply("⚠️ Поддерживаются только `.zip` архивы и `.pdf` файлы.")
-            return
-
-        chat_id = message.chat.id
-        PENDING_FILES[chat_id] = {
-            "file_id": doc.file_id,
-            "file_name": doc.file_name,
-            "file_size": doc.file_size,
-            "store_id": access["store_id"],
-        }
-
-        size_mb = (doc.file_size or 0) / (1024 * 1024)
-        stg = await asyncio.to_thread(config.load_print_settings, access["store_id"])
-        def_fmt = stg.get("output_layout", "auto")
-
-        await message.reply(
-            f"📦 **Получен файл:** `{doc.file_name}` ({size_mb:.2f} МБ)\n"
-            f"⚙️ **Текущий формат по умолчанию:** `{def_fmt}`\n\n"
-            f"Выберите формат обработки или нажмите кнопку ниже:",
-            reply_markup=get_layout_keyboard()
-        )
-
-    @dp.callback_query(F.data.startswith("pb_fmt:") | F.data.startswith("pb_force:"))
-    async def process_print_layout(callback_query: types.CallbackQuery):
-        chat_id = callback_query.message.chat.id
-        pending = PENDING_FILES.get(chat_id)
-
-        if not pending:
-            await callback_query.answer("⚠️ Файл не найден или истек срок действия. Отправьте архив заново.", show_alert=True)
-            return
-
-        data_parts = callback_query.data.split(":")
-        action_type = data_parts[0]  # 'pb_fmt' or 'pb_force'
-        layout_mode = data_parts[1]
-        force_reprint = (action_type == "pb_force")
-
-        await callback_query.answer()
+    async def _run_manual_print_job(
+        status_message: types.Message,
+        chat_id: int,
+        pending: dict,
+        layout_mode: str,
+        deduplicate_history: bool,
+        force_reprint: bool,
+    ) -> None:
+        """Общая обработка ручной загрузки .zip/.pdf — общий хвост между
+        прямой обработкой (dup_handling_mode != always_ask), выбором в
+        опросе «какие накладные печатать» и принудительной перепечаткой."""
         try:
-            await callback_query.message.edit_text("⏳ **Загрузка архива, обрезка белых полей и подгонка MediaBox...**")
+            await status_message.edit_text("⏳ **Загрузка архива, обрезка белых полей и подгонка MediaBox...**")
         except Exception:
             pass
 
@@ -1140,7 +1197,7 @@ def register_handlers():
                 sort_preset=stg.get("sort_preset", "filename"),
                 auto_rotate=stg.get("auto_rotate", True),
                 express_mode=stg.get("express_mode", "separate"),
-                deduplicate_history=stg.get("deduplicate_history", True),
+                deduplicate_history=deduplicate_history,
                 force_reprint=force_reprint,
                 output_layout=layout_mode,
                 store_id=store_id,
@@ -1155,16 +1212,16 @@ def register_handlers():
 
             if all_dups:
                 force_kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🖨️ Напечатать заново принудительно", callback_data=f"pb_force:{layout_mode}")]
+                    [InlineKeyboardButton(text="🖨️ Напечатать заново принудительно", callback_data="pb_force_all")]
                 ])
-                await callback_query.message.edit_text(
+                await status_message.edit_text(
                     f"⚠️ **Все {total_pages} заказов из этого архива уже были напечатаны ранее!**\n\n"
                     f"Система автоматически отфильтровала старые дубликаты. Нажмите кнопку ниже, если хотите принудительно перепечатать весь этот архив:",
                     reply_markup=force_kb
                 )
                 return
 
-            await callback_query.message.edit_text(
+            await status_message.edit_text(
                 f"✅ **Печатный пакет успешно скомпонован!**\n"
                 f"📁 **Файлов в архиве:** `{total_files}` шт | **Всего листов:** `{total_pages}`\n"
                 f"🛑 **Исключено дубликатов:** `{dedup_pages}` страниц\n"
@@ -1192,7 +1249,83 @@ def register_handlers():
 
         except Exception as e:
             logger.error(f"Ошибка при обработке печатного пакета в Telegram: {e}", exc_info=True)
-            await callback_query.message.answer(f"❌ **Ошибка при обработке файла:** `{str(e)}`")
+            await status_message.answer(f"❌ **Ошибка при обработке файла:** `{str(e)}`")
+
+    @dp.message(F.document)
+    async def handle_document(message: types.Message):
+        access = await _require_access(message)
+        if not access:
+            return
+
+        doc = message.document
+        if not doc or not doc.file_name:
+            return
+
+        filename = doc.file_name.lower()
+        if not (filename.endswith(".zip") or filename.endswith(".pdf")):
+            await message.reply("⚠️ Поддерживаются только `.zip` архивы и `.pdf` файлы.")
+            return
+
+        chat_id = message.chat.id
+        store_id = access["store_id"]
+        pending = {
+            "file_id": doc.file_id,
+            "file_name": doc.file_name,
+            "file_size": doc.file_size,
+            "store_id": store_id,
+        }
+        PENDING_FILES[chat_id] = pending
+
+        size_mb = (doc.file_size or 0) / (1024 * 1024)
+        stg = await asyncio.to_thread(config.load_print_settings, store_id)
+        dup_mode = stg.get("dup_handling_mode", "always_new")
+        layout_mode = stg.get("output_layout", "auto")
+
+        # Раньше здесь при каждой загрузке спрашивали формат/размер наклейки —
+        # теперь формат берётся из настроек по умолчанию (Настройки → Печать),
+        # а опрос (если включён режим "Всегда спрашивать") — про то, какие
+        # накладные печатать (все / только новые).
+        if dup_mode == "always_ask":
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🖨 Печатать все", callback_data="pb_dup:all")],
+                [InlineKeyboardButton(text="🆕 Только новые (пропустить повторы)", callback_data="pb_dup:new")],
+            ])
+            await message.reply(
+                f"📦 **Получен файл:** `{doc.file_name}` ({size_mb:.2f} МБ)\n\n"
+                f"Какие накладные печатать?",
+                reply_markup=kb
+            )
+            return
+
+        deduplicate_history = (dup_mode != "always_all")
+        status_message = await message.reply(f"📦 **Получен файл:** `{doc.file_name}` ({size_mb:.2f} МБ)")
+        await _run_manual_print_job(status_message, chat_id, pending, layout_mode, deduplicate_history, force_reprint=False)
+
+    @dp.callback_query(F.data.startswith("pb_dup:"))
+    async def process_pb_dup_choice(callback_query: types.CallbackQuery):
+        chat_id = callback_query.message.chat.id
+        pending = PENDING_FILES.get(chat_id)
+        if not pending:
+            await callback_query.answer("⚠️ Файл не найден или истёк срок действия. Отправьте архив заново.", show_alert=True)
+            return
+        choice = callback_query.data.split(":", 1)[1]  # 'all' | 'new'
+        deduplicate_history = (choice == "new")
+        await callback_query.answer()
+        stg = await asyncio.to_thread(config.load_print_settings, pending.get("store_id"))
+        layout_mode = stg.get("output_layout", "auto")
+        await _run_manual_print_job(callback_query.message, chat_id, pending, layout_mode, deduplicate_history, force_reprint=False)
+
+    @dp.callback_query(F.data == "pb_force_all")
+    async def process_pb_force_all(callback_query: types.CallbackQuery):
+        chat_id = callback_query.message.chat.id
+        pending = PENDING_FILES.get(chat_id)
+        if not pending:
+            await callback_query.answer("⚠️ Файл не найден или истёк срок действия. Отправьте архив заново.", show_alert=True)
+            return
+        await callback_query.answer()
+        stg = await asyncio.to_thread(config.load_print_settings, pending.get("store_id"))
+        layout_mode = stg.get("output_layout", "auto")
+        await _run_manual_print_job(callback_query.message, chat_id, pending, layout_mode, deduplicate_history=True, force_reprint=True)
 
     @dp.callback_query(F.data.startswith("unblock_"))
     async def process_unblock_callback(callback_query: types.CallbackQuery):
