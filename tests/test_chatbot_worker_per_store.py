@@ -46,8 +46,12 @@ class TestRunChatbotCycle(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         worker._chatbot_state.clear()
 
+    @patch("backend.chatbot.worker.list_active_stores", new_callable=AsyncMock)
     @patch("backend.chatbot.worker.config")
-    async def test_disabled_returns_5s_delay_without_touching_cookies(self, mock_config):
+    async def test_disabled_returns_5s_delay_without_touching_cookies(self, mock_config, mock_list_stores):
+        # Пустой список сторов -> легаси-ветка run_chatbot_cycle(), которую
+        # этот тест и проверяет (общий enabled-флаг без per-store БД).
+        mock_list_stores.return_value = []
         mock_config.load_chatbot_config.return_value = {"enabled": False}
         with patch("backend.chatbot.worker.load_chat_cookies") as mock_cookies:
             delay = await worker.run_chatbot_cycle()
