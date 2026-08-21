@@ -17,6 +17,13 @@ export const fetchStores = async (): Promise<StoreItem[]> => {
 
 export const fetchGroupsQuery = async (): Promise<MasterStockGroup[]> => {
   const res = await apiFetch(`${API_URL}/api/stock-groups`);
+  if (!res.ok) {
+    // Раньше любая ошибка (в т.ч. 401 из-за унаследованного чужого store_id
+    // после смены аккаунта на общем браузере) тихо превращалась в "0 групп" —
+    // баг был неотличим от реального пустого состояния. Пусть падает явной
+    // ошибкой запроса, а не врёт нулём.
+    throw new Error(`GET /api/stock-groups failed: ${res.status}`);
+  }
   const data = await res.json();
   return data.success ? (data.groups || []) : [];
 };

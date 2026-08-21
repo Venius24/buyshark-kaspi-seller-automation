@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { apiFetch, setUnauthorizedHandler, API_URL, getWsUrl } from './api';
 import { clearPersistedQueryCache } from './queryClient';
-import { useActiveStoreId } from './storeContext';
+import { useActiveStoreId, setActiveStoreId } from './storeContext';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useLogs } from './hooks/useLogs';
 import { useAnalyticsWidgets } from './hooks/useAnalyticsWidgets';
@@ -56,6 +56,11 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
+    // Иначе на общем/чужом браузере следующий залогинившийся юзер наследует
+    // store_id предыдущего аккаунта — если он ему не принадлежит,
+    // get_store_context вечно отдаёт бизнес-401 на все ручки без единого
+    // видимого сообщения об ошибке (фронт молча рисует пустые списки/нули).
+    setActiveStoreId(null);
     clearPersistedQueryCache();
     setIsAuthed(false);
   };
@@ -336,6 +341,7 @@ export default function App() {
   // Register global 401 handler
   useEffect(() => {
     setUnauthorizedHandler(() => {
+      setActiveStoreId(null);
       clearPersistedQueryCache();
       setIsAuthed(false);
     });
@@ -363,11 +369,13 @@ export default function App() {
             loadDumpingStatus();
           } else {
             localStorage.removeItem('access_token');
+            setActiveStoreId(null);
             clearPersistedQueryCache();
             setIsAuthed(false);
           }
         } else {
           localStorage.removeItem('access_token');
+          setActiveStoreId(null);
           clearPersistedQueryCache();
           setIsAuthed(false);
         }

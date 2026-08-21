@@ -76,6 +76,18 @@ export const StoreHub: React.FC = () => {
     refetchInterval: 30_000,
   });
 
+  // Самолечение унаследованного store_id: на общем браузере логаут раньше не
+  // чистил active_store_id, и следующий вошедший юзер получал чужой store_id
+  // из localStorage — get_store_context вечно 401'ил на все ручки без единого
+  // видимого сообщения (фронт молча показывал везде "0"). Как только список
+  // СВОИХ магазинов пришёл, если сохранённый id в нём не найден — переключаем
+  // на первый доступный (тот же дефолт, что и на бэкенде при пустом X-Store-Id).
+  useEffect(() => {
+    if (loading || stores.length === 0) return;
+    if (activeStoreId && stores.some((s) => s.id === activeStoreId)) return;
+    setSharedActiveStoreId(stores[0].id);
+  }, [loading, stores, activeStoreId]);
+
   const { data: plans = [] } = useQuery({
     queryKey: ['billing', 'plans'],
     queryFn: fetchBillingPlans,
