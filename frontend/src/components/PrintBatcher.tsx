@@ -30,6 +30,12 @@ interface ManifestResponse {
   total_files: number;
   total_pages: number;
   deduplicated_pages: number;
+  excluded_express_pages?: number;
+  skipped_files?: number;
+  grouped_pages?: number;
+  ungrouped_pages?: number;
+  store_categories?: { key: string; title: string; pages: number }[];
+  separator_pages?: boolean;
   new_pages: number;
   all_duplicates: boolean;
   sort_preset: string;
@@ -57,6 +63,32 @@ const DEFAULT_PREFS: PrintPrefs = {
   expressMode: 'separate',
   outputLayout: 'auto',
   deduplicateHistory: true,
+};
+
+// Крупные категории магазина («S — Спорт», «D — Дом») поверх Мастер-Групп.
+// Живут в настройках магазина на сервере, а не в localStorage: один и тот же
+// пресет обязан действовать и в кабинете, и в Telegram-боте.
+interface StoreCategory {
+  prefix: string;
+  title: string;
+}
+interface StoreCategoriesConfig {
+  enabled: boolean;
+  separator_pages: boolean;
+  uncategorized_title: string;
+  categories: StoreCategory[];
+}
+interface DetectedPrefix {
+  prefix: string;
+  products: number;
+  examples: string[];
+}
+
+const EMPTY_CATEGORIES: StoreCategoriesConfig = {
+  enabled: false,
+  separator_pages: true,
+  uncategorized_title: 'Прочее',
+  categories: [],
 };
 
 const prefsKey = (storeId: string | null | undefined) => `printBatcherPrefs:${storeId || 'default'}`;
@@ -108,6 +140,11 @@ export const PrintBatcher: React.FC = () => {
   const [resultManifest, setResultManifest] = useState<ManifestResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [categories, setCategories] = useState<StoreCategoriesConfig>(EMPTY_CATEGORIES);
+  const [detectedPrefixes, setDetectedPrefixes] = useState<DetectedPrefix[]>([]);
+  const [categoriesOpen, setCategoriesOpen] = useState<boolean>(false);
+  const [categoriesSaving, setCategoriesSaving] = useState<boolean>(false);
+  const [categoriesNotice, setCategoriesNotice] = useState<string | null>(null);
 
   // react-query, а не ручной fetch-on-mount — переживает переключение вкладок
   // и перезагрузку страницы через персистентный кэш (queryClient.ts).
@@ -144,6 +181,81 @@ export const PrintBatcher: React.FC = () => {
       // приватный режим / переполненное хранилище — настройки просто не запомнятся
     }
   }, [activeStoreId, sortPreset, autoRotate, expressMode, outputLayout, deduplicateHistory]);
+
+  // Пресет категорий и список префиксов тянем с сервера при открытии магазина:
+  // это настройка магазина, а не устройства.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [settingsRes, prefixesRes] = await Promise.all([
+          apiFetch(`${API_URL}/api/print-batcher/settings`),
+          apiFetch(`${API_URL}/api/print-batcher/detected-prefixes`),
+        ]);
+        if (cancelled) return;
+        if (settingsRes.ok) {
+          const data = await settingsRes.json();
+          setCategories({ ...EMPTY_CATEGORIES, ...(data.store_categories || {}) });
+        }
+        if (prefixesRes.ok) {
+          const data = await prefixesRes.json();
+          setDetectedPrefixes(data.prefixes || []);
+        }
+      } catch {
+        // сервер перезапускается — блок категорий просто останется свёрнутым
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeStoreId]);
+
+  // Название категории по префиксу; пустое — значит категория не настроена.
+  const titleForPrefix = (prefix: string): string =>
+    categories.categories.find((c) => c.prefix === prefix)?.title || '';
+
+  const setTitleForPrefix = (prefix: string, title: string) => {
+    setCategories((prev) => {
+      const rest = prev.categories.filter((c) => c.prefix !== prefix);
+      if (!title.trim()) return { ...prev, categories: rest };
+      const existingIndex = prev.categories.findIndex((c) => c.prefix === prefix);
+      const next = [...prev.categories];
+      if (existingIndex >= 0) next[existingIndex] = { prefix, title };
+      else next.push({ prefix, title });
+      return { ...prev, categories: next };
+    });
+  };
+
+  const moveCategory = (prefix: string, delta: number) => {
+    setCategories((prev) => {
+      const idx = prev.categories.findIndex((c) => c.prefix === prefix);
+      const target = idx + delta;
+      if (idx < 0 || target < 0 || target >= prev.categories.length) return prev;
+      const next = [...prev.categories];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return { ...prev, categories: next };
+    });
+  };
+
+  const handleSaveCategories = async () => {
+    setCategoriesSaving(true);
+    setCategoriesNotice(null);
+    try {
+      const res = await apiFetch(`${API_URL}/api/print-batcher/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ store_categories: categories }),
+      });
+      if (res.ok) {
+        setCategoriesNotice('Пресет категорий сохранён — он действует и в Telegram-боте');
+      } else {
+        const detail = await res.json().catch(() => null);
+        setCategoriesNotice(detail?.detail || 'Не удалось сохранить пресет');
+      }
+    } catch {
+      setCategoriesNotice('Не удалось сохранить пресет');
+    } finally {
+      setCategoriesSaving(false);
+    }
+  };
 
   const handleResetHistory = async () => {
     if (!window.confirm('Вы уверены, что хотите сбросить историю напечатанных заказов за сегодня?')) {
@@ -324,6 +436,116 @@ export const PrintBatcher: React.FC = () => {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Крупные категории магазина — пресет поверх Мастер-Групп */}
+      <div style={styles.card}>
+        <button
+          onClick={() => setCategoriesOpen((v) => !v)}
+          style={styles.categoriesToggle}
+        >
+          <span>🗂️ Крупные категории магазина{categories.enabled ? ' — включены' : ''}</span>
+          <span>{categoriesOpen ? '▲' : '▼'}</span>
+        </button>
+
+        {categoriesOpen && (
+          <div style={{ marginTop: '14px' }}>
+            <p style={styles.categoriesHint}>
+              Категория берётся из первой буквы артикула продавца. Порядок строк = порядок печати:
+              сначала вся стопка одной категории, внутри неё — блоки Мастер-Групп. Работает при
+              сортировке «По Мастер-Группам» или «По названию товара».
+            </p>
+
+            <label style={styles.categoriesCheckbox}>
+              <input
+                type="checkbox"
+                checked={categories.enabled}
+                onChange={(e) => setCategories((p) => ({ ...p, enabled: e.target.checked }))}
+              />
+              <span>Разбивать пачку на категории</span>
+            </label>
+            <label style={styles.categoriesCheckbox}>
+              <input
+                type="checkbox"
+                checked={categories.separator_pages}
+                onChange={(e) => setCategories((p) => ({ ...p, separator_pages: e.target.checked }))}
+              />
+              <span>Печатать разделительный лист перед каждой категорией</span>
+            </label>
+
+            {detectedPrefixes.length === 0 ? (
+              <p style={styles.categoriesHint}>
+                В каталоге не найдено артикулов вида <code>S517-0027</code> — категории по префиксу
+                для этого магазина не применимы.
+              </p>
+            ) : (
+              <table style={styles.categoriesTable}>
+                <thead>
+                  <tr>
+                    <th style={styles.categoriesTh}>Префикс</th>
+                    <th style={styles.categoriesTh}>Товаров</th>
+                    <th style={styles.categoriesTh}>Название категории</th>
+                    <th style={styles.categoriesTh}>Порядок</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detectedPrefixes.map((p) => {
+                    const title = titleForPrefix(p.prefix);
+                    const orderIndex = categories.categories.findIndex((c) => c.prefix === p.prefix);
+                    return (
+                      <tr key={p.prefix}>
+                        <td style={styles.categoriesTd}>
+                          <strong>{p.prefix}</strong>
+                          <div style={styles.categoriesExample}>{p.examples[0]}</div>
+                        </td>
+                        <td style={styles.categoriesTd}>{p.products}</td>
+                        <td style={styles.categoriesTd}>
+                          <input
+                            type="text"
+                            value={title}
+                            placeholder={`не названа — уедет в «${categories.uncategorized_title}»`}
+                            onChange={(e) => setTitleForPrefix(p.prefix, e.target.value)}
+                            style={styles.categoriesInput}
+                          />
+                        </td>
+                        <td style={styles.categoriesTd}>
+                          {orderIndex >= 0 ? (
+                            <span style={{ whiteSpace: 'nowrap' }}>
+                              <button
+                                onClick={() => moveCategory(p.prefix, -1)}
+                                disabled={orderIndex === 0}
+                                style={styles.categoriesOrderBtn}
+                                title="Печатать раньше"
+                              >↑</button>
+                              <span style={{ margin: '0 6px' }}>{orderIndex + 1}</span>
+                              <button
+                                onClick={() => moveCategory(p.prefix, 1)}
+                                disabled={orderIndex === categories.categories.length - 1}
+                                style={styles.categoriesOrderBtn}
+                                title="Печатать позже"
+                              >↓</button>
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}>—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '14px', flexWrap: 'wrap' }}>
+              <button onClick={handleSaveCategories} disabled={categoriesSaving} style={styles.categoriesSaveBtn}>
+                {categoriesSaving ? 'Сохраняю...' : '💾 Сохранить пресет магазина'}
+              </button>
+              {categoriesNotice && (
+                <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{categoriesNotice}</span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Control & Upload Panel */}
@@ -560,6 +782,35 @@ export const PrintBatcher: React.FC = () => {
                 ✨ Новых листов в PDF: <strong style={{ color: 'var(--secondary)' }}>{resultManifest.new_pages} страниц</strong> |
                 Раскладка: <code>{resultManifest.output_layout}</code>
               </div>
+              {/* Отброшенное раньше растворялось в разнице между «файлов в
+                  архиве» и «листов в PDF» — теперь названо поимённо. */}
+              {!!resultManifest.excluded_express_pages && (
+                <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px' }}>
+                  ⚡ Экспресс отложен (режим «Исключать»): <strong style={{ color: 'var(--warning)' }}>{resultManifest.excluded_express_pages} страниц</strong>
+                </div>
+              )}
+              {!!resultManifest.skipped_files && (
+                <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px' }}>
+                  ⚠️ Не удалось прочитать файлов: <strong style={{ color: 'var(--error)' }}>{resultManifest.skipped_files}</strong>
+                </div>
+              )}
+              {!!resultManifest.store_categories?.length && (
+                <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px' }}>
+                  🗂️ Категории (в порядке печати):{' '}
+                  {resultManifest.store_categories.map((c, i) => (
+                    <span key={c.key || i}>
+                      {i > 0 && ' • '}
+                      <strong>{c.title}</strong> — {c.pages}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {!!(resultManifest.grouped_pages || resultManifest.ungrouped_pages) && (
+                <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px' }}>
+                  🏷 Связка остатков: <strong style={{ color: 'var(--secondary)' }}>{resultManifest.grouped_pages} со штампом группы</strong>,{' '}
+                  <strong style={{ color: 'var(--text-muted)' }}>{resultManifest.ungrouped_pages} без</strong>
+                </div>
+              )}
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'right' }}>
               Батч-ID: <code>{resultManifest.batch_id.substring(0, 8)}</code>
@@ -731,6 +982,86 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '8px',
     fontSize: '12px',
     fontWeight: 600,
+    cursor: 'pointer',
+  },
+  categoriesToggle: {
+    width: '100%',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    background: 'transparent',
+    border: 'none',
+    color: '#ffffff',
+    fontSize: '15px',
+    fontWeight: 700,
+    cursor: 'pointer',
+    padding: 0,
+  },
+  categoriesHint: {
+    fontSize: '13px',
+    color: 'var(--text-muted)',
+    lineHeight: 1.5,
+    margin: '0 0 12px 0',
+  },
+  categoriesCheckbox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '13px',
+    color: '#cbd5e1',
+    marginBottom: '8px',
+    cursor: 'pointer',
+  },
+  categoriesTable: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    marginTop: '12px',
+    fontSize: '13px',
+  },
+  categoriesTh: {
+    textAlign: 'left',
+    color: 'var(--text-muted)',
+    fontWeight: 600,
+    padding: '6px 8px',
+    borderBottom: '1px solid rgba(255,255,255,0.08)',
+  },
+  categoriesTd: {
+    padding: '8px',
+    borderBottom: '1px solid rgba(255,255,255,0.05)',
+    color: '#cbd5e1',
+    verticalAlign: 'top',
+  },
+  categoriesExample: {
+    fontSize: '11px',
+    color: 'var(--text-muted)',
+    marginTop: '2px',
+  },
+  categoriesInput: {
+    width: '100%',
+    background: 'rgba(255,255,255,0.06)',
+    border: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: '8px',
+    padding: '6px 10px',
+    color: '#ffffff',
+    fontSize: '13px',
+  },
+  categoriesOrderBtn: {
+    background: 'rgba(255,255,255,0.08)',
+    border: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: '6px',
+    color: '#cbd5e1',
+    cursor: 'pointer',
+    padding: '2px 7px',
+    fontSize: '12px',
+  },
+  categoriesSaveBtn: {
+    background: 'var(--secondary)',
+    border: 'none',
+    borderRadius: '10px',
+    color: '#04121f',
+    fontWeight: 700,
+    fontSize: '13px',
+    padding: '9px 16px',
     cursor: 'pointer',
   },
   card: {

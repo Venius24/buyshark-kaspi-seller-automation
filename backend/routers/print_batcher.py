@@ -11,7 +11,8 @@ from backend.services.print_batcher_service import (
     process_zip_or_pdfs,
     get_batch_file_path,
     reset_printed_history,
-    load_printed_history
+    load_printed_history,
+    detect_article_prefixes,
 )
 from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed
 
@@ -112,10 +113,18 @@ async def process_print_batch(
         sort_preset=sort_preset,
         auto_rotate=auto_rotate,
         express_mode=express_mode,
-        deduplicate_history=deduplicate_history,
+        # Галочка в UI — про то, отсеивать ли повторы В ЭТОМ прогоне. Журнал
+        # напечатанного ведём всегда: снятая галочка означала «напечатать всё»,
+        # а не «забыть, что мы это печатали», иначе следующая пачка не смогла
+        # бы отличить в ней новое от повторов.
+        deduplicate_history=True,
+        filter_duplicates=deduplicate_history,
         force_reprint=force_reprint,
         output_layout=output_layout,
         store_id=ctx.store_id,
+        # Крупные категории — настройка магазина, а не параметр запроса:
+        # один и тот же пресет обязан действовать и в кабинете, и в боте.
+        store_categories=_load_store_categories(ctx.store_id),
         progress_cb=_make_progress_cb(job_id),
     ))).start()
 
@@ -145,6 +154,71 @@ async def get_process_status(job_id: str, ctx: StoreContext = Depends(get_store_
         "manifest": snapshot["manifest"],
         "detail": snapshot["detail"],
     }
+
+
+def _load_store_categories(store_id: str) -> Dict[str, Any]:
+    from backend.chatbot import config as chatbot_config
+    return (chatbot_config.load_print_settings(store_id) or {}).get("store_categories") or {}
+
+
+@router.get("/settings")
+async def get_print_settings(ctx: StoreContext = Depends(get_store_context)):
+    """
+    Настройки печати магазина, включая пресет крупных категорий.
+
+    Кабинет раньше хранил их только в localStorage браузера, а бот — в БД, и
+    один и тот же магазин печатал по-разному в зависимости от того, откуда
+    запустили. Общий источник — StorePrintSettingsDB.
+    """
+    from backend.chatbot import config as chatbot_config
+    settings = await asyncio.to_thread(chatbot_config.load_print_settings, ctx.store_id)
+    return settings
+
+
+@router.put("/settings")
+async def put_print_settings(payload: Dict[str, Any], ctx: StoreContext = Depends(get_store_context_billed)):
+    """Сохранить настройки печати магазина (частичное обновление)."""
+    from backend.chatbot import config as chatbot_config
+
+    allowed = {
+        "output_layout", "express_mode", "sort_preset", "deduplicate_history",
+        "auto_rotate", "dup_handling_mode", "store_categories",
+    }
+    unknown = set(payload) - allowed
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Неизвестные настройки: {', '.join(sorted(unknown))}")
+
+    cats = payload.get("store_categories")
+    if cats is not None:
+        if not isinstance(cats, dict):
+            raise HTTPException(status_code=400, detail="store_categories должен быть объектом")
+        items = cats.get("categories") or []
+        if not isinstance(items, list):
+            raise HTTPException(status_code=400, detail="store_categories.categories должен быть списком")
+        seen = set()
+        for item in items:
+            prefix = str((item or {}).get("prefix") or "").strip().upper()
+            if not prefix:
+                raise HTTPException(status_code=400, detail="У категории пустой префикс артикула")
+            if prefix in seen:
+                raise HTTPException(status_code=400, detail=f"Префикс {prefix} указан дважды")
+            seen.add(prefix)
+
+    saved = await asyncio.to_thread(chatbot_config.save_print_settings, payload, ctx.store_id)
+    return saved
+
+
+@router.get("/detected-prefixes")
+async def get_detected_prefixes(ctx: StoreContext = Depends(get_store_context)):
+    """
+    Префиксы артикулов, реально встречающиеся в каталоге магазина.
+
+    Владельцу остаётся только проставить человеческие названия — вписывать
+    буквы руками и следить за появлением новых не нужно.
+    """
+    from backend.state_helpers import _load_products
+    products = await asyncio.to_thread(_load_products, ctx.store_id)
+    return {"prefixes": detect_article_prefixes(products or [])}
 
 
 @router.post("/reset-history")

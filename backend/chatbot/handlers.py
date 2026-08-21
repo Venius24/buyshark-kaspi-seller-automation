@@ -11,7 +11,9 @@ from backend.services.print_batcher_service import (
     process_zip_or_pdfs,
     get_batch_file_path,
     reset_printed_history,
-    load_printed_history
+    load_printed_history,
+    peek_already_printed,
+    count_already_printed_orders
 )
 from backend.services.auto_assembly_worker import (
     get_unprinted_spool_rows,
@@ -685,31 +687,48 @@ def register_handlers():
 
         if action_type == "spool_force":
             layout_mode = data_parts[1]
-            deduplicate_history = True
+            filter_duplicates = False
             force_reprint = True
         elif action_type == "spool_dup":
-            # data: spool_dup:<all|new>:<layout_mode>
+            # data: spool_dup:<all|new|reset>:<layout_mode>
             choice = data_parts[1]
             layout_mode = data_parts[2] if len(data_parts) > 2 else "auto"
-            deduplicate_history = (choice == "new")
+            if choice == "reset":
+                await asyncio.to_thread(reset_printed_history, store_id)
+            filter_duplicates = (choice == "new")
             force_reprint = False
         else:
             layout_mode = data_parts[1]
             stg = await asyncio.to_thread(config.load_print_settings, store_id)
             dup_mode = stg.get("dup_handling_mode", "always_new")
             if dup_mode == "always_ask":
-                await callback_query.answer()
-                ask_kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🖨 Печатать все", callback_data=f"spool_dup:all:{layout_mode}")],
-                    [InlineKeyboardButton(text="🆕 Только новые (пропустить повторы)", callback_data=f"spool_dup:new:{layout_mode}")],
-                ])
-                try:
-                    await callback_query.message.edit_text("Какие накладные печатать?", reply_markup=ask_kb)
-                except Exception:
-                    pass
-                return
-            deduplicate_history = (dup_mode != "always_all")
-            force_reprint = False
+                # Как и при ручной загрузке: спрашиваем только если в спуле
+                # действительно есть уже напечатанное сегодня.
+                spool_rows = await asyncio.to_thread(get_unprinted_spool_rows, store_id)
+                codes = [r.get("order_code") for r in spool_rows if r.get("order_code")]
+                already = await asyncio.to_thread(count_already_printed_orders, codes, store_id)
+                if codes and already == 0:
+                    filter_duplicates = True
+                    force_reprint = False
+                else:
+                    await callback_query.answer()
+                    ask_kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="🆕 Только новые (пропустить повторы)", callback_data=f"spool_dup:new:{layout_mode}")],
+                        [InlineKeyboardButton(text="🖨 Печатать все", callback_data=f"spool_dup:all:{layout_mode}")],
+                        [InlineKeyboardButton(text="♻️ Сбросить историю за сегодня и печатать всё", callback_data=f"spool_dup:reset:{layout_mode}")],
+                    ])
+                    try:
+                        await callback_query.message.edit_text(
+                            f"🛑 Уже печатались сегодня: **{already}** из **{len(codes)}** заказов.\n\n"
+                            f"Какие накладные печатать?",
+                            reply_markup=ask_kb
+                        )
+                    except Exception:
+                        pass
+                    return
+            else:
+                filter_duplicates = (dup_mode != "always_all")
+                force_reprint = False
 
         await callback_query.answer()
         try:
@@ -731,7 +750,9 @@ def register_handlers():
             # per-store print_settings) — та же раскладка, что и в вебе
             # (routers/auto_assembly.py::download_spool), спул это отдельный
             # от ручной загрузки в PrintBatcher поток. dup_handling_mode —
-            # исключение, читается из настроек (см. выше).
+            # исключение, читается из настроек (см. выше). Крупные категории
+            # магазина здесь тоже неприменимы: сортировка по номеру заказа о
+            # товаре ничего не знает, а значит и категорию определить не из чего.
             manifest = await asyncio.to_thread(
                 process_zip_or_pdfs,
                 file_bytes=zip_bytes,
@@ -739,7 +760,8 @@ def register_handlers():
                 sort_preset="order_id",
                 auto_rotate=True,
                 express_mode="separate",
-                deduplicate_history=deduplicate_history,
+                deduplicate_history=True,
+                filter_duplicates=filter_duplicates,
                 force_reprint=force_reprint,
                 output_layout=layout_mode,
                 store_id=store_id,
@@ -934,7 +956,7 @@ def register_handlers():
             # Утренний сбор автоматический, без диалога — "Всегда спрашивать"
             # здесь не спрашивает (некому отвечать), падаем на тихий режим
             # "только новые", как и раньше по умолчанию.
-            deduplicate_history = (dup_mode != "always_all")
+            filter_duplicates = (dup_mode != "always_all")
             manifest = await asyncio.to_thread(
                 process_zip_or_pdfs,
                 file_bytes=zip_bytes,
@@ -942,7 +964,9 @@ def register_handlers():
                 sort_preset="order_id",
                 auto_rotate=True,
                 express_mode="separate",
-                deduplicate_history=deduplicate_history,
+                deduplicate_history=True,
+                filter_duplicates=filter_duplicates,
+                store_categories=stg.get("store_categories"),
                 force_reprint=False,
                 output_layout="auto",
                 store_id=store_id,
@@ -1164,12 +1188,17 @@ def register_handlers():
         chat_id: int,
         pending: dict,
         layout_mode: str,
-        deduplicate_history: bool,
+        filter_duplicates: bool,
         force_reprint: bool,
     ) -> None:
         """Общая обработка ручной загрузки .zip/.pdf — общий хвост между
         прямой обработкой (dup_handling_mode != always_ask), выбором в
-        опросе «какие накладные печатать» и принудительной перепечаткой."""
+        опросе «какие накладные печатать» и принудительной перепечаткой.
+
+        filter_duplicates — только про ЭТОТ прогон. Журнал напечатанного
+        ведётся по настройке магазина независимо, иначе пачка, напечатанная
+        в режиме «все», выпадала из истории и следующая пачка считала её
+        заказы новыми."""
         try:
             await status_message.edit_text("⏳ **Загрузка архива, обрезка белых полей и подгонка MediaBox...**")
         except Exception:
@@ -1177,10 +1206,13 @@ def register_handlers():
 
         try:
             bot = bot_instance.bot
-            file_info = await bot.get_file(pending["file_id"])
-            file_stream = io.BytesIO()
-            await bot.download_file(file_info.file_path, destination=file_stream)
-            file_bytes = file_stream.getvalue()
+            # Предпроверка повторов уже могла скачать файл — не тянем второй раз.
+            file_bytes = pending.get("file_bytes")
+            if file_bytes is None:
+                file_info = await bot.get_file(pending["file_id"])
+                file_stream = io.BytesIO()
+                await bot.download_file(file_info.file_path, destination=file_stream)
+                file_bytes = file_stream.getvalue()
 
             store_id = pending.get("store_id")
             stg = await asyncio.to_thread(config.load_print_settings, store_id)
@@ -1197,7 +1229,9 @@ def register_handlers():
                 sort_preset=stg.get("sort_preset", "filename"),
                 auto_rotate=stg.get("auto_rotate", True),
                 express_mode=stg.get("express_mode", "separate"),
-                deduplicate_history=deduplicate_history,
+                deduplicate_history=stg.get("deduplicate_history", True),
+                filter_duplicates=filter_duplicates,
+                store_categories=stg.get("store_categories"),
                 force_reprint=force_reprint,
                 output_layout=layout_mode,
                 store_id=store_id,
@@ -1209,6 +1243,10 @@ def register_handlers():
             new_pages = manifest["new_pages"]
             all_dups = manifest["all_duplicates"]
             batches = manifest["batches"]
+            express_skipped = manifest.get("excluded_express_pages", 0)
+            unreadable = manifest.get("skipped_files", 0)
+            ungrouped = manifest.get("ungrouped_pages", 0)
+            grouped = manifest.get("grouped_pages", 0)
 
             if all_dups:
                 force_kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -1221,13 +1259,27 @@ def register_handlers():
                 )
                 return
 
-            await status_message.edit_text(
-                f"✅ **Печатный пакет успешно скомпонован!**\n"
-                f"📁 **Файлов в архиве:** `{total_files}` шт | **Всего листов:** `{total_pages}`\n"
-                f"🛑 **Исключено дубликатов:** `{dedup_pages}` страниц\n"
-                f"✨ **Новых листов к печати:** `{new_pages}` страниц\n"
-                f"📤 Отправка файлов в чат..."
-            )
+            report_lines = [
+                "✅ **Печатный пакет успешно скомпонован!**",
+                f"📁 **Файлов в архиве:** `{total_files}` шт | **Всего листов:** `{total_pages}`",
+            ]
+            if filter_duplicates:
+                report_lines.append(f"🛑 **Исключено дубликатов:** `{dedup_pages}` страниц")
+            else:
+                report_lines.append("🖨 **Режим «печатать все»** — повторы не отсеивались")
+            # Экспресс и нечитаемые файлы раньше молча исчезали в разнице между
+            # «Файлов в архиве» и «Всего листов» — теперь названы поимённо.
+            if express_skipped:
+                report_lines.append(f"⚡ **Экспресс отложен:** `{express_skipped}` страниц (режим «Исключать»)")
+            if unreadable:
+                report_lines.append(f"⚠️ **Не удалось прочитать файлов:** `{unreadable}`")
+            if grouped or ungrouped:
+                report_lines.append(
+                    f"🏷 **Связка остатков:** `{grouped}` со штампом группы, `{ungrouped}` без"
+                )
+            report_lines.append(f"✨ **Новых листов к печати:** `{new_pages}` страниц")
+            report_lines.append("📤 Отправка файлов в чат...")
+            await status_message.edit_text("\n".join(report_lines))
 
             for b_key, b_info in batches.items():
                 batch_file_path = get_batch_file_path(manifest["batch_id"], b_info["category"])
@@ -1286,20 +1338,63 @@ def register_handlers():
         # а опрос (если включён режим "Всегда спрашивать") — про то, какие
         # накладные печатать (все / только новые).
         if dup_mode == "always_ask":
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🖨 Печатать все", callback_data="pb_dup:all")],
-                [InlineKeyboardButton(text="🆕 Только новые (пропустить повторы)", callback_data="pb_dup:new")],
-            ])
-            await message.reply(
-                f"📦 **Получен файл:** `{doc.file_name}` ({size_mb:.2f} МБ)\n\n"
-                f"Какие накладные печатать?",
-                reply_markup=kb
+            # Но спрашивать есть смысл, только если в архиве реально есть уже
+            # напечатанное. Проверяем это по оглавлению zip (номера заказов в
+            # именах файлов) — миллисекунды, без разбора PDF. Архив без единого
+            # повтора уходит в печать сразу: лишний вопрос там раздражает и
+            # провоцирует ответ «печатать все» по привычке.
+            status_message = await message.reply(
+                f"📦 **Получен файл:** `{doc.file_name}` ({size_mb:.2f} МБ)\n⏳ Проверяю, есть ли повторы..."
             )
+            try:
+                file_info = await bot_instance.bot.get_file(doc.file_id)
+                stream = io.BytesIO()
+                await bot_instance.bot.download_file(file_info.file_path, destination=stream)
+                pending["file_bytes"] = stream.getvalue()
+                already, total_orders = await asyncio.to_thread(
+                    peek_already_printed, pending["file_bytes"], doc.file_name, store_id
+                )
+            except Exception as e:
+                logger.warning(f"Печать: предпроверка повторов не удалась, спрашиваем как обычно: {e}")
+                already, total_orders = 0, 0
+
+            if total_orders and already == 0:
+                try:
+                    await status_message.edit_text(
+                        f"📦 **Получен файл:** `{doc.file_name}` ({size_mb:.2f} МБ)\n"
+                        f"✅ Повторов нет — все `{total_orders}` заказов новые, печатаю."
+                    )
+                except Exception:
+                    pass
+                await _run_manual_print_job(
+                    status_message, chat_id, pending, layout_mode,
+                    filter_duplicates=True, force_reprint=False
+                )
+                return
+
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🆕 Только новые (пропустить повторы)", callback_data="pb_dup:new")],
+                [InlineKeyboardButton(text="🖨 Печатать все", callback_data="pb_dup:all")],
+                [InlineKeyboardButton(text="♻️ Сбросить историю за сегодня и печатать всё", callback_data="pb_dup:reset")],
+            ])
+            hint = (
+                f"🛑 Уже печатались сегодня: **{already}** из **{total_orders}** заказов."
+                if total_orders else
+                "Не удалось заранее определить повторы по этому файлу."
+            )
+            try:
+                await status_message.edit_text(
+                    f"📦 **Получен файл:** `{doc.file_name}` ({size_mb:.2f} МБ)\n\n"
+                    f"{hint}\n\nКакие накладные печатать?",
+                    reply_markup=kb
+                )
+            except Exception:
+                pass
             return
 
-        deduplicate_history = (dup_mode != "always_all")
+        filter_duplicates = (dup_mode != "always_all")
         status_message = await message.reply(f"📦 **Получен файл:** `{doc.file_name}` ({size_mb:.2f} МБ)")
-        await _run_manual_print_job(status_message, chat_id, pending, layout_mode, deduplicate_history, force_reprint=False)
+        await _run_manual_print_job(status_message, chat_id, pending, layout_mode, filter_duplicates, force_reprint=False)
 
     @dp.callback_query(F.data.startswith("pb_dup:"))
     async def process_pb_dup_choice(callback_query: types.CallbackQuery):
@@ -1308,12 +1403,16 @@ def register_handlers():
         if not pending:
             await callback_query.answer("⚠️ Файл не найден или истёк срок действия. Отправьте архив заново.", show_alert=True)
             return
-        choice = callback_query.data.split(":", 1)[1]  # 'all' | 'new'
-        deduplicate_history = (choice == "new")
+        choice = callback_query.data.split(":", 1)[1]  # 'all' | 'new' | 'reset'
+        if choice == "reset":
+            # Сброс прямо в потоке печати: кнопка нужна ровно в тот момент,
+            # когда стало ясно, что история мешает, — а не в дебрях настроек.
+            await asyncio.to_thread(reset_printed_history, pending.get("store_id"))
+        filter_duplicates = (choice == "new")
         await callback_query.answer()
         stg = await asyncio.to_thread(config.load_print_settings, pending.get("store_id"))
         layout_mode = stg.get("output_layout", "auto")
-        await _run_manual_print_job(callback_query.message, chat_id, pending, layout_mode, deduplicate_history, force_reprint=False)
+        await _run_manual_print_job(callback_query.message, chat_id, pending, layout_mode, filter_duplicates, force_reprint=False)
 
     @dp.callback_query(F.data == "pb_force_all")
     async def process_pb_force_all(callback_query: types.CallbackQuery):
@@ -1325,7 +1424,7 @@ def register_handlers():
         await callback_query.answer()
         stg = await asyncio.to_thread(config.load_print_settings, pending.get("store_id"))
         layout_mode = stg.get("output_layout", "auto")
-        await _run_manual_print_job(callback_query.message, chat_id, pending, layout_mode, deduplicate_history=True, force_reprint=True)
+        await _run_manual_print_job(callback_query.message, chat_id, pending, layout_mode, filter_duplicates=False, force_reprint=True)
 
     @dp.callback_query(F.data.startswith("unblock_"))
     async def process_unblock_callback(callback_query: types.CallbackQuery):
