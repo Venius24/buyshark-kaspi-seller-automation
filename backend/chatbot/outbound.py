@@ -226,10 +226,17 @@ def _sent_today_count(store_id: str) -> int:
 
 
 def _load_due_pending(store_id: str, limit: int = 20) -> list:
+    """Возвращает due-записи, отсортированные так, чтобы «Самовывоз» ВСЕГДА
+    попадал в выборку этого тика первым — а не только "вне дневного лимита"
+    в _process_store_queue. Иначе при большом объёмном бэклоге «Отзыва»
+    (может быть 1000+ pending с более ранним scheduled_at, чем у любого
+    самовывоза) записи pickup физически не попадали бы даже в этот LIMIT-срез
+    по scheduled_at ASC — гейт по лимиту до них просто не доходил бы."""
     session = _get_sync_db_session()
     if not session:
         return []
     try:
+        from sqlalchemy import case
         from backend.db.models import OutboundQueueDB
         now = _dt.datetime.utcnow()
         rows = session.execute(
@@ -237,7 +244,10 @@ def _load_due_pending(store_id: str, limit: int = 20) -> list:
                 OutboundQueueDB.store_id == store_id,
                 OutboundQueueDB.status.in_(("pending", "needs_first_contact")),
                 OutboundQueueDB.scheduled_at <= now,
-            ).order_by(OutboundQueueDB.scheduled_at).limit(limit)
+            ).order_by(
+                case((OutboundQueueDB.campaign == "pickup", 0), else_=1),
+                OutboundQueueDB.scheduled_at,
+            ).limit(limit)
         ).scalars().all()
         session.expunge_all()
         return rows
@@ -321,9 +331,16 @@ async def _process_store_queue(store_id: str, cookies: dict, merchant_id: str):
             )
             continue
 
-        if sent_today >= MAX_OUTBOUND_PER_DAY:
+        # «Самовывоз» — вне общего дневного лимита (решение пользователя
+        # 2026-08-21): это разовое time-sensitive сообщение с адресом/графиком
+        # клиенту, который прямо сейчас стоит и ждёт, а не массовая рассылка
+        # вроде «Отзыва» (до 225 записей за один тик sales_sync_worker). При
+        # общем лимите на магазин «Отзыв» съедал квоту раньше по scheduled_at
+        # и «Самовывоз» неделями стоял в очереди, пока не сгорал по Гейту 5
+        # (STALE_AFTER_DAYS) — клиент так и не получал адрес точки выдачи.
+        if item.campaign != "pickup" and sent_today >= MAX_OUTBOUND_PER_DAY:
             logger.info(f"[Outbound] Стор {store_id}: дневной лимит {MAX_OUTBOUND_PER_DAY} исходящих достигнут, откладываю остальное.")
-            break
+            continue
 
         if not _is_within_window(item):
             continue
