@@ -119,7 +119,8 @@ async def notify_manager_and_block(
         try:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Разблокировать для ИИ", callback_data=f"unblock_{group_id}")]
+                [InlineKeyboardButton(text="✍️ Ответить", callback_data=f"chat_open:{group_id}")],
+                [InlineKeyboardButton(text="✅ Разблокировать для ИИ", callback_data=f"unblock_{group_id}")],
             ])
 
             if store_id is not None:
@@ -127,4 +128,4 @@ async def notify_manager_and_block(
         except Exception as e:
             logger.error(f"⚠️ Ошибка формирования Telegram клавиатуры: {e}")
 
-    config.set_chat_human_override(store_id, group_id)
+    config.set_chat_human_override(store_id, group_id, client_name=client_name)

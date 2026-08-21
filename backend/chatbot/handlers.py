@@ -429,16 +429,17 @@ def register_handlers():
         return text, kb
 
     def get_chats_view(store_id: str) -> tuple[str, Optional[InlineKeyboardMarkup]]:
-        blocked = config.list_blocked_chat_ids(store_id)
+        blocked = config.list_blocked_chats_detailed(store_id)
         store_line = f"🏪 **{_esc_md(config.get_store_name(store_id))}**\n\n" if store_id else ""
         if not blocked:
             return f"💬 **Чаты**\n\n{store_line}Нет диалогов, ожидающих ответа человека — ИИ справляется сам.", None
-        lines = [f"💬 **Чаты**\n\n{store_line}Ожидают ответа: `{len(blocked)}`"]
+        lines = [f"💬 **Чаты**\n\n{store_line}Ожидают ответа: `{len(blocked)}` (блокировка сама снимается через 2 дня)"]
         kb_rows = []
-        for gid in blocked[:10]:
+        for c in blocked[:10]:
+            label = c["client_name"] if c["client_name"] else c["group_id"][:10]
             kb_rows.append([
-                InlineKeyboardButton(text=f"✍️ Ответить ({gid[:10]})", callback_data=f"chat_open:{gid}"),
-                InlineKeyboardButton(text="🤖 Вернуть ИИ", callback_data=f"chat_ai:{gid}"),
+                InlineKeyboardButton(text=f"✍️ Ответить: {label}", callback_data=f"chat_open:{c['group_id']}"),
+                InlineKeyboardButton(text="🤖 Вернуть ИИ", callback_data=f"chat_ai:{c['group_id']}"),
             ])
         return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
@@ -465,9 +466,21 @@ def register_handlers():
         уходит клиенту в Kaspi-чат напрямую, минуя ИИ. Зарегистрирован
         раньше остальных текстовых хэндлеров, чтобы перехватывать ответ
         даже если он текстуально совпал бы с подписью кнопки меню."""
-        pending = PENDING_REPLY.pop(message.from_user.id, None)
+        pending = PENDING_REPLY.get(message.from_user.id)
         if not pending:
             return
+
+        # Защита от бага: если человек в режиме "✍️ Ответить" нажал кнопку
+        # главного меню, этот хэндлер (зарегистрирован раньше остальных,
+        # текстовые команды сюда уже не долетают — см. фильтр выше) ловил и
+        # её, и текст кнопки уходил клиенту в Kaspi-чат. Теперь такой текст
+        # режим ответа просто отменяет, ничего клиенту не отправляя.
+        if message.text in i18n.all_menu_labels():
+            PENDING_REPLY.pop(message.from_user.id, None)
+            await message.reply("❌ Это похоже на команду/кнопку меню, а не ответ клиенту — ничего не отправлено, режим ответа отменён.")
+            return
+
+        pending = PENDING_REPLY.pop(message.from_user.id)
         store_id = pending["store_id"]
         group_id = pending["group_id"]
 
@@ -1130,7 +1143,27 @@ def register_handlers():
         group_id = callback_query.data.split(":", 1)[1]
         PENDING_REPLY[callback_query.from_user.id] = {"group_id": group_id, "store_id": access["store_id"]}
         await callback_query.answer()
-        await callback_query.message.answer(f"✍️ Напишите ответ клиенту следующим сообщением (диалог `{group_id}`).")
+        cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data=f"chat_cancel:{group_id}")]
+        ])
+        await callback_query.message.answer(
+            f"✍️ Напишите ответ клиенту следующим сообщением (диалог `{group_id}`).",
+            reply_markup=cancel_kb,
+        )
+
+    @dp.callback_query(F.data.startswith("chat_cancel:"))
+    async def process_chat_cancel(callback_query: types.CallbackQuery):
+        pending = PENDING_REPLY.get(callback_query.from_user.id)
+        group_id = callback_query.data.split(":", 1)[1]
+        if pending and pending.get("group_id") == group_id:
+            PENDING_REPLY.pop(callback_query.from_user.id, None)
+            await callback_query.answer("Ответ отменён.")
+        else:
+            await callback_query.answer("Уже отменено.")
+        try:
+            await callback_query.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
 
     @dp.callback_query(F.data.startswith("chat_ai:"))
     async def process_chat_return_ai(callback_query: types.CallbackQuery):

@@ -331,6 +331,11 @@ class ChatStateDB(Base):
     # снимается на первом же ответе клиента после этого — см. миграцию 022.
     awaiting_review_reply: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # Имя клиента (для читаемого списка "Чаты" в боте) + отметка времени
+    # блокировки для ИИ — используется, чтобы протухшие блокировки (менеджер
+    # забыл вернуть ИИ) сами снимались через 2 дня, см. CHAT_OVERRIDE_TTL.
+    client_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    blocked_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
 
 class ProcessedOrderDB(Base):

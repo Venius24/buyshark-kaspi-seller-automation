@@ -86,6 +86,7 @@ async def run_scheduled_dumping_cycle() -> dict:
                     await notify_dispatch.dispatch(
                         store.store_id, "money",
                         f"📉 Демпинг поставил в очередь новую цену у {updated} товар(ов)",
+                        card="dumping",
                     )
                 except Exception as notif_ex:
                     logger.error(f"[Dumping] Не удалось отправить уведомление о демпинге: {notif_ex}")

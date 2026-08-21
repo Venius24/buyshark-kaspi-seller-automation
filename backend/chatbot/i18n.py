@@ -31,3 +31,10 @@ def label(key: str, lang: str) -> str:
 
 def all_variants(key: str) -> Set[str]:
     return set(BUTTON_LABELS.get(key, {}).values())
+
+
+def all_menu_labels() -> Set[str]:
+    """Все подписи кнопок главного меню на всех языках — используется, чтобы
+    не спутать нажатие меню с реальным ответом клиенту в режиме «✍️ Ответить»
+    (см. handle_chat_reply в handlers.py)."""
+    return {label for variants in BUTTON_LABELS.values() for label in variants.values()}

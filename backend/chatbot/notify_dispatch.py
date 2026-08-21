@@ -30,6 +30,23 @@ CARD_FILES = {
     "startup": _CARDS_DIR / "startup.png",
 }
 
+# Хэштег в конце каждого алерта — чтобы уведомления можно было фильтровать/
+# искать прямо в Telegram (встроенный поиск по чату понимает #теги). Ключ —
+# card (см. CARD_FILES выше и вызовы dispatch(..., card=...) по всему коду).
+HASHTAGS = {
+    "welcome": "старт",
+    "new_order": "новый_заказ",
+    "dumping": "демпинг",
+    "money_digest": "итоги_дня",
+    "chat_alert": "срочный_вызов",
+    "cookie_expired": "сессия_истекла",
+    "assembly_failed": "автосборка",
+    "stock_stopped": "остатки",
+    "oversold": "перепродажа",
+    "startup": "старт",
+    "radar": "демпинг",
+}
+
 _dedup_sent: dict = {}  # (store_id, dedup_key) -> datetime отправки
 _DEDUP_WINDOW = datetime.timedelta(minutes=10)
 
@@ -125,8 +142,15 @@ async def send_with_card(tg_user_id: int, text: str, card: Optional[str] = None,
         logger.error(f"[NotifyDispatch] Не удалось отправить {tg_user_id}: {e}")
 
 
+def _with_hashtag(text: str, card: Optional[str]) -> str:
+    tag = HASHTAGS.get(card) if card else None
+    if not tag or f"#{tag}" in text:
+        return text
+    return f"{text}\n\n#{tag}"
+
+
 async def _send(tg_user_id: int, text: str, reply_markup=None, card: Optional[str] = None):
-    await send_with_card(tg_user_id, text, card=card, reply_markup=reply_markup)
+    await send_with_card(tg_user_id, _with_hashtag(text, card), card=card, reply_markup=reply_markup)
 
 
 async def dispatch(

@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import datetime
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,8 @@ def get_chat_state(store_id: Optional[str], group_id: str) -> Optional[dict]:
             "last_replied_msg_id": row.last_replied_msg_id,
             "human_override": row.human_override,
             "awaiting_review_reply": row.awaiting_review_reply,
+            "client_name": row.client_name,
+            "blocked_at": row.blocked_at,
         }
     finally:
         session.close()
@@ -117,8 +120,13 @@ def _upsert_chat_state(store_id: Optional[str], group_id: str, **fields):
 def mark_chat_replied(store_id: Optional[str], group_id: str, msg_id: str):
     _upsert_chat_state(store_id, group_id, last_replied_msg_id=msg_id)
 
-def set_chat_human_override(store_id: Optional[str], group_id: str):
-    _upsert_chat_state(store_id, group_id, human_override=True)
+CHAT_OVERRIDE_TTL = datetime.timedelta(days=2)
+
+def set_chat_human_override(store_id: Optional[str], group_id: str, client_name: Optional[str] = None):
+    fields = {"human_override": True, "blocked_at": datetime.datetime.now().isoformat()}
+    if client_name:
+        fields["client_name"] = client_name
+    _upsert_chat_state(store_id, group_id, **fields)
 
 def clear_chat_human_override(store_id: Optional[str], group_id: str) -> bool:
     """Возвращает True, если чат реально был заблокирован (и теперь разблокирован)."""
@@ -209,22 +217,53 @@ def count_blocked_chats(store_id: Optional[str] = None) -> int:
     return len(list_blocked_chat_ids(store_id))
 
 def list_blocked_chat_ids(store_id: Optional[str] = None) -> list:
+    return [c["group_id"] for c in list_blocked_chats_detailed(store_id)]
+
+def list_blocked_chats_detailed(store_id: Optional[str] = None) -> list:
+    """Как list_blocked_chat_ids, но с именем клиента и временем блокировки —
+    для читаемого списка в /chats. Заодно снимает блокировки, которые висят
+    дольше CHAT_OVERRIDE_TTL (менеджер забыл вернуть чат ИИ): такой чат сам
+    возвращается под управление ИИ, а не копится в списке вечно."""
     from backend.state_helpers import _get_sync_db_session
     from sqlalchemy import select
     session = _get_sync_db_session()
-    ids = []
+    out = []
     if session:
         try:
             from backend.db.models import ChatStateDB
             stmt = select(ChatStateDB).where(ChatStateDB.human_override == True)
             if store_id is not None:
                 stmt = stmt.where(ChatStateDB.store_id == store_id)
-            ids = [r.group_id for r in session.scalars(stmt).all()]
+            now = datetime.datetime.now()
+            expired = []
+            for r in session.scalars(stmt).all():
+                blocked_at = None
+                if r.blocked_at:
+                    try:
+                        blocked_at = datetime.datetime.fromisoformat(r.blocked_at)
+                    except ValueError:
+                        blocked_at = None
+                if blocked_at and now - blocked_at > CHAT_OVERRIDE_TTL:
+                    expired.append(r)
+                    continue
+                out.append({
+                    "group_id": r.group_id,
+                    "store_id": r.store_id,
+                    "client_name": r.client_name,
+                    "blocked_at": r.blocked_at,
+                })
+            for r in expired:
+                r.human_override = False
+            if expired:
+                session.commit()
         finally:
             session.close()
     if store_id is None:
-        ids += [gid for gid, val in _legacy_chat_state.items() if val == "HUMAN_OVERRIDE"]
-    return ids
+        out += [
+            {"group_id": gid, "store_id": None, "client_name": None, "blocked_at": None}
+            for gid, val in _legacy_chat_state.items() if val == "HUMAN_OVERRIDE"
+        ]
+    return out
 
 def count_processed_chats(store_id: Optional[str] = None) -> int:
     from backend.state_helpers import _get_sync_db_session

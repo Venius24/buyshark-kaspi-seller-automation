@@ -78,7 +78,7 @@ async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus
             f"⚠️ Все карточки товаров группы временно сняты с продажи на Kaspi!"
         )
 
-        await notify_dispatch.dispatch(store_id, "problems", text, urgent=True, dedup_key=f"stop_qty:{group_id}")
+        await notify_dispatch.dispatch(store_id, "problems", text, urgent=True, dedup_key=f"stop_qty:{group_id}", card="stock_stopped")
     except Exception as e:
         logger.error(f"Failed to execute notify_zero_stock_telegram: {e}")
 
@@ -111,7 +111,7 @@ async def notify_oversold_telegram(
         )
         await notify_dispatch.dispatch(
             store_id, "problems", text, urgent=True,
-            dedup_key=f"oversold:{group_id}:{order_code}",
+            dedup_key=f"oversold:{group_id}:{order_code}", card="oversold",
         )
     except Exception as e:
         logger.error(f"Failed to execute notify_oversold_telegram: {e}")
