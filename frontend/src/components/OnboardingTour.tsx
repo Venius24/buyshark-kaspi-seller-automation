@@ -31,12 +31,13 @@ const TOOLTIP_WIDTH = 320;
 
 interface OnboardingTourProps {
   onFinish: () => void;
+  onNavigate: (target: string) => void;
   isSuperadmin?: boolean;
   isReferrer?: boolean;
   isBetaTester?: boolean;
 }
 
-export function OnboardingTour({ onFinish, isSuperadmin, isReferrer, isBetaTester }: OnboardingTourProps) {
+export function OnboardingTour({ onFinish, onNavigate, isSuperadmin, isReferrer, isBetaTester }: OnboardingTourProps) {
   const { t } = useTranslation('onboarding_tour');
   const [stepIndex, setStepIndex] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
@@ -59,10 +60,11 @@ export function OnboardingTour({ onFinish, isSuperadmin, isReferrer, isBetaTeste
   }, [step.target]);
 
   useLayoutEffect(() => {
+    onNavigate(step.target);
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [measure]);
+  }, [measure, onNavigate, step.target]);
 
   const handleNext = () => {
     if (isLast) { onFinish(); return; }

@@ -757,6 +757,7 @@ export default function App() {
       {showOnboardingTour && !mobileNavOpen && (
         <OnboardingTour
           onFinish={handleFinishOnboarding}
+          onNavigate={(target) => setActiveTab(target as ActiveTab)}
           isSuperadmin={isSuperadmin}
           isReferrer={isReferrer}
           isBetaTester={isBetaTester}
