@@ -41,7 +41,7 @@ class ChatbotStoreScopingTest(unittest.TestCase):
         self.config = config
         # Reset in-memory legacy/anti-spam state between tests (module-level dicts).
         config._legacy_chat_state.clear()
-        config._cookie_alert_sent.clear()
+        config._legacy_cookie_alert_sent.clear()
 
     def tearDown(self):
         self._session_patch.stop()
