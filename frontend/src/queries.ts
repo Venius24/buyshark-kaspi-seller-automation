@@ -9,6 +9,10 @@ export const fetchProfile = async (): Promise<UserProfile | null> => {
   return res.json();
 };
 
+export const completeOnboarding = async (): Promise<void> => {
+  await apiFetch(`${API_URL}/api/v1/auth/onboarding-complete`, { method: 'POST' });
+};
+
 export const fetchStores = async (): Promise<StoreItem[]> => {
   const res = await apiFetch(`${API_URL}/api/v1/stores`);
   if (!res.ok) return [];

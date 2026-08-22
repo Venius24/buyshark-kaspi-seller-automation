@@ -23,6 +23,7 @@ export interface UserProfile {
     full_name: string;
     is_superadmin?: boolean;
     is_referrer?: boolean;
+    onboarding_completed?: boolean;
   };
   subscription: {
     plan_type: string;

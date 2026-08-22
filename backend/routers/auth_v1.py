@@ -290,6 +290,7 @@ async def get_me(
             "is_verified": user.is_verified,
             "is_superadmin": user.is_superadmin,
             "is_referrer": is_referrer,
+            "onboarding_completed": user.onboarding_completed_at is not None,
         },
         "subscription": {
             "plan_type": sub.plan_type if sub else "STARTER",
@@ -299,3 +300,15 @@ async def get_me(
             "valid_until": sub.valid_until.isoformat() if sub else None
         }
     }
+
+
+@router.post("/onboarding-complete")
+async def complete_onboarding(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Отмечает онбординг-тур пройденным (или явно пропущенным) для юзера."""
+    if user.onboarding_completed_at is None:
+        user.onboarding_completed_at = datetime.utcnow()
+        await db.commit()
+    return {"onboarding_completed": True}

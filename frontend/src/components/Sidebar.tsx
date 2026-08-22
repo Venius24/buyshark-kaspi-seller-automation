@@ -18,6 +18,7 @@ interface SidebarProps {
   /** Мобильный drawer: открыт ли он сейчас. На десктопе класс ни на что не влияет. */
   isOpen?: boolean;
   onOpenPriceFeedImport: () => void;
+  onOpenTour: () => void;
 }
 
 export function Sidebar({
@@ -35,6 +36,7 @@ export function Sidebar({
   billingBlocked,
   isOpen,
   onOpenPriceFeedImport,
+  onOpenTour,
 }: SidebarProps) {
   const { t } = useTranslation('sidebar');
 
@@ -53,6 +55,7 @@ export function Sidebar({
           <div className="sidebar-group-title">{t('section_main')}</div>
 
           <button
+            data-tour="stores"
             className={`sidebar-item ${activeTab === 'stores' ? 'active' : ''}`}
             onClick={() => onSelectTab('stores')}
           >
@@ -75,6 +78,7 @@ export function Sidebar({
           </button>
 
           <button
+            data-tour="products"
             className={`sidebar-item ${activeTab === 'products' ? 'active' : ''}`}
             onClick={() => onSelectTab('products')}
           >
@@ -110,6 +114,7 @@ export function Sidebar({
           </button>
 
           <button
+            data-tour="chats"
             className={`sidebar-item ${activeTab === 'chats' ? 'active' : ''}`}
             onClick={() => onSelectTab('chats')}
           >
@@ -196,6 +201,7 @@ export function Sidebar({
           <div className="sidebar-group-title">{t('section_orders')}</div>
 
           <button
+            data-tour="print-batcher"
             className={`sidebar-item ${activeTab === 'print-batcher' ? 'active' : ''}`}
             onClick={() => onSelectTab('print-batcher')}
           >
@@ -206,6 +212,7 @@ export function Sidebar({
           </button>
 
           <button
+            data-tour="packaging"
             className={`sidebar-item ${activeTab === 'packaging' ? 'active' : ''}`}
             onClick={() => onSelectTab('packaging')}
           >
@@ -267,6 +274,7 @@ export function Sidebar({
           </button>
 
           <button
+            data-tour="help"
             className={`sidebar-item ${activeTab === 'help' ? 'active' : ''}`}
             onClick={() => onSelectTab('help')}
           >
@@ -296,6 +304,23 @@ export function Sidebar({
         >
           <span style={{ fontSize: '12px' }}>📥</span>
           <span>{t('import_from_pricefeed')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={onOpenTour}
+          title={t('show_tour')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '6px', width: '100%',
+            padding: '4px 6px', marginBottom: '6px', background: 'transparent',
+            border: 'none', borderRadius: '6px', cursor: 'pointer',
+            color: 'var(--text-muted)', fontSize: '11px', opacity: 0.6,
+            transition: 'opacity 0.15s ease',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; }}
+        >
+          <span style={{ fontSize: '12px' }}>🧭</span>
+          <span>{t('show_tour')}</span>
         </button>
         <div className="sidebar-user-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

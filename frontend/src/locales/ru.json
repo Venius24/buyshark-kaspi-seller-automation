@@ -3,6 +3,23 @@
     "language": "Русский",
     "languageSwitch": "Переключить язык"
   },
+  "onboarding_tour": {
+    "skip": "Пропустить",
+    "next": "Далее",
+    "finish": "Понятно",
+    "step_stores_title": "Ваши магазины Kaspi",
+    "step_stores_text": "Здесь список подключённых магазинов Kaspi. Можно переключаться между ними и подключать новые.",
+    "step_products_title": "Товары",
+    "step_products_text": "Каталог товаров вашего магазина — цены, остатки, статусы.",
+    "step_print_title": "Склейка накладных",
+    "step_print_text": "Загружайте PDF-накладные из Kaspi — сервис сам обрежет поля и склеит несколько накладных на один лист для печати.",
+    "step_packaging_title": "Упаковка",
+    "step_packaging_text": "Список заказов на сборку — отмечайте собранные, чтобы не потерять ни один.",
+    "step_chats_title": "Чаты",
+    "step_chats_text": "Переписка с покупателями Kaspi прямо здесь, без переключения на сайт Kaspi.",
+    "step_help_title": "Раздел помощи",
+    "step_help_text": "Если что-то непонятно — здесь собраны ответы на частые вопросы. А ещё у многих функций есть значок «?» с пояснением на месте."
+  },
   "tab_billing": {
     "loading": "Загрузка...",
     "service_blocked": "🔒 Сервис заблокирован",
@@ -65,6 +82,7 @@
     "connections_session": "Подключения & Сессия",
     "help": "Помощь",
     "import_from_pricefeed": "Импорт из PriceFeed",
+    "show_tour": "Показать тур по кабинету",
     "kaspi_api_online": "Kaspi API Online",
     "logout_tooltip": "Выйти из аккаунта"
   },

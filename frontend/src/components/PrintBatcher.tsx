@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, API_URL } from '../api';
 import { useActiveStoreId } from '../storeContext';
+import { HelpHint } from './shared/HelpHint';
 
 interface GeometryAudit {
   is_valid: boolean;
@@ -420,7 +421,10 @@ export const PrintBatcher: React.FC = () => {
           <div style={styles.headerTitleGroup}>
             <div style={styles.headerIcon}>🖨️</div>
             <div>
-              <h2 style={styles.headerTitle}>Склейка накладных</h2>
+              <h2 style={styles.headerTitle}>
+                Склейка накладных
+                <HelpHint text="Загрузите PDF-накладные из кабинета Kaspi — сервис сам обрежет поля до 100%, склеит несколько накладных на один лист A4 (4/8/9 штук) и уберёт уже напечатанные сегодня заказы, чтобы не распечатать их дважды." />
+              </h2>
               <p style={styles.headerSubtitle}>
                 Подгонка накладных 100% без полей, мульти-раскладка (4/8/9 на A4), суточная дедупликация и аудит MediaBox.
               </p>

@@ -32,6 +32,10 @@ class User(Base):
     # connect-full-store, когда есть store_id, на который вешается
     # store_referrals). Очищается после первой успешной атрибуции.
     pending_referral_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    # Онбординг-тур в кабинете (2026-08-22): NULL — ещё не проходил/не завершил,
+    # timestamp — когда завершил или явно пропустил. Per-user, не per-store —
+    # тур про интерфейс кабинета в целом, а не про конкретный магазин.
+    onboarding_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

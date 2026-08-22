@@ -35,7 +35,8 @@ import { AutoAssemblyTab } from './components/tabs/AutoAssemblyTab';
 import { BillingTab } from './components/tabs/BillingTab';
 import { AdminPanel } from './components/admin/AdminPanel';
 import { ReferralTab } from './components/tabs/ReferralTab';
-import { fetchProfile, fetchBillingSummary } from './queries';
+import { fetchProfile, fetchBillingSummary, completeOnboarding } from './queries';
+import { OnboardingTour } from './components/OnboardingTour';
 import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig, KaspiQuotaStatus } from './types';
 
 // Сырые фичи (Автодобавление, Для разработчиков) — доступны только этим email,
@@ -90,6 +91,23 @@ export default function App() {
   // Автодобавление и «Для разработчиков» ещё сырые — временно видны только этому
   // списку email. Whitelist, не deployment-флаг: снять ограничение — просто удалить.
   const isBetaTester = !!profile?.user.email && BETA_TESTER_EMAILS.includes(profile.user.email.toLowerCase());
+  // Онбординг-тур — только когда профиль реально загружен и явно не пройден
+  // (не просто falsy на старте до ответа /me, иначе тур мигает при каждой загрузке).
+  const [tourDismissed, setTourDismissed] = useState(false);
+  // Ручной повторный запуск тура (кнопка в сайдбаре) — независим от
+  // onboarding_completed, поэтому работает даже после того, как тур уже пройден.
+  const [manualTourActive, setManualTourActive] = useState(false);
+  const showOnboardingTour = manualTourActive || (!!profile && profile.user.onboarding_completed === false && !tourDismissed);
+  const handleFinishOnboarding = () => {
+    setTourDismissed(true);
+    setManualTourActive(false);
+    if (profile?.user.onboarding_completed !== true) {
+      completeOnboarding();
+      queryClient.setQueryData(['auth', 'me'], (old: typeof profile) =>
+        old ? { ...old, user: { ...old.user, onboarding_completed: true } } : old
+      );
+    }
+  };
 
   const { data: billingSummary } = useQuery({
     queryKey: ['billing', 'summary', activeStoreId],
@@ -736,6 +754,8 @@ export default function App() {
     <div className="app-shell">
       <BackgroundSync />
 
+      {showOnboardingTour && !mobileNavOpen && <OnboardingTour onFinish={handleFinishOnboarding} />}
+
       {/* ── МОБИЛЬНАЯ ВЕРХНЯЯ ПАНЕЛЬ (только <=900px, см. mobile.css) ── */}
       <div className="mobile-topbar">
         <button
@@ -778,6 +798,7 @@ export default function App() {
         isBetaTester={isBetaTester}
         billingBlocked={billingBlocked}
         onOpenPriceFeedImport={priceFeedImport.openModal}
+        onOpenTour={() => setManualTourActive(true)}
       />
 
       {/* ── MAIN CONTENT AREA ─────────────────────────────────── */}
