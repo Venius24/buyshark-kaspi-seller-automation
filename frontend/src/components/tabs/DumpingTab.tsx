@@ -5,6 +5,7 @@ import { Pagination } from '../shared/Pagination';
 import { ProductCardHeader } from '../shared/ProductCardHeader';
 import { PriceWarSummary } from '../PriceWarSummary';
 import { usePriceWarStats, leaderPrice, type PriceWarProduct } from '../../hooks/usePriceWarStats';
+import { HelpHint } from '../shared/HelpHint';
 
 const EMPTY_CONFIG: DumpingConfig = {
   min_price: 0, max_price: 0, dump_step: 2, enabled: false,
@@ -115,8 +116,9 @@ export function DumpingTab({
       {/* Header with Search, Filter & Page Size */}
       <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h2 style={{ fontSize: '16px' }}>
+          <h2 style={{ fontSize: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
             {totalCount ? t('title').replace('%count%', String(totalCount)) : t('title_no_products')}
+            <HelpHint text="Автодемпинг сам снижает цену товара шагами до тех пор, пока не займёт нужную позицию в выдаче Kaspi (например, 1-е место или дешевле всех), но не ниже указанного вами минимума. Работает по расписанию — не нужно проверять цены конкурентов вручную." />
           </h2>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>

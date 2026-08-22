@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, API_URL } from '../api';
 import { useActiveStoreId } from '../storeContext';
+import { HelpHint } from './shared/HelpHint';
 import {
   Key,
   Webhook,
@@ -213,6 +214,7 @@ export const IntegrationsPublicApi: React.FC = () => {
           <h2 style={{ fontSize: '22px', fontWeight: 700, margin: 0, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Code size={26} color="var(--primary)" />
             Раздел для разработчиков (API & Webhooks)
+            <HelpHint text="X-API-Key даёт вашим внешним системам (1С, МойСклад, ERP) доступ к данным кабинета через REST API. Webhooks — наоборот, сервис сам присылает уведомления на ваш URL при событиях (новый заказ, изменение цены и т.д.)." />
           </h2>
           <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
             Управление ключами доступа (X-API-Key), входящими запросами и исходящими Webhooks для интеграции 1С, МойСклад и внешней ERP

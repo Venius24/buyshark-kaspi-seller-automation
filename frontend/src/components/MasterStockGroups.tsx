@@ -26,6 +26,7 @@ import { apiFetch, API_URL, getWsUrl } from '../api';
 import { fetchGroupsQuery, fetchProductsQuery } from '../queries';
 import { useActiveStoreId } from '../storeContext';
 import { openImageLightbox } from './shared/ImageLightbox';
+import { HelpHint } from './shared/HelpHint';
 
 interface GroupDumpingConfig {
   enabled: boolean;
@@ -565,8 +566,9 @@ export const MasterStockGroups: React.FC = () => {
               <Boxes size={24} color="#ffffff" />
             </div>
             <div>
-              <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: 'var(--text-color)', letterSpacing: '-0.02em' }}>
+              <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: 'var(--text-color)', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 Единый связный учет остатков (Master Stock Sync)
+                <HelpHint text="Если один и тот же товар продаётся под разными SKU (разные размеры упаковки, объединённые лоты), объедините их SKU в одну Мастер-Группу с общим остатком. При продаже одного SKU остаток спишется веером у всех остальных SKU группы — не нужно вручную синхронизировать склад по каждой карточке." />
               </h1>
               <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
                 Объединение карточек товаров Kaspi в единые Мастер-Группы с автоматическим веерным списанием остатков

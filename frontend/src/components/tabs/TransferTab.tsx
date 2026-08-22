@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { HelpHint } from '../shared/HelpHint';
 import type { Transfer } from '../../types';
 
 interface TransferTabProps {
@@ -16,8 +17,9 @@ export function TransferTab({ transfers, fetchingTransfers, transferFilter, onTr
       {/* Header with Search, Filter & Limit */}
       <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-          <h2 style={{ fontSize: '16px' }}>
+          <h2 style={{ fontSize: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
             {transfers.length ? t('title').replace('%count%', String(transfers.length)) : t('title_no_transfers')}
+            <HelpHint text="Заказы, которые уже собраны и ждут передачи курьеру Kaspi или сдачи в пункт выдачи. Фильтры помогают отделить экспресс-доставку и заказы «на сегодня» от остальных." />
           </h2>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>

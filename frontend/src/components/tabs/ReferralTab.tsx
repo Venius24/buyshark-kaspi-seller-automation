@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { apiFetch, API_URL } from '../../api';
 import { formatTenge } from '../../utils/money';
+import { HelpHint } from '../shared/HelpHint';
 
 interface ReferralMe {
   code: string;
@@ -57,7 +58,10 @@ export const ReferralTab: React.FC = () => {
     <div style={styles.wrap}>
       <div style={styles.grid}>
         <div className="glass-card" style={styles.card}>
-          <div style={styles.cardLabel}>{t('your_link')}</div>
+          <div style={{ ...styles.cardLabel, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {t('your_link')}
+            <HelpHint text="Отправьте эту ссылку владельцу магазина. Когда он зарегистрируется по ней и подключит магазин, вы будете получать процент с его платежей за подписку в течение указанного числа месяцев." />
+          </div>
           <div style={styles.linkRow}>
             <code style={styles.linkText}>{link}</code>
             <button className="btn btn-secondary" style={styles.smallBtn} onClick={copyLink}>{copied ? t('btn_copied') : t('btn_copy')}</button>

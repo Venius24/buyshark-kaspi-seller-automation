@@ -67,6 +67,7 @@ export function Sidebar({
           </button>
 
           <button
+            data-tour="overview"
             className={`sidebar-item ${activeTab === 'overview' ? 'active' : ''}`}
             onClick={() => onSelectTab('overview')}
           >
@@ -90,6 +91,7 @@ export function Sidebar({
           </button>
 
           <button
+            data-tour="dumping"
             className={`sidebar-item ${activeTab === 'dumping' ? 'active' : ''}`}
             onClick={() => onSelectTab('dumping')}
           >
@@ -101,6 +103,7 @@ export function Sidebar({
           </button>
 
           <button
+            data-tour="chatbot"
             className={`sidebar-item ${activeTab === 'chatbot' ? 'active' : ''}`}
             onClick={() => onSelectTab('chatbot')}
           >
@@ -125,6 +128,7 @@ export function Sidebar({
           </button>
 
           <button
+            data-tour="stock-groups"
             className={`sidebar-item ${activeTab === 'stock-groups' ? 'active' : ''}`}
             onClick={() => onSelectTab('stock-groups')}
           >
@@ -137,6 +141,7 @@ export function Sidebar({
 
           {isBetaTester && (
             <button
+              data-tour="autolist"
               className={`sidebar-item ${activeTab === 'autolist' ? 'active' : ''}`}
               onClick={() => onSelectTab('autolist')}
             >
@@ -150,6 +155,7 @@ export function Sidebar({
 
           {isBetaTester && (
             <button
+              data-tour="public-api"
               className={`sidebar-item ${activeTab === 'public-api' ? 'active' : ''}`}
               onClick={() => onSelectTab('public-api')}
             >
@@ -162,6 +168,7 @@ export function Sidebar({
           )}
 
           <button
+            data-tour="billing"
             className={`sidebar-item ${activeTab === 'billing' ? 'active' : ''}`}
             onClick={() => onSelectTab('billing')}
           >
@@ -174,6 +181,7 @@ export function Sidebar({
 
           {isSuperadmin && (
             <button
+              data-tour="admin"
               className={`sidebar-item ${activeTab === 'admin' ? 'active' : ''}`}
               onClick={() => onSelectTab('admin')}
             >
@@ -186,6 +194,7 @@ export function Sidebar({
 
           {isReferrer && (
             <button
+              data-tour="referral"
               className={`sidebar-item ${activeTab === 'referral' ? 'active' : ''}`}
               onClick={() => onSelectTab('referral')}
             >
@@ -224,6 +233,7 @@ export function Sidebar({
           </button>
 
           <button
+            data-tour="auto-assembly"
             className={`sidebar-item ${activeTab === 'auto-assembly' ? 'active' : ''}`}
             onClick={() => onSelectTab('auto-assembly')}
           >
@@ -235,6 +245,7 @@ export function Sidebar({
           </button>
 
           <button
+            data-tour="transfer"
             className={`sidebar-item ${activeTab === 'transfer' ? 'active' : ''}`}
             onClick={() => onSelectTab('transfer')}
           >
@@ -250,6 +261,7 @@ export function Sidebar({
           <div className="sidebar-group-title">{t('section_system')}</div>
 
           <button
+            data-tour="logs"
             className={`sidebar-item ${activeTab === 'logs' ? 'active' : ''}`}
             onClick={() => onSelectTab('logs')}
           >
@@ -263,6 +275,7 @@ export function Sidebar({
           </button>
 
           <button
+            data-tour="settings"
             className={`sidebar-item ${activeTab === 'settings' ? 'active' : ''}`}
             onClick={() => onSelectTab('settings')}
           >

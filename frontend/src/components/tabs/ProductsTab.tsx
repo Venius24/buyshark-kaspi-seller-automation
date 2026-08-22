@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { Product } from '../../types';
 import { Pagination } from '../shared/Pagination';
 import { ProductCardHeader } from '../shared/ProductCardHeader';
+import { HelpHint } from '../shared/HelpHint';
 
 interface ProductsTabProps {
   totalCount: number;
@@ -50,8 +51,9 @@ export function ProductsTab({
       {/* Header with Search, Filter & Page Size */}
       <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h2 style={{ fontSize: '16px' }}>
+          <h2 style={{ fontSize: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
             {totalCount ? t('title').replace('%count%', String(totalCount)) : t('title_no_products')}
+            <HelpHint text="Каталог товаров вашего магазина Kaspi — цены, остатки, статус активности. Можно редактировать прямо здесь, изменения сразу уходят в Kaspi." />
           </h2>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>

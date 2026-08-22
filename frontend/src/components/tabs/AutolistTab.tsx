@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { apiFetch, API_URL } from '../../api';
+import { HelpHint } from '../shared/HelpHint';
 import type { AutolistDraft } from '../../types';
 
 const STATUS_COLOR: Record<string, string> = {
@@ -431,7 +432,10 @@ export function AutolistTab() {
   return (
     <>
       <div className="glass-card" style={{ padding: '20px', marginBottom: '20px' }}>
-        <h3 style={{ fontSize: '14px', marginBottom: '12px' }}>{t('upload_new_product')}</h3>
+        <h3 style={{ fontSize: '14px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {t('upload_new_product')}
+          <HelpHint text="Загрузите фото товара и укажите название — ИИ подберёт категорию Kaspi, атрибуты и соберёт черновик карточки. Черновик нужно проверить и отредактировать вручную перед публикацией — это ускоряет заполнение, но не заменяет проверку." />
+        </h3>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <input
             type="file"

@@ -7,6 +7,7 @@ import { OutboundTestCard } from './OutboundTestCard';
 import { OutboundStatsCard } from './OutboundStatsCard';
 import { fetchChatbotHasSession } from '../../queries';
 import { useActiveStoreId } from '../../storeContext';
+import { HelpHint } from '../shared/HelpHint';
 import type { ChatbotConfig, ChatbotStatus } from '../../types';
 
 interface ChatbotTabProps {
@@ -56,6 +57,7 @@ export function ChatbotTab({ chatbotStatus, onSaveChatbotConfig, onUnblockChatbo
         <div>
           <h2 style={{ fontSize: '18px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', color: '#fff' }}>
             {t('title')}
+            <HelpHint text="ИИ-бот отвечает покупателям в чатах Kaspi вместо вас — по своей базе знаний и настройкам ниже. Нужна отдельная SMS-сессия чата Kaspi (не путать с обычным входом в кабинет продавца) — подключается кнопкой рядом." />
           </h2>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
             {t('description')}

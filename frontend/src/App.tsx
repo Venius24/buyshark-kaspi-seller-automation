@@ -754,7 +754,14 @@ export default function App() {
     <div className="app-shell">
       <BackgroundSync />
 
-      {showOnboardingTour && !mobileNavOpen && <OnboardingTour onFinish={handleFinishOnboarding} />}
+      {showOnboardingTour && !mobileNavOpen && (
+        <OnboardingTour
+          onFinish={handleFinishOnboarding}
+          isSuperadmin={isSuperadmin}
+          isReferrer={isReferrer}
+          isBetaTester={isBetaTester}
+        />
+      )}
 
       {/* ── МОБИЛЬНАЯ ВЕРХНЯЯ ПАНЕЛЬ (только <=900px, см. mobile.css) ── */}
       <div className="mobile-topbar">

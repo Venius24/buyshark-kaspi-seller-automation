@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { apiFetch, API_URL } from '../../api';
 import { useActiveStoreId } from '../../storeContext';
+import { HelpHint } from '../shared/HelpHint';
 import type { AutoAssemblyLogEntry, AutoAssemblyRule, AutoAssemblySpoolItem } from '../../types';
 
 const DELIVERY_TYPE_META: Record<string, { label: string; icon: string }> = {
@@ -346,7 +347,10 @@ export function AutoAssemblyTab() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h2 style={{ fontSize: '16px', margin: 0 }}>🤖 Автосборка</h2>
+          <h2 style={{ fontSize: '16px', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            🤖 Автосборка
+            <HelpHint text="Автоматически принимает новые заказы и переводит их в «Собран» без ручных кликов, накапливая накладные по видам доставки — вы просто забираете готовую пачку на печать." />
+          </h2>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
             Автопринятие, автоупаковка и накопление накладных — раздельно по видам доставки.
           </p>

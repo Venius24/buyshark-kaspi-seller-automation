@@ -5,6 +5,7 @@ import { apiFetch, API_URL } from '../../api';
 import { formatTenge } from '../../utils/money';
 import type { BillingPlan } from '../../types';
 import { fetchBillingPlans } from '../../queries';
+import { HelpHint } from '../shared/HelpHint';
 
 interface AdminStoreRow {
   store_id: string;
@@ -69,9 +70,12 @@ export const AdminPanel: React.FC = () => {
 
   return (
     <div style={styles.wrap}>
-      <div style={styles.subTabs}>
-        <button className={`btn ${subTab === 'stores' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSubTab('stores')}>{t('tab_stores')}</button>
-        <button className={`btn ${subTab === 'referrers' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSubTab('referrers')}>{t('tab_referrers')}</button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={styles.subTabs}>
+          <button className={`btn ${subTab === 'stores' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSubTab('stores')}>{t('tab_stores')}</button>
+          <button className={`btn ${subTab === 'referrers' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSubTab('referrers')}>{t('tab_referrers')}</button>
+        </div>
+        <HelpHint text="Список всех магазинов сервиса и их владельцев. Здесь можно вручную сменить тариф, пополнить баланс, привязать реферера или принудительно списать/пересчитать биллинг." />
       </div>
 
       {subTab === 'stores' && (

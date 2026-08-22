@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import type { Order } from '../../types';
 import { openImageLightbox } from '../shared/ImageLightbox';
+import { HelpHint } from '../shared/HelpHint';
 
 interface PackagingTabProps {
   filteredOrders: Order[];
@@ -45,8 +46,9 @@ export function PackagingTab({
       {/* Header with Search, Filter & Limit */}
       <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
-          <h2 style={{ fontSize: '16px' }}>
+          <h2 style={{ fontSize: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
             {filteredOrders.length ? t('title').replace('%count%', String(filteredOrders.length)) : t('title_no_orders')}
+            <HelpHint text="Заказы, которые нужно собрать. Отмечайте товар собранным по одному или пакетом — статус в Kaspi обновится автоматически." />
           </h2>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>

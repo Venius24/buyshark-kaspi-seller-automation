@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { LiveTerminalStream } from '../LiveTerminalStream';
+import { HelpHint } from '../shared/HelpHint';
 
 interface LogsTabProps {
   logs: string[];
@@ -17,7 +18,10 @@ export function LogsTab({ logs, isConnected, onClear }: LogsTabProps) {
       />
       <div className="glass-card" style={{ display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <h2>{t('detailed_log')}</h2>
+          <h2 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {t('detailed_log')}
+            <HelpHint text="Живой журнал всех фоновых операций сервиса: синхронизация заказов, автодемпинг, работа бота и т.д. Полезно, когда что-то пошло не так и нужно понять, что именно и когда произошло." />
+          </h2>
           <button
             className="btn btn-secondary"
             style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '6px' }}

@@ -8,6 +8,7 @@ import { ScoreRing } from '../ScoreRing';
 import { RevenueHeatmap } from '../RevenueHeatmap';
 import { AbcXyzWidget } from '../AbcXyzWidget';
 import { CompetitorLeaderboard } from '../CompetitorLeaderboard';
+import { HelpHint } from '../shared/HelpHint';
 import { CatalogCoverageGauge } from '../CatalogCoverageGauge';
 import { HourlyHeatmap } from '../HourlyHeatmap';
 import { ChatActivityHeatmap } from '../ChatActivityHeatmap';
@@ -96,7 +97,10 @@ export function OverviewTab({
 
       <div className="grid-2">
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <h2>{t('system_status')}</h2>
+          <h2 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {t('system_status')}
+            <HelpHint text="Статус двух независимых подключений: REST API — сессия входа в сам кабинет (BuyShark), MC-cookies — доступ к личному кабинету Kaspi (нужен для загрузки товаров, заказов, изменения цен). Если MC истёк — жмите «Войти» и подтвердите вход в Kaspi заново." />
+          </h2>
           <div className="status-widget">
             <div>
               <h3 style={{ fontSize: '14px', fontWeight: 600 }}>{t('rest_api_title')}</h3>

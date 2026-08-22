@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useActiveStoreId } from '../../storeContext';
 import { fetchBillingSummary, fetchBillingPlans, fetchBillingTransactions } from '../../queries';
 import { formatTenge } from '../../utils/money';
+import { HelpHint } from '../shared/HelpHint';
 
 const STATUS_LABEL: Record<string, string> = {
   ACTIVE: 'status_active',
@@ -63,7 +64,10 @@ export const BillingTab: React.FC = () => {
 
       <div style={styles.grid}>
         <div className="glass-card" style={styles.card}>
-          <div style={styles.cardLabel}>{t('balance_label')}</div>
+          <div style={{ ...styles.cardLabel, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {t('balance_label')}
+            <HelpHint text="Тариф списывается ежедневно с баланса. Если баланс уходит в минус ниже порога блокировки — сервис перестаёт синхронизировать заказы и товары, пока не пополните счёт. AI-кредиты (карточка справа) — отдельный дневной лимит на работу чат-бота и Автодобавления, обнуляется каждый день." />
+          </div>
           <div style={styles.cardValue}>{formatTenge(summary.balance_minor)}</div>
           <div style={styles.cardSub}>{t('block_threshold')} {formatTenge(summary.block_threshold_minor)}</div>
         </div>

@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { apiFetch, API_URL } from '../../api';
 import { TelegramLinkPanel } from '../TelegramLinkPanel';
 import { NotificationSettingsPanel } from '../NotificationSettingsPanel';
+import { HelpHint } from '../shared/HelpHint';
 
 interface SettingsTabProps {
   mcHasSession: boolean;
@@ -16,7 +17,10 @@ export function SettingsTab({ mcHasSession, addLog, onOpenMcAuth, onCheckMcStatu
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '800px' }}>
       <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        <h2>{t('title')}</h2>
+        <h2 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {t('title')}
+          <HelpHint text="Здесь две независимые сессии: вход в сам кабинет (REST API) и доступ к личному кабинету Kaspi (MC-cookies), без которого недоступны заказы, товары и цены. Если Kaspi разлогинил — переподключайтесь здесь, без выхода из кабинета." />
+        </h2>
 
         <div className="status-widget">
           <div>
