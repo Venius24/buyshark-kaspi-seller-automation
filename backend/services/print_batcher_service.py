@@ -511,8 +511,24 @@ def natural_sort_key(s: str) -> List[Any]:
 
 # Пунктирная линия перед "N шт." — основной шаблон термоэтикетки Kaspi:
 # "Barkhan S517-0027 черный . . . . . . . . . . . .  1 шт."
-_PRODUCT_DOT_LEADER_RE = re.compile(r'^\s*(?:\d+\.\s*)?(.+?)\s*(?:\.\s*){4,}\d+\s*шт\.?\s*$', re.MULTILINE)
+# Порог был {4,} — на живой партии Бархана 2026-08-22 нашлась накладная с
+# пунктиром всего в 3 точки ("Веревка Джутовый аркан ... джут . .  2 шт.",
+# т.е. фактически 3 символа "." после сжатия пробелов), и товар молча
+# проваливался в "Прочее" вместо категории по коду. Понижено до {2,} — двух
+# точек достаточно, чтобы отличить настоящий пунктир от случайного "N шт."
+# без него, а короче Kaspi эту линию не печатает.
+_PRODUCT_DOT_LEADER_RE = re.compile(r'^\s*(?:\d+\.\s*)?(.+?)\s*(?:\.\s*){2,}\d+\s*шт\.?\s*$', re.MULTILINE)
 _ORDER_ID_LINE_RE = re.compile(r'^\d[\d\s]{8,}\d$')
+
+# Когда название товара длинное, счётчик "N шт." переносится PDF-рендерером
+# Kaspi на следующую строку ОТДЕЛЬНО от числа: "...10 шт . .  2 \nшт.\n" —
+# число и единица измерения физически разорваны переводом строки. Из-за
+# этого _PRODUCT_DOT_LEADER_RE (работает построчно, ^...$ на одной строке)
+# не находил совпадение вообще, и накладная проваливалась в "Прочее" даже
+# при наличии кода артикула в самом названии (живой случай: "H477-0005
+# Набор воздушных шаров ... 10 шт . .  2 \nшт." — партия Бархана
+# 2026-08-22). Склеиваем разорванные "N" + "шт" обратно перед поиском.
+_WRAPPED_QTY_UNIT_RE = re.compile(r'(\d)\s*\n\s*(шт\.?)')
 
 
 def extract_product_name(text: str, filename: str) -> Optional[str]:
@@ -531,7 +547,7 @@ def extract_product_name(text: str, filename: str) -> Optional[str]:
     if not text:
         return None
 
-    m = _PRODUCT_DOT_LEADER_RE.search(text)
+    m = _PRODUCT_DOT_LEADER_RE.search(_WRAPPED_QTY_UNIT_RE.sub(r'\1 \2', text))
     if m:
         name = m.group(1).strip(" .")
         if name:
@@ -1051,10 +1067,21 @@ def _draw_fitted_text(target_page: fitz.Page, rect: fitz.Rect, text: str, font: 
     if not text or rect.width <= 1 or rect.height <= 1:
         return False
 
+    # Название категории на разделительном листе — как правило одно слово
+    # ("Спорт", "Хозка", "Праздник"). _wrap_text умеет резать слово по буквам,
+    # если оно не помещается целиком в текущий кегль ("Спорт" → "Спор"/"т") —
+    # это нужно для длинных многословных подписей, но для одного слова читается
+    # как опечатка. Пока слово не влезает целиком в одну строку — продолжаем
+    # уменьшать кегль вместо того, чтобы принять такой перенос.
+    single_word = " " not in text.strip()
+
     step = max(0.25, fontsize * 0.06)
     fs = fontsize
     while fs >= min_fontsize:
         lines = _wrap_text(font, text, fs, rect.width)
+        if single_word and len(lines) > 1:
+            fs -= step
+            continue
         # max_lines — для разделительных листов: технически «влезающие» четыре
         # строки во всю высоту читаются хуже, чем две покрупнее, и упираются
         # в рамку.
@@ -1331,9 +1358,44 @@ def _plural_waybills(n: int) -> str:
     return f"{n} накладных"
 
 
-def _category_subtitle(items: List["PageItem"], item: "PageItem") -> str:
+def _compute_category_page_ranges(
+    items: List["PageItem"], items_per_page: int, separators: bool
+) -> Dict[Any, Tuple[int, int]]:
+    """
+    Стартовая/конечная страница блока категории в итоговом PDF (сам
+    разделительный лист в диапазон не входит — считаются только страницы с
+    накладными). Нужно для подписи "стр. 12-40" на разделителе следующей
+    категории, чтобы упаковщик мог сразу пролистать пачку до нужного места.
+
+    Бухгалтерия страниц здесь ДОЛЖНА зеркалить порядок вставки разделителей и
+    сетки в самом цикле генерации ниже — если тот поменяется, менять и это.
+    """
+    ranges: Dict[Any, List[int]] = {}
+    page = 0
+    item_count_on_page = 0
+    prev_category = _SENTINEL_CATEGORY
+    for item in items:
+        if separators and item.store_category_key != prev_category:
+            page += 1  # сам разделительный лист
+            item_count_on_page = 0
+            prev_category = item.store_category_key
+        if item_count_on_page % items_per_page == 0:
+            page += 1
+        item_count_on_page += 1
+        entry = ranges.setdefault(item.store_category_key, [page, page])
+        entry[1] = page
+    return {k: (v[0], v[1]) for k, v in ranges.items()}
+
+
+def _category_subtitle(
+    items: List["PageItem"], item: "PageItem", page_range: Optional[Tuple[int, int]] = None
+) -> str:
     count = sum(1 for i in items if i.store_category_key == item.store_category_key)
-    return _plural_waybills(count)
+    subtitle = _plural_waybills(count)
+    if page_range:
+        start, end = page_range
+        subtitle += f" · стр. {start}-{end}" if start != end else f" · стр. {start}"
+    return subtitle
 
 
 def generate_nup_a4_pdf(
@@ -1353,6 +1415,7 @@ def generate_nup_a4_pdf(
     cell_h = (A4_HEIGHT_PT - 2 * margin - (rows - 1) * gap) / rows
 
     doc_cache = _DocCache()
+    page_ranges = _compute_category_page_ranges(items, items_per_page, separators) if separators else {}
 
     try:
         current_a4_page = None
@@ -1366,7 +1429,7 @@ def generate_nup_a4_pdf(
                 # предыдущей стопки и граница переставала читаться.
                 draw_separator_page(out_doc, A4_WIDTH_PT, A4_HEIGHT_PT,
                                     item.store_category_title or "",
-                                    _category_subtitle(items, item))
+                                    _category_subtitle(items, item, page_ranges.get(item.store_category_key)))
                 prev_category = item.store_category_key
                 item_count_on_page = 0
                 current_a4_page = None
@@ -1417,6 +1480,7 @@ def generate_thermal_pdf(
 
     out_doc = fitz.open()
     doc_cache = _DocCache()
+    page_ranges = _compute_category_page_ranges(items, 1, separators) if separators else {}
 
     try:
         prev_category = _SENTINEL_CATEGORY
@@ -1424,7 +1488,7 @@ def generate_thermal_pdf(
             if separators and item.store_category_key != prev_category:
                 draw_separator_page(out_doc, target_w_pt, target_h_pt,
                                     item.store_category_title or "",
-                                    _category_subtitle(items, item))
+                                    _category_subtitle(items, item, page_ranges.get(item.store_category_key)))
                 prev_category = item.store_category_key
             new_p = out_doc.new_page(width=target_w_pt, height=target_h_pt)
             src_doc = doc_cache.get(item.pdf_path)
@@ -1817,6 +1881,7 @@ def _process_zip_or_pdfs_locked(
         if all_pages:
             out_doc = fitz.open()
             doc_cache = _DocCache()
+            page_ranges = _compute_category_page_ranges(all_pages, 1, use_separators) if use_separators else {}
             try:
                 prev_category = _SENTINEL_CATEGORY
                 for item in all_pages:
@@ -1827,7 +1892,7 @@ def _process_zip_or_pdfs_locked(
                         sep_rect = src_doc[item.page_num].rect
                         draw_separator_page(out_doc, sep_rect.width, sep_rect.height,
                                             item.store_category_title or "",
-                                            _category_subtitle(all_pages, item))
+                                            _category_subtitle(all_pages, item, page_ranges.get(item.store_category_key)))
                         prev_category = item.store_category_key
                     out_doc.insert_pdf(src_doc, from_page=item.page_num, to_page=item.page_num)
                     if item.stamp_label:
@@ -1878,6 +1943,7 @@ def _process_zip_or_pdfs_locked(
                     continue
 
                 out_doc = fitz.open()
+                page_ranges = _compute_category_page_ranges(items, 1, use_separators) if use_separators else {}
                 prev_category = _SENTINEL_CATEGORY
                 for item in items:
                     src_doc = doc_cache.get(item.pdf_path)
@@ -1885,7 +1951,7 @@ def _process_zip_or_pdfs_locked(
                         sep_rect = src_doc[item.page_num].rect
                         draw_separator_page(out_doc, sep_rect.width, sep_rect.height,
                                             item.store_category_title or "",
-                                            _category_subtitle(items, item))
+                                            _category_subtitle(items, item, page_ranges.get(item.store_category_key)))
                         prev_category = item.store_category_key
                     out_doc.insert_pdf(src_doc, from_page=item.page_num, to_page=item.page_num)
                     last_page = out_doc[-1]
