@@ -267,7 +267,8 @@ export default function App() {
     maxDeliveryDays: number | null = null,
     minSellerRating: number | null = null,
     sameCityOnly: boolean = false,
-    blacklistedMerchants: string[] = []
+    blacklistedMerchants: string[] = [],
+    displaySku: string = sku
   ) => {
     addLog(t('log_dumping_save_start', { sku, mode }));
     try {
@@ -293,10 +294,12 @@ export default function App() {
         addLog(t('log_dumping_save_ok', { sku }));
         loadDumpingConfigs();
         loadProducts(currentPage, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, dumpingStatusFilter);
-        // Закрываем панель редактирования
+        // Закрываем панель редактирования — ключ expandedSkus это product.sku
+        // (см. DumpingTab.tsx), а не cfgKey, который может быть merchantSku
+        // при мерчант-скоуп-конфиге, поэтому закрываем по displaySku, не sku.
         setExpandedSkus(prev => {
           const next = new Set(prev);
-          next.delete(sku);
+          next.delete(displaySku);
           return next;
         });
       } else {

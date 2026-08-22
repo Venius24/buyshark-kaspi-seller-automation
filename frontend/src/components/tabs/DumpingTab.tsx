@@ -66,7 +66,8 @@ interface DumpingTabProps {
     maxDeliveryDays: number | null,
     minSellerRating: number | null,
     sameCityOnly: boolean,
-    blacklistedMerchants: string[]
+    blacklistedMerchants: string[],
+    displaySku: string
   ) => void;
   currentPage: number;
   totalPages: number;
@@ -580,7 +581,8 @@ export function DumpingTab({
 
                             onSaveDumpingConfig(
                               cfgKey, minVal, maxVal, stepVal, enabledVal,
-                              modeVal, targetPosVal, maxDelivVal, minRatingVal, sameCityVal, blacklistArr
+                              modeVal, targetPosVal, maxDelivVal, minRatingVal, sameCityVal, blacklistArr,
+                              sku
                             );
                           }}
                         >
