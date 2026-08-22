@@ -149,6 +149,9 @@ def get_log(limit: int = Query(100, le=500), ctx: StoreContext = Depends(get_sto
 async def run_once(ctx: StoreContext = Depends(get_store_context_billed)):
     """Ручной прогон одного цикла автосборки вне 30с фонового тика —
     удобно для проверки правила сразу после сохранения."""
+    from backend import feature_flags
+    if not feature_flags.is_autoassembly_enabled(ctx.store_id):
+        raise HTTPException(status_code=409, detail="Автосборка отключена в Глобальном управлении.")
     try:
         await run_auto_assembly_cycle(ctx.token, ctx.store_id)
         return {"success": True, "message": "Цикл автосборки выполнен."}

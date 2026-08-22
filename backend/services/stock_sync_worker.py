@@ -919,16 +919,19 @@ async def run_packaging_sync_cycle():
     """
     from backend.services.auto_assembly_worker import run_auto_assembly_cycle
 
+    from backend import feature_flags
+
     stores = await list_active_stores()
     for store in stores:
         try:
-            await process_packaging_auto_deduction(store.token, store.store_id)
+            if await asyncio.to_thread(feature_flags.is_stock_groups_enabled, store.store_id):
+                await process_packaging_auto_deduction(store.token, store.store_id)
         except Exception as e:
             logger.error(f"[Packaging Sync Loop] Store {store.store_id} failed: {e}")
         try:
             from backend.billing import enforcement as billing_enforcement
             blocked, _reason = await asyncio.to_thread(billing_enforcement.is_service_blocked, store.store_id)
-            if not blocked:
+            if not blocked and await asyncio.to_thread(feature_flags.is_autoassembly_enabled, store.store_id):
                 await run_auto_assembly_cycle(store.token, store.store_id)
         except Exception as e:
             logger.error(f"[Auto Assembly] Store {store.store_id} failed: {e}")

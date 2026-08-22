@@ -315,6 +315,9 @@ async def manual_sync_stock_group(
 @router.post("/check-packaging-deduction")
 async def trigger_packaging_deduction(ctx: StoreContext = Depends(get_store_context)):
     """Принудительный запуск проверки и авто-списания остатков по новым заказам в Упаковке."""
+    from backend import feature_flags
+    if not feature_flags.is_stock_groups_enabled(ctx.store_id):
+        raise HTTPException(status_code=409, detail="Связка остатков отключена в Глобальном управлении.")
     token = ctx.token
     from backend.services.stock_sync_worker import process_packaging_auto_deduction
     try:

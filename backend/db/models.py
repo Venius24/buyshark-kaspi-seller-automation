@@ -314,6 +314,23 @@ class ChatbotSettingsDB(Base):
     chat_cookie_alert_sent: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class StoreFeatureFlagsDB(Base):
+    """Общемагазинные выключатели автоматик — вкладка "Глобальное управление".
+
+    Демпинг и связка остатков раньше можно было выключить только точечно
+    (per-SKU / per-group) — не было ни одного общего рубильника на весь
+    магазин. Чат-бот сюда не дублируется — у него уже есть свой
+    ChatbotSettingsDB.enabled.
+    """
+    __tablename__ = "store_feature_flags"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    dumping_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    stock_groups_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    autoassembly_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+
 class StoreBotProfileDB(Base):
     """Профиль ИИ-менеджера чат-бота этого магазина — имя, адрес самовывоза,
     график, ассортимент и т.д., подставляются в универсальный систем-промпт

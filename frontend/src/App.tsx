@@ -19,6 +19,7 @@ import { IntegrationsPublicApi } from './components/IntegrationsPublicApi';
 import { PrintBatcher } from './components/PrintBatcher';
 import { AuthModal } from './components/AuthModal';
 import { StoreHub } from './components/StoreHub';
+import { GlobalControlTab } from './components/tabs/GlobalControlTab';
 import { BackgroundSync } from './components/BackgroundSync';
 import { McAuthModal } from './components/McAuthModal';
 import { PriceFeedImportModal } from './components/PriceFeedImportModal';
@@ -35,7 +36,7 @@ import { AutoAssemblyTab } from './components/tabs/AutoAssemblyTab';
 import { BillingTab } from './components/tabs/BillingTab';
 import { AdminPanel } from './components/admin/AdminPanel';
 import { ReferralTab } from './components/tabs/ReferralTab';
-import { fetchProfile, fetchBillingSummary, completeOnboarding } from './queries';
+import { fetchProfile, fetchBillingSummary, completeOnboarding, fetchFeatureFlagsWithDefault } from './queries';
 import { OnboardingTour } from './components/OnboardingTour';
 import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig, KaspiQuotaStatus } from './types';
 
@@ -116,6 +117,12 @@ export default function App() {
     refetchInterval: 60_000,
   });
   const billingBlocked = !!billingSummary && billingSummary.billing_status !== 'ACTIVE';
+
+  const { data: featureFlags } = useQuery({
+    queryKey: ['feature-flags', activeStoreId],
+    queryFn: fetchFeatureFlagsWithDefault,
+    enabled: !!activeStoreId,
+  });
 
   // Открытый drawer блокирует скролл фона (иначе под меню уезжает контент).
   useEffect(() => {
@@ -798,6 +805,7 @@ export default function App() {
         onLogout={handleLogout}
         totalCount={totalCount}
         chatbotEnabled={chatbotStatus.enabled}
+        featureFlags={featureFlags}
         ordersCount={orders.length}
         transfersCount={transfers.length}
         isWsConnected={isWsConnected}
@@ -833,6 +841,9 @@ export default function App() {
 
         {/* 🏪 TAB: STORES */}
         {activeTab === 'stores' && <StoreHub />}
+
+        {/* 🎛️ TAB: GLOBAL CONTROL */}
+        {activeTab === 'global-control' && <GlobalControlTab onSelectTab={setActiveTab} />}
 
         {/* 📊 TAB: OVERVIEW */}
         {activeTab === 'overview' && (

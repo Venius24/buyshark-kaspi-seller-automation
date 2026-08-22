@@ -76,6 +76,9 @@ async def run_scheduled_dumping_cycle() -> dict:
             blocked, _reason = await asyncio.to_thread(billing_enforcement.is_service_blocked, store.store_id)
             if blocked:
                 continue
+            from backend import feature_flags
+            if not await asyncio.to_thread(feature_flags.is_dumping_enabled, store.store_id):
+                continue
             res = await _run_dumping_cycle(store.token, store.store_id)
             updated = res.get("updated_count", 0)
             total_updated += updated
@@ -208,6 +211,9 @@ def get_dumping_status(ctx: StoreContext = Depends(get_store_context)):
 @router.post("/run")
 async def run_price_dumping(ctx: StoreContext = Depends(get_store_context_billed)):
     """Запустить расчет авто-демпинга вручную для стора текущего пользователя."""
+    from backend import feature_flags
+    if not feature_flags.is_dumping_enabled(ctx.store_id):
+        raise HTTPException(status_code=409, detail="Демпинг отключён в Глобальном управлении.")
     if not _load_products(ctx.store_id):
         raise HTTPException(status_code=404, detail="Список товаров пуст. Загрузите товары.")
 

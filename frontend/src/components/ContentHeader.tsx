@@ -2,6 +2,7 @@ import type { ActiveTab } from '../types';
 
 const TAB_ICON: Record<ActiveTab, string> = {
   stores: '🏪',
+  'global-control': '🎛️',
   overview: '📊',
   products: '🏷️',
   dumping: '⚡',
@@ -24,6 +25,7 @@ const TAB_ICON: Record<ActiveTab, string> = {
 
 const TAB_TITLE: Record<ActiveTab, string> = {
   stores: 'Управление Магазинами Kaspi',
+  'global-control': 'Глобальное управление',
   overview: 'Аналитический Обзор',
   products: 'Управление Товарами',
   dumping: 'Автоматический Демпинг',
@@ -46,6 +48,7 @@ const TAB_TITLE: Record<ActiveTab, string> = {
 
 const TAB_SUBTITLE: Record<ActiveTab, string> = {
   stores: 'Управление магазинами Kaspi, безопасное AES-256 шифрование куков и модальное окно Onboarding Wizard',
+  'global-control': 'Один экран для всех автоматик магазина — общий рубильник и точечные выключатели демпинга, связки остатков, автосборки и ИИ-автоответчика',
   overview: 'Доля лучшей цены по каталогу, сохранённая маржа и поток активности',
   products: 'Каталог товаров, остатки, цены и статус продажи на Kaspi',
   dumping: 'Управление стратегиями демпинга, шагом и фильтрами конкурентов',

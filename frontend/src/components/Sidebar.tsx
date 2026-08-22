@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from './shared/LanguageSwitcher';
-import type { ActiveTab } from '../types';
+import type { ActiveTab, FeatureFlags } from '../types';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -8,6 +8,7 @@ interface SidebarProps {
   onLogout: () => void;
   totalCount: number;
   chatbotEnabled: boolean;
+  featureFlags?: FeatureFlags;
   ordersCount: number;
   transfersCount: number;
   isWsConnected: boolean;
@@ -27,6 +28,7 @@ export function Sidebar({
   onLogout,
   totalCount,
   chatbotEnabled,
+  featureFlags,
   ordersCount,
   transfersCount,
   isWsConnected,
@@ -64,6 +66,30 @@ export function Sidebar({
               <span>{t('stores')}</span>
             </div>
             <span className="sidebar-pill">Multi-Store</span>
+          </button>
+
+          <button
+            data-tour="global-control"
+            className={`sidebar-item ${activeTab === 'global-control' ? 'active' : ''}`}
+            onClick={() => onSelectTab('global-control')}
+          >
+            <div className="sidebar-item-left">
+              <span className="sidebar-icon">🎛️</span>
+              <span>{t('global_control')}</span>
+            </div>
+            {featureFlags && (() => {
+              const enabledCount = [
+                featureFlags.dumping_enabled,
+                featureFlags.stock_groups_enabled,
+                featureFlags.autoassembly_enabled,
+                featureFlags.chatbot_enabled,
+              ].filter(Boolean).length;
+              return (
+                <span className="sidebar-pill" style={{ color: enabledCount === 4 ? '#34d399' : enabledCount === 0 ? '#888' : '#e0a33e' }}>
+                  {enabledCount === 4 ? 'ON' : enabledCount === 0 ? 'OFF' : `${enabledCount}/4`}
+                </span>
+              );
+            })()}
           </button>
 
           <button

@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 // Порядок шагов повторяет порядок пунктов в сайдбаре сверху вниз.
 const ALL_STEPS = [
   { target: 'stores', titleKey: 'step_stores_title', textKey: 'step_stores_text' },
+  { target: 'global-control', titleKey: 'step_global_control_title', textKey: 'step_global_control_text' },
   { target: 'overview', titleKey: 'step_overview_title', textKey: 'step_overview_text' },
   { target: 'products', titleKey: 'step_products_title', textKey: 'step_products_text' },
   { target: 'dumping', titleKey: 'step_dumping_title', textKey: 'step_dumping_text' },

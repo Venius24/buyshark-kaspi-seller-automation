@@ -238,7 +238,15 @@ export type ActiveTab =
   | 'referral'
   | 'logs'
   | 'settings'
-  | 'help';
+  | 'help'
+  | 'global-control';
+
+export interface FeatureFlags {
+  dumping_enabled: boolean;
+  stock_groups_enabled: boolean;
+  autoassembly_enabled: boolean;
+  chatbot_enabled: boolean;
+}
 
 export interface BillingSummary {
   plan_code: string;

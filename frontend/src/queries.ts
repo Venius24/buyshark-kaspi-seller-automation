@@ -1,7 +1,7 @@
 import { apiFetch, API_URL } from './api';
 import type { StoreItem, UserProfile } from './components/StoreHub';
 import type { MasterStockGroup, ProductItem } from './components/MasterStockGroups';
-import type { BotProfile, BotUsageSummary, OutboundQueueItem, OutboundStats, BillingSummary, BillingPlan, BillingTransaction } from './types';
+import type { BotProfile, BotUsageSummary, OutboundQueueItem, OutboundStats, BillingSummary, BillingPlan, BillingTransaction, FeatureFlags } from './types';
 
 export const fetchProfile = async (): Promise<UserProfile | null> => {
   const res = await apiFetch(`${API_URL}/api/v1/auth/me`);
@@ -82,6 +82,47 @@ export const fetchBotUsage = async (): Promise<BotUsageSummary | null> => {
   } catch {
     return null;
   }
+};
+
+export const fetchFeatureFlags = async (): Promise<FeatureFlags | null> => {
+  try {
+    const res = await apiFetch(`${API_URL}/api/v1/feature-flags`);
+    const data = await res.json();
+    return res.ok && data.success ? data.flags : null;
+  } catch {
+    return null;
+  }
+};
+
+// Все включено по умолчанию — сервер лениво создаёт строку flags с такими же
+// дефолтами (backend/feature_flags.py), так что до первого реального ответа
+// или при сбое сети сайдбар/вкладка честно показывают "всё как обычно
+// работает", а не ложное "выключено".
+export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
+  dumping_enabled: true,
+  stock_groups_enabled: true,
+  autoassembly_enabled: true,
+  chatbot_enabled: true,
+};
+
+// Общий queryFn для queryKey ['feature-flags', storeId] — используется и в
+// App.tsx (для пилюли в сайдбаре), и в GlobalControlTab.tsx. Раньше у каждого
+// был свой queryFn на один и тот же ключ (один отдавал null при ошибке,
+// другой подставлял дефолт) — какой из них первым населял кэш, тот и решал
+// форму данных для ОБОИХ подписчиков, и `null` мог долететь до места, которое
+// его не ждало, и упасть на `flags[row.key]`.
+export const fetchFeatureFlagsWithDefault = async (): Promise<FeatureFlags> => {
+  return (await fetchFeatureFlags()) ?? DEFAULT_FEATURE_FLAGS;
+};
+
+export const saveFeatureFlags = async (updates: Partial<FeatureFlags>): Promise<FeatureFlags | null> => {
+  const res = await apiFetch(`${API_URL}/api/v1/feature-flags`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  const data = await res.json();
+  return res.ok && data.success ? data.flags : null;
 };
 
 export const fetchBillingSummary = async (): Promise<BillingSummary | null> => {

@@ -48,7 +48,7 @@ from backend.routers import (
     auth, products, orders, dumping, ws, analytics,
     chatbot, stock_groups, api_keys, print_batcher,
     auth_v1, stores_v1, chats, autolist, auto_assembly, telegram_link,
-    pricefeed_import, stores_auto_connect,
+    pricefeed_import, stores_auto_connect, feature_flags as feature_flags_router,
 )
 from backend.routers import billing as billing_router, admin_billing, referral as referral_router
 from backend.routers import webhooks_incoming_email
@@ -150,6 +150,7 @@ app.include_router(billing_router.router)
 app.include_router(admin_billing.router)
 app.include_router(referral_router.router)
 app.include_router(webhooks_incoming_email.router)
+app.include_router(feature_flags_router.router)
 
 if _perf_enabled():
     from backend.perf.router import router as perf_router
