@@ -53,6 +53,7 @@ from backend.routers import (
 from backend.routers import billing as billing_router, admin_billing, referral as referral_router
 from backend.routers import webhooks_incoming_email
 from backend.routers.public_api import groups as public_groups
+from backend.routers.public_api import orders as public_orders
 
 from backend.routers.dumping import background_dumping_loop
 from backend.chatbot.worker import kaspi_chatbot_loop, start_telegram_bot_polling
@@ -143,6 +144,7 @@ app.include_router(stock_groups.router)
 app.include_router(api_keys.router)
 app.include_router(print_batcher.router)
 app.include_router(public_groups.router)
+app.include_router(public_orders.router)
 app.include_router(autolist.router)
 app.include_router(auto_assembly.router)
 app.include_router(telegram_link.router)

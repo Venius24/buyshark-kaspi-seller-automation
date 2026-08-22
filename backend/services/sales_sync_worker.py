@@ -3,9 +3,10 @@ import datetime
 import logging
 
 from backend.kaspi_wrapper import KaspiAPI
-from backend.state_helpers import _upsert_sales_orders, _get_latest_sales_order_date
+from backend.state_helpers import _upsert_sales_orders, _get_latest_sales_order_date, resolve_external_code
 from backend.security.store_context import list_active_stores
 from backend.chatbot.review_campaign import scan_and_enqueue_review_campaign
+from backend.services.webhook_dispatcher import dispatch_webhook_event
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,38 @@ def _windows_since(since: datetime.datetime, now: datetime.datetime) -> list:
     return windows
 
 
+async def _notify_order_completed(order: dict, store_id: str):
+    """[Public API 1С/ERP, черновик] Отправляет order.completed через тот же
+    dispatch_webhook_event, что и stock.updated (HMAC + 3 ретрая). Схема
+    пейлоада черновая — комиссия/НДС/статус выплаты сюда сознательно не
+    включены, см. GET /api/v1/public/orders (та же сериализация)."""
+    entries = []
+    for e in order.get("entries") or []:
+        sku = e.get("sku")
+        merchant_sku = e.get("merchantSku")
+        entries.append({
+            "sku": sku,
+            "merchant_sku": merchant_sku,
+            "external_code": await asyncio.to_thread(resolve_external_code, store_id, sku, merchant_sku),
+            "name": e.get("name"),
+            "qty": e.get("qty"),
+            "total_price": e.get("totalPrice"),
+        })
+
+    await dispatch_webhook_event(
+        "order.completed",
+        {
+            "order_internal_id": order.get("internalId"),
+            "order_code": order.get("code"),
+            "total_price": order.get("totalPrice"),
+            "status": order.get("status"),
+            "state": order.get("state"),
+            "entries": entries,
+        },
+        store_id,
+    )
+
+
 async def _sync_store_sales(token: str, store_id: str) -> int:
     now = datetime.datetime.utcnow()
     latest = await asyncio.to_thread(_get_latest_sales_order_date, store_id)
@@ -52,6 +85,17 @@ async def _sync_store_sales(token: str, store_id: str) -> int:
             continue
         new_orders = await asyncio.to_thread(_upsert_sales_orders, orders, store_id, not is_cold_start)
         total_new += len(new_orders)
+
+        # Событие для 1С/ERP (Слайс 3 webhook), только на реально новых заказах
+        # и не на холодном 90-дневном бэкафилле — иначе первое подключение
+        # стора разом шлёт сотни вебхуков во внешнюю учётку. Ошибка нотификации
+        # никогда не должна ронять сам синк остатков/продаж.
+        if new_orders and not is_cold_start:
+            for o in new_orders:
+                try:
+                    await _notify_order_completed(o, store_id)
+                except Exception as e:
+                    logger.warning(f"⚠️ [Sales Sync Worker] Не удалось отправить order.completed для {o.get('code')}: {e}")
 
     if total_new:
         logger.info(f"💰 [Sales Sync Worker] Стор {store_id}: сохранено {total_new} новых заказов.")

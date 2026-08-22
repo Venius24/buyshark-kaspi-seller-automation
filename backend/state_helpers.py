@@ -1228,6 +1228,50 @@ def _upsert_sales_orders(orders: list, store_id: str, review_eligible: bool = Tr
         session.close()
 
 
+def _list_sales_orders_since(store_id: str, since: Optional["datetime"] = None, limit: int = 100) -> list:
+    """[Public API 1С/ERP] Завершённые заказы этого магазина, отсортированные
+    по created_at по возрастанию — для пагинации курсором ?since=<ISO дата
+    последнего полученного заказа> на стороне 1С/ERP-клиента."""
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import SalesOrderDB
+        stmt = select(SalesOrderDB).where(SalesOrderDB.store_id == store_id)
+        if since is not None:
+            stmt = stmt.where(SalesOrderDB.created_at > since)
+        stmt = stmt.order_by(SalesOrderDB.created_at.asc()).limit(max(1, min(limit, 500)))
+        rows = session.scalars(stmt).all()
+        return [
+            {
+                "order_internal_id": r.order_internal_id,
+                "order_code": r.order_code,
+                "created_at": r.created_at,
+                "total_price": r.total_price,
+                "status": r.status,
+                "state": r.state,
+                "entries": json.loads(r.entries_payload) if r.entries_payload else [],
+            }
+            for r in rows
+        ]
+    finally:
+        session.close()
+
+
+def resolve_external_code(store_id: str, sku: Optional[str], merchant_sku: Optional[str] = None) -> Optional[str]:
+    """[Public API 1С/ERP] Артикул 1С (external_code) Мастер-Группы, в
+    linked_skus которой входит этот sku/merchantSku заказа. None, если товар
+    ни в одну Мастер-Группу не привязан — 1С тогда сама сопоставляет по sku."""
+    if not sku and not merchant_sku:
+        return None
+    groups = _load_master_stock_groups(store_id=store_id)
+    for g in groups.values():
+        linked = g.get("linked_skus") or []
+        if (sku and sku in linked) or (merchant_sku and merchant_sku in linked):
+            return g.get("external_code")
+    return None
+
+
 def _get_latest_sales_order_date(store_id: str):
     """Дата самого свежего заказа, уже сохранённого для этого стора —
     воркер использует её, чтобы понять, откуда продолжать инкрементальный
