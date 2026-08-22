@@ -45,19 +45,21 @@ class StoreConnectTrialTest(unittest.TestCase):
         self._async_engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
         self._AsyncSessionLocal = async_sessionmaker(bind=self._async_engine, expire_on_commit=False)
 
-        async def _fake_get_db():
-            async with self._AsyncSessionLocal() as s:
-                yield s
+        # Эндпоинт после рефакторинга пула открывает сессии сам через
+        # AsyncSessionLocal, а не через Depends(get_db) — подменяем фабрику
+        # в модуле роутера, иначе тест попал бы в dev-sqlite репозитория.
+        import backend.routers.stores_v1 as stores_v1_mod
+        self._asl_patch = patch.object(stores_v1_mod, "AsyncSessionLocal", self._AsyncSessionLocal)
+        self._asl_patch.start()
 
         self.client = TestClient(app)
         app.dependency_overrides[get_current_user] = lambda: User(
             id="user-1", email="a@b.com", password_hash="x", is_active=True
         )
-        app.dependency_overrides[get_db] = _fake_get_db
 
     def tearDown(self):
         app.dependency_overrides.pop(get_current_user, None)
-        app.dependency_overrides.pop(get_db, None)
+        self._asl_patch.stop()
         os.chdir(self._orig_cwd)
         shutil.rmtree(self._tmp_dir, ignore_errors=True)
 

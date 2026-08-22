@@ -530,20 +530,64 @@ def flush_store(store_id, merchant_uid: str) -> dict:
     """
     Один проход флашера по магазину. Синхронный (сетевой + БД) — вызывать
     через asyncio.to_thread.
+
+    Пул Postgres: сессия НЕ держится открытой во время сетевых вызовов.
+    Раньше один session жил от загрузки очереди до последнего батча — то
+    есть через quota.get(), все сверки offer-view и POST batch (timeout=90),
+    и на медленном Kaspi коннект пула был занят минутами каждый тик.
+    Теперь структура трёхфазная: короткая сессия на чтение очереди → вся
+    сеть без сессии → короткие сессии на запись результатов таргетированными
+    UPDATE (только изменённые колонки — параллельный enqueue того же SKU не
+    затирается).
     """
     from backend.db.models import KaspiOfferSyncDB
     from backend.state_helpers import _mc_api_request
 
     stats = {"candidates": 0, "no_op": 0, "written": 0, "deferred": 0, "verified": 0, "errors": 0}
-    session = _session()
-    if not session:
-        return stats
+
+    # Локальная копия поля + запись в журнал обновлений. Сетевые фазы мутируют
+    # отсоединённые объекты только через неё: логика читает свежие значения,
+    # а в БД уходит точечный UPDATE перечисленных колонок.
+    pending_updates: dict = {}
+
+    def _track(row, **fields):
+        key = (row.store_id, row.sku)
+        pending_updates.setdefault(key, {}).update(fields)
+        for k, v in fields.items():
+            setattr(row, k, v)
+
+    def _flush_pending():
+        if not pending_updates:
+            return
+        session = _session()
+        if not session:
+            pending_updates.clear()
+            return
+        try:
+            from sqlalchemy import update as sa_update
+
+            for (sid, sku), fields in pending_updates.items():
+                session.execute(
+                    sa_update(KaspiOfferSyncDB)
+                    .where(KaspiOfferSyncDB.store_id == sid, KaspiOfferSyncDB.sku == sku)
+                    .values(**fields)
+                )
+            session.commit()
+        except Exception as e:
+            logger.error("[OfferSync] Не удалось записать результаты флаша: %s", e)
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            stats["errors"] += 1
+        finally:
+            session.close()
+            pending_updates.clear()
 
     try:
         # Держим индикатор квоты на фронте живым даже на тихом сторе — см.
-        # QUOTA_HEARTBEAT_SECONDS выше. Делаем это ДО чтения очереди: у
-        # стора может не быть вообще ни одного намерения (rows пуст), и
-        # раньше цикл в этом случае завершался, ни разу не тронув Kaspi.
+        # QUOTA_HEARTBEAT_SECONDS выше. Делаем это ДО открытия сессии: это
+        # сетевой вызов, ему коннект БД не нужен.
         cached_quota = quota.peek(store_id)
         quota_stale = (
             cached_quota is None
@@ -552,11 +596,18 @@ def flush_store(store_id, merchant_uid: str) -> dict:
         if quota_stale:
             quota.get(store_id, merchant_uid)
 
-        rows = session.scalars(
-            select(KaspiOfferSyncDB)
-            .where(KaspiOfferSyncDB.store_id == store_id, KaspiOfferSyncDB.desired_at.isnot(None))
-            .order_by(KaspiOfferSyncDB.priority, KaspiOfferSyncDB.desired_at)
-        ).all()
+        # Фаза 1: читаем очередь намерений — единственная работа этой сессии.
+        load_session = _session()
+        if not load_session:
+            return stats
+        try:
+            rows = load_session.scalars(
+                select(KaspiOfferSyncDB)
+                .where(KaspiOfferSyncDB.store_id == store_id, KaspiOfferSyncDB.desired_at.isnot(None))
+                .order_by(KaspiOfferSyncDB.priority, KaspiOfferSyncDB.desired_at)
+            ).all()
+        finally:
+            load_session.close()
         if not rows:
             return stats
         stats["candidates"] = len(rows)
@@ -595,16 +646,17 @@ def flush_store(store_id, merchant_uid: str) -> dict:
                             "🔁 [OfferSync] SKU %s: писали %s ₸, на Kaspi %s ₸ — запись не применилась, отправляем снова.",
                             row.sku, row.pushed_price, actual["price"],
                         )
-                    row.kaspi_price = actual["price"]
-                    row.kaspi_stock = actual["stock"]
-                    row.kaspi_seen_at = datetime.datetime.utcnow()
-                    if actual.get("master_sku") and not row.master_sku:
-                        row.master_sku = actual["master_sku"]
-                    if actual.get("model") and not row.model:
-                        row.model = str(actual["model"])[:500]
+                    _track(
+                        row,
+                        kaspi_price=actual["price"],
+                        kaspi_stock=actual["stock"],
+                        kaspi_seen_at=datetime.datetime.utcnow(),
+                        master_sku=actual.get("master_sku") if actual.get("master_sku") and not row.master_sku else row.master_sku,
+                        model=str(actual["model"])[:500] if actual.get("model") and not row.model else row.model,
+                    )
                     full = actual.get("store_id_full") or ""
                     if "_" in full:
-                        row.store_suffix = full.split("_", 1)[1]
+                        _track(row, store_suffix=full.split("_", 1)[1])
                     base_price, base_stock, base_available = (
                         actual["price"], actual["stock"], actual["available"],
                     )
@@ -619,13 +671,18 @@ def flush_store(store_id, merchant_uid: str) -> dict:
                 # Намерение ничего не меняет — гасим, не тратя квоту. Это и
                 # есть те самые NO_CHANGE, которыми Kaspi помечал наши записи.
                 stats["no_op"] += 1
-                row.desired_price = row.desired_stock = row.desired_available = None
-                row.desired_at = None
-                row.reason = None
-                row.priority = Priority.MINOR
+                _track(
+                    row,
+                    desired_price=None,
+                    desired_stock=None,
+                    desired_available=None,
+                    desired_at=None,
+                    reason=None,
+                    priority=Priority.MINOR,
+                )
                 continue
             decisions.append((row, decision))
-        session.commit()
+        _flush_pending()
 
         if not decisions:
             return stats
@@ -692,46 +749,48 @@ def flush_store(store_id, merchant_uid: str) -> dict:
                 msg = f"{resp.status_code}: {resp.text[:200]}"
                 logger.error("[OfferSync] Батч отклонён (%s)", msg)
                 for row, _ in chunk:
-                    row.last_error = msg[:500]
-                session.commit()
+                    _track(row, last_error=msg[:500])
+                _flush_pending()
                 continue
 
             quota.consume(store_id, len(chunk))
             written_at = datetime.datetime.utcnow()
             for row, d in chunk:
                 _flap_note_price_write(store_id, d.sku, d.base_price, d.price, now_ts)
-                row.pushed_price = d.price
-                row.pushed_stock = d.stock
-                row.pushed_at = written_at
-                # kaspi_* — это "что мы ПРОЧИТАЛИ у Kaspi", и собственная
-                # запись таким доказательством не является: ручка batch
-                # асинхронная, 200 значит "принято", а не "применено".
-                # Раньше мы копировали сюда отправленное значение, и
-                # непринятая Kaspi строка залипала навсегда — следующий флаш
-                # видел "уже так" и гасил намерение вхолостую. Теперь
-                # фактическое состояние честно обнуляется: базой станет
-                # pushed_* (was_fresh=False), а через
-                # UNCONFIRMED_RECHECK_SECONDS повтор того же намерения
-                # вызовет бесплатную сверку с Kaspi.
-                row.kaspi_price = None
-                row.kaspi_stock = None
-                row.kaspi_seen_at = None
-                row.desired_price = row.desired_stock = row.desired_available = None
-                row.desired_at = None
-                row.reason = None
-                row.priority = Priority.MINOR
-                row.last_error = None
+                _track(
+                    row,
+                    pushed_price=d.price,
+                    pushed_stock=d.stock,
+                    pushed_at=written_at,
+                    # kaspi_* — это "что мы ПРОЧИТАЛИ у Kaspi", и собственная
+                    # запись таким доказательством не является: ручка batch
+                    # асинхронная, 200 значит "принято", а не "применено".
+                    # Раньше мы копировали сюда отправленное значение, и
+                    # непринятая Kaspi строка залипала навсегда — следующий флаш
+                    # видел "уже так" и гасил намерение вхолостую. Теперь
+                    # фактическое состояние честно обнуляется: базой станет
+                    # pushed_* (was_fresh=False), а через
+                    # UNCONFIRMED_RECHECK_SECONDS повтор того же намерения
+                    # вызовет бесплатную сверку с Kaspi.
+                    kaspi_price=None,
+                    kaspi_stock=None,
+                    kaspi_seen_at=None,
+                    desired_price=None,
+                    desired_stock=None,
+                    desired_available=None,
+                    desired_at=None,
+                    reason=None,
+                    priority=Priority.MINOR,
+                    last_error=None,
+                )
             stats["written"] += len(chunk)
-            session.commit()
+            _flush_pending()
 
         return stats
     except Exception as e:
         logger.exception("[OfferSync] Флаш для стора %s упал: %s", store_id, e)
-        session.rollback()
         stats["errors"] += 1
         return stats
-    finally:
-        session.close()
 
 
 async def run_offer_sync_cycle() -> dict:

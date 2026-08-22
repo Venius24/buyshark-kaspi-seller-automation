@@ -731,14 +731,21 @@ class KaspiAPI:
     # ── 5.2. full 3-tab layout packaging parsing ───────────────
 
     @staticmethod
-    def get_all_packaging_tabs(token: str) -> dict:
+    def get_all_packaging_tabs(token: str, window_days: int = 13) -> dict:
         """
         Скачивает заказы и раскладывает их по 3 стандартным вкладкам Kaspi:
           1. cargo_assembly (📦 На сборке / Упаковка): not is_assembled
           2. wait_for_courier (🏷️ Ожидает курьера / Передача): is_assembled and transmission_date is None
           3. transmitted (🚚 Переданы на доставку / Архив): is_assembled and transmission_date is not None
+
+        window_days сужает окно creationDate (дефолт 13 — как было всегда).
+        Горячий потребитель — авто-списание (stock_sync_worker, тик 30с):
+        ему нужен узкий запрос, а не вся двухнедельная история; полный
+        обход он всё равно делает по расписанию (см. схему свипов там же).
+        Экранные потребители (routers/orders.py, stock_groups.py через
+        *_cached) оставлены на дефолте.
         """
-        ge, le = KaspiAPI._date_range(13)
+        ge, le = KaspiAPI._date_range(window_days)
         cargo_assembly = []
         wait_for_courier = []
         transmitted = []

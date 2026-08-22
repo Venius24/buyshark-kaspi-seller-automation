@@ -297,7 +297,10 @@ def _mark(item_id: int, status: str, skip_reason: Optional[str] = None, group_id
             return
         row.status = status
         if skip_reason is not None:
-            row.skip_reason = skip_reason
+            # skip_reason — varchar(200): тексты ошибок Playwright легко длиннее
+            # (Page.goto timeout + Call log). Без среза UPDATE падает с
+            # "value too long", и статус записи вообще не обновляется.
+            row.skip_reason = skip_reason[:200]
         if group_id is not None:
             row.group_id = group_id
         if status == "sent":

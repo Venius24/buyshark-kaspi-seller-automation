@@ -90,7 +90,13 @@ def get_chatbot_status(ctx: StoreContext = Depends(get_store_context)):
     # Статус чата отражает отдельную SMS-сессию (encrypted_chat_cookies), а
     # не общие MC-куки email+пароль входа — чат-API Kaspi требует именно её.
     chat_cookies = load_chat_cookies(store_id=ctx.store_id)
-    has_valid_cookies = bool("mc-session" in chat_cookies and "mc-sid" in chat_cookies)
+    has_cookie_keys = bool("mc-session" in chat_cookies and "mc-sid" in chat_cookies)
+    # Наличие ключей в куках ещё не значит, что сессия жива на стороне Kaspi —
+    # это узнаётся только по факту реального запроса (chat_client/kaspi.py
+    # шлёт notify_cookie_expired и взводит cookie_alert_sent при провале).
+    # Раньше бейдж смотрел только на has_cookie_keys, поэтому "висел" зелёным
+    # даже после того, как Telegram уже прислал алерт об истёкшей сессии.
+    has_valid_cookies = has_cookie_keys and not config.is_cookie_alert_sent(ctx.store_id)
 
     blocked_chats = [
         {"group_id": gid, "reason": "HUMAN_OVERRIDE"}

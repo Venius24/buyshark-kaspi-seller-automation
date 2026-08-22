@@ -55,45 +55,17 @@ from backend.kaspi_wrapper import KaspiAPI
 
 @router.get("")
 def get_stock_groups(ctx: StoreContext = Depends(get_store_context)):
-    """Получить список всех Мастер-Групп остатка с информацией об активных заказах в 'Упаковке'."""
-    token = ctx.token
+    """Получить список всех Мастер-Групп остатка."""
     groups_dict = _load_master_stock_groups(store_id=ctx.store_id)
     groups_list = list(groups_dict.values())
 
-    # Выгружаем активную упаковку из общего кэша (TTL 120c, см. kaspi_wrapper.py)
-    # для предотвращения зависания эндпоинта и лишних обходов Kaspi
-    packaging_data = KaspiAPI.get_all_packaging_tabs_cached(token)
-    cargo_assembly = packaging_data.get("cargo_assembly", [])
-
-    for g in groups_list:
-        skus = set([str(s).strip().lower() for s in g.get("linked_skus", [])])
-        matched_orders = []
-        total_items_qty = 0
-
-        for order in cargo_assembly:
-            items = order.get("items", [])
-            matched = False
-            for it in items:
-                m_sku = str(it.get("merchant_sku", "")).strip().lower()
-                title = str(it.get("title", "")).strip().lower()
-
-                is_match = (
-                    m_sku in skus
-                    or any(s in m_sku or m_sku.startswith(s) or s in title for s in skus if len(s) >= 4)
-                )
-
-                if is_match:
-                    matched = True
-                    total_items_qty += it.get("quantity", 1)
-
-            if matched:
-                matched_orders.append(order)
-
-        g["active_packaging_orders_count"] = len(matched_orders)
-        g["active_packaging_items_qty"] = total_items_qty
-        g["active_packaging_orders"] = matched_orders
-
-    # Сортируем по дате обновления/создания
+    # Раньше здесь на каждый запрос гонялся матчинг «группа × заказ × позиция»
+    # с подстрочными сравнениями, а в ответ клался ПОЛНЫЙ список заказов
+    # упаковки отдельно для каждой группы (289 копий). Ни фронтенд (тип
+    # MasterStockGroup не содержит active_packaging_*), ни бэкенд, ни тесты
+    # эти поля не читали — это был главный источник p95=27.6с у ручки
+    # (HANDOFF §3.52 «Осталось»). Детальный список заказов группы по кнопке
+    # живёт в GET /{group_id}/packaging, он и остаётся единственным путём.
     groups_list.sort(key=lambda g: g.get("updated_at", ""), reverse=True)
     return {"success": True, "groups": groups_list, "count": len(groups_list)}
 

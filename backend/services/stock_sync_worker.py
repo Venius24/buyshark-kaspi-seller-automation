@@ -1,8 +1,10 @@
 import asyncio
+import os
 import re
 import logging
 import datetime
-from typing import Optional, List
+import time
+from typing import Optional, List, Dict
 
 from backend.state_helpers import (
     _load_master_stock_groups,
@@ -35,6 +37,30 @@ def get_stock_lock(store_id=None) -> asyncio.Lock:
     if store_id not in _stock_locks:
         _stock_locks[store_id] = asyncio.Lock()
     return _stock_locks[store_id]
+
+# ── Окно выборки авто-списания ─────────────────────────────────────────
+# Раньше каждый 30-секундный тик качал ПОЛНЫЙ 13-дневный обход /orders
+# (все страницы, все три вкладки) — ~66 тыс. запросов в сутки, чтобы найти
+# заказы, появившиеся за последние 30 секунд (HANDOFF §3.54).
+#
+# Схема теперь двухуровневая, с гарантией непотери списаний:
+#   • Горячий путь — узкое окно DEDUCTION_HOT_WINDOW_DAYS: обычное
+#     появление заказа списывается за один тик, как и раньше.
+#   • Полный 13-дневный свип — при старте процесса (ловит всё, что
+#     накопилось, пока сервис лежал) и раз в
+#     DEDUCTION_FULL_SWEEP_INTERVAL_SECONDS (ловит заказы старше горячего
+#     окна, которые по любой причине ещё не списаны). Свип стоит ~24
+#     обхода в сутки вместо 2880.
+# Отметка свипа сдвигается только после УСПЕШНОЙ выборки: упавший обход
+# ретраится следующим тиком. Права на списание персистентны
+# (processed_orders), поэтому повторная видимость заказа не создаёт
+# двойных списаний.
+DEDUCTION_HOT_WINDOW_DAYS = max(1, int(os.getenv("DEDUCTION_HOT_WINDOW_DAYS", "3")))
+FULL_SWEEP_WINDOW_DAYS = 13
+DEDUCTION_FULL_SWEEP_INTERVAL_SECONDS = float(
+    os.getenv("DEDUCTION_FULL_SWEEP_INTERVAL_SECONDS", "3600")
+)
+_last_full_sweep_at: Dict[Optional[str], float] = {}
 
 async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus: List[str], store_id: Optional[str] = None, trigger_order_info: Optional[dict] = None, shared_stock: int = 0, stop_qty: int = 5):
     """Уведомление при просаде остатка группы ниже (или равно) её "Стоп
@@ -731,16 +757,32 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
 
     Списываются ВСЕ подходящие позиции заказа, а не только первая: заказ из
     двух товаров разных групп уменьшает обе.
+
+    Выборка двухуровневая (см. комментарий над DEDUCTION_HOT_WINDOW_DAYS):
+    узкое окно на каждом тике + полный 13-дневный свип при старте процесса
+    и раз в час. Это сохраняет гарантию прежнего поведения — любой заказ
+    в KASPI_DELIVERY/ACCEPTED_BY_MERCHANT не старше 13 дней будет увиден,
+    пусть в худшем случае с задержкой до одного интервала свипа, — убрав
+    ~99% объёма запросов к /orders.
     """
     from backend.state_helpers import _load_processed_packaging_orders, _save_processed_packaging_orders
 
+    now_mono = time.monotonic()
+    last_sweep = _last_full_sweep_at.get(store_id)
+    full_sweep = last_sweep is None or (now_mono - last_sweep) >= DEDUCTION_FULL_SWEEP_INTERVAL_SECONDS
+
     try:
         # Синхронный постраничный обход Kaspi MC — тик каждые 30с на каждый
-        # активный стор.
-        tabs = await asyncio.to_thread(KaspiAPI.get_all_packaging_tabs, token)
+        # активный стор. Узкое окно на горячем пути, 13 дней на свипе.
+        days = FULL_SWEEP_WINDOW_DAYS if full_sweep else DEDUCTION_HOT_WINDOW_DAYS
+        tabs = await asyncio.to_thread(KaspiAPI.get_all_packaging_tabs, token, days)
     except Exception as e:
         logger.error(f"[AutoDeduction] Error fetching packaging tabs: {e}")
         return {"success": False, "error": str(e)}
+
+    if full_sweep:
+        # Только после успешной выборки: упавший свип ретрается следующим тиком.
+        _last_full_sweep_at[store_id] = time.monotonic()
 
     orders = list(tabs.get("cargo_assembly") or []) + list(tabs.get("wait_for_courier") or [])
     if not orders:

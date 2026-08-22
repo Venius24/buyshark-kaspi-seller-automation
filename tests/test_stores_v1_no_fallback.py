@@ -4,6 +4,11 @@ Closes the stores_v1.py gap in HANDOFF 3.1: /api/v1/stores/connect-full-store,
 state.json/session.json for MC credentials or cookies, and must never fall
 back to another store's (or the legacy global) session when a store's own
 credentials/cookies are missing or invalid.
+
+Пул Postgres (HANDOFF 3.52/§аудит): эти три эндпоинта больше не держат
+Depends(get_db) через сетевые фазы — они открывают короткие scoped-сессии
+сами. Поэтому тесты ходят в реальную SQLite (как test_store_connect_trial),
+а не подсовывают AsyncMock-последовательности execute().
 """
 import os
 import sys
@@ -11,25 +16,16 @@ import shutil
 import tempfile
 import unittest
 from datetime import datetime
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch
 
 sys.path.append(os.getcwd())
 
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.db.models import User, Store
+from backend.db.models import User, Store, UserStore
 from backend.routers.auth_v1 import get_current_user as real_get_current_user
-from backend.db.database import get_db as real_get_db
 from backend.security.crypto import encrypt_data, decrypt_data
-
-
-def make_result(value):
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = value
-    result.scalar.return_value = value
-    result.first.return_value = value
-    return result
 
 
 class TestStoresV1NoFallback(unittest.TestCase):
@@ -46,6 +42,21 @@ class TestStoresV1NoFallback(unittest.TestCase):
         session.commit()
         session.close()
 
+        # Эндпоинты после рефакторинга пула открывают сессии сами, через
+        # AsyncSessionLocal (не через Depends(get_db)). Глобальный движок
+        # держит абсолютный путь к dev-sqlite репозитория — подменяем
+        # фабрику в модуле роутера на движок поверх временного файла.
+        import glob
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+        import backend.routers.stores_v1 as stores_v1_mod
+        db_files = glob.glob(os.path.join(self._tmp_dir, "*.db"))
+        assert db_files, "sync session did not create a sqlite file"
+        db_path = db_files[0].replace(os.sep, "/")
+        self._async_engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        self._AsyncSessionLocal = async_sessionmaker(bind=self._async_engine, expire_on_commit=False)
+        self._asl_patch = patch.object(stores_v1_mod, "AsyncSessionLocal", self._AsyncSessionLocal)
+        self._asl_patch.start()
+
         self.client = TestClient(app)
         app.dependency_overrides[real_get_current_user] = lambda: User(
             id="user-1", email="a@b.com", password_hash="x", is_active=True
@@ -53,9 +64,16 @@ class TestStoresV1NoFallback(unittest.TestCase):
 
     def tearDown(self):
         app.dependency_overrides.pop(real_get_current_user, None)
-        app.dependency_overrides.pop(real_get_db, None)
+        self._asl_patch.stop()
         os.chdir(self._orig_cwd)
         shutil.rmtree(self._tmp_dir, ignore_errors=True)
+
+    def _seed_owner_link(self, store_id="store-existing-1"):
+        from backend.state_helpers import _get_sync_db_session
+        session = _get_sync_db_session()
+        session.add(UserStore(user_id="user-1", store_id=store_id, role="OWNER"))
+        session.commit()
+        session.close()
 
     def _read_store(self, store_id):
         from backend.state_helpers import _get_sync_db_session
@@ -64,11 +82,6 @@ class TestStoresV1NoFallback(unittest.TestCase):
             return session.get(Store, store_id)
         finally:
             session.close()
-
-    def _override_db(self, fake_db):
-        async def fake_get_db_gen():
-            yield fake_db
-        app.dependency_overrides[real_get_db] = fake_get_db_gen
 
     @patch("backend.routers.stores_v1.worker")
     @patch("backend.routers.stores_v1.KaspiAPI")
@@ -81,20 +94,6 @@ class TestStoresV1NoFallback(unittest.TestCase):
         # Де-глобализация Playwright: LOGIN отдаёт куки напрямую (3-tuple),
         # не через общий state.json — см. playwright_worker.py.
         mock_worker.send_cmd.return_value = (True, "Success", {"mc-session": "fresh-sess", "mc-sid": "fresh-sid"})
-
-        existing_store_obj = Store(
-            id="store-existing-1", merchant_id="m_existing", name="ExistingShop",
-            encrypted_api_key=None, encrypted_cookies=None, status="PAUSED",
-            created_at=datetime.utcnow(),
-        )
-        fake_db = AsyncMock()
-        fake_db.execute.side_effect = [
-            make_result(None),                  # check_quota_guard: no Subscription row
-            make_result(0),                     # owned-store count
-            make_result(existing_store_obj),    # existing-store lookup
-            make_result(object()),              # UserStore link already exists
-        ]
-        self._override_db(fake_db)
 
         resp = self.client.post(
             "/api/v1/stores/connect-full-store",
@@ -120,15 +119,8 @@ class TestStoresV1NoFallback(unittest.TestCase):
     def test_sync_cookies_no_fallback_requires_own_creds(self, mock_refresh):
         """When this store's own refresh fails, sync-cookies must reject with
         a re-login message -- never fall back to system/global cookies."""
+        self._seed_owner_link()
         mock_refresh.return_value = False
-
-        store_row = Store(
-            id="store-existing-1", merchant_id="m_existing", name="ExistingShop",
-            created_at=datetime.utcnow(),
-        )
-        fake_db = AsyncMock()
-        fake_db.execute.side_effect = [make_result((store_row, "OWNER"))]
-        self._override_db(fake_db)
 
         resp = self.client.post("/api/v1/stores/store-existing-1/sync-cookies")
 
@@ -142,24 +134,18 @@ class TestStoresV1NoFallback(unittest.TestCase):
     def test_verify_no_fallback_marks_expired_when_own_refresh_fails(self, mock_refresh, mock_load_cookies, mock_worker):
         """When this store's cookies are invalid and its own refresh fails,
         /verify must mark it COOKIE_EXPIRED -- no global-cookie fallback."""
+        self._seed_owner_link()
         mock_load_cookies.return_value = {"mc-session": "stale", "mc-sid": "stale"}
         mock_worker.send_cmd.return_value = (True, False, {})  # success, is_valid=False
         mock_refresh.return_value = False
-
-        store_row = Store(
-            id="store-existing-1", merchant_id="m_existing", name="ExistingShop",
-            encrypted_cookies=encrypt_data("mc-session=stale; mc-sid=stale"),
-            created_at=datetime.utcnow(),
-        )
-        fake_db = AsyncMock()
-        fake_db.execute.side_effect = [make_result((store_row, "OWNER"))]
-        self._override_db(fake_db)
 
         resp = self.client.post("/api/v1/stores/store-existing-1/verify")
 
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["status"], "COOKIE_EXPIRED")
         mock_refresh.assert_called_once_with(store_id="store-existing-1")
+        # Вердикт реально доехал до БД короткой scoped-сессией.
+        self.assertEqual(self._read_store("store-existing-1").status, "COOKIE_EXPIRED")
 
     def test_select_endpoint_removed(self):
         """Слайс 6: /select удалён целиком — раньше он писал расшифрованный
