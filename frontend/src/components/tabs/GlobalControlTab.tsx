@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchFeatureFlagsWithDefault, saveFeatureFlags, DEFAULT_FEATURE_FLAGS } from '../../queries';
 import { ToggleSwitch } from '../shared/ToggleSwitch';
+import { HelpHint } from '../shared/HelpHint';
 import { useActiveStoreId } from '../../storeContext';
 import type { ActiveTab, FeatureFlags } from '../../types';
 
@@ -68,7 +69,10 @@ export function GlobalControlTab({ onSelectTab }: { onSelectTab: (tab: ActiveTab
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '820px' }}>
       <div>
-        <h1 style={{ marginBottom: '6px' }}>🎛️ {t('title')}</h1>
+        <h1 style={{ marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          🎛️ {t('title')}
+          <HelpHint text="Один переключатель на весь магазин: выключает демпинг, связку остатков, автосборку и ИИ-автоответчика разом, без похода по отдельным разделам. Точечные настройки (per-SKU, per-группа) при этом не сбрасываются — просто перестают срабатывать, пока автоматика выключена." />
+        </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', lineHeight: 1.5 }}>{t('subtitle')}</p>
       </div>
 
