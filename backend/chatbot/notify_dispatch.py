@@ -178,7 +178,15 @@ def _with_hashtag(text: str, card: Optional[str]) -> str:
     tag = HASHTAGS.get(card) if card else None
     if not tag or f"#{tag}" in text:
         return text
-    return f"{text}\n\n#{tag}"
+    # Часть тегов содержит "_" (сессия_истекла, новый_заказ, итоги_дня...) —
+    # для legacy Telegram Markdown это спецсимвол курсива. Неэкранированный
+    # он ломал парсинг ВСЕГО сообщения (в т.ч. чужого текста перед тегом),
+    # из-за чего caption+текст падал и клиент получал голую картинку без
+    # текста (2026-08-22). Экранирование не мешает Telegram распознать
+    # #хэштег в итоговом отрендеренном тексте — parse_mode просто убирает
+    # обратный слэш, символ "_" остаётся на месте.
+    escaped_tag = tag.replace("_", "\\_")
+    return f"{text}\n\n#{escaped_tag}"
 
 
 async def _send(tg_user_id: int, text: str, reply_markup=None, card: Optional[str] = None):
