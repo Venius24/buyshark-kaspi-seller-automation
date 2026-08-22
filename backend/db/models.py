@@ -302,6 +302,12 @@ class ChatbotSettingsDB(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     admin_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON-stringified list
     updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # Анти-спам флаг "уже уведомили о протухшей чат-сессии" — раньше был
+    # in-memory dict (backend/chatbot/config.py), обнулялся при каждом
+    # рестарте процесса (в т.ч. деплое), поэтому реально ещё не решённая
+    # проблема переуведомлялась на каждый деплой. Персистим, как
+    # human_override в ChatStateDB.
+    chat_cookie_alert_sent: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class StoreBotProfileDB(Base):

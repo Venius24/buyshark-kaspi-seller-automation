@@ -28,21 +28,67 @@ def load_env():
 
 load_env()
 
-# Слайс 4: анти-спам флаг "уже уведомили о протухших куках" — per-store,
-# in-memory (как _chatbot_state/_stock_locks в других модулях; не требует
-# персистентности, это не был файл и раньше — просто общий bool на процесс).
-_cookie_alert_sent: dict = {}
+# Слайс 4: анти-спам флаг "уже уведомили о протухших куках" — per-store.
+# Персистится в ChatbotSettingsDB.chat_cookie_alert_sent (миграция 036):
+# раньше это был in-memory dict, обнулявшийся при каждом рестарте процесса,
+# из-за чего РЕАЛЬНО ещё не решённая проблема (просроченная SMS-сессия чата)
+# переуведомляла админов на каждый деплой (инцидент 2026-08-22). store_id=None
+# (легаси, dev-бутстрап без Store в БД) остаётся in-memory — там и Store-то
+# в БД может не быть.
+_legacy_cookie_alert_sent: dict = {}
 
 def is_cookie_alert_sent(store_id: Optional[str] = None) -> bool:
-    return _cookie_alert_sent.get(store_id, False)
+    if store_id is None:
+        return _legacy_cookie_alert_sent.get(store_id, False)
+    from backend.state_helpers import _get_sync_db_session
+    session = _get_sync_db_session()
+    if not session:
+        return _legacy_cookie_alert_sent.get(store_id, False)
+    try:
+        from backend.db.models import ChatbotSettingsDB
+        row = session.get(ChatbotSettingsDB, store_id)
+        return bool(row.chat_cookie_alert_sent) if row else False
+    finally:
+        session.close()
 
 def set_cookie_alert_sent(store_id: Optional[str], value: bool):
-    _cookie_alert_sent[store_id] = value
+    if store_id is None:
+        _legacy_cookie_alert_sent[store_id] = value
+        return
+    from backend.state_helpers import _get_sync_db_session
+    session = _get_sync_db_session()
+    if not session:
+        _legacy_cookie_alert_sent[store_id] = value
+        return
+    try:
+        from backend.db.models import ChatbotSettingsDB
+        row = session.get(ChatbotSettingsDB, store_id)
+        if not row:
+            row = ChatbotSettingsDB(store_id=store_id, chat_cookie_alert_sent=value)
+            session.add(row)
+        else:
+            row.chat_cookie_alert_sent = value
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting cookie alert flag to DB: {e}")
+        session.rollback()
+    finally:
+        session.close()
 
 def any_cookie_alert_sent() -> bool:
     """Для Telegram-команды /status — бот единый процесс на все магазины
     (Phase 5 де-глобализации не было), поэтому там нет store-контекста."""
-    return any(_cookie_alert_sent.values())
+    from backend.state_helpers import _get_sync_db_session
+    session = _get_sync_db_session()
+    if not session:
+        return any(_legacy_cookie_alert_sent.values())
+    try:
+        from backend.db.models import ChatbotSettingsDB
+        from sqlalchemy import select
+        rows = session.scalars(select(ChatbotSettingsDB)).all()
+        return any(r.chat_cookie_alert_sent for r in rows) or any(_legacy_cookie_alert_sent.values())
+    finally:
+        session.close()
 
 # Слайс 4: PROCESSED_CHATS раньше был единым словарём group_id -> msg_id/
 # "HUMAN_OVERRIDE" на все магазины — состояние блокировки чата одного стора

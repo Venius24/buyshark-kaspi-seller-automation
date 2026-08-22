@@ -113,11 +113,40 @@ async def send_card(tg_user_id: int, card: str):
         logger.error(f"[NotifyDispatch] Не удалось отправить карточку {card} {tg_user_id}: {e}")
 
 
+async def _send_message_safe(tg_user_id: int, text: str, reply_markup=None) -> bool:
+    """Шлёт текст, при ошибке парсинга Markdown (неэкранированный спецсимвол
+    в динамических данных — имя клиента/товар/причина) повторяет без
+    форматирования, лишь бы текст реально дошёл, а не терялся молча."""
+    try:
+        await bot_instance.bot.send_message(
+            chat_id=tg_user_id, text=text, parse_mode="Markdown",
+            disable_web_page_preview=True, reply_markup=reply_markup,
+        )
+        return True
+    except Exception as e:
+        logger.error(f"[NotifyDispatch] Не удалось отправить {tg_user_id}: {e}")
+        try:
+            await bot_instance.bot.send_message(
+                chat_id=tg_user_id, text=text, parse_mode=None,
+                disable_web_page_preview=True, reply_markup=reply_markup,
+            )
+            return True
+        except Exception as e2:
+            logger.error(f"[NotifyDispatch] Не удалось отправить {tg_user_id} даже без форматирования: {e2}")
+            return False
+
+
 async def send_with_card(tg_user_id: int, text: str, card: Optional[str] = None, reply_markup=None):
     """Шлёт текст и карточку ОДНИМ сообщением (текст — caption у фото), чтобы
     в чате не было двух разрозненных сообщений подряд. Если текст не влезает
     в лимит caption (1024 симв., напр. money-дайджест из многих строк) —
-    падаем назад на картинку и текст раздельно, как было раньше."""
+    падаем назад на картинку и текст раздельно, как было раньше.
+
+    Если Markdown в тексте не парсится (неэкранированный спецсимвол в
+    динамике — 2026-08-22, клиент получал голую картинку без единого слова
+    текста, т.к. и caption-отправка, и фоллбек-send_message падали с одной
+    и той же ошибкой парсинга) — повторяем ту же попытку без parse_mode,
+    чтобы текст дошёл гарантированно, пусть и без форматирования."""
     if not bot_instance.bot:
         return
     path = CARD_FILES.get(card) if card else None
@@ -131,15 +160,18 @@ async def send_with_card(tg_user_id: int, text: str, card: Optional[str] = None,
             return
         except Exception as e:
             logger.error(f"[NotifyDispatch] Не удалось отправить карточку+текст {card} {tg_user_id}: {e}")
+            try:
+                from aiogram.types import FSInputFile
+                await bot_instance.bot.send_photo(
+                    chat_id=tg_user_id, photo=FSInputFile(str(path)), caption=text,
+                    parse_mode=None, reply_markup=reply_markup,
+                )
+                return
+            except Exception as e2:
+                logger.error(f"[NotifyDispatch] Не удалось отправить карточку+текст {card} {tg_user_id} даже без форматирования: {e2}")
     if card:
         await send_card(tg_user_id, card)
-    try:
-        await bot_instance.bot.send_message(
-            chat_id=tg_user_id, text=text, parse_mode="Markdown",
-            disable_web_page_preview=True, reply_markup=reply_markup,
-        )
-    except Exception as e:
-        logger.error(f"[NotifyDispatch] Не удалось отправить {tg_user_id}: {e}")
+    await _send_message_safe(tg_user_id, text, reply_markup)
 
 
 def _with_hashtag(text: str, card: Optional[str]) -> str:
