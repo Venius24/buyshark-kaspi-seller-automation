@@ -56,7 +56,12 @@ export function OnboardingTour({ onFinish, onNavigate, isSuperadmin, isReferrer,
 
   const measure = useCallback(() => {
     const el = document.querySelector(`[data-tour="${step.target}"]`);
-    setRect(el ? el.getBoundingClientRect() : null);
+    const r = el ? el.getBoundingClientRect() : null;
+    // На мобильном сайдбар — закрытый drawer, переведённый за левый край
+    // экрана (см. mobile.css), поэтому его пункты имеют реальный, но
+    // невидимый rect — без этой проверки подсветка рисовалась бы за кадром.
+    const visible = r && r.right > 0 && r.left < window.innerWidth && r.bottom > 0 && r.top < window.innerHeight;
+    setRect(visible ? r : null);
   }, [step.target]);
 
   useLayoutEffect(() => {

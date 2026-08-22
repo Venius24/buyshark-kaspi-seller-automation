@@ -806,7 +806,7 @@ export default function App() {
         isBetaTester={isBetaTester}
         billingBlocked={billingBlocked}
         onOpenPriceFeedImport={priceFeedImport.openModal}
-        onOpenTour={() => setManualTourActive(true)}
+        onOpenTour={() => { setManualTourActive(true); setMobileNavOpen(false); }}
       />
 
       {/* ── MAIN CONTENT AREA ─────────────────────────────────── */}
