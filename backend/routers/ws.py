@@ -1,15 +1,21 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend.dumper.telemetry import telemetry_manager
-from backend.db.database import get_db
+from backend.db.database import AsyncSessionLocal
 from backend.security.store_context import resolve_ws_store_id
 
 router = APIRouter(tags=["telemetry"])
 
 @router.websocket("/api/ws/telemetry")
-async def websocket_endpoint(websocket: WebSocket, db: AsyncSession = Depends(get_db)):
-    store_id = await resolve_ws_store_id(websocket, db)
+async def websocket_endpoint(websocket: WebSocket):
+    # Своя сессия, закрывается сразу после резолва store_id — Depends(get_db)
+    # здесь держал бы соединение открытым (idle in transaction) на всё время
+    # жизни WS-подключения (часы, пока открыта вкладка браузера), а не на
+    # время запроса. При достаточном числе одновременных вкладок это выедало
+    # пул (10+20=30) целиком и клало ВСЕ фоновые воркеры, включая чат-бота
+    # (инцидент 2026-08-22).
+    async with AsyncSessionLocal() as db:
+        store_id = await resolve_ws_store_id(websocket, db)
     await telemetry_manager.connect(websocket, store_id)
     try:
         while True:
