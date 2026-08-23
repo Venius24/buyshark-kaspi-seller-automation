@@ -17,6 +17,24 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 logger = logging.getLogger(__name__)
 
 
+class AssortmentTruncated(Exception):
+    """Выкачка ассортимента оборвалась и вернула НЕ весь каталог.
+
+    Пагинация BFF ломается на любом не-200 или исключении и отдаёт то, что
+    успела набрать. Для потребителей, которым важна свежесть (кэш товаров,
+    воркеры), недобор терпим — следующий тик доберёт. Для прайс-фида он
+    смертелен: оффер, не попавший в файл, Kaspi снимает с продажи с причиной
+    «не указан в прайс-листе» (HANDOFF.md §3.67 — так у владельца слегло ~798
+    карточек). Поэтому sync_merchant_assortment(strict=True) вместо
+    усечённого списка бросает это исключение.
+    """
+
+    def __init__(self, reason: str, collected: int):
+        self.reason = reason
+        self.collected = collected
+        super().__init__(f"Ассортимент выкачан не полностью ({collected} офферов): {reason}")
+
+
 class KaspiAPI:
     BASE_URL = "https://kaspi.kz/shop/api/v2"
     TIMEOUT = 15
@@ -151,10 +169,27 @@ class KaspiAPI:
             resp = requests.get(url, headers=headers, params=params, timeout=KaspiAPI.TIMEOUT)
             if resp.status_code == 429:
                 wait = 2 ** attempt
-                print(f"[KaspiAPI] 429 Too Many Requests — backing off {wait}s (attempt {attempt+1})")
+                logger.warning(f"[KaspiAPI] 429 Too Many Requests — backing off {wait}s (attempt {attempt+1})")
+                try:
+                    from backend.services import ops_metrics
+                    ops_metrics.inc("kaspi_429")
+                except Exception:
+                    pass
                 time.sleep(wait)
                 continue
+            if resp.status_code >= 500:
+                try:
+                    from backend.services import ops_metrics
+                    ops_metrics.inc("kaspi_http_error_5xx")
+                except Exception:
+                    pass
             return resp
+        # Ретраи 429 исчерпаны — вызывающий получит 429-ответ как есть.
+        try:
+            from backend.services import ops_metrics
+            ops_metrics.inc("kaspi_429_exhausted")
+        except Exception:
+            pass
         return resp
 
     @staticmethod
@@ -1043,8 +1078,20 @@ class KaspiAPI:
     # ── 9. sync merchant assortment (BFF offer-view) ─────────
 
     @staticmethod
-    def sync_merchant_assortment(token: str, store_id: Optional[str] = None) -> list:
-        """Выкачивает ВСЕ товары из кабинета Kaspi (ассортимент) через BFF эндпоинт или фоллбеки."""
+    def sync_merchant_assortment(token: str, store_id: Optional[str] = None,
+                                 strict: bool = False) -> list:
+        """Выкачивает ВСЕ товары из кабинета Kaspi (ассортимент) через BFF эндпоинт или фоллбеки.
+
+        strict=False (по умолчанию, поведение всех прежних вызывающих): пагинация
+        на ошибке обрывается и возвращается то, что успели набрать — недобор
+        доберёт следующий тик.
+
+        strict=True: любой обрыв — это AssortmentTruncated, а не короткий список.
+        Нужно там, где неполнота меняет смысл данных: прайс-фид объявляет весь
+        каталог, и отсутствующий в файле оффер Kaspi снимает с продажи
+        (HANDOFF.md §3.67). В strict-режиме фоллбеки (заказы, кэш) тоже
+        запрещены — они принципиально не дают полного каталога.
+        """
         # Слайс 7: раньше сперва читался merchant_id из общего states/session.json
         # — для стора B это могло вернуть merchant_id стора A. Токен уже
         # однозначно указывает, чей это запрос — резолвим напрямую по нему
@@ -1060,6 +1107,8 @@ class KaspiAPI:
             # 403 от Kaspi на каждой странице). Честно пропускаем синхронизацию —
             # следующий периодический тик (products_sync_worker) попробует снова.
             print(f"[BFF Sync] Не удалось определить numeric Merchant ID (got: {m_id!r}) — пропускаем синхронизацию ассортимента.")
+            if strict:
+                raise AssortmentTruncated(f"не определён numeric merchant_id (got {m_id!r})", 0)
             return []
         merchant_id = str(m_id)
 
@@ -1090,6 +1139,12 @@ class KaspiAPI:
         # при любом состоянии кабинета. Ходим двумя проходами, чтобы каждый оффер
         # честно получил свой статус из той выборки, в которой Kaspi его отдал.
         has_mc_session = bool(cookies and "mc-session" in cookies and "mc-sid" in cookies)
+        if strict and not has_mc_session:
+            raise AssortmentTruncated("нет кук mc-session/mc-sid — BFF недоступен", 0)
+
+        # Причина обрыва пагинации, если он был. Пустая строка = оба прохода
+        # дошли до естественного конца каталога.
+        truncation_reason = ""
 
         for is_active_pass in ((True, False) if has_mc_session else ()):
             page = 0
@@ -1109,6 +1164,10 @@ class KaspiAPI:
 
                     if resp.status_code != 200:
                         print(f"[BFF Sync] Ошибка пагинации на странице {page} [{resp.status_code}]: {resp.text}")
+                        truncation_reason = (
+                            f"HTTP {resp.status_code} на странице {page} "
+                            f"(a={'true' if is_active_pass else 'false'})"
+                        )
                         break
 
                     data_json = resp.json()
@@ -1182,10 +1241,27 @@ class KaspiAPI:
                     time.sleep(0.3)
                 except Exception as err:
                     print(f"[BFF Sync] Исключение во время пагинации: {err}")
+                    truncation_reason = (
+                        f"исключение на странице {page} "
+                        f"(a={'true' if is_active_pass else 'false'}): {err!r}"
+                    )
                     break
 
             print(f"[BFF Sync] Проход a={'true' if is_active_pass else 'false'} "
                   f"({'в продаже' if is_active_pass else 'сняты'}): {pass_count} товаров.")
+
+        if truncation_reason:
+            # Раньше обрыв был неотличим от конца каталога: функция просто
+            # возвращала недобор. Теперь он хотя бы виден в логе всегда, а в
+            # strict-режиме останавливает работу.
+            print(f"[BFF Sync] ⚠️ ПАГИНАЦИЯ ОБОРВАЛАСЬ — список НЕПОЛНЫЙ: {truncation_reason}")
+            if strict:
+                raise AssortmentTruncated(truncation_reason, len(all_products))
+        if strict:
+            # Фоллбеки ниже (заказы, кэш) полного каталога не дают by design.
+            if not all_products:
+                raise AssortmentTruncated("BFF вернул 0 офферов", 0)
+            return all_products
 
         # Фоллбек 1: Получение товаров из недавних заказов Kaspi API
         if not all_products:

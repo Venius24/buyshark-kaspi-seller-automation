@@ -1,0 +1,406 @@
+<?xml version="1.0" encoding="UTF-8"?><kaspi_catalog xmlns="kaspiShopping" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://kaspi.kz/kaspishopping.xsd" date="2026-08-14 23:58">
+    <company>20186986</company>
+    <merchantid>20186986</merchantid>
+    <offers>
+        <offer sku="D844-0005">
+            <model>Barkhan мотыга D844-0005</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="64.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">590</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="S517-0005">
+            <model>Набор 3 шт</model>
+            <brand/>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="100.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1118</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="X474-0018-9">
+            <model>Губка для посуды Vetta 441-200 4 шт, поролон</model>
+            <brand>vetta</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="13.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">500</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D844-0018">
+            <model>Мотыга садовая Barkhan, нерж. сталь, PP, TPR</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="15.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1290</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D210-0001-2">
+            <model>Москитная сетка 1500х2000 мм</model>
+            <brand/>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="28.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">790</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D613-0004">
+            <model/>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="72.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">2300</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D675-00019">
+            <model>Barkhan Горшок для растений, 10.5х10.5х8см, керамика</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="56.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1590</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D697-0005-1">
+            <model>Наклейка интерьерная Бабочки 3D Радуга 12шт 12x10 см</model>
+            <brand/>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="45.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">592</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="X474-0018">
+            <model>Barkhan Губка для мытья посуды, 12.5х8.5х1.5см, поролон, полиэстер, PE волокно, 4шт.</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="31.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">279</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D111-0008">
+            <model>Barkhan Держатель для фитолампы, E27, 43см, 220В, 3А, металл, PC</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="78.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1900</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D472-0017-2">
+            <model>Аксессуары для подвязки для кустарников GRINDA 5000x0.2 см, металл</model>
+            <brand>grinda</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="20.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1020</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D472-0019">
+            <model>Barkhan Подвязка для растений 30м, 0.4см, металл, PET</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="218.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">490</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D616-0004 2 шт">
+            <model>LC1-BXGTP золотистый</model>
+            <brand/>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="15.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">3500</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D970-0023">
+            <model>Лейка, 37х13х17см, 1.5л, пластик</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="44.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1500</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D472-0025">
+            <model>Маркеры строительные 3шт (черный, красный, синий), наконечник 20х1мм, для разметки по металлу, дереву, стеклу, ткани</model>
+            <brand>pailun</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="68.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">590</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D973-0020">
+            <model>Barkhan Набор для полива</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="3.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">3700</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D618-0011-2">
+            <model>Home Sweet шкатулка Home Sweet BJ10 BJ10, дерево, искусственная кожа, пластик</model>
+            <brand>home-sweet</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="4.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">6600</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D979-0030">
+            <model>Barkhan коннектор D979-0030 1 шт</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="1.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">350</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="H477-0010 Набор воздушных шаров">
+            <model>H477-0010 Набор воздушных шаров</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="85.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1680</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="X147-0010">
+            <model>Держатель для губки Barkhan Коврик для мойки, 12.5x9.6см, силикон X147-0010 12.5x9.6 см</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="94.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">590</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="T114-0006-1">
+            <model>Стакан раскладной Helios РМ10</model>
+            <brand>helios</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="6.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">997</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D979-0027">
+            <model>Barkhan соединитель D979-0027 1 шт</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="28.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">420</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D648-0002-2">
+            <model>Сетка шпалерная для огурцов, для кустарников, для вьющихся растений 200x500 см, пластик</model>
+            <brand/>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="10.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1980</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D844-0009">
+            <model>Barkhan веерные грабли D844-0009</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="13.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">590</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D844-0004">
+            <model>Barkhan мотыга D844-0004</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="60.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">650</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D979-0025">
+            <model>Муфта ремонтная для шланга 1/2" - 3/4", пластик, Barkhan</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="187.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">470</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D472-0017-4">
+            <model>GRINDA опора для растений 8-422343_z01 зеленый</model>
+            <brand>grinda</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="20.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1020</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D973-0011">
+            <model>Barkhan пистолет для полива D973-0011</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="89.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1890</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="581809328">
+            <model>Barkhan держатель бумажных полотенец X171-0027, нержавеющая сталь</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="107.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1690</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D613-0006">
+            <model>Рамка для фотографий А3, 29.7x42см, белый, МДФ, ПВХ</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="6.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">2400</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D973-0009">
+            <model>Пистолет-разбрызгиватель Barkhan, 5 режимов, пластиковый</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="100.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">970</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D042-0019-2">
+            <model>Садовые ножницы для веток, универсальное, для цветов , диаметр среза: 210 мм</model>
+            <brand/>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="40.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1498</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D675-00013">
+            <model/>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="9.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">490</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D210-0005-4">
+            <model>Москитные шторы на двери 1000х2100 мм</model>
+            <brand/>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="15.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">2499</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="S517-0046-1">
+            <model>Ключ Kenli KL-9725А 1</model>
+            <brand>kenli</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="23.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">788</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D616-0004-4">
+            <model>SofAli Home Golden золотистый</model>
+            <brand/>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="12.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1300</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="X171-0015">
+            <model>Barkhan Набор крючков, 8.5х3см, металл, 2шт</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="23.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">490</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D979-0016">
+            <model>Barkhan адаптер D979-0016 1 шт</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="155.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">340</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="H057-0002">
+            <model>Небесный фонарик «Сердце», 95х89х36см, бумага, воск, металл</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="1817.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">790</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="K474-0008-3">
+            <model>Салфетница V&amp;v-shop, ABS-пластик</model>
+            <brand/>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="20.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">2500</cityprice>
+            </cityprices>
+        </offer>
+    </offers>
+</kaspi_catalog>

@@ -1,5 +1,6 @@
 import datetime
 import logging
+import os
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from backend.kaspi_wrapper import KaspiAPI
 from backend.models import UpdateProductRequest
@@ -194,7 +195,24 @@ def get_xml_feed(ctx: StoreContext = Depends(get_store_context)):
     Раньше был вообще без авторизации (читал states/session.json напрямую) —
     теперь, как и остальные эндпоинты этого роутера, резолвит контекст через
     dual-auth (см. security/store_context.py::get_store_context).
+
+    ВЫКЛЮЧЕНО ПО УМОЛЧАНИЮ (XML_FEED_ENDPOINT_ENABLED=1, чтобы включить) —
+    прайс-фид это декларация ВСЕГО каталога: оффер, которого в файле нет,
+    Kaspi снимает с продажи с причиной «не указан в прайс-листе». Ровно так
+    у владельца однажды слегло ~798 карточек из-за файла на два SKU (см.
+    HANDOFF.md §3.67). Ручка отдаёт содержимое кэша `states/products.json`
+    без всякой проверки полноты — усечённый кэш здесь неотличим от полного
+    каталога. Пока не готов сборщик снимка с инвариантом полноты
+    (`backend/dumper/feed_snapshot.py`), отдавать этот файл наружу опасно.
     """
+    if os.getenv("XML_FEED_ENDPOINT_ENABLED", "0") != "1":
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "XML-фид временно отключён: файл без проверки полноты снимает "
+                "с продажи всё, чего в нём нет. Включается XML_FEED_ENDPOINT_ENABLED=1."
+            ),
+        )
     products = _load_products(ctx.store_id)
     xml_data = generate_xml_feed(ctx.merchant_id, products)
     return Response(content=xml_data, media_type="application/xml")
