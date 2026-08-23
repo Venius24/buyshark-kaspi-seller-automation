@@ -251,6 +251,48 @@ def queue_depth(store_id) -> int:
         session.close()
 
 
+def pending_intents(store_id) -> dict:
+    """
+    Намерения, ждущие отправки: {merchantSku: {...}}. Ничего не пишет и не шлёт.
+
+    Ключ — тот же merchantSku, которым оффер зовётся в прайс-листе (демпер
+    кладёт `p["merchantSku"]`, Мастер-Группы — физический SKU), поэтому очередь
+    и файл стыкуются без переходников.
+
+    Нужно dry-run'у прайс-фида (backend/dumper/feed_plan.py): файл объявляет
+    весь каталог, а меняет в нём ровно то, что здесь лежит, — и человек должен
+    увидеть этот список ДО того, как файл куда-то поедет.
+    """
+    session = _session()
+    if not session:
+        return {}
+    try:
+        from backend.db.models import KaspiOfferSyncDB
+
+        rows = session.scalars(
+            select(KaspiOfferSyncDB).where(
+                KaspiOfferSyncDB.store_id == store_id,
+                KaspiOfferSyncDB.desired_at.isnot(None),
+            )
+        ).all()
+        return {
+            row.sku: {
+                "price": row.desired_price,
+                "stock": row.desired_stock,
+                "available": row.desired_available,
+                "priority": row.priority if row.priority is not None else Priority.MINOR,
+                "reason": row.reason or "",
+                "desired_at": row.desired_at,
+            }
+            for row in rows
+        }
+    except Exception as e:
+        logger.error("Не удалось прочитать очередь намерений: %s", e)
+        return {}
+    finally:
+        session.close()
+
+
 def enqueue(
     store_id,
     sku: str,
