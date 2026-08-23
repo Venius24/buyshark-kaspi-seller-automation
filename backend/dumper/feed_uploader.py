@@ -266,6 +266,15 @@ def send_plan(
             "измениться, файл откатил бы чужие правки; пересобрать план"
         )
 
+    # Поля идентичности. Если они не взяты из принятого Kaspi файла, значит они
+    # пришли из BFF — а там бренд лежит display-именем («Волат») вместо слага
+    # («volat»), и файл переписал бы бренды сотням карточек заодно с ценой.
+    if not getattr(plan, "identity_source", None):
+        raise FeedUploadRefused(
+            "названия и бренды не сверены с принятым файлом Kaspi — отправка переписала бы "
+            "поля идентичности; пересобрать план с use_accepted_identity"
+        )
+
     if not allow_changes and plan.changed_offers:
         raise FeedUploadRefused(
             f"план меняет {plan.changed_offers} офферов, а это идемпотентная отправка "

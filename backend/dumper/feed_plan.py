@@ -58,6 +58,10 @@ class FeedPlan:
     missing_from_file: List[str] = field(default_factory=list)
     orphan_intents: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    # id принятого Kaspi файла, из которого взяты <model>/<brand>. None = поля
+    # идентичности не сверены, и отправлять такой файл нельзя (см. feed_uploader).
+    identity_source: Optional[str] = None
+    identity_unknown: int = 0
     built_at: Optional[datetime.datetime] = None
 
     @property
@@ -135,6 +139,9 @@ def build_feed_plan(
     baseline_count: Optional[int] = None,
     intents: Optional[Dict[str, dict]] = None,
     generated_at: Optional[datetime.datetime] = None,
+    identity: Optional[Dict[str, dict]] = None,
+    identity_source: Optional[str] = None,
+    use_accepted_identity: bool = True,
 ) -> FeedPlan:
     """
     Собрать файл и дифф, ничего никуда не отправляя.
@@ -165,12 +172,36 @@ def build_feed_plan(
         offers.append(planned)
         diffs.extend(offer_diffs)
 
+    # Поля идентичности — из файла, который Kaspi сама приняла и сама отдаёт
+    # обратно. Из BFF их брать нельзя: там бренд лежит display-именем
+    # («Волат»), а в фиде он слаг («volat»), и вывести одно из другого
+    # невозможно. Подробности — в feed_identity.
+    identity_stats = None
+    if identity is None and use_accepted_identity:
+        from backend.dumper.feed_identity import fetch_accepted_identity
+
+        identity_source, identity = fetch_accepted_identity(store_id, snapshot.merchant_id)
+    if identity:
+        from backend.dumper.feed_identity import apply_identity
+
+        offers, identity_stats = apply_identity(offers, identity)
+
     # Намерения по SKU, которых в каталоге нет. Файлом их не выразить: оффера,
     # отсутствующего в факте, в файле тоже не будет, и намерение просто
     # потеряется. Это не повод не собирать файл, но человек должен знать.
     orphans = sorted(set(intents) - fact_skus)
 
     warnings: List[str] = list(snapshot.notes)
+    if identity_stats is None:
+        warnings.append(
+            "поля идентичности НЕ сверены с принятым файлом — названия и бренды пришли из BFF "
+            "и почти наверняка разойдутся со слагами Kaspi; отправка заблокирована"
+        )
+    elif identity_stats["unknown"]:
+        warnings.append(
+            "офферов вне принятого файла: {} — уйдут с пустыми <model/> и <brand/> "
+            "(напр. {})".format(len(identity_stats["unknown"]), identity_stats["unknown"][:5])
+        )
     if orphans:
         warnings.append(
             "намерений по SKU вне каталога: {} — файлом они не поедут (напр. {})".format(
@@ -225,6 +256,8 @@ def build_feed_plan(
         missing_from_file=[],
         orphan_intents=orphans,
         warnings=warnings,
+        identity_source=identity_source,
+        identity_unknown=len(identity_stats["unknown"]) if identity_stats else 0,
         built_at=datetime.datetime.now(),
     )
     logger.info(
@@ -248,6 +281,11 @@ def render_plan_report(plan: FeedPlan, limit: int = 25) -> str:
         "  не изменится          : {}".format(plan.unchanged),
         "  отсутствует в файле   : {}".format(len(plan.missing_from_file)),
         "  снято с продажи (архив, в файл не идёт): {}".format(plan.snapshot.archived_count),
+        "  названия и бренды   : {}".format(
+            "из принятого файла {} (вне файла — {})".format(
+                plan.identity_source, plan.identity_unknown)
+            if plan.identity_source else "НЕ СВЕРЕНЫ — отправка заблокирована"
+        ),
     ]
     if plan.warnings:
         lines.append("")

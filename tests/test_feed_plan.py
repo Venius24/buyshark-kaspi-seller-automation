@@ -49,6 +49,7 @@ def catalog(monkeypatch):
 
 
 def _plan(intents=None, **kw):
+    kw.setdefault("use_accepted_identity", False)
     return build_feed_plan("tok", "store-1", baseline_count=20, intents=intents or {}, **kw)
 
 
@@ -177,7 +178,7 @@ def test_intents_are_read_from_db_by_default(catalog, monkeypatch):
     monkeypatch.setattr(
         offer_sync, "pending_intents", lambda store_id: {"SKU-009": {"price": 111}}
     )
-    plan = build_feed_plan("tok", "store-1", baseline_count=20)
+    plan = build_feed_plan("tok", "store-1", baseline_count=20, use_accepted_identity=False)
     assert plan.changed_offers == 1
     assert plan.diffs[0].planned == 111
 

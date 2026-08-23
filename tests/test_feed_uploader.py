@@ -49,6 +49,7 @@ class _Plan:
         self.snapshot = _Snapshot(merchant_id, age_seconds)
         self.xml = b"<kaspi_catalog/>"
         self.missing_from_file = missing or []
+        self.identity_source = "accepted-file-1"
         self._total = total
         self._changed = changed
 
@@ -271,3 +272,13 @@ def test_verdict_ok_requires_everything_to_line_up():
     assert not UploadVerdict("i", "f", "FLUSHED", distinct=10, processed=10, rejected=1).ok
     assert not UploadVerdict("i", "f", "ERROR", distinct=10, processed=10).ok
     assert not UploadVerdict("i", "f", "FLUSHED", distinct=0, processed=0).ok
+
+
+def test_refuses_when_identity_not_verified(kaspi):
+    """Без сверки с принятым файлом бренды уедут display-именами вместо слагов."""
+    plan = _Plan()
+    plan.identity_source = None
+    with pytest.raises(FeedUploadRefused) as e:
+        send_plan(plan, "store-1", MERCHANT, confirm=MERCHANT)
+    assert "не сверены" in str(e.value)
+    assert kaspi["posts"] == []
