@@ -275,13 +275,47 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
     skipped_count = 0
     logs = []
 
+    if not all_products:
+        # Пустой кэш ассортимента — резолвить merchantSku не из чего. Раньше
+        # каждый SKU группы проваливался в заглушку ниже и уезжал в очередь
+        # намерений под ключом masterSku; флашер такой ключ не находит в BFF
+        # (там offer["sku"] — это merchantSku), сверка вечно возвращает
+        # INCOMPLETE, и остаток группы не доезжает до Kaspi вообще. Так на
+        # проде 16 намерений Бархана пролежали в очереди девять дней.
+        msg = (
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ⛔ Группа '{group_name}': "
+            f"кэш ассортимента пуст — синхронизация отменена, остаток не разослан. "
+            f"Нужна синхронизация товаров."
+        )
+        logger.error("🔄 [Broadcast Sync] %s", msg)
+        async with get_stock_lock(store_id):
+            groups = _load_master_stock_groups(store_id=store_id)
+            if group_id in groups:
+                groups[group_id]["status"] = "error"
+                groups[group_id]["last_sync_log"] = msg
+                groups[group_id]["status_since"] = datetime.datetime.now().isoformat()
+                _save_master_stock_groups(groups, store_id=store_id)
+        await broadcast_ws_event("log", msg, store_id=store_id)
+        return
+
     processed_physical_skus = set()
     for idx, sku in enumerate(linked_skus):
         t_now = datetime.datetime.now().strftime("%H:%M:%S")
         # Находим товар в ассортименте
         target_p = next((p for p in all_products if p.get("sku") == sku or p.get("merchantSku") == sku or p.get("kaspiSku") == sku), None)
         if not target_p:
-            target_p = {"sku": sku, "merchantSku": sku, "name": f"Товар {sku}", "price_num": 1000}
+            # Не выдумываем оффер. Заглушка подставляла merchantSku=masterSku и
+            # цену 1000 ₸: намерение уходило под неверным ключом и застревало
+            # навсегда, а фиктивная цена попадала в локальный оверрайд.
+            fail_count += 1
+            msg = (
+                f"[{t_now}] ⚠ Группа '{group_name}' -> SKU {sku}: нет в ассортименте — "
+                f"пропущен (остаток не отправлен)"
+            )
+            logger.warning("🔄 [Broadcast Sync] %s", msg)
+            logs.append(msg)
+            await broadcast_ws_event("log", msg, store_id=store_id)
+            continue
 
         physical_key = target_p.get("merchantSku") or target_p.get("sku") or sku
         if physical_key in processed_physical_skus:

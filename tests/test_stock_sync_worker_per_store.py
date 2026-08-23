@@ -168,3 +168,55 @@ class TestExecuteBroadcastSyncStoreScoping(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBroadcastSyncNeverInventsAnOffer(unittest.IsolatedAsyncioTestCase):
+    """Веерная синхронизация раньше подставляла заглушку для SKU, которого нет
+    в кэше ассортимента: merchantSku=masterSku и цена 1000 ₸. Намерение уходило
+    в очередь под числовым masterSku, а флашер ищет оффер в BFF по merchantSku и
+    не находит — сверка вечно возвращает INCOMPLETE. На проде так застряли 16
+    остатков Бархана: девять дней в очереди, ноль отправок."""
+
+    GROUP = {
+        "group_id": "grp_1",
+        "group_name": "Палочки",
+        "linked_skus": ["176712278", "D844-0026-1"],
+        "shared_stock": 40,
+        "stop_qty": 5,
+    }
+
+    def _patches(self, products, groups=None):
+        groups = groups if groups is not None else {"grp_1": dict(self.GROUP)}
+        return [
+            patch.object(worker, "_load_products", return_value=products),
+            patch.object(worker, "_load_master_stock_groups", return_value=groups),
+            patch.object(worker, "_save_master_stock_groups"),
+            patch.object(worker, "_save_products"),
+            patch.object(worker, "_save_override"),
+            patch.object(worker, "discover_merchant_id", return_value="20186986"),
+            patch.object(worker, "broadcast_ws_event", new_callable=AsyncMock),
+        ]
+
+    async def _run(self, products):
+        cm = self._patches(products)
+        for p in cm:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in cm])
+        with patch.object(worker.offer_sync, "enqueue") as enq, \
+             patch.object(worker.offer_sync, "last_known_stock", return_value=None), \
+             patch.object(worker.offer_sync, "should_push_stock", return_value=True):
+            await worker._execute_broadcast_sync_impl("grp_1", "tok", store_id="store-a")
+        return enq
+
+    async def test_unknown_sku_is_skipped_not_invented(self):
+        known = {"sku": "198780339", "merchantSku": "D844-0026-1",
+                 "kaspiSku": "198780339", "name": "Ложка", "price_num": 1666}
+        enq = await self._run([known])
+        sent = [c.args[1] for c in enq.call_args_list]
+        self.assertEqual(sent, ["D844-0026-1"])
+        self.assertNotIn("176712278", sent)
+
+    async def test_empty_product_cache_aborts_instead_of_poisoning_the_queue(self):
+        """Пустой кэш — это «не знаем ничего», а не «всё новое»."""
+        enq = await self._run([])
+        enq.assert_not_called()

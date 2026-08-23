@@ -92,6 +92,9 @@ BATCH_CHUNK = 50
 # Максимум бесплатных сверок с Kaspi за один флаш (offer-view/list квоту не
 # тратит, но это всё равно сетевые запросы — не устраиваем шторм).
 MAX_VERIFY_PER_FLUSH = 40
+#: Сколько намерение может провисеть без единой удачной сверки, прежде чем
+#: флашер начнёт кричать об этом в лог (сутки).
+STUCK_INTENT_SECONDS = 24 * 3600
 # Насколько долго доверяем ранее увиденному состоянию оффера на Kaspi.
 KASPI_STATE_TTL_SECONDS = 1800.0
 # Через сколько после НАШЕЙ записи (не подтверждённой чтением) перепроверяем
@@ -674,6 +677,20 @@ def flush_store(store_id, merchant_uid: str) -> dict:
             if need_verify:
                 verify_left -= 1
                 actual = _fetch_kaspi_state(store_id, merchant_uid, row.sku)
+                if not actual and row.desired_at and (
+                    datetime.datetime.utcnow() - row.desired_at
+                ).total_seconds() > STUCK_INTENT_SECONDS:
+                    # Намерение, которое сутки не удаётся сверить, почти всегда
+                    # означает неверный ключ: SKU нет в BFF, значит и отправить
+                    # его некуда. Молчаливое INCOMPLETE прячет это навсегда —
+                    # 16 остатков Бархана так пролежали девять дней.
+                    logger.error(
+                        "🚫 [OfferSync] SKU %r висит в очереди с %s и не находится в "
+                        "ассортименте Kaspi — остаток %s не доедет. Похоже на неверный "
+                        "ключ намерения (masterSku вместо merchantSku).",
+                        row.sku, row.desired_at, row.desired_stock,
+                    )
+                    _track(row, last_error="не найден в ассортименте Kaspi"[:500])
                 if actual:
                     stats["verified"] += 1
                     if (
