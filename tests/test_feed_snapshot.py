@@ -166,3 +166,44 @@ def test_snapshot_feeds_the_serializer(stub_kaspi):
     xml = generate_xml_feed(snap.merchant_id, snap.offers).decode("utf-8")
     assert xml.count("<offer sku=") == 100
     assert "<merchantid>20186986</merchantid>" in xml
+
+
+# ── Подстановки kaspi_wrapper не должны попадать в фид (живой случай 24.08) ──
+
+def test_placeholder_name_becomes_no_name(stub_kaspi):
+    """`Товар <sku>` придумываем мы, когда BFF молчит. В каталог это писать нельзя:
+    65 таких заглушек уже уехали туда с ручной загрузкой бэкапа 15.08."""
+    products = _catalog(20)
+    products[0]["name"] = "Товар SKU-0000"
+    stub_kaspi["products"] = products
+    snap = build_catalog_snapshot("tok", "store-1", baseline_count=20)
+    assert snap.offers[0]["name"] is None
+
+
+def test_real_name_survives(stub_kaspi):
+    products = _catalog(20)
+    products[0]["name"] = "Товар для сада"  # похоже, но не заглушка
+    stub_kaspi["products"] = products
+    snap = build_catalog_snapshot("tok", "store-1", baseline_count=20)
+    assert snap.offers[0]["name"] == "Товар для сада"
+
+
+def test_placeholder_brand_becomes_no_brand(stub_kaspi):
+    products = _catalog(20)
+    products[0]["brand"] = "Без бренда"
+    stub_kaspi["products"] = products
+    snap = build_catalog_snapshot("tok", "store-1", baseline_count=20)
+    assert snap.offers[0]["brand"] is None
+
+
+def test_undecorated_offer_gives_empty_tags(stub_kaspi):
+    from backend.dumper.xml_feed import generate_xml_feed
+
+    products = _catalog(20)
+    products[0]["name"] = "Товар SKU-0000"
+    products[0]["brand"] = "Без бренда"
+    stub_kaspi["products"] = products
+    snap = build_catalog_snapshot("tok", "store-1", baseline_count=20)
+    xml = generate_xml_feed(snap.merchant_id, snap.offers).decode("utf-8")
+    assert "<model/>" in xml and "<brand/>" in xml
+    assert "Товар SKU-0000" not in xml and "Без бренда" not in xml

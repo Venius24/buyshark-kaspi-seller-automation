@@ -72,6 +72,31 @@ def _is_active(product: dict) -> bool:
     return product.get("status") == "Активен"
 
 
+# Значения, которые придумывает kaspi_wrapper, когда BFF не отдал поле
+# ([backend/kaspi_wrapper.py:1214](backend/kaspi_wrapper.py:1214)). Для интерфейса
+# это безобидная косметика, для прайс-листа — запись выдумки в чужой каталог.
+BRAND_PLACEHOLDER = "Без бренда"
+
+
+def _undecorate(product: dict) -> dict:
+    """
+    Убрать из оффера подставленные нами значения, вернув «поля нет».
+
+    Замечено на первом живом dry-run Бархана: файл содержал 180 названий вида
+    `Товар S517-0015` и 336 брендов `Без бренда` — там, где в собственной
+    выгрузке Kaspi стоят пустые `<model/>` и `<brand/>`. Хуже того, 65 таких
+    заглушек уже лежат в каталоге: они уехали туда с ручной загрузкой бэкапа
+    15.08. Фид не имеет права дописывать то, чего в источнике не было.
+    """
+    clean = dict(product)
+    sku = str(product.get("merchantSku") or "")
+    if clean.get("name") and sku and clean["name"] == f"Товар {sku}":
+        clean["name"] = None
+    if clean.get("brand") == BRAND_PLACEHOLDER:
+        clean["brand"] = None
+    return clean
+
+
 def _baseline_active_count(store_id: str) -> Optional[int]:
     """
     Сколько активных офферов мы видели в прошлый раз — по кэшу ассортимента.
@@ -192,7 +217,7 @@ def build_catalog_snapshot(
     snapshot = CatalogSnapshot(
         store_id=store_id,
         merchant_id=merchant_id,
-        offers=active,
+        offers=[_undecorate(p) for p in active],
         taken_at=datetime.datetime.now(),
         archived_count=archived,
         baseline_count=baseline_count,
