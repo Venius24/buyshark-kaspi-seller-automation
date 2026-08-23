@@ -1,0 +1,406 @@
+<?xml version="1.0" encoding="UTF-8"?><kaspi_catalog xmlns="kaspiShopping" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://kaspi.kz/kaspishopping.xsd" date="2026-08-23 23:09">
+    <company>20186986</company>
+    <merchantid>20186986</merchantid>
+    <offers>
+        <offer sku="D472-0028">
+            <model>Веревка Barkhan D472-0028 20 м, джут</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="66.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">2290</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D917-0008">
+            <model>Barkhan катушка D917-0008</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="10.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">7900</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="H974-0015">
+            <model>Barkhan бокал H974-0015 прозрачный 5 шт</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="37.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">990</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="K474-0001">
+            <model>Barkhan салфетница K474-0001, дерево, пластик</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="96.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1090</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="K474-0003">
+            <model>Barkhan кольцо для салфеток K474-0003, металл</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="60.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1390</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="K474-0004">
+            <model>Barkhan кольцо для салфеток K474-0004, металл</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="79.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1390</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="K474-0006">
+            <model>Barkhan кольцо для салфеток K474-0006, металл</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="52.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1290</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="K474-0007">
+            <model>Barkhan салфетница K474-0007, пластик</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="74.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1290</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="K474-0002">
+            <model>Barkhan кольцо для салфеток K474-0002, металл</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="204.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1190</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="X179-0007">
+            <model>Barkhan флакон дорожный наливным путем пластик 30 мл 6 шт</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="147.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">590</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="K471-0008-1">
+            <model>Подставка Barkhan пластик</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="9.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1290</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="X179-0012.">
+            <model>Barkhan емкость для косметических средств силикон, пластик 90 мл 4 шт</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="76.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">2590</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D472-0021">
+            <model>Barkhan метка-ориентир D472-0021 оранжевый</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="6.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">210</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D143-0001">
+            <model>Barkhan D143-0001 500 см</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="60.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">4800</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D143-0003">
+            <model>Уличный светильник Barkhan D143-0003 700 см</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="99.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">2990</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D143-0005">
+            <model>Уличный светильник Barkhan D143-0005 700 см</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="46.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">3300</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D979-0001">
+            <model>Barkhan коннектор D979-0001 1 шт</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="33.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">890</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D979-0014">
+            <model>Штуцер резьбовой для крана, с внутренней резьбой 1"-3/4", латунь</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="29.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1790</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D970-0017">
+            <model>Пульверизатор, 24х8.5см, 510мл, PP</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="95.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">490</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D917-0011">
+            <model>Barkhan Катушка для шланга, 32x32x34см, PVC, металл</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="10.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">7900</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="X171-0021">
+            <model>Barkhan держатель Urban Black 1 шт, металл</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="526.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1060</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="H477-0005">
+            <model/>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="187.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">890</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="H477-0008">
+            <model/>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="373.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">690</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="H477-0006">
+            <model/>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="687.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">790</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="H477-0016">
+            <model>Набор воздушных шаров "С днем рождения", 53 предмета, черно-красный, фольга, латекс</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="385.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">2290</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="H477-0003">
+            <model/>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="53.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1690</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="H477-0011">
+            <model>Шары воздушные "Хром", 60шт, микс, латекс</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="230.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1680</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="H477-0015">
+            <model>Набор воздушных шаров "С днем рождения", 53 предмета, черный, фольга, латекс</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="376.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">2990</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="H477-0020">
+            <model>Шары воздушные "Серебро  и розовые сердца", 10шт, 46см, фольга</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="792.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">790</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="H477-0004">
+            <model/>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="100.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1580</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="X171-0027-2">
+            <model>Держатель бумажных полотенец Без бренда, пластик</model>
+            <brand/>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="149.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">2500</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="S517-0027-1">
+            <model>Фонарь 20177494_096027529 черный</model>
+            <brand/>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="208.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1090</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="S537-0006-1">
+            <model>Мяч S537-0006 для футбола размер 5</model>
+            <brand/>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="39.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">2900</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="X171-00009">
+            <model> Barkhan Набор крючков "Золото", 5.5х5.5см, пластик, 3шт </model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="37.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">379</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="D111-00008">
+            <model> Держатель для фитолампы</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="30.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">1900</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="X171-0011">
+            <model> Barkhan Набор крючков, 18х4см, пластик, 3шт </model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="18.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">289</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku=" S517-0005 ">
+            <model> Универсальный набор для мячей, шланг, игла 3шт, насадка, металл </model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="269.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">490</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="K474-0008-3">
+            <model>Салфетница V&amp;v-shop, ABS-пластик</model>
+            <brand/>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="177.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">2298</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="X171-0010">
+            <model> Barkhan Набор крючков "Золото"</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="100.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">390</cityprice>
+            </cityprices>
+        </offer>
+        <offer sku="H477-0009 ">
+            <model>H477-0009	</model>
+            <brand>barkhan</brand>
+            <availabilities>
+                <availability available="yes" storeId="20186986_001" preOrder="0" stockCount="49.0"/>
+            </availabilities>
+            <cityprices>
+                <cityprice cityId="750000000">390</cityprice>
+            </cityprices>
+        </offer>
+    </offers>
+</kaspi_catalog>

@@ -23,7 +23,12 @@ from backend.dumper.xml_feed import (
     generate_xml_feed,
 )
 
-FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "kaspi_reference_feed.xml"
+FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
+FIXTURE = FIXTURES_DIR / "kaspi_reference_feed.xml"
+# Второй эталон — выдержка из выгрузки ACTIVE от 2026-08-23 (1110 офферов).
+# Взят отдельно от первого, потому что вскрыл расхождение, которого в первом не
+# было: Kaspi сохраняет пробелы и табуляции в <model> дословно, а мы их обрезали.
+FIXTURE_ACTIVE = FIXTURES_DIR / "kaspi_reference_feed_active.xml"
 
 OFFER_RE = re.compile(r'        <offer sku="(?P<sku>[^"]+)">\n(?P<body>.*?)\n        </offer>', re.S)
 
@@ -67,8 +72,9 @@ def _parse_reference(xml_text: str):
     return merchant_id, generated_at, products
 
 
-def test_reproduces_reference_feed_byte_for_byte():
-    reference = FIXTURE.read_text(encoding="utf-8")
+@pytest.mark.parametrize("fixture", [FIXTURE, FIXTURE_ACTIVE], ids=["upload", "active"])
+def test_reproduces_reference_feed_byte_for_byte(fixture):
+    reference = fixture.read_text(encoding="utf-8")
     merchant_id, generated_at, products = _parse_reference(reference)
 
     assert len(products) == 40, "фикстура повреждена — офферы не разобрались"
@@ -78,12 +84,20 @@ def test_reproduces_reference_feed_byte_for_byte():
     assert produced == reference
 
 
-def test_reference_covers_the_awkward_cases():
+@pytest.mark.parametrize("fixture", [FIXTURE, FIXTURE_ACTIVE], ids=["upload", "active"])
+def test_reference_covers_the_awkward_cases(fixture):
     """Фикстура должна содержать именно те случаи, на которых легко ошибиться."""
-    reference = FIXTURE.read_text(encoding="utf-8")
+    reference = fixture.read_text(encoding="utf-8")
     assert "<model/>" in reference, "нет оффера с пустым названием"
     assert "<brand/>" in reference, "нет оффера с пустым брендом"
     assert "&amp;" in reference, "нет оффера с символом, требующим экранирования"
+
+
+def test_active_reference_covers_whitespace_names():
+    """Ради этого случая второй эталон и заведён."""
+    reference = FIXTURE_ACTIVE.read_text(encoding="utf-8")
+    assert re.search(r"<model> \S", reference), "нет названия с ведущим пробелом"
+    assert re.search(r"\t</model>", reference), "нет названия с табуляцией на конце"
 
 
 # ── Инварианты: лучше не собрать файл, чем собрать с дырой ──────────────────
@@ -164,6 +178,20 @@ def test_escapes_special_characters_in_text():
         "20186986", [_ok_product(name='Щётка "Ёж" & Ко <2 шт>')]
     ).decode("utf-8")
     assert '<model>Щётка "Ёж" &amp; Ко &lt;2 шт&gt;</model>' in xml
+
+
+def test_preserves_surrounding_whitespace_in_name():
+    """Обрезка пробелов — тихое переименование чужой карточки, а не уборка."""
+    xml = generate_xml_feed(
+        "20186986", [_ok_product(name=" Barkhan Набор крючков\t")]
+    ).decode("utf-8")
+    assert "<model> Barkhan Набор крючков\t</model>" in xml
+
+
+def test_whitespace_only_name_is_an_empty_tag():
+    """Но строка из одних пробелов — это отсутствие названия, а не тег с пробелом."""
+    xml = generate_xml_feed("20186986", [_ok_product(name="   ")]).decode("utf-8")
+    assert "<model/>" in xml
 
 
 def test_escapes_quote_in_attribute():
