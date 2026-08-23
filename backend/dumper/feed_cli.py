@@ -50,6 +50,12 @@ def main(argv=None) -> int:
     parser.add_argument("--store", required=True, help="store_id из таблицы stores")
     parser.add_argument("--save", help="куда положить собранный XML")
     parser.add_argument("--limit", type=int, default=25, help="сколько изменений печатать")
+    parser.add_argument(
+        "--identity-file",
+        help="XML-выгрузка из кабинета как источник <model>/<brand>. Нужна, когда "
+             "последний ПРИНЯТЫЙ файл устарел: офферы, появившиеся после него, иначе "
+             "уедут с пустыми названием и брендом.",
+    )
     parser.add_argument("--send", action="store_true", help="ОТПРАВИТЬ файл в Kaspi")
     parser.add_argument("--confirm", default="", help="merchant_id — подтверждение отправки")
     parser.add_argument("--allow-changes", action="store_true",
@@ -63,7 +69,18 @@ def main(argv=None) -> int:
     token, merchant_id, name = _resolve_store(args.store)
     print("магазин: {} (merchant {})".format(name, merchant_id))
 
-    plan = build_feed_plan(token, args.store)
+    identity, identity_source = None, None
+    if args.identity_file:
+        from backend.dumper.feed_identity import parse_identity
+
+        with open(args.identity_file, "rb") as fh:
+            identity = parse_identity(fh.read())
+        identity_source = "file:{}".format(args.identity_file)
+        print("идентичность из файла: {} ({} офферов)".format(args.identity_file, len(identity)))
+
+    plan = build_feed_plan(
+        token, args.store, identity=identity, identity_source=identity_source
+    )
     print()
     print(render_plan_report(plan, limit=args.limit))
 
