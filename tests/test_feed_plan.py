@@ -180,3 +180,42 @@ def test_intents_are_read_from_db_by_default(catalog, monkeypatch):
     plan = build_feed_plan("tok", "store-1", baseline_count=20)
     assert plan.changed_offers == 1
     assert plan.diffs[0].planned == 111
+
+
+# ── Пробельные артикулы: живой случай Бархана (2026-08-24) ──────────────────
+
+def test_tab_in_sku_is_not_a_missing_offer(catalog):
+    """
+    BFF отдаёт merchantSku двух товаров с хвостовой табуляцией, а XML-парсер
+    по стандарту превращает её в пробел — ровно так, как в собственной выгрузке
+    Kaspi (`H477-0009 `). Сверка обязана считать это одним и тем же оффером,
+    иначе сборка отказывает на ровном месте (и отказала на первом же прогоне).
+    """
+    catalog["products"] = (
+        [_offer("SKU-{:03d}".format(i)) for i in range(18)]
+        + [_offer("H477-0009\t"), _offer("H477-0017\t")]
+    )
+    plan = _plan()
+    assert plan.total == 20
+    assert plan.missing_from_file == []
+    assert "H477-0009 " in feed_plan._skus_in_xml(plan.xml)
+
+
+def test_leading_and_trailing_spaces_in_sku_survive(catalog):
+    """` S517-0005 ` — тоже реальный артикул; пробелы по краям атрибут хранит."""
+    catalog["products"] = (
+        [_offer("SKU-{:03d}".format(i)) for i in range(19)] + [_offer(" S517-0005 ")]
+    )
+    plan = _plan()
+    assert " S517-0005 " in feed_plan._skus_in_xml(plan.xml)
+
+
+def test_refuses_when_two_skus_collapse_into_one(catalog):
+    """А вот схлопывание разных артикулов в один — настоящая пропажа оффера."""
+    catalog["products"] = (
+        [_offer("SKU-{:03d}".format(i)) for i in range(18)]
+        + [_offer("H477-0009\t"), _offer("H477-0009 ")]
+    )
+    with pytest.raises(FeedPlanRefused) as e:
+        _plan()
+    assert "схлопываются" in str(e.value)

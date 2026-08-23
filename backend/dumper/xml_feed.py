@@ -55,6 +55,23 @@ def _escape_attr(value: str) -> str:
     return _escape(value).replace('"', "&quot;")
 
 
+def xml_attr_value(raw) -> str:
+    """
+    Значение атрибута ТАК, КАК ЕГО УВИДИТ ЛЮБОЙ XML-ПАРСЕР.
+
+    Стандарт предписывает нормализацию значений атрибутов: табуляция, перевод
+    строки и возврат каретки заменяются пробелом (XML 1.0, §3.3.3). Это делаем
+    не мы — это сделает парсер на стороне Kaspi, что бы мы ни записали.
+
+    Замечено на живых данных Бархана: BFF отдаёт merchantSku двух товаров с
+    хвостовой ТАБУЛЯЦИЕЙ (`H477-0009\\t`), а в собственной выгрузке Kaspi те же
+    офферы стоят с ПРОБЕЛОМ (`H477-0009 `) — то есть их сторона уже прошла ту
+    же нормализацию. Значит табуляцию можно писать как есть, но сверять состав
+    файла с фактом нужно в нормализованном виде.
+    """
+    return str(raw).replace("\t", " ").replace("\n", " ").replace("\r", " ")
+
+
 def _point_store_id(merchant_id: str, product: dict) -> str:
     """
     storeId точки продаж. У Бархана точка одна — `20186986_001`, и все 1119
@@ -172,9 +189,15 @@ def generate_xml_feed(
     seen = set()
     for product in products:
         sku = _offer_sku(product)
-        if sku in seen:
-            raise FeedSerializationError(f"дубль merchantSku в снимке: {sku!r}")
-        seen.add(sku)
+        # Сверяем по нормализованному виду: `A\t` и `A ` — разные строки для
+        # Python, но один и тот же атрибут для любого XML-парсера, и второй
+        # оффер в файле молча заместил бы первый.
+        key = xml_attr_value(sku)
+        if key in seen:
+            raise FeedSerializationError(
+                f"дубль merchantSku в снимке: {sku!r} (после нормализации атрибута {key!r})"
+            )
+        seen.add(key)
 
         price = _offer_price(product)
         stock = _offer_stock(product)

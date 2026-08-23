@@ -27,7 +27,7 @@ import logging
 import xml.etree.ElementTree as ET
 
 from backend.dumper.feed_snapshot import CatalogSnapshot, build_catalog_snapshot
-from backend.dumper.xml_feed import CATALOG_NS, generate_xml_feed
+from backend.dumper.xml_feed import CATALOG_NS, generate_xml_feed, xml_attr_value
 
 logger = logging.getLogger(__name__)
 
@@ -184,18 +184,32 @@ def build_feed_plan(
             "снимать надёжнее JSON-ом".format(len(withdrawals))
         )
 
+    # Схлопывание при нормализации: два разных артикула, отличавшихся только
+    # видом пробельного символа, станут в файле одним оффером — второй просто
+    # исчезнет. Проверяем ДО сборки, чтобы назвать виновную пару поимённо
+    # (сериализатор тоже это ловит, но он видит лишь второй SKU).
+    normalized = {}
+    for raw in fact_skus:
+        normalized.setdefault(xml_attr_value(raw), []).append(raw)
+    collisions = {k: v for k, v in normalized.items() if len(v) > 1}
+    if collisions:
+        raise FeedPlanRefused(
+            "разные merchantSku схлопываются в один при нормализации атрибута: "
+            "{}".format({k: [repr(x) for x in v] for k, v in list(collisions.items())[:3]})
+        )
+
     xml = generate_xml_feed(snapshot.merchant_id, offers, generated_at=generated_at)
 
     # Инвариант полноты, посчитанный по готовому файлу, а не по намерению его
     # собрать. Пропажа здесь = карточки, которые Kaspi погасит.
     file_skus = set(_skus_in_xml(xml))
-    missing = sorted(fact_skus - file_skus)
+    missing = sorted(set(normalized) - file_skus)
     if missing:
         raise FeedPlanRefused(
             "в файле не хватает {} офферов из факта — Kaspi снимет их с продажи "
             "(напр. {})".format(len(missing), missing[:5])
         )
-    extra = sorted(file_skus - fact_skus)
+    extra = sorted(file_skus - set(normalized))
     if extra:
         raise FeedPlanRefused(
             "в файле есть {} офферов, которых нет в факте — состав файла разошёлся "
