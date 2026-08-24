@@ -49,9 +49,16 @@ UPLOAD_FIELD = os.getenv("XML_FEED_UPLOAD_FIELD", "file")
 # цену руками в кабинете, и файл откатил бы правку молча.
 MAX_PLAN_AGE_SECONDS = 300
 
-# Сколько ждать, пока Kaspi дожуёт файл (статус PENDING/PROCESSING -> FLUSHED).
-VERDICT_TIMEOUT_SECONDS = 180
-VERDICT_POLL_SECONDS = 5
+# Статусы, после которых счётчики карточки уже не изменятся. Всё, чего тут нет
+# (включая незнакомые новые), означает «ещё обрабатывается» — см. подробности в
+# UploadVerdict.is_terminal.
+TERMINAL_STATUSES = frozenset({"FLUSHED", "ERROR", "FAILED", "REJECTED", "CANCELLED"})
+
+# Сколько ждать, пока Kaspi дожуёт файл. Живой замер 2026-08-24 на 1097 офферах:
+# разбор идёт рывками с долгими паузами, за 12 минут дошло только до 748 — так что
+# прежние 180с не хватало даже близко.
+VERDICT_TIMEOUT_SECONDS = 30 * 60
+VERDICT_POLL_SECONDS = 15
 
 _MULTIPART_HEADERS = {
     "Accept": "application/json, text/plain, */*",
@@ -88,7 +95,24 @@ class UploadVerdict:
     not_mapped: int = 0
     not_changed: int = 0
     created: Optional[str] = None
+    ended: Optional[str] = None
     raw: Optional[dict] = None
+
+    @property
+    def is_terminal(self) -> bool:
+        """
+        Обработка завершена — дальше счётчики не изменятся.
+
+        Раньше терминальным считался любой статус, которого нет в списке «ещё
+        идёт», и незнакомый `PARSING` был принят за готовый результат: первая
+        живая отправка 2026-08-24 упала с «обработано 0 из 0», хотя файл в этот
+        момент только начали разбирать. Поэтому список перевёрнут: выходим
+        только по явно известному финалу, всё остальное — ждать.
+
+        `endDate` — самостоятельный признак финала: Kaspi проставляет его,
+        когда дожевала файл, и на него можно опереться при новом статусе.
+        """
+        return bool(self.ended) or self.status in TERMINAL_STATUSES
 
     @property
     def ok(self) -> bool:
@@ -125,6 +149,7 @@ def _verdict_from_card(card: dict) -> UploadVerdict:
         not_mapped=num("notMappedOffersCount"),
         not_changed=num("notChangedOffersCount"),
         created=card.get("createdDate"),
+        ended=card.get("endDate"),
         raw=card,
     )
 
@@ -207,7 +232,7 @@ def wait_for_verdict(
             verdict = _verdict_from_card(card)
             if verdict.file_id != previous_file_id:
                 last_seen = verdict
-                if verdict.status not in ("PENDING", "PROCESSING", "UPLOADED", None):
+                if verdict.is_terminal:
                     return verdict
         time.sleep(poll)
     if last_seen:

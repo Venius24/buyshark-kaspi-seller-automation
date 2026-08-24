@@ -284,3 +284,30 @@ def test_refuses_when_identity_not_verified(kaspi):
         send_plan(plan, "store-1", MERCHANT, confirm=MERCHANT)
     assert "не сверены" in str(e.value)
     assert kaspi["posts"] == []
+
+
+def test_parsing_is_not_mistaken_for_a_finished_file(monkeypatch):
+    """
+    Первая живая отправка 2026-08-24 упала с «обработано 0 из 0»: Kaspi отдала
+    статус PARSING, а список «ещё идёт» был неполным — любой незнакомый статус
+    считался финалом. Ждать надо до явного финала, а не до отсутствия в списке.
+    """
+    cards = iter([
+        _card("new-1", status="PARSING", distinct=0, processed=0, not_changed=0),
+        _card("new-1", status="PARSED", distinct=1097, processed=704, not_changed=673),
+        _card("new-1", status="FLUSHED", distinct=1097, processed=1097, not_changed=1097),
+    ])
+    monkeypatch.setattr(feed_uploader, "fetch_last_file", lambda *a, **k: next(cards))
+    monkeypatch.setattr(feed_uploader.time, "sleep", lambda *_: None)
+    verdict = wait_for_verdict("store-1", MERCHANT, previous_file_id="old-0", timeout=30, poll=0)
+    assert verdict.status == "FLUSHED" and verdict.processed == 1097
+
+
+def test_end_date_closes_the_wait_even_on_an_unknown_status(monkeypatch):
+    """Признак финала не только в статусе: проставленный endDate тоже терминален."""
+    card = _card("new-1", status="СОВСЕМ_НОВЫЙ_СТАТУС", distinct=5, processed=5)
+    card["endDate"] = "2026-08-24T22:40:00"
+    monkeypatch.setattr(feed_uploader, "fetch_last_file", lambda *a, **k: card)
+    monkeypatch.setattr(feed_uploader.time, "sleep", lambda *_: None)
+    verdict = wait_for_verdict("store-1", MERCHANT, previous_file_id="old-0", timeout=30, poll=0)
+    assert verdict.is_terminal and verdict.ended
