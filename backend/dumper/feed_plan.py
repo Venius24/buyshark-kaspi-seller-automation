@@ -27,7 +27,12 @@ import logging
 import xml.etree.ElementTree as ET
 
 from backend.dumper.feed_snapshot import CatalogSnapshot, build_catalog_snapshot
-from backend.dumper.xml_feed import CATALOG_NS, generate_xml_feed, xml_attr_value
+from backend.dumper.xml_feed import (
+    CATALOG_NS,
+    feed_sku_roundtrip,
+    generate_xml_feed,
+    xml_attr_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +232,21 @@ def build_feed_plan(
         raise FeedPlanRefused(
             "разные merchantSku схлопываются в один при нормализации атрибута: "
             "{}".format({k: [repr(x) for x in v] for k, v in list(collisions.items())[:3]})
+        )
+
+    # Артикулы, не переживающие путь «XML-нормализация -> обрезка на стороне
+    # Kaspi». Для них файл физически не может сослаться на нужный оффер, и
+    # Kaspi гасит его как отсутствующий в прайс-листе. Молча отправлять такой
+    # файл нельзя: 2026-08-24 так ушли в архив H477-0009 и H477-0017, причём
+    # то же самое сделала бы и родная выгрузка кабинета.
+    unroundtrippable = sorted(s for s in fact_skus if feed_sku_roundtrip(s) != s)
+    if unroundtrippable:
+        raise FeedPlanRefused(
+            "{} артикулов не переживают приём файла (пробелы/табы по краям) — Kaspi не "
+            "сопоставит их с каталогом и снимет с продажи: {}. Чинится только "
+            "переименованием артикула в кабинете.".format(
+                len(unroundtrippable), [repr(s) for s in unroundtrippable[:5]]
+            )
         )
 
     xml = generate_xml_feed(snapshot.merchant_id, offers, generated_at=generated_at)

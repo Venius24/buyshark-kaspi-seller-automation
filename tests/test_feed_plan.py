@@ -185,30 +185,32 @@ def test_intents_are_read_from_db_by_default(catalog, monkeypatch):
 
 # ── Пробельные артикулы: живой случай Бархана (2026-08-24) ──────────────────
 
-def test_tab_in_sku_is_not_a_missing_offer(catalog):
+def test_tab_in_sku_refuses_the_whole_plan(catalog):
     """
-    BFF отдаёт merchantSku двух товаров с хвостовой табуляцией, а XML-парсер
-    по стандарту превращает её в пробел — ровно так, как в собственной выгрузке
-    Kaspi (`H477-0009 `). Сверка обязана считать это одним и тем же оффером,
-    иначе сборка отказывает на ровном месте (и отказала на первом же прогоне).
+    Раньше здесь утверждалось обратное: раз XML-парсер превращает таб в пробел
+    ровно как в выгрузке самой Kaspi, значит оффер доедет. Живая загрузка
+    2026-08-24 это опровергла — Kaspi обрезает края УЖЕ ПОСЛЕ нормализации,
+    ищет `H477-0009`, такого артикула в каталоге нет, и оба оффера ушли в архив
+    как отсутствующие в прайс-листе (`notMapped: 2`). Собирать такой файл
+    нельзя.
     """
     catalog["products"] = (
         [_offer("SKU-{:03d}".format(i)) for i in range(18)]
         + [_offer("H477-0009\t"), _offer("H477-0017\t")]
     )
-    plan = _plan()
-    assert plan.total == 20
-    assert plan.missing_from_file == []
-    assert "H477-0009 " in feed_plan._skus_in_xml(plan.xml)
+    with pytest.raises(FeedPlanRefused) as e:
+        _plan()
+    assert "не переживают приём файла" in str(e.value)
 
 
-def test_leading_and_trailing_spaces_in_sku_survive(catalog):
-    """` S517-0005 ` — тоже реальный артикул; пробелы по краям атрибут хранит."""
+def test_leading_and_trailing_spaces_in_sku_refuse_too(catalog):
+    """` S517-0005 ` — реальный артикул, и его Kaspi обрезает так же."""
     catalog["products"] = (
         [_offer("SKU-{:03d}".format(i)) for i in range(19)] + [_offer(" S517-0005 ")]
     )
-    plan = _plan()
-    assert " S517-0005 " in feed_plan._skus_in_xml(plan.xml)
+    with pytest.raises(FeedPlanRefused) as e:
+        _plan()
+    assert "S517-0005" in str(e.value)
 
 
 def test_refuses_when_two_skus_collapse_into_one(catalog):
@@ -220,3 +222,23 @@ def test_refuses_when_two_skus_collapse_into_one(catalog):
     with pytest.raises(FeedPlanRefused) as e:
         _plan()
     assert "схлопываются" in str(e.value)
+
+
+def test_refuses_skus_that_cannot_survive_kaspi_ingest(monkeypatch):
+    """
+    Артикул с хвостовым табом уезжает в файл пробелом, Kaspi его обрезает и не
+    находит в каталоге — оффер гаснет как «отсутствующий в прайс-листе».
+    Загрузка 2026-08-24 сняла так H477-0009 и H477-0017; молча — недопустимо.
+    """
+    from backend.dumper.xml_feed import feed_sku_roundtrip
+
+    assert feed_sku_roundtrip("H477-0009\t") == "H477-0009"
+    assert feed_sku_roundtrip(" S517-0005 ") == "S517-0005"
+    assert feed_sku_roundtrip("D844-0005") == "D844-0005"
+
+
+def test_clean_sku_roundtrips_unchanged():
+    from backend.dumper.xml_feed import feed_sku_roundtrip
+
+    for sku in ("D844-0026-1", "198780339", "T114-0022-3-BL", "K471-0008-01"):
+        assert feed_sku_roundtrip(sku) == sku
