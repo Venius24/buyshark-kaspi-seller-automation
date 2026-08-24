@@ -176,7 +176,11 @@ def _post_file(store_id, merchant_uid: str, xml: bytes, filename: str):
     return _mc_api_request(
         "POST", UPLOAD_URL, store_id=store_id,
         headers=_MULTIPART_HEADERS,
-        params={"m": merchant_uid},
+        # Именно `merchantUid`, а не `m`: соседние ручки фида разошлись в
+        # неймингах (`files/last?m=`, но `upload/configuration?merchantUid=`).
+        # Живая отправка 2026-08-24 вернула 400 "Required parameter
+        # 'merchantUid' is not present" — контракт подтверждён самим Kaspi.
+        params={"merchantUid": merchant_uid},
         files={UPLOAD_FIELD: (filename, xml, "text/xml")},
         timeout=120,
     )

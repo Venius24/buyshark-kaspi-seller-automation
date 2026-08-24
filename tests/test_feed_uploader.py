@@ -199,7 +199,9 @@ def test_sends_multipart_without_hardcoded_content_type(kaspi):
     name, payload, ctype = post["files"][feed_uploader.UPLOAD_FIELD]
     assert name.endswith(".xml") and payload == b"<kaspi_catalog/>"
     assert not any(k.lower() == "content-type" for k in post["headers"])
-    assert post["params"] == {"m": MERCHANT}
+    # `m` тут не работает: Kaspi отвечает 400 "Required parameter 'merchantUid'
+    # is not present" (проверено живой отправкой 2026-08-24).
+    assert post["params"] == {"merchantUid": MERCHANT}
 
 
 def test_upload_http_error_is_reported_as_untouched_catalog(kaspi):
