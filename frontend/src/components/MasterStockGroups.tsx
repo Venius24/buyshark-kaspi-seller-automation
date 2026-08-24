@@ -185,6 +185,13 @@ export const MasterStockGroups: React.FC = () => {
   const [formIsActive, setFormIsActive] = useState<boolean>(true);
   const [modalProductSearch, setModalProductSearch] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
+  // "На сборке" по товарам группы — тянется по кнопке/при открытии модалки
+  // редактирования через GET /{group_id}/packaging (ту же ручку, что и кнопка
+  // "Заказы" в карточке группы), а НЕ на каждый рендер списка: этот запрос
+  // тяжёлый для Kaspi (тянет весь список заказов на сборке по магазину), см.
+  // комментарий в get_stock_groups на бэкенде.
+  const [modalPackaging, setModalPackaging] = useState<{ count: number; total_quantity: number } | null>(null);
+  const [modalPackagingLoading, setModalPackagingLoading] = useState<boolean>(false);
 
   // Group Dumping Modal State
   const [formDumpingEnabled, setFormDumpingEnabled] = useState<boolean>(false);
@@ -298,6 +305,7 @@ export const MasterStockGroups: React.FC = () => {
   // Modal Handlers
   const handleOpenCreateModal = () => {
     setEditingGroupId(null);
+    setModalPackaging(null);
     setFormGroupName('');
     setFormSharedStock(10);
     setFormStopQty(5);
@@ -343,6 +351,14 @@ export const MasterStockGroups: React.FC = () => {
     }
     setFormDumpingExcludedSkus([...(group.dumping_excluded_skus || [])]);
     setIsModalOpen(true);
+
+    setModalPackaging(null);
+    setModalPackagingLoading(true);
+    apiFetch(`${API_URL}/api/stock-groups/${group.group_id}/packaging`)
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(data => setModalPackaging({ count: data.count, total_quantity: data.total_quantity }))
+      .catch(() => setModalPackaging(null))
+      .finally(() => setModalPackagingLoading(false));
   };
 
   const handleToggleSkuSelection = (p: ProductItem, archived: boolean = false) => {
@@ -1278,6 +1294,16 @@ export const MasterStockGroups: React.FC = () => {
                 <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
                   Укажите название, доступный складской остаток и свяжите SKU товаров Kaspi
                 </p>
+                {editingGroupId && (
+                  <p style={{ margin: '10px 0 0 0', fontSize: '13px', color: '#cbd5e1' }}>
+                    📦 На сборке сейчас:{' '}
+                    {modalPackagingLoading
+                      ? 'считаем...'
+                      : modalPackaging
+                      ? `${modalPackaging.count} зак. (${modalPackaging.total_quantity} шт.)`
+                      : 'не удалось посчитать'}
+                  </p>
+                )}
               </div>
               <button
                 onClick={() => setIsModalOpen(false)}

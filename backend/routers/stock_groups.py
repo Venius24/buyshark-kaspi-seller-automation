@@ -201,9 +201,23 @@ async def update_stock_group(
 
     background_tasks.add_task(execute_broadcast_sync, group_id, token, ctx.store_id)
 
+    # Счётчик "на сборке" — только здесь, в ответ на РУЧНОЕ редактирование
+    # группы в UI. Специально не переносим это в execute_broadcast_sync: та же
+    # функция запускается на КАЖДЫЙ заказ (trigger_order_info), а
+    # get_packaging_orders_for_skus тянет из Kaspi весь список заказов на
+    # сборке по магазину (limit=1000) — именно такой запрос на каждую продажу
+    # уже давал p95=27.6с на ручке списка групп (см. комментарий в
+    # get_stock_groups выше).
+    packaging_note = ""
+    try:
+        packaging = KaspiAPI.get_packaging_orders_for_skus(token, group["linked_skus"])
+        packaging_note = f" На сборке: {packaging['count']} зак. ({packaging['total_quantity']} шт.)."
+    except Exception as e:
+        logger.warning("Не удалось посчитать заказы на сборке для группы %s: %s", group_id, e)
+
     return {
         "success": True,
-        "message": f"Мастер-Группа '{group['group_name']}' обновлена.",
+        "message": f"Мастер-Группа '{group['group_name']}' обновлена.{packaging_note}",
         "group": group
     }
 
