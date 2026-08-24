@@ -28,8 +28,10 @@
 from dataclasses import dataclass
 from typing import Optional
 import datetime
+import json
 import logging
 import os
+import pathlib
 import time
 
 logger = logging.getLogger(__name__)
@@ -258,6 +260,67 @@ def wait_for_verdict(
     )
 
 
+def _archive_dir(store_id) -> pathlib.Path:
+    base = pathlib.Path(__file__).resolve().parents[2] / "states" / "feeds" / str(store_id)
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def archive_sent_file(store_id, name: str, xml: bytes, plan) -> pathlib.Path:
+    """
+    Положить отправленный файл на диск ДО того, как станет известен вердикт.
+
+    Это не журнал «на всякий случай», а источник истины для сверки после
+    вердикта: чтобы понять, что именно Kaspi применила, надо знать, что именно
+    мы объявили — по каждому офферу, а не суммой. Держать эти значения в БД
+    нельзя по размеру (у крупного магазина это десятки тысяч строк на каждую
+    отправку), а перекачивать файл обратно у Kaspi — лишняя зависимость от неё
+    ровно в тот момент, когда мы разбираемся, не сломала ли она нам каталог.
+
+    Сохраняем именно ДО ожидания вердикта: обработка идёт минутами, и если
+    процесс за это время умрёт, файл должен остаться. Имя файла — наше
+    (`name`), потому что `file_id` Kaspi выдаёт только вместе с карточкой,
+    то есть позже; связь с ним пишет `archive_verdict`.
+    """
+    path = _archive_dir(store_id) / name
+    path.write_bytes(xml)
+    meta = {
+        "name": name,
+        "store_id": str(store_id),
+        "merchant_id": str(plan.snapshot.merchant_id),
+        "snapshot_at": plan.snapshot.taken_at.isoformat(),
+        "offers": plan.total,
+        "changed_offers": plan.changed_offers,
+        "identity_source": getattr(plan, "identity_source", None),
+        "active_before": plan.snapshot.size,
+    }
+    path.with_suffix(path.suffix + ".meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return path
+
+
+def archive_verdict(path, verdict: UploadVerdict) -> None:
+    """Дописать в meta итог обработки — включая `file_id`, известный лишь теперь."""
+    meta_path = path.with_suffix(path.suffix + ".meta.json")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        meta = {}
+    meta["file_id"] = verdict.file_id
+    meta["verdict"] = {
+        "status": verdict.status,
+        "distinct": verdict.distinct,
+        "processed": verdict.processed,
+        "rejected": verdict.rejected,
+        "not_mapped": verdict.not_mapped,
+        "not_changed": verdict.not_changed,
+        "ended": verdict.ended,
+        "ok": verdict.ok,
+    }
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def send_plan(
     plan,
     store_id,
@@ -364,8 +427,22 @@ def send_plan(
             f"(при неверном имени поля multipart ждать именно 400 — см. XML_FEED_UPLOAD_FIELD)"
         )
 
+    # Файл принят — кладём его на диск ПРЕЖДЕ, чем уйдём ждать вердикт: ждать
+    # приходится минутами, и падение процесса в этот момент не должно оставить
+    # нас без ответа на вопрос «что мы вообще объявили».
+    try:
+        archived = archive_sent_file(store_id, name, plan.xml, plan)
+    except OSError as err:
+        archived = None
+        logger.error("[FeedUpload] Не удалось сохранить отправленный файл: %r", err)
+
     verdict = wait_for_verdict(store_id, merchant_uid, previous_id)
     logger.warning("[FeedUpload] Вердикт: %s", verdict.summary())
+    if archived is not None:
+        try:
+            archive_verdict(archived, verdict)
+        except OSError as err:
+            logger.error("[FeedUpload] Не удалось дописать вердикт в meta: %r", err)
 
     if not verdict.ok:
         raise FeedUploadFailed(

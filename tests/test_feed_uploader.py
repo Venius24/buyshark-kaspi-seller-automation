@@ -41,6 +41,7 @@ class _Snapshot:
         self.store_id = "store-1"
         self.taken_at = datetime.datetime.now() - datetime.timedelta(seconds=age_seconds)
         self.archived_count = 0
+        self.size = 1110
         self.notes = []
 
 
@@ -345,3 +346,64 @@ def test_end_date_closes_the_wait_even_on_an_unknown_status(monkeypatch):
     monkeypatch.setattr(feed_uploader.time, "sleep", lambda *_: None)
     verdict = wait_for_verdict("store-1", MERCHANT, previous_file_id="old-0", timeout=30, poll=0)
     assert verdict.is_terminal and verdict.ended
+
+
+# ── Архив отправленного файла (этап 5A) ─────────────────────────────────────
+
+def test_sent_file_is_archived_before_the_verdict_is_known(kaspi, monkeypatch, tmp_path):
+    """
+    Файл кладётся на диск сразу после приёма, а не после вердикта: обработка
+    идёт минутами, и падение процесса в это время не должно оставить нас без
+    ответа на вопрос «что мы вообще объявили Kaspi».
+    """
+    monkeypatch.setattr(feed_uploader, "_archive_dir", lambda store_id: tmp_path)
+
+    seen = {}
+
+    def _spy_wait(*a, **k):
+        # На момент ожидания вердикта файл уже обязан лежать.
+        seen["files"] = sorted(p.name for p in tmp_path.iterdir())
+        return feed_uploader._verdict_from_card(_card())
+
+    monkeypatch.setattr(feed_uploader, "wait_for_verdict", _spy_wait)
+    send_plan(_Plan(), "store-1", MERCHANT, confirm=MERCHANT)
+
+    xml_name = next(n for n in seen["files"] if n.endswith(".xml"))
+    assert seen["files"] == [xml_name, xml_name + ".meta.json"]
+    assert (tmp_path / xml_name).read_bytes() == b"<kaspi_catalog/>"
+
+
+def test_archive_meta_carries_what_settlement_will_need(kaspi, monkeypatch, tmp_path):
+    """
+    Meta — вход для сверки после вердикта. Без snapshot_at нельзя отличить
+    правку, сделанную ДО снимка (её везёт файл), от правки внутри окна полёта
+    (её файл откатит, и её надо вернуть в очередь).
+    """
+    import json
+
+    monkeypatch.setattr(feed_uploader, "_archive_dir", lambda store_id: tmp_path)
+    monkeypatch.setattr(feed_uploader, "wait_for_verdict",
+                        lambda *a, **k: feed_uploader._verdict_from_card(_card()))
+    send_plan(_Plan(), "store-1", MERCHANT, confirm=MERCHANT)
+
+    meta = json.loads(next(tmp_path.glob("*.meta.json")).read_text(encoding="utf-8"))
+    assert meta["snapshot_at"] and meta["offers"] == 1110
+    assert meta["active_before"] == 1110      # детектор «погасили каталог»
+    assert meta["identity_source"] == "accepted-file-1"
+    assert meta["file_id"] == "new-1"         # дописано уже после вердикта
+    assert meta["verdict"]["ok"] is True
+
+
+def test_a_broken_archive_does_not_abort_a_good_upload(kaspi, monkeypatch, tmp_path):
+    """
+    Архив — наш внутренний журнал. Если диск не пишется, это повод для ошибки в
+    логе, но не повод считать, что с уже принятым Kaspi файлом что-то не так.
+    """
+    def _boom(*a, **k):
+        raise OSError("диск только для чтения")
+
+    monkeypatch.setattr(feed_uploader, "archive_sent_file", _boom)
+    monkeypatch.setattr(feed_uploader, "wait_for_verdict",
+                        lambda *a, **k: feed_uploader._verdict_from_card(_card()))
+    verdict = send_plan(_Plan(), "store-1", MERCHANT, confirm=MERCHANT)
+    assert verdict.ok

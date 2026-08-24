@@ -24,6 +24,9 @@ frontend/dist/
 # ── Runtime states (generated, not source) ──
 states/*.json
 !states/.gitkeep
+# Отправленные прайс-листы: у крупного магазина это мегабайты на каждую
+# отправку, и это журнал прода, а не исходник.
+states/feeds/
 
 # ── BuyShark landing (separate app) ──
 buyshark-landing/node_modules/
