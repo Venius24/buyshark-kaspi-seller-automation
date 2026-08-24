@@ -37,6 +37,8 @@ import json
 import logging
 import re
 
+from backend.dumper import feed_state
+
 logger = logging.getLogger(__name__)
 
 # Насколько может просесть число активных офферов, прежде чем это перестанет
@@ -236,6 +238,39 @@ def settle_intents(store_id, declared: Dict[str, dict], snapshot_at) -> tuple:
         session.close()
 
 
+async def notify_settle_report(store_id, report: SettleReport) -> None:
+    """
+    Разбудить человека. Лог для этого не годится — его никто не читает.
+
+    Шлём только когда есть что сказать: тревога или расхождение. Уведомление о
+    каждой успешной отправке приучило бы игнорировать канал ровно к тому
+    моменту, когда придёт настоящая беда.
+    """
+    if not report.needs_attention:
+        return
+    from backend.chatbot import notify_dispatch
+
+    lines = ["🚨 *ПРАЙС-ЛИСТ: ТРЕБУЕТСЯ ВНИМАНИЕ*", ""]
+    for alarm in report.alarms:
+        lines.append("⚠️ {}".format(alarm))
+    if report.active_before is not None and report.active_after is not None:
+        lines.append("")
+        lines.append("📦 Активных офферов: {} → {}".format(report.active_before, report.active_after))
+    for m in report.mismatches[:5]:
+        lines.append("• `{}` {}: объявили {}, в каталоге {}".format(
+            m["sku"], m["field"], m["declared"], m["actual"]))
+    if len(report.mismatches) > 5:
+        lines.append("… и ещё {}".format(len(report.mismatches) - 5))
+
+    try:
+        await notify_dispatch.dispatch(
+            str(store_id), "problems", "\n".join(lines),
+            urgent=True, dedup_key="feed-settle-{}".format(report.file_id),
+        )
+    except Exception as err:
+        logger.error("[FeedSettle] Тревога не ушла в Телеграм: %r", err)
+
+
 def settle_file(store_id, archive_path, verdict, snapshot=None, token=None) -> SettleReport:
     """
     Полная сверка по вердикту: что файл довёз, что откатил, что сломал.
@@ -258,9 +293,9 @@ def settle_file(store_id, archive_path, verdict, snapshot=None, token=None) -> S
     )
 
     if not verdict.ok:
-        report.alarms.append(
-            "вердикт не годен ({}) — намерения оставлены в очереди".format(verdict.summary())
-        )
+        reason = "вердикт не годен ({}) — намерения оставлены в очереди".format(verdict.summary())
+        report.alarms.append(reason)
+        feed_state.disable(store_id, reason)
         return report
 
     declared = parse_declared(archive_path.read_bytes())
@@ -277,10 +312,12 @@ def settle_file(store_id, archive_path, verdict, snapshot=None, token=None) -> S
     if before:
         lost = before - snapshot.size
         if lost > max(1, int(before * MAX_ACTIVE_DROP_RATIO)):
-            report.alarms.append(
+            reason = (
                 "активных офферов было {}, стало {} — потеряно {}. Фид для магазина "
                 "выключен, проверить каталог немедленно".format(before, snapshot.size, lost)
             )
+            report.alarms.append(reason)
+            feed_state.disable(store_id, reason)
             return report
 
     report.mismatches = compare_with_catalog(declared, snapshot)
@@ -294,5 +331,6 @@ def settle_file(store_id, archive_path, verdict, snapshot=None, token=None) -> S
     snapshot_at = datetime.datetime.fromisoformat(meta["snapshot_at"])
     report.settled, report.kept_queued = settle_intents(store_id, declared, snapshot_at)
 
+    feed_state.mark_settled(store_id, report)
     logger.warning("[FeedSettle] %s", report.summary())
     return report

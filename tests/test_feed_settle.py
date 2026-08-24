@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
-from backend.dumper import feed_settle
+from backend.dumper import feed_settle, feed_state
 from backend.dumper.feed_settle import (
     compare_with_catalog,
     parse_declared,
@@ -273,3 +273,82 @@ class SettleIntentsTestCase(unittest.TestCase):
         settled, kept = feed_settle.settle_intents("s1", {"A": {"price": 500, "stock": 7.0, "available": True}}, SNAP_AT)
         self.assertEqual((settled, kept), (0, 0))
         self.assertIsNotNone(self._row("A", store="s2").desired_at)
+
+
+# ── Состояние магазина и автоотключение (этап 5C) ───────────────────────────
+
+@pytest.fixture
+def state_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(feed_state, "_state_path", lambda store_id: tmp_path / "state.json")
+    return tmp_path
+
+
+def test_feed_is_off_until_someone_turns_it_on(state_dir):
+    """Отсутствие состояния = выключено. Магазин не начинает слать файлы сам."""
+    assert feed_state.is_enabled("s1") is False
+    assert feed_state.eligible("s1", 5000)
+
+
+def test_small_store_never_gets_a_feed(state_dir):
+    """
+    Порог 250 = размер окна OFFER. Магазин, целиком помещающийся в одно окно,
+    обновится JSON-ом быстрее и точнее, а файл принесёт ему только риск.
+    """
+    feed_state.enable("s1")
+    assert "меньше порога 250" in feed_state.eligible("s1", 249)
+    assert feed_state.eligible("s1", 250) is None
+
+
+def test_a_file_in_flight_blocks_the_next_one(state_dir):
+    """Два файла внахлёст — неразрешимая гонка значений."""
+    feed_state.enable("s1")
+    feed_state.mark_sent("s1", "buyshark-1.xml", SNAP_AT)
+    assert "ещё в полёте" in feed_state.eligible("s1", 5000)
+
+
+def test_bad_verdict_turns_the_feed_off(archive, state_dir, monkeypatch):
+    """
+    Второй файл поверх непонятного состояния каталога — худшее, что можно
+    сделать. Обратно включает только человек.
+    """
+    feed_state.enable("s1")
+    monkeypatch.setattr(feed_settle, "settle_intents", lambda *a: (0, 0))
+    settle_file("s1", archive([_offer("A")]), _Verdict(ok=False))
+    assert feed_state.is_enabled("s1") is False
+    assert "вердикт не годен" in feed_state.load("s1")["blocked_reason"]
+
+
+def test_catalog_wipe_turns_the_feed_off(archive, state_dir, monkeypatch):
+    feed_state.enable("s1")
+    monkeypatch.setattr(feed_settle, "settle_intents", lambda *a: (0, 0))
+    settle_file("s1", archive([_offer("A")], active_before=1000), _Verdict(),
+                snapshot=_Snapshot([_offer("A")] * 880))
+    assert feed_state.is_enabled("s1") is False
+
+
+def test_a_clean_run_leaves_the_feed_on(archive, state_dir, monkeypatch):
+    """Ложных срабатываний быть не должно: чистый цикл фид не гасит."""
+    feed_state.enable("s1")
+    monkeypatch.setattr(feed_settle, "settle_intents", lambda *a: (3, 0))
+    feed_state.mark_sent("s1", "buyshark-1.xml", SNAP_AT)
+    report = settle_file("s1", archive([_offer("A")]), _Verdict(),
+                         snapshot=_Snapshot([_offer("A")]))
+    assert feed_state.is_enabled("s1") is True
+    assert not report.needs_attention
+    # Полёт закрыт — следующий файл больше не заблокирован.
+    assert feed_state.load("s1")["in_flight"] is None
+
+
+def test_silence_when_there_is_nothing_to_report(state_dir):
+    """
+    Уведомление о каждой успешной отправке приучило бы игнорировать канал ровно
+    к тому моменту, когда придёт настоящая беда.
+    """
+    import asyncio
+
+    sent = []
+    from backend.chatbot import notify_dispatch
+
+    with patch.object(notify_dispatch, "dispatch", side_effect=lambda *a, **k: sent.append(a)):
+        asyncio.run(feed_settle.notify_settle_report("s1", feed_settle.SettleReport("s1", ok=True)))
+    assert sent == []
