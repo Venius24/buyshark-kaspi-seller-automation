@@ -185,32 +185,48 @@ def test_intents_are_read_from_db_by_default(catalog, monkeypatch):
 
 # ── Пробельные артикулы: живой случай Бархана (2026-08-24) ──────────────────
 
-def test_tab_in_sku_refuses_the_whole_plan(catalog):
+def test_tab_in_sku_blocks_sending_but_still_builds_a_preview(catalog):
     """
-    Раньше здесь утверждалось обратное: раз XML-парсер превращает таб в пробел
-    ровно как в выгрузке самой Kaspi, значит оффер доедет. Живая загрузка
-    2026-08-24 это опровергла — Kaspi обрезает края УЖЕ ПОСЛЕ нормализации,
-    ищет `H477-0009`, такого артикула в каталоге нет, и оба оффера ушли в архив
-    как отсутствующие в прайс-листе (`notMapped: 2`). Собирать такой файл
-    нельзя.
+    Дважды переписанный тест, и оба раза за счёт прода. Сперва он утверждал, что
+    таб доедет (XML-парсер сделает из него пробел ровно как в выгрузке Kaspi) —
+    загрузка 2026-08-24 это опровергла: Kaspi обрезает края УЖЕ ПОСЛЕ
+    нормализации, ищет `H477-0009`, такого артикула в каталоге нет, и оба оффера
+    ушли в архив (`notMapped: 2`). Затем он требовал отказа при сборке — а это
+    превращало 4 битых артикула в отказ обслуживать весь магазин, притом что
+    починить их в кабинете владелец физически не может.
+
+    Итог: план собирается и называет виновников, отправку блокирует загрузчик.
     """
     catalog["products"] = (
         [_offer("SKU-{:03d}".format(i)) for i in range(18)]
         + [_offer("H477-0009\t"), _offer("H477-0017\t")]
     )
-    with pytest.raises(FeedPlanRefused) as e:
-        _plan()
-    assert "не переживают приём файла" in str(e.value)
+    plan = _plan()
+    assert plan.blockers == ["H477-0009\t", "H477-0017\t"]
+    assert plan.total == 20  # файл собран целиком, предпросмотр работает
+    assert any("ОТПРАВКА ФИДА ЗАБЛОКИРОВАНА" in w for w in plan.warnings)
 
 
-def test_leading_and_trailing_spaces_in_sku_refuse_too(catalog):
+def test_leading_and_trailing_spaces_in_sku_block_too(catalog):
     """` S517-0005 ` — реальный артикул, и его Kaspi обрезает так же."""
     catalog["products"] = (
         [_offer("SKU-{:03d}".format(i)) for i in range(19)] + [_offer(" S517-0005 ")]
     )
-    with pytest.raises(FeedPlanRefused) as e:
-        _plan()
-    assert "S517-0005" in str(e.value)
+    assert _plan().blockers == [" S517-0005 "]
+
+
+def test_report_shows_where_the_invisible_characters_are(catalog):
+    """
+    Главное требование к сообщению: оно должно показывать, ЧТО чинить. Кабинет
+    Kaspi эти символы не отображает, и список голых артикулов владельцу ничего
+    не даёт — он их там просто не найдёт.
+    """
+    catalog["products"] = (
+        [_offer("SKU-{:03d}".format(i)) for i in range(19)] + [_offer("H477-0009\t")]
+    )
+    text = render_plan_report(_plan())
+    assert "H477-0009<TAB>" in text
+    assert "ОТПРАВКА ЗАБЛОКИРОВАНА" in text
 
 
 def test_refuses_when_two_skus_collapse_into_one(catalog):
@@ -242,3 +258,14 @@ def test_clean_sku_roundtrips_unchanged():
 
     for sku in ("D844-0026-1", "198780339", "T114-0022-3-BL", "K471-0008-01"):
         assert feed_sku_roundtrip(sku) == sku
+
+
+def test_defect_marks_only_the_edges():
+    """Пробел в середине артикула безвреден — метить его значило бы шуметь."""
+    from backend.dumper.xml_feed import describe_sku_defect
+
+    assert describe_sku_defect("H477-0009\t") == "H477-0009<TAB>"
+    assert describe_sku_defect(" S517-0005 ") == "<ПРОБЕЛ>S517-0005<ПРОБЕЛ>"
+    assert describe_sku_defect(" X474-00033") == "<ПРОБЕЛ>X474-00033"
+    assert describe_sku_defect("A B") == "A B"
+    assert describe_sku_defect("D844-0005") == "D844-0005"

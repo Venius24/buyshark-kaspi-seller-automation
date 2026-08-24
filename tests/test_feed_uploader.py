@@ -45,10 +45,12 @@ class _Snapshot:
 
 
 class _Plan:
-    def __init__(self, total=1110, changed=0, missing=None, age_seconds=0, merchant_id=MERCHANT):
+    def __init__(self, total=1110, changed=0, missing=None, age_seconds=0, merchant_id=MERCHANT,
+                 blockers=None):
         self.snapshot = _Snapshot(merchant_id, age_seconds)
         self.xml = b"<kaspi_catalog/>"
         self.missing_from_file = missing or []
+        self.blockers = blockers or []
         self.identity_source = "accepted-file-1"
         self._total = total
         self._changed = changed
@@ -157,6 +159,38 @@ def test_refuses_empty_plan(kaspi):
         send_plan(_Plan(total=0), "store-1", MERCHANT, confirm=MERCHANT)
     assert "гасит весь каталог" in str(e.value)
     assert kaspi["posts"] == []
+
+
+def test_refuses_skus_with_invisible_characters(kaspi):
+    """
+    Артикул с краевым табом файл адресовать не может: Kaspi обрежет край, не
+    найдёт такой артикул и снимет оффер с продажи (живьём 2026-08-24 так ушли в
+    архив H477-0009 и H477-0017). Замок безусловный — allow_changes его не
+    снимает, потому что это не риск, а гарантированная потеря карточек.
+    """
+    for kwargs in ({}, {"allow_changes": True}):
+        with pytest.raises(FeedUploadRefused) as e:
+            send_plan(_Plan(blockers=["H477-0009	"]), "store-1", MERCHANT,
+                      confirm=MERCHANT, **kwargs)
+        # Сообщение обязано показывать, ГДЕ символ: в кабинете его не видно.
+        assert "H477-0009<TAB>" in str(e.value)
+    assert kaspi["posts"] == []
+
+
+def test_unmapped_offers_are_a_failure_not_a_success(kaspi, monkeypatch):
+    """
+    `notMapped` — это карточки, которые Kaspi не нашла по артикулу из файла и
+    потому сняла с продажи. Живая отправка 2026-08-24 отчиталась
+    `FLUSHED, 1097/1097, rejected 0` при `notMapped: 2`, и прежняя проверка
+    считала это успехом, хотя два товара уже лежали в архиве.
+    """
+    card = _card(distinct=1110, processed=1110)
+    card["notMappedOffersCount"] = 2
+    monkeypatch.setattr(feed_uploader, "wait_for_verdict",
+                        lambda *a, **k: feed_uploader._verdict_from_card(card))
+    with pytest.raises(feed_uploader.FeedUploadFailed) as e:
+        send_plan(_Plan(), "store-1", MERCHANT, confirm=MERCHANT)
+    assert "не смаплено 2" in str(e.value)
 
 
 def test_refuses_stale_snapshot(kaspi):

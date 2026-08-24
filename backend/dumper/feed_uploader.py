@@ -116,9 +116,22 @@ class UploadVerdict:
 
     @property
     def ok(self) -> bool:
+        """
+        Файл принят И НИ ОДНА КАРТОЧКА НЕ ПОТЕРЯНА.
+
+        `not_mapped` тут появился дорого. Первая живая отправка 2026-08-24
+        отчиталась `FLUSHED, 1097/1097, rejected 0` — по этой проверке успех, —
+        но в той же карточке стояло `notMappedOffersCount: 2`, и это были два
+        реально снятых с продажи товара. «Не смаплен» означает, что Kaspi не
+        нашла оффер по артикулу из файла, а значит сочла его отсутствующим в
+        прайс-листе и погасила. Причина может быть любой (у нас это были
+        краевые пробелы), но исход всегда один — потерянная карточка, поэтому
+        ненулевой not_mapped не бывает успехом.
+        """
         return (
             self.status == "FLUSHED"
             and self.rejected == 0
+            and self.not_mapped == 0
             and self.distinct > 0
             and self.processed == self.distinct
         )
@@ -287,6 +300,25 @@ def send_plan(
         )
     if not plan.total:
         raise FeedUploadRefused("в файле нет офферов — такой файл гасит весь каталог")
+
+    # Артикулы с краевыми пробелами/табами. Файл их не адресует: Kaspi обрежет
+    # края, не найдёт такой артикул в каталоге и снимет оффер с продажи как
+    # отсутствующий в прайс-листе (живой случай 2026-08-24, `notMapped: 2`).
+    # Замок безусловный — его не снимают ни allow_changes, ни любой другой флаг:
+    # это не «рискованная правка, которую владелец подтвердил», а гарантированная
+    # потеря карточек. Пока такой артикул активен, магазин работает по JSON-пути,
+    # где артикул едет в теле запроса и не нормализуется.
+    blockers = getattr(plan, "blockers", None)
+    if blockers:
+        from backend.dumper.xml_feed import describe_sku_defect
+
+        raise FeedUploadRefused(
+            "{} артикулов содержат невидимые символы по краям и не переживут приём "
+            "файла — Kaspi снимет эти офферы с продажи: {}. Пока они активны, фид "
+            "по этому магазину отправлять нельзя.".format(
+                len(blockers), [describe_sku_defect(s) for s in blockers[:10]]
+            )
+        )
 
     age = (datetime.datetime.now() - plan.snapshot.taken_at).total_seconds()
     if age > MAX_PLAN_AGE_SECONDS:

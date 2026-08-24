@@ -29,6 +29,7 @@ import xml.etree.ElementTree as ET
 from backend.dumper.feed_snapshot import CatalogSnapshot, build_catalog_snapshot
 from backend.dumper.xml_feed import (
     CATALOG_NS,
+    describe_sku_defect,
     feed_sku_roundtrip,
     generate_xml_feed,
     xml_attr_value,
@@ -61,6 +62,11 @@ class FeedPlan:
     diffs: List[OfferDiff]
     unchanged: int
     missing_from_file: List[str] = field(default_factory=list)
+    # Артикулы, которые файл физически не может адресовать (краевые пробелы и
+    # табы). Непустой список = отправлять этот файл нельзя ни при каких флагах,
+    # см. feed_uploader.send_plan. Хранится как данные, а не как исключение,
+    # чтобы предпросмотр показал их владельцу вместо того, чтобы упасть.
+    blockers: List[str] = field(default_factory=list)
     orphan_intents: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     # id принятого Kaspi файла, из которого взяты <model>/<brand>. None = поля
@@ -235,17 +241,24 @@ def build_feed_plan(
         )
 
     # Артикулы, не переживающие путь «XML-нормализация -> обрезка на стороне
-    # Kaspi». Для них файл физически не может сослаться на нужный оффер, и
-    # Kaspi гасит его как отсутствующий в прайс-листе. Молча отправлять такой
-    # файл нельзя: 2026-08-24 так ушли в архив H477-0009 и H477-0017, причём
-    # то же самое сделала бы и родная выгрузка кабинета.
-    unroundtrippable = sorted(s for s in fact_skus if feed_sku_roundtrip(s) != s)
-    if unroundtrippable:
-        raise FeedPlanRefused(
-            "{} артикулов не переживают приём файла (пробелы/табы по краям) — Kaspi не "
-            "сопоставит их с каталогом и снимет с продажи: {}. Чинится только "
-            "переименованием артикула в кабинете.".format(
-                len(unroundtrippable), [repr(s) for s in unroundtrippable[:5]]
+    # Kaspi». Для них файл физически не может сослаться на нужный оффер, и Kaspi
+    # гасит его как отсутствующий в прайс-листе: 2026-08-24 так ушли в архив
+    # H477-0009 и H477-0017, причём то же самое сделала бы и родная выгрузка
+    # кабинета.
+    #
+    # Почему это НЕ исключение, хотя цена ошибки — снятые с продажи карточки.
+    # Раньше здесь был raise, и он превращал четыре битых артикула в отказ
+    # обслуживать весь магазин: dry-run не собирался, показать владельцу было
+    # нечего, а починить артикул в кабинете он не может — Kaspi не показывает
+    # эти символы и не даёт их стереть. Отказ поэтому перенесён в отправку
+    # (feed_uploader.send_plan): файл по-прежнему не уедет, но предпросмотр
+    # собирается и называет виновников поимённо, с подсветкой краёв.
+    blockers = sorted(s for s in fact_skus if feed_sku_roundtrip(s) != s)
+    if blockers:
+        warnings.append(
+            "{} артикулов не переживают приём файла — Kaspi обрежет края, не найдёт "
+            "их в каталоге и снимет с продажи. ОТПРАВКА ФИДА ЗАБЛОКИРОВАНА: {}".format(
+                len(blockers), [describe_sku_defect(s) for s in blockers[:5]]
             )
         )
 
@@ -274,6 +287,7 @@ def build_feed_plan(
         diffs=diffs,
         unchanged=len(offers) - len({d.merchant_sku for d in diffs}),
         missing_from_file=[],
+        blockers=blockers,
         orphan_intents=orphans,
         warnings=warnings,
         identity_source=identity_source,
@@ -311,6 +325,20 @@ def render_plan_report(plan: FeedPlan, limit: int = 25) -> str:
         lines.append("")
         lines.append("  ВНИМАНИЕ:")
         lines.extend("    · {}".format(w) for w in plan.warnings)
+
+    if plan.blockers:
+        # Печатаем ПОИМЁННО и с подсветкой краёв: в кабинете этих символов не
+        # видно, так что список артикулов без разметки владельцу бесполезен.
+        lines.append("")
+        lines.append("  ОТПРАВКА ЗАБЛОКИРОВАНА — артикулы с невидимыми символами:")
+        for sku in plan.blockers:
+            lines.append("    {}".format(describe_sku_defect(sku)))
+        lines.append(
+            "    Файл не может сослаться на такой оффер: Kaspi обрежет края и снимет"
+        )
+        lines.append(
+            "    его с продажи. Магазин при этом продолжает работать по JSON-пути."
+        )
 
     if plan.diffs:
         lines.append("")

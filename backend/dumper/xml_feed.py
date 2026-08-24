@@ -93,6 +93,39 @@ def feed_sku_roundtrip(raw) -> str:
     return xml_attr_value(raw).strip()
 
 
+# Как показать невидимый символ человеку. Кабинет Kaspi эти символы НЕ
+# показывает и не даёт стереть: владелец Бархана 2026-08-24 не смог ни увидеть
+# табуляцию в `H477-0009`, ни убрать пробелы в ` S517-0005 `. Поэтому наше
+# сообщение о таком артикуле обязано печатать края явно — «почините артикул»
+# без указания, что именно чинить, бесполезно.
+_VISIBLE_EDGE = {
+    "\t": "<TAB>",
+    "\n": "<LF>",
+    "\r": "<CR>",
+    " ": "<ПРОБЕЛ>",
+    "\xa0": "<NBSP>",
+}
+
+
+def describe_sku_defect(raw) -> str:
+    """
+    Артикул с подсвеченными краевыми невидимыми символами: `H477-0009<TAB>`.
+
+    Подсвечиваются только КРАЯ: именно их Kaspi обрезает при приёме, и именно
+    они решают судьбу оффера. Пробел в середине артикула безвреден, и метить
+    его значило бы утопить настоящую проблему в шуме.
+    """
+    def mark(part: str) -> str:
+        return "".join(_VISIBLE_EDGE.get(ch, repr(ch)) for ch in part)
+
+    text = str(raw)
+    head_len = len(text) - len(text.lstrip())
+    body_end = len(text.rstrip())
+    if body_end <= head_len:  # артикул целиком из пробелов
+        return mark(text)
+    return mark(text[:head_len]) + text[head_len:body_end] + mark(text[body_end:])
+
+
 def _point_store_id(merchant_id: str, product: dict) -> str:
     """
     storeId точки продаж. У Бархана точка одна — `20186986_001`, и все 1119
