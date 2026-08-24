@@ -99,6 +99,10 @@ class UploadVerdict:
     created: Optional[str] = None
     ended: Optional[str] = None
     raw: Optional[dict] = None
+    # Куда лёг отправленный файл. Нужен сверке после вердикта: чтобы понять,
+    # что Kaspi сделала с каталогом, надо знать, что мы объявили по каждому
+    # офферу. Заполняется только в send_plan — карточка файла про это не знает.
+    archive_path: Optional[str] = None
 
     @property
     def is_terminal(self) -> bool:
@@ -439,6 +443,7 @@ def send_plan(
     verdict = wait_for_verdict(store_id, merchant_uid, previous_id)
     logger.warning("[FeedUpload] Вердикт: %s", verdict.summary())
     if archived is not None:
+        verdict.archive_path = str(archived)
         try:
             archive_verdict(archived, verdict)
         except OSError as err:

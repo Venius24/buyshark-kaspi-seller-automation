@@ -95,6 +95,14 @@ async def startup_event():
     # реальной квоты (250 офферов / 30 мин) — см. backend/services/offer_sync.py.
     from backend.services.offer_sync import offer_sync_loop
     asyncio.create_task(offer_sync_loop())
+    # Полная сверка каталога прайс-листом. Второго писателя это НЕ добавляет:
+    # воркер не решает ничего про отдельные офферы, он объявляет Kaspi всё
+    # желаемое состояние целиком. По умолчанию идёт в ТЕНЕВОМ режиме — пишет в
+    # лог, что отправил бы, и ничего не отправляет; чтобы файл поехал, нужны
+    # XML_FEED_WORKER=1, XML_FEED_UPLOAD_ENABLED=1 и enabled в состоянии
+    # магазина. См. backend/dumper/feed_worker.py.
+    from backend.dumper.feed_worker import feed_worker_loop
+    asyncio.create_task(feed_worker_loop())
     asyncio.create_task(start_packaging_sync_loop(30))
     asyncio.create_task(start_health_check_loop(3600))
     asyncio.create_task(start_products_sync_loop(1800))

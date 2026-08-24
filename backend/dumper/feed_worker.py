@@ -1,0 +1,271 @@
+"""
+Периодическая полная сверка каталога прайс-листом.
+
+Это НЕ второй писатель. Единственный писатель по-прежнему `offer_sync`, и он не
+знает про этот модуль ничего: маршрутизации намерений между транспортами нет,
+приоритеты не трогаются, `_decide` не меняется. Воркер просто раз в цикл
+объявляет Kaspi всё желаемое состояние каталога целиком.
+
+Экономия квоты получается сама собой, без единой строчки про транспорт.
+`offer_sync` уже гасит намерение, если желаемое совпало с фактом на Kaspi: фид
+применил цену -> BFF её показывает -> JSON молча пропускает запись, не потратив
+единицу окна `OFFER`. Разводить намерения по трубам ради этого не нужно, а
+каждый лишний режим — это место, где два транспорта разойдутся.
+
+Про режимы. По умолчанию воркер работает в ТЕНЕВОМ режиме: собирает план и
+пишет в лог, что он отправил бы, но не отправляет. Чтобы файл поехал, нужны
+одновременно `XML_FEED_WORKER=1` (этот воркер) и `XML_FEED_UPLOAD_ENABLED=1`
+(общий рубильник отправки), плюс `enabled` в состоянии магазина. Три
+независимых замка — потому что цена ошибки здесь измеряется не в неудачном
+цикле, а в снятых с продажи карточках.
+"""
+from typing import Optional
+import datetime
+import logging
+import os
+
+from backend.dumper import feed_state
+
+logger = logging.getLogger(__name__)
+
+# Как часто воркер просыпается. Не равно частоте отправки: большинство
+# просыпаний заканчивается «ещё рано» или «нечего везти».
+TICK_SECONDS = 300.0
+
+# Минимальная пауза между файлами одного магазина. `FILE: 2` за 30-минутное
+# окно, а обработка 1097 офферов заняла ~18 минут — чаще, чем раз в полчаса,
+# слать нечего и некогда.
+MIN_PAUSE_SECONDS = 30 * 60
+
+# Запас поверх времени прошлой обработки. Время разбора растёт с размером
+# каталога, и за пределами замеренных ~1100 офферов оно неизвестно, поэтому
+# следующий такт считается от факта, а не от константы.
+PAUSE_SAFETY = 1.5
+
+# Сколько несрочных намерений оправдывают файл. Ниже этого JSON и дешевле, и
+# быстрее: 100 записей — меньше половины окна `OFFER`, они уедут за пару флашей
+# и без риска объявлять весь каталог разом.
+MIN_INTENTS_FOR_FEED = 100
+
+# Насколько заполненное окно квоты само по себе повод отправить файл, даже если
+# намерений мало: если JSON уже упирается, дальше он начнёт откладывать.
+QUOTA_PRESSURE_RATIO = 0.6
+
+# Чем считать размер каталога, пока он неизвестен. Заведомо выше порога: на
+# первом тике порог не должен молча отсечь магазин, размер которого мы ещё не
+# смотрели — иначе он не будет посмотрен никогда.
+MIN_OFFERS_UNKNOWN = 10 ** 9
+
+
+def _shadow() -> bool:
+    return os.getenv("XML_FEED_WORKER", "0") != "1"
+
+
+def next_pause_seconds(store_id) -> float:
+    """
+    Сколько ждать после прошлой отправки. Считается от факта, а не от константы.
+
+    Kaspi проставляет в карточке файла `createdDate` и `endDate` — разница между
+    ними и есть настоящее время обработки для КОНКРЕТНОГО размера каталога. У
+    Бархана это ~18 минут на 1097 офферов; у магазина втрое больше оно втрое
+    больше, и константа там врала бы в опасную сторону.
+    """
+    state = feed_state.load(store_id)
+    processed = state.get("last_processing_seconds")
+    if not processed:
+        return MIN_PAUSE_SECONDS
+    return max(MIN_PAUSE_SECONDS, float(processed) * PAUSE_SAFETY)
+
+
+def _seconds_since(iso: Optional[str]) -> Optional[float]:
+    if not iso:
+        return None
+    try:
+        return (datetime.datetime.now() - datetime.datetime.fromisoformat(iso)).total_seconds()
+    except (TypeError, ValueError):
+        return None
+
+
+def why_not_now(store_id, active_offers: int, pending: int, quota_used_ratio: float) -> Optional[str]:
+    """
+    Причина промолчать, или None если пора слать.
+
+    Возвращается именно причина, а не bool: «фид не работает» без объяснения
+    превращается в расследование по логам, а тут каждый отказ должен сам себя
+    называть.
+    """
+    blocked = feed_state.eligible(store_id, active_offers)
+    if blocked:
+        return blocked
+
+    since = _seconds_since(feed_state.load(store_id).get("settled_at"))
+    pause = next_pause_seconds(store_id)
+    if since is not None and since < pause:
+        return "с прошлой отправки прошло {:.0f} мин из {:.0f}".format(since / 60, pause / 60)
+
+    if pending < MIN_INTENTS_FOR_FEED and quota_used_ratio < QUOTA_PRESSURE_RATIO:
+        return (
+            "везти нечего: {} намерений (порог {}), окно квоты занято на {:.0%}".format(
+                pending, MIN_INTENTS_FOR_FEED, quota_used_ratio
+            )
+        )
+    return None
+
+
+def run_for_store(store) -> dict:
+    """
+    Один проход по одному магазину. Синхронный — вызывается через to_thread.
+
+    Порядок шагов важен, и он не тот, что кажется. Сначала — дешёвые проверки
+    по БД и файлу состояния, и только потом сборка плана.
+
+    Сборка «бесплатна» лишь по квоте Kaspi: она выкачивает ВЕСЬ каталог через
+    bff/offer-view/list, а это полтораста страниц у крупного магазина. Делать
+    это на каждом тике по каждому магазину — ровно тот паттерн постоянного
+    лишнего трафика, за который IP этого VPS уже банили (HANDOFF 3.8/3.9).
+    Поэтому выкачка происходит, только когда мы уже намерены отправлять.
+
+    Число активных офферов для порога берётся из прошлой сборки (оно живёт в
+    состоянии магазина). На самом первом тике его нет — тогда план собирается
+    один раз, и дальше порог проверяется даром.
+    """
+    from backend.dumper.feed_plan import build_feed_plan, render_plan_report
+    from backend.services.kaspi_quota import quota
+    from backend.services.offer_sync import pending_intents
+
+    result = {"store_id": store.store_id, "sent": False, "reason": None}
+
+    known_active = feed_state.load(store.store_id).get("active_offers")
+    pending = len(pending_intents(store.store_id))
+    state = quota.get(store.store_id, str(store.merchant_id))
+    used_ratio = (state.used / state.limit) if getattr(state, "limit", 0) else 0.0
+
+    # Порог по размеру каталога проверяем, только если размер уже известен:
+    # иначе первый тик обязан собрать план, чтобы его узнать.
+    reason = why_not_now(
+        store.store_id,
+        known_active if known_active is not None else MIN_OFFERS_UNKNOWN,
+        pending,
+        used_ratio,
+    )
+    if reason:
+        result["reason"] = reason
+        return result
+
+    plan = build_feed_plan(store.token, store.store_id, use_accepted_identity=True)
+    active = plan.total
+    feed_state.save(store.store_id, active_offers=active)
+
+    if plan.blockers:
+        # Артикулы с невидимыми символами. Файл на них сослаться не может, и
+        # Kaspi погасит эти карточки — тот же случай, что 2026-08-24.
+        result["reason"] = "битые артикулы: {}".format(plan.blockers[:5])
+        feed_state.disable(store.store_id, result["reason"])
+        return result
+
+    # Второй заход: теперь размер каталога известен точно, а не по памяти.
+    reason = why_not_now(store.store_id, active, pending, used_ratio)
+    if reason:
+        result["reason"] = reason
+        return result
+
+    if _shadow():
+        result["reason"] = "теневой режим"
+        logger.info(
+            "👁 [FeedWorker] Стор %s: ОТПРАВИЛ БЫ файл — офферов %s, изменений %s.\n%s",
+            store.store_id, plan.total, plan.changed_offers, render_plan_report(plan, limit=10),
+        )
+        return result
+
+    from backend.dumper.feed_uploader import send_plan
+
+    feed_state.mark_sent(store.store_id, "pending", plan.snapshot.taken_at)
+    try:
+        verdict = send_plan(
+            plan, store.store_id, str(store.merchant_id),
+            confirm=str(store.merchant_id), allow_changes=True,
+        )
+    except Exception as err:
+        # Полёт закрываем в любом случае: иначе один неудачный запуск запер бы
+        # магазин навсегда — `in_flight` блокирует следующую отправку.
+        feed_state.save(store.store_id, in_flight=None)
+        result["reason"] = "отправка не удалась: {!r}".format(err)
+        feed_state.disable(store.store_id, result["reason"])
+        return result
+
+    record_processing_time(store.store_id, verdict)
+    result["sent"] = True
+    result["verdict"] = verdict.summary()
+
+    # Вердикт говорит «файл разобран», а не «каталог в порядке». Что именно
+    # произошло с карточками, показывает только сверка со свежим снимком.
+    if verdict.archive_path:
+        import pathlib
+
+        from backend.dumper.feed_settle import settle_file
+
+        result["report"] = settle_file(
+            store.store_id, pathlib.Path(verdict.archive_path), verdict, token=store.token,
+        )
+    else:
+        # Архив не записался — сверять не с чем. Это не повод считать, что всё
+        # хорошо: мы только что объявили весь каталог и не можем проверить исход.
+        feed_state.disable(
+            store.store_id, "файл отправлен, но не сохранён — сверить исход невозможно"
+        )
+    return result
+
+
+async def run_feed_cycle() -> dict:
+    """Один проход по всем активным магазинам. Вынесен ради юнит-тестов."""
+    import asyncio
+
+    from backend.security.store_context import list_active_stores
+
+    totals = {"checked": 0, "sent": 0}
+    for store in await list_active_stores():
+        totals["checked"] += 1
+        try:
+            result = await asyncio.to_thread(run_for_store, store)
+            if result["sent"]:
+                totals["sent"] += 1
+                report = result.get("report")
+                if report is not None:
+                    from backend.dumper.feed_settle import notify_settle_report
+
+                    await notify_settle_report(store.store_id, report)
+            elif result["reason"]:
+                logger.debug("[FeedWorker] Стор %s: %s", store.store_id, result["reason"])
+        except Exception as err:
+            logger.error("[FeedWorker] Стор %s: цикл упал: %r", store.store_id, err)
+    return totals
+
+
+async def feed_worker_loop(interval_seconds: float = TICK_SECONDS):
+    import asyncio
+
+    logger.info(
+        "🟢 [FeedWorker] Полная сверка прайс-листом запущена (тик раз в %.0fс, режим: %s).",
+        interval_seconds, "ТЕНЕВОЙ" if _shadow() else "БОЕВОЙ",
+    )
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            await run_feed_cycle()
+        except asyncio.CancelledError:
+            logger.info("⏹ [FeedWorker] Остановлен.")
+            break
+        except Exception as err:
+            logger.error("❌ [FeedWorker] Ошибка цикла: %r", err)
+
+
+def record_processing_time(store_id, verdict) -> None:
+    """Запомнить, сколько Kaspi жевала файл — этим считается следующий такт."""
+    try:
+        started = datetime.datetime.fromisoformat(verdict.created)
+        ended = datetime.datetime.fromisoformat(verdict.ended)
+    except (TypeError, ValueError):
+        return
+    seconds = (ended - started).total_seconds()
+    if seconds > 0:
+        feed_state.save(store_id, last_processing_seconds=seconds)
