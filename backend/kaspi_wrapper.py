@@ -1211,8 +1211,13 @@ class KaspiAPI:
                         from backend.kaspi_offer_price import extract_offer_price
                         price_num = extract_offer_price(offer) or 0
 
+                        from backend.product_name_overrides import KNOWN_PRODUCT_NAMES
                         brand_name = offer.get("brandName") or "Без бренда"
-                        title = offer.get("title") or f"Товар {merchant_sku}"
+                        title = (
+                            offer.get("title")
+                            or KNOWN_PRODUCT_NAMES.get(str(merchant_sku))
+                            or f"Товар {merchant_sku}"
+                        )
 
                         images_v2 = offer.get("imagesV2") or []
                         image_url = images_v2[0].get("small") if images_v2 else None
@@ -1276,7 +1281,8 @@ class KaspiAPI:
                         if m_sku in seen_skus:
                             continue
                         seen_skus.add(m_sku)
-                        title = e.get("name") or f"Товар {m_sku}"
+                        from backend.product_name_overrides import KNOWN_PRODUCT_NAMES
+                        title = e.get("name") or KNOWN_PRODUCT_NAMES.get(str(m_sku)) or f"Товар {m_sku}"
                         price_val = e.get("basePrice", 0)
                         all_products.append({
                             "id": f"p_{m_sku}",
