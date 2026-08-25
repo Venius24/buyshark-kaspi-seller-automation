@@ -1213,8 +1213,14 @@ class KaspiAPI:
 
                         from backend.product_name_overrides import KNOWN_PRODUCT_NAMES
                         brand_name = offer.get("brandName") or "Без бренда"
+                        raw_title = offer.get("title")
+                        # BFF отдаёт не только пустой title, но и саму заглушку
+                        # буквально: инцидент 15.08 (см. product_name_overrides.py)
+                        # закрепил "Товар <SKU>" не только в прайс-листе, но и здесь.
+                        if raw_title == f"Товар {merchant_sku}":
+                            raw_title = None
                         title = (
-                            offer.get("title")
+                            raw_title
                             or KNOWN_PRODUCT_NAMES.get(str(merchant_sku))
                             or f"Товар {merchant_sku}"
                         )
