@@ -199,6 +199,20 @@ def test_sends_when_everything_is_green(wired, monkeypatch, tmp_path):
     assert feed_state.load("s1")["last_processing_seconds"] == 18 * 60
 
 
+def test_the_default_pause_is_an_hour(wired):
+    """
+    Час, а не полчаса. Пока файл жуётся (18-20 минут), он объявляет цены,
+    снятые до отправки; отправлять следующий сразу по вердикту — держать
+    каталог в этом состоянии непрерывно. Между файлами должно оставаться
+    время, когда магазин живёт по JSON.
+    """
+    assert feed_worker.MIN_PAUSE_SECONDS == 60 * 60
+    feed_state.save("s1", settled_at=(
+        datetime.datetime.now() - datetime.timedelta(minutes=45)
+    ).isoformat())
+    assert "с прошлой отправки" in feed_worker.why_not_now("s1", 1582, 500, 0.1)
+
+
 def test_next_pause_grows_with_real_processing_time(wired):
     """
     18 минут — замер Бархана на 1097 офферах. У каталога втрое больше обработка
