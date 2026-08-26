@@ -202,19 +202,26 @@ def test_escapes_quote_in_attribute():
     assert '<offer sku="D844&quot;0005">' in xml
 
 
-def test_writes_tab_in_sku_as_is():
-    """Табуляцию не экранируем: парсер Kaspi нормализует её в пробел сам, и в
-    его собственной выгрузке эти офферы стоят именно с пробелом."""
+def test_writes_tab_in_sku_as_a_character_reference():
+    """
+    Табуляцию экранируем ссылкой — иначе парсер Kaspi нормализует её в пробел
+    и оффер не найдётся. Прежняя версия этого теста требовала обратного и
+    стоила двух карточек 2026-08-24 (`notMapped: 2`).
+    """
     xml = generate_xml_feed("20186986", [_ok_product(merchantSku="H477-0009\t")]).decode("utf-8")
-    assert '<offer sku="H477-0009\t">' in xml
-    assert "&#9;" not in xml
+    assert '<offer sku="H477-0009&#9;">' in xml
+    assert '<offer sku="H477-0009\t">' not in xml
 
 
-def test_refuses_skus_that_differ_only_by_whitespace_kind():
-    """`A\t` и `A ` — один атрибут для парсера; второй оффер заместил бы первый."""
-    with pytest.raises(FeedSerializationError) as e:
-        generate_xml_feed("20186986", [
-            _ok_product(merchantSku="H477-0009\t"),
-            _ok_product(merchantSku="H477-0009 "),
-        ])
-    assert "нормализации" in str(e.value)
+def test_tab_and_space_are_no_longer_the_same_offer():
+    """
+    `A\t` и `A ` доезжают разными: первый ссылкой, второй литералом. Пока таб
+    ехал литералом, второй оффер молча замещал первый и сборка отказывалась —
+    теперь замещать нечего, и оба должны попасть в файл.
+    """
+    xml = generate_xml_feed("20186986", [
+        _ok_product(merchantSku="H477-0009\t"),
+        _ok_product(merchantSku="H477-0009 "),
+    ]).decode("utf-8")
+    assert '<offer sku="H477-0009&#9;">' in xml
+    assert '<offer sku="H477-0009 ">' in xml

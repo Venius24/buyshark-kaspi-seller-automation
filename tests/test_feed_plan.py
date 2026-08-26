@@ -185,72 +185,117 @@ def test_intents_are_read_from_db_by_default(catalog, monkeypatch):
 
 # ── Пробельные артикулы: живой случай Бархана (2026-08-24) ──────────────────
 
-def test_tab_in_sku_blocks_sending_but_still_builds_a_preview(catalog):
+def test_tab_in_sku_now_travels_in_the_file(catalog):
     """
-    Дважды переписанный тест, и оба раза за счёт прода. Сперва он утверждал, что
-    таб доедет (XML-парсер сделает из него пробел ровно как в выгрузке Kaspi) —
-    загрузка 2026-08-24 это опровергла: Kaspi обрезает края УЖЕ ПОСЛЕ
-    нормализации, ищет `H477-0009`, такого артикула в каталоге нет, и оба оффера
-    ушли в архив (`notMapped: 2`). Затем он требовал отказа при сборке — а это
-    превращало 4 битых артикула в отказ обслуживать весь магазин, притом что
-    починить их в кабинете владелец физически не может.
+    Трижды переписанный тест, и каждый раз за счёт прода.
 
-    Итог: план собирается и называет виновников, отправку блокирует загрузчик.
+    (1) Утверждал, что таб доедет литералом — 2026-08-24 опровергло: XML-парсер
+        сделал из него пробел, `notMapped: 2`, оба оффера в архив.
+    (2) Утверждал, что виноват ещё и trim на стороне Kaspi, а значит чинить
+        можно лишь переименованием в кабинете — и это оказалось выдумкой. В том
+        же принятом файле ехал ` S517-0005 ` с пробелами по краям И отдельный
+        `S517-0005`; обрезка схлопнула бы их, но `rejected: 0`.
+    (3) Раз края не режут, потеря была только на нормализации литерала — а её
+        обходит символьная ссылка `&#9;`.
+
+    Итог: артикул с табуляцией больше не блокер, он просто едет в файле.
     """
     catalog["products"] = (
         [_offer("SKU-{:03d}".format(i)) for i in range(18)]
         + [_offer("H477-0009\t"), _offer("H477-0017\t")]
     )
     plan = _plan()
-    assert plan.blockers == ["H477-0009\t", "H477-0017\t"]
-    assert plan.total == 20  # файл собран целиком, предпросмотр работает
-    assert any("ОТПРАВКА ФИДА ЗАБЛОКИРОВАНА" in w for w in plan.warnings)
+    assert plan.blockers == []
+    assert plan.total == 20
+    assert not any("ЗАБЛОКИРОВАНА" in w for w in plan.warnings)
+    assert b'sku="H477-0009&#9;"' in plan.xml
+    assert b'sku="H477-0017&#9;"' in plan.xml
 
 
-def test_leading_and_trailing_spaces_in_sku_block_too(catalog):
-    """` S517-0005 ` — реальный артикул, и его Kaspi обрезает так же."""
+def test_edge_spaces_were_never_the_problem(catalog):
+    """` S517-0005 ` — реальный артикул, и он в файле 24.08 сматчился."""
     catalog["products"] = (
         [_offer("SKU-{:03d}".format(i)) for i in range(19)] + [_offer(" S517-0005 ")]
     )
-    assert _plan().blockers == [" S517-0005 "]
+    plan = _plan()
+    assert plan.blockers == []
+    assert b'sku=" S517-0005 "' in plan.xml
 
 
 def test_report_shows_where_the_invisible_characters_are(catalog):
     """
-    Главное требование к сообщению: оно должно показывать, ЧТО чинить. Кабинет
-    Kaspi эти символы не отображает, и список голых артикулов владельцу ничего
-    не даёт — он их там просто не найдёт.
+    Блокером остался только символ, запрещённый в XML 1.0 §2.2 — его не
+    записать ни литералом, ни ссылкой. Сообщение обязано показывать, ЧТО
+    чинить: кабинет Kaspi таких символов не отображает, и список голых
+    артикулов владельцу ничего не даёт — он их там просто не найдёт.
     """
     catalog["products"] = (
-        [_offer("SKU-{:03d}".format(i)) for i in range(19)] + [_offer("H477-0009\t")]
+        [_offer("SKU-{:03d}".format(i)) for i in range(19)] + [_offer("H477-0009\x01")]
     )
-    text = render_plan_report(_plan())
-    assert "H477-0009<TAB>" in text
+    plan = _plan()
+    assert plan.blockers == ["H477-0009\x01"]
+    text = render_plan_report(plan)
     assert "ОТПРАВКА ЗАБЛОКИРОВАНА" in text
 
 
 def test_refuses_when_two_skus_collapse_into_one(catalog):
-    """А вот схлопывание разных артикулов в один — настоящая пропажа оффера."""
+    """
+    Схлопывание разных артикулов в один — настоящая пропажа оффера.
+
+    Пара «таб против пробела» больше сюда не годится: она перестала
+    схлопываться. Остался случай непечатаемого символа, который из файла
+    выпадает и делает артикул неотличимым от соседа.
+    """
     catalog["products"] = (
         [_offer("SKU-{:03d}".format(i)) for i in range(18)]
-        + [_offer("H477-0009\t"), _offer("H477-0009 ")]
+        + [_offer("H477-0009\x01"), _offer("H477-0009")]
     )
     with pytest.raises(FeedPlanRefused) as e:
         _plan()
     assert "схлопываются" in str(e.value)
 
 
-def test_refuses_skus_that_cannot_survive_kaspi_ingest(monkeypatch):
+def test_invisible_sku_travels_as_character_reference():
     """
-    Артикул с хвостовым табом уезжает в файл пробелом, Kaspi его обрезает и не
-    находит в каталоге — оффер гаснет как «отсутствующий в прайс-листе».
-    Загрузка 2026-08-24 сняла так H477-0009 и H477-0017; молча — недопустимо.
+    Табуляция в артикуле уезжает символьной ссылкой и доезжает целой.
+
+    XML 1.0 §3.3.3 заменяет пробелом ЛИТЕРАЛЬНЫЙ таб, но для символьной ссылки
+    предписывает «append the referenced character». Загрузка 2026-08-24 везла
+    литерал и потеряла H477-0009/H477-0017; ссылка эту ступень не проходит.
+    """
+    from backend.dumper.xml_feed import _escape_attr, unescape_attr
+
+    assert _escape_attr("H477-0009\t") == "H477-0009&#9;"
+    assert unescape_attr(_escape_attr("H477-0009\t")) == "H477-0009\t"
+    assert _escape_attr(" S517-0005 ") == " S517-0005 "  # пробел и так выживает
+
+
+def test_roundtrip_is_identity_because_kaspi_does_not_trim():
+    """
+    Kaspi края НЕ обрезает — замер, а не догадка.
+
+    В принятом файле 6a8c7b06b73ea421a0140dac (1098 офферов) ехали и
+    ` S517-0005 ` с пробелами по краям, и отдельный `S517-0005`. Обрезка
+    схлопнула бы их в один артикул; фактически `rejected: 0`, а `notMapped: 2`
+    пришлись ровно на два табулированных — то есть на XML-нормализацию.
     """
     from backend.dumper.xml_feed import feed_sku_roundtrip
 
-    assert feed_sku_roundtrip("H477-0009\t") == "H477-0009"
-    assert feed_sku_roundtrip(" S517-0005 ") == "S517-0005"
+    assert feed_sku_roundtrip("H477-0009\t") == "H477-0009\t"
+    assert feed_sku_roundtrip(" S517-0005 ") == " S517-0005 "
     assert feed_sku_roundtrip("D844-0005") == "D844-0005"
+
+
+def test_xml_forbidden_char_is_the_only_real_blocker():
+    """
+    Символ из XML 1.0 §2.2 не записать ни литералом, ни ссылкой — он просто
+    выпадает из файла. Сборку это не роняет (предпросмотр должен собраться),
+    но артикул перестаёт совпадать с собой, и план кладёт его в `blockers`.
+    """
+    from backend.dumper.xml_feed import _escape_attr, feed_sku_roundtrip
+
+    assert _escape_attr("H477-1") == "H477-1"
+    assert feed_sku_roundtrip("H477-1") == "H477-1" != "H477-1"
 
 
 def test_clean_sku_roundtrips_unchanged():
@@ -261,7 +306,11 @@ def test_clean_sku_roundtrips_unchanged():
 
 
 def test_defect_marks_only_the_edges():
-    """Пробел в середине артикула безвреден — метить его значило бы шуметь."""
+    """Диагностика для человека: невидимое на краях надо показать явно.
+
+    Это уже не приговор офферу — файл такие артикулы везёт, — но при разборе
+    расхождений увидеть `H477-0009<TAB>` вместо `H477-0009` по-прежнему нужно.
+    """
     from backend.dumper.xml_feed import describe_sku_defect
 
     assert describe_sku_defect("H477-0009\t") == "H477-0009<TAB>"

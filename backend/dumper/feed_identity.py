@@ -22,7 +22,7 @@ from typing import Dict, Optional, Tuple
 import logging
 import re
 
-from backend.dumper.xml_feed import xml_attr_value
+from backend.dumper.xml_feed import unescape_attr, xml_attr_value
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +47,13 @@ _BRAND_RE = re.compile(r"<brand>(.*?)</brand>", re.S)
 
 
 def _unescape(text: str) -> str:
-    return (
-        text.replace("&quot;", '"')
-        .replace("&gt;", ">")
-        .replace("&lt;", "<")
-        .replace("&amp;", "&")
-    )
+    """Значение атрибута из сырого текста файла — включая `&#9;`.
+
+    Свой вариант этой функции жил здесь, пока табуляция ехала литералом и
+    разбирать было нечего. Теперь артикул с табуляцией записан ссылкой, и
+    читатель обязан знать про неё столько же, сколько писатель.
+    """
+    return unescape_attr(text)
 
 
 def parse_identity(xml_bytes: bytes) -> Dict[str, dict]:

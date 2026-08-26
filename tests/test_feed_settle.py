@@ -94,11 +94,12 @@ def test_declared_is_read_back_from_the_file_itself(archive):
 
 def test_declared_keys_match_how_kaspi_will_see_them(archive):
     """
-    Ключ — артикул после приёма Kaspi. Иначе сверка разошлась бы с каталогом
-    ровно на тех артикулах, из-за которых всё и затевалось.
+    Ключ — артикул после приёма Kaspi. Табуляция теперь доезжает целой, и
+    ключ обязан нести её же: иначе сверка искала бы в каталоге `H477-0009`,
+    которого там нет, и объявила бы пропавшим живой оффер.
     """
     declared = parse_declared(archive([_offer("H477-0009\t")]).read_bytes())
-    assert list(declared) == ["H477-0009"]
+    assert list(declared) == ["H477-0009\t"]
 
 
 # ── Сравнение с фактом ──────────────────────────────────────────────────────

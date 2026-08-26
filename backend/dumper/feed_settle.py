@@ -38,6 +38,7 @@ import logging
 import re
 
 from backend.dumper import feed_state
+from backend.dumper.xml_feed import unescape_attr
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +56,13 @@ _AVAIL_RE = re.compile(r'available="(yes|no)"')
 
 
 def _unescape(text: str) -> str:
-    return (
-        text.replace("&quot;", '"')
-        .replace("&gt;", ">")
-        .replace("&lt;", "<")
-        .replace("&amp;", "&")
-    )
+    """Значение атрибута из сырого текста файла — включая `&#9;`.
+
+    Артикул с табуляцией уезжает символьной ссылкой; без её разбора сверка
+    искала бы в каталоге строку `H477-0009&#9;` и не нашла бы — то есть
+    объявила бы расхождением ровно тот оффер, ради которого всё чинилось.
+    """
+    return unescape_attr(text)
 
 
 @dataclass
