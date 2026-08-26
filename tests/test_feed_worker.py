@@ -211,6 +211,28 @@ def test_the_default_pause_is_an_hour(wired):
         datetime.datetime.now() - datetime.timedelta(minutes=45)
     ).isoformat())
     assert "с прошлой отправки" in feed_worker.why_not_now("s1", 1582, 500, 0.1)
+def test_shadow_run_also_starts_the_pause(wired):
+    """
+    В тени файл не отправляется, `settled_at` не проставляется никогда — и
+    воркер выкачивал ВЕСЬ каталог каждые пять минут. Замерено на Бархане
+    2026-08-26: две полные выкачки за шесть минут (15:15 и 15:21). Дорогая
+    здесь сборка плана, а не отправка, поэтому пауза считается и от неё.
+    """
+    feed_state.save("s1", last_plan_at=(
+        datetime.datetime.now() - datetime.timedelta(minutes=45)
+    ).isoformat())
+    assert "с прошлой отправки" in feed_worker.why_not_now("s1", 1582, 500, 0.1)
+
+
+def test_the_later_of_the_two_marks_wins(wired):
+    """Старая отметка не должна перебивать свежую — иначе пауза обнуляется."""
+    now = datetime.datetime.now()
+    feed_state.save(
+        "s1",
+        settled_at=(now - datetime.timedelta(hours=5)).isoformat(),
+        last_plan_at=(now - datetime.timedelta(minutes=10)).isoformat(),
+    )
+    assert "с прошлой отправки" in feed_worker.why_not_now("s1", 1582, 500, 0.1)
 
 
 def test_next_pause_grows_with_real_processing_time(wired):

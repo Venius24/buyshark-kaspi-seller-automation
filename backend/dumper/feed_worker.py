@@ -91,7 +91,10 @@ def _seconds_since(iso: Optional[str]) -> Optional[float]:
         return None
 
 
-def why_not_now(store_id, active_offers: int, pending: int, quota_used_ratio: float) -> Optional[str]:
+def why_not_now(
+    store_id, active_offers: int, pending: int, quota_used_ratio: float,
+    *, check_pause: bool = True,
+) -> Optional[str]:
     """
     Причина промолчать, или None если пора слать.
 
@@ -103,9 +106,25 @@ def why_not_now(store_id, active_offers: int, pending: int, quota_used_ratio: fl
     if blocked:
         return blocked
 
-    since = _seconds_since(feed_state.load(store_id).get("settled_at"))
+    # Пауза считается от ПОЗДНЕЙШЕГО из двух событий: разобранного файла и
+    # собранного плана. Только `settled_at` тут мало: в теневом режиме файл не
+    # отправляется, `settled_at` не проставляется никогда, и воркер выкачивал
+    # весь каталог каждые пять минут. Замерено на Бархане 2026-08-26 — две
+    # полные выкачки за шесть минут (15:15 и 15:21). Это ровно тот паттерн
+    # лишнего трафика, за который IP этого VPS уже банили (HANDOFF 3.8/3.9),
+    # и в тени он опаснее, чем в бою: в бою его гасил `settled_at`.
+    state = feed_state.load(store_id)
+    ages = [
+        age
+        for age in (
+            _seconds_since(state.get("settled_at")),
+            _seconds_since(state.get("last_plan_at")),
+        )
+        if age is not None
+    ]
+    since = min(ages) if ages else None
     pause = next_pause_seconds(store_id)
-    if since is not None and since < pause:
+    if check_pause and since is not None and since < pause:
         return "с прошлой отправки прошло {:.0f} мин из {:.0f}".format(since / 60, pause / 60)
 
     if pending < MIN_INTENTS_FOR_FEED and quota_used_ratio < QUOTA_PRESSURE_RATIO:
@@ -159,7 +178,14 @@ def run_for_store(store) -> dict:
 
     plan = build_feed_plan(store.token, store.store_id, use_accepted_identity=True)
     active = plan.total
-    feed_state.save(store.store_id, active_offers=active)
+    # Отметка ставится СРАЗУ после сборки, а не после отправки: дорогая здесь
+    # именно выкачка каталога, и она уже случилась — независимо от того, чем
+    # кончится проход (тень, блокеры, неудачная отправка).
+    feed_state.save(
+        store.store_id,
+        active_offers=active,
+        last_plan_at=datetime.datetime.now().isoformat(),
+    )
 
     if plan.blockers:
         # Артикулы с невидимыми символами. Файл на них сослаться не может, и
@@ -169,7 +195,10 @@ def run_for_store(store) -> dict:
         return result
 
     # Второй заход: теперь размер каталога известен точно, а не по памяти.
-    reason = why_not_now(store.store_id, active, pending, used_ratio)
+    # Паузу тут НЕ проверяем: дешёвый заход её уже проверил секунду назад, а
+    # `last_plan_at` мы только что проставили сами — повторная проверка
+    # отвергла бы собственный же проход, ничего при этом не сэкономив.
+    reason = why_not_now(store.store_id, active, pending, used_ratio, check_pause=False)
     if reason:
         result["reason"] = reason
         return result
