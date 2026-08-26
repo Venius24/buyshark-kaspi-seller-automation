@@ -202,26 +202,30 @@ def test_escapes_quote_in_attribute():
     assert '<offer sku="D844&quot;0005">' in xml
 
 
-def test_writes_tab_in_sku_as_a_character_reference():
+def test_writes_tab_in_sku_literally_because_nothing_else_works():
     """
-    Табуляцию экранируем ссылкой — иначе парсер Kaspi нормализует её в пробел
-    и оффер не найдётся. Прежняя версия этого теста требовала обратного и
-    стоила двух карточек 2026-08-24 (`notMapped: 2`).
+    Табуляция едет литералом, и Kaspi увидит на её месте пробел.
+
+    Обход через символьную ссылку (`&#9;`) здесь стоял ровно один день и был
+    опровергнут живой отправкой 2026-08-27: файл `6a8f391497dfba199f5ae991`
+    нёс обе ссылки, вердикт — `notMapped: 2`, обе карточки в архиве. Спека на
+    стороне ссылки, парсер Kaspi — нет. Значит выбирать не из чего, и защита
+    живёт не здесь, а в `blockers`: файл с таким артикулом не отправляется.
     """
     xml = generate_xml_feed("20186986", [_ok_product(merchantSku="H477-0009\t")]).decode("utf-8")
-    assert '<offer sku="H477-0009&#9;">' in xml
-    assert '<offer sku="H477-0009\t">' not in xml
+    assert '&#9;' not in xml
+    assert '<offer sku="H477-0009\t">' in xml
 
 
-def test_tab_and_space_are_no_longer_the_same_offer():
+def test_tab_and_space_collapse_into_one_offer():
     """
-    `A\t` и `A ` доезжают разными: первый ссылкой, второй литералом. Пока таб
-    ехал литералом, второй оффер молча замещал первый и сборка отказывалась —
-    теперь замещать нечего, и оба должны попасть в файл.
+    `A<TAB>` и `A ` для Kaspi неразличимы, поэтому в одном файле они дубль.
+
+    Сборка обязана отказаться: молча оставить один из двух значило бы, что
+    второй не упомянут в прайс-листе — а это снятие карточки с продажи.
     """
-    xml = generate_xml_feed("20186986", [
-        _ok_product(merchantSku="H477-0009\t"),
-        _ok_product(merchantSku="H477-0009 "),
-    ]).decode("utf-8")
-    assert '<offer sku="H477-0009&#9;">' in xml
-    assert '<offer sku="H477-0009 ">' in xml
+    with pytest.raises(FeedSerializationError):
+        generate_xml_feed("20186986", [
+            _ok_product(merchantSku="H477-0009\t"),
+            _ok_product(merchantSku="H477-0009 "),
+        ])
