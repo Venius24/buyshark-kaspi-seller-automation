@@ -215,15 +215,36 @@ def test_tab_in_sku_blocks_the_whole_file(catalog):
     assert any("ЗАБЛОКИРОВАНА" in w for w in plan.warnings)
     assert b'&#9;' not in plan.xml
 
-def test_edge_spaces_were_never_the_problem(catalog):
-    """` S517-0005 ` — реальный артикул, и он в файле 24.08 сматчился."""
+def test_edge_space_blocks_the_file_and_would_corrupt_the_twin(catalog):
+    """
+    Краевой пробел — не косметика, а порча соседней карточки.
+
+    Замер на Бархане: файл 24.08 объявил ` S517-0005 ` → 490 и `S517-0005`
+    → 1118. Последний JSON-пуш по обоим был 16.08 с этими же значениями, и
+    после него ни одного. Сегодня ` S517-0005 ` в архиве, а `S517-0005`
+    несёт 490 — чужую цену. Kaspi обрезала края, сопоставила запись с
+    близнецом, переписала ему цену, а оригинал сняла с продажи. Вердикт при
+    этом отрапортовал `rejected 0` — молча.
+
+    Тест держит ОБА следствия: такой артикул блокирует файл, а пара
+    «с краями / без» отвергается как коллизия ещё до сборки.
+    """
     catalog["products"] = (
         [_offer("SKU-{:03d}".format(i)) for i in range(19)] + [_offer(" S517-0005 ")]
     )
     plan = _plan()
-    assert plan.blockers == []
-    assert b'sku=" S517-0005 "' in plan.xml
+    assert plan.blockers == [" S517-0005 "]
+    assert any("ЗАБЛОКИРОВАНА" in w for w in plan.warnings)
 
+
+def test_trimmed_twin_is_refused_as_a_collision(catalog):
+    """Пара, которую Kaspi схлопнет в один оффер, — отказ, а не догадка."""
+    catalog["products"] = (
+        [_offer("SKU-{:03d}".format(i)) for i in range(18)]
+        + [_offer(" S517-0005 "), _offer("S517-0005")]
+    )
+    with pytest.raises(FeedPlanRefused):
+        _plan()
 
 def test_report_shows_where_the_invisible_characters_are(catalog):
     """
@@ -272,7 +293,7 @@ def test_character_reference_does_not_save_the_tab():
     assert _escape_attr(" S517-0005 ") == " S517-0005 "  # пробел выживает
     assert unescape_attr("H477-0009&#9;") == "H477-0009\t"
 
-def test_roundtrip_loses_the_tab_but_keeps_the_edges():
+def test_roundtrip_loses_the_tab_and_the_edges():
     """
     Что Kaspi увидит, приняв файл: таб — пробелом, края — как есть.
 
@@ -283,8 +304,8 @@ def test_roundtrip_loses_the_tab_but_keeps_the_edges():
     """
     from backend.dumper.xml_feed import feed_sku_roundtrip
 
-    assert feed_sku_roundtrip("H477-0009\t") == "H477-0009 "
-    assert feed_sku_roundtrip(" S517-0005 ") == " S517-0005 "
+    assert feed_sku_roundtrip("H477-0009\t") == "H477-0009"
+    assert feed_sku_roundtrip(" S517-0005 ") == "S517-0005"
     assert feed_sku_roundtrip("D844-0005") == "D844-0005"
 
 def test_xml_forbidden_char_is_the_only_real_blocker():

@@ -134,10 +134,19 @@ def _apply_intent(product: dict, intent: dict):
 
 
 def _skus_in_xml(xml_bytes: bytes) -> List[str]:
-    """Разобрать готовый файл обратно и вынуть sku всех офферов."""
+    """
+    Разобрать готовый файл обратно и вынуть sku всех офферов — В ТОМ ВИДЕ,
+    в каком их получит Kaspi.
+
+    `ET` уже нормализует значение атрибута по XML 1.0 §3.3.3 (таб → пробел),
+    а `feed_sku_roundtrip` добавляет то, что делает сверх спеки сама Kaspi
+    (обрезку краёв). Без этого инвариант полноты сравнивал бы обрезанный ключ
+    факта с необрезанным ключом файла и падал бы на ровном месте — а падать
+    он обязан только тогда, когда оффер действительно не доедет.
+    """
     root = ET.fromstring(xml_bytes.decode("utf-8"))
     return [
-        offer.attrib["sku"]
+        feed_sku_roundtrip(offer.attrib["sku"])
         for offer in root.iter("{%s}offer" % CATALOG_NS)
         if "sku" in offer.attrib
     ]
