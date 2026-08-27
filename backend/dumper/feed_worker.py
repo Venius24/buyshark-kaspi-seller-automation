@@ -191,7 +191,32 @@ def run_for_store(store) -> dict:
         # Артикулы с невидимыми символами. Файл на них сослаться не может, и
         # Kaspi погасит эти карточки — тот же случай, что 2026-08-24.
         result["reason"] = "битые артикулы: {}".format(plan.blockers[:5])
+        result["blockers"] = list(plan.blockers)
+
+        if _shadow():
+            # В тени рубильник НЕ дёргаем. `disable()` несимметричен намеренно
+            # (см. докстринг feed_state): он берёт полчаса без фида в обмен на
+            # ночь ручного восстановления каталога. В теневом режиме второй
+            # половины сделки не существует — отправить нечего, потерять
+            # карточки нечем, — а первая обходится дороже, чем кажется:
+            # `eligible()` начинает отбивать проход ДО сборки плана, и мы
+            # теряем ровно те наблюдения, ради которых тень и включена.
+            # Замерено 2026-08-27: блокеры в 06:09 выключили теневой прогон на
+            # 12+ часов (0 тиков), при том что отправка была невозможна.
+            feed_state.save(
+                store.store_id,
+                last_blockers=result["blockers"][:5],
+                last_blockers_at=datetime.datetime.now().isoformat(),
+            )
+            logger.warning(
+                "👁 [FeedWorker] Стор %s: СОБРАЛ БЫ файл, НО не отправил бы — %s. "
+                "Тень: фид оставлен включённым, рубильник не тронут.",
+                store.store_id, result["reason"],
+            )
+            return result
+
         feed_state.disable(store.store_id, result["reason"])
+        result["disabled"] = result["reason"]
         return result
 
     # Второй заход: теперь размер каталога известен точно, а не по памяти.
@@ -225,6 +250,7 @@ def run_for_store(store) -> dict:
         feed_state.save(store.store_id, in_flight=None)
         result["reason"] = "отправка не удалась: {!r}".format(err)
         feed_state.disable(store.store_id, result["reason"])
+        result["disabled"] = result["reason"]
         return result
 
     record_processing_time(store.store_id, verdict)
@@ -244,10 +270,39 @@ def run_for_store(store) -> dict:
     else:
         # Архив не записался — сверять не с чем. Это не повод считать, что всё
         # хорошо: мы только что объявили весь каталог и не можем проверить исход.
-        feed_state.disable(
-            store.store_id, "файл отправлен, но не сохранён — сверить исход невозможно"
-        )
+        result["disabled"] = "файл отправлен, но не сохранён — сверить исход невозможно"
+        feed_state.disable(store.store_id, result["disabled"])
     return result
+
+
+async def notify_feed_disabled(store_id, reason: str) -> None:
+    """
+    Разбудить человека, когда фид выключил сам себя.
+
+    До 2026-08-27 `disable()` умел только `logger.error`, и выключение было
+    невидимым: фид простоял выключенным 12 часов, а узналось об этом
+    раскопками в логах по другому поводу. Лог для этого не годится — его никто
+    не читает, и это ровно тот вывод, который уже сделан в `notify_settle_report`.
+
+    Фид обратно включает только человек, поэтому сообщение обязано сказать не
+    только «выключен», но и «сам не включится».
+    """
+    from backend.chatbot import notify_dispatch
+
+    text = "\n".join([
+        "🚨 *ПРАЙС-ЛИСТ ВЫКЛЮЧЕН*",
+        "",
+        "Причина: {}".format(reason),
+        "",
+        "Сам он обратно не включится — нужно починить причину и включить руками.",
+    ])
+    try:
+        await notify_dispatch.dispatch(
+            str(store_id), "problems", text,
+            urgent=True, dedup_key="feed-disabled-{}".format(store_id),
+        )
+    except Exception as err:
+        logger.error("[FeedWorker] Тревога о выключении фида не ушла в Телеграм: %r", err)
 
 
 async def run_feed_cycle() -> dict:
@@ -270,6 +325,11 @@ async def run_feed_cycle() -> dict:
                     await notify_settle_report(store.store_id, report)
             elif result["reason"]:
                 logger.debug("[FeedWorker] Стор %s: %s", store.store_id, result["reason"])
+
+            # Отдельно от sent/not-sent: выключиться фид может и после удачной
+            # отправки (архив не записался), и вместо неё.
+            if result.get("disabled"):
+                await notify_feed_disabled(store.store_id, result["disabled"])
         except Exception as err:
             logger.error("[FeedWorker] Стор %s: цикл упал: %r", store.store_id, err)
     return totals

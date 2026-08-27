@@ -7,6 +7,7 @@
 набором зелёных условий.
 """
 import datetime
+from unittest.mock import patch
 
 import pytest
 
@@ -129,6 +130,66 @@ def test_broken_articles_stop_the_feed_and_disable_it(wired, monkeypatch):
     assert result["sent"] is False and "битые артикулы" in result["reason"]
     assert feed_state.is_enabled("s1") is False
     assert calls == []
+
+
+def test_blockers_in_shadow_do_not_flip_the_switch(wired, monkeypatch):
+    """
+    Теневой прогон отправить не может физически, значит терять карточки нечем —
+    а `disable()` стоит дорого: `eligible()` начинает отбивать проход ДО сборки
+    плана, и наблюдения, ради которых тень включена, прекращаются.
+
+    Замерено на проде 2026-08-27: блокеры выключили теневой прогон в 06:09 и он
+    молчал 12+ часов, при том что отправка была невозможна в принципе.
+    """
+    monkeypatch.delenv("XML_FEED_WORKER", raising=False)  # тень
+    wired["plan"] = _Plan(blockers=["H477-0009\t", " S517-0005 "])
+    calls = _no_send(monkeypatch)
+
+    result = feed_worker.run_for_store(_Store())
+
+    assert result["sent"] is False
+    assert "битые артикулы" in result["reason"]
+    assert calls == []
+    # Главное: рубильник не тронут, следующий тик снова соберёт план.
+    assert feed_state.is_enabled("s1") is True
+    assert "disabled" not in result
+    # Но причина записана — иначе тень стала бы молчаливой в другую сторону.
+    assert feed_state.load("s1")["last_blockers"] == ["H477-0009\t", " S517-0005 "]
+
+
+def test_blockers_in_live_mode_still_disable(wired, monkeypatch):
+    """Боевой режим не смягчаем: там цена пропущенной тревоги — ночь ручного
+    восстановления каталога, ради которой рубильник и заведён."""
+    wired["plan"] = _Plan(blockers=["H477-0009\t"])
+    _no_send(monkeypatch)
+
+    result = feed_worker.run_for_store(_Store())
+
+    assert feed_state.is_enabled("s1") is False
+    # Причина уезжает наверх, чтобы цикл разбудил человека.
+    assert "битые артикулы" in result["disabled"]
+
+
+def test_disable_wakes_the_owner():
+    """
+    До 2026-08-27 `disable()` умел только `logger.error`, и выключение фида было
+    невидимым: узналось об этом раскопками в логах, спустя 12 часов.
+    """
+    import asyncio
+
+    sent = []
+    from backend.chatbot import notify_dispatch
+
+    with patch.object(notify_dispatch, "dispatch",
+                      side_effect=lambda *a, **k: sent.append((a, k))):
+        asyncio.run(feed_worker.notify_feed_disabled("s1", "битые артикулы: ['H477-0009\t']"))
+
+    assert len(sent) == 1
+    args, kwargs = sent[0]
+    assert args[0] == "s1" and args[1] == "problems"
+    assert "ПРАЙС-ЛИСТ ВЫКЛЮЧЕН" in args[2]
+    assert "битые артикулы" in args[2]
+    assert kwargs["urgent"] is True
 
 
 def test_nothing_to_carry_means_silence(wired, monkeypatch):
