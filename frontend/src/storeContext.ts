@@ -1,4 +1,6 @@
 import { useSyncExternalStore } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { fetchStores } from './queries';
 
 // Слайс 6: единственный источник правды "какой магазин сейчас выбран" —
 // раньше это был локальный useState внутри StoreHub.tsx, который терялся
@@ -36,4 +38,27 @@ function subscribe(listener: Listener): () => void {
 
 export function useActiveStoreId(): string | null {
   return useSyncExternalStore(subscribe, getActiveStoreId);
+}
+
+// Роль текущего пользователя в активном магазине (OWNER/MANAGER/VIEWER).
+// GET /api/v1/stores уже отдаёт role на каждый магазин (StoreHub.tsx грузит
+// его через тот же ['stores'] queryKey) — react-query дедуплицирует запрос,
+// доп. сетевого похода на роль не требуется.
+export function useActiveStoreRole(): string | null {
+  const activeStoreId = useActiveStoreId();
+  const { data: stores = [] } = useQuery({ queryKey: ['stores'], queryFn: fetchStores });
+  const store = stores.find((s) => s.id === activeStoreId);
+  return store?.role ?? null;
+}
+
+export function useCanEdit(): boolean {
+  return useActiveStoreRole() !== 'VIEWER';
+}
+
+export function useIsStoreOwner(): boolean {
+  // Fail-open, пока роль ещё не загружена (null) — реальная защита всё
+  // равно на бэкенде (403), здесь только UX. Без этого OWNER на долю
+  // секунды терял бы вкладку "Тариф и Баланс" при каждой загрузке страницы.
+  const role = useActiveStoreRole();
+  return role === null || role === 'OWNER';
 }
