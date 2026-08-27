@@ -1,10 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import {
+  Sparkles,
+  AlertTriangle,
+  CheckCircle2,
+  ShieldAlert,
+  Store,
+  Plus,
+  Loader2,
+  Rocket,
+  XCircle,
+  RefreshCw,
+  KeyRound,
+  Trash2,
+  X,
+  Wrench,
+  Send,
+} from 'lucide-react';
 import { apiFetch, API_URL } from '../api';
 import { fetchProfile, fetchStores, fetchBillingPlans } from '../queries';
 import { useActiveStoreId, setActiveStoreId as setSharedActiveStoreId } from '../storeContext';
 import { formatTenge } from '../utils/money';
+import emptyStateIllustration from '../assets/sprites/storehub_empty_illustration.png';
 
 export interface StoreItem {
   id: string;
@@ -53,6 +71,12 @@ export const StoreHub: React.FC = () => {
 
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
+  const showToast = (type: 'success' | 'error' | 'warning', text: string) => {
+    setToastMessage({ type, text });
+    setTimeout(() => setToastMessage(null), 4000);
+  };
 
   // "Сделайте всё за меня" — авто-подключение через SMS владельца.
   // Каркас: см. AUTOCONNECT_PLAN.md — бэкенд пока отдаёт 503, т.к. Фаза 1
@@ -256,15 +280,15 @@ export const StoreHub: React.FC = () => {
         method: 'POST',
       });
       if (res.ok) {
-        alert('✅ Куки успешно синхронизированы с магазином!');
+        showToast('success', 'Куки успешно синхронизированы с магазином!');
         refetchStoresAndProfile();
       } else {
         const errData = await res.json();
-        alert(`⚠️ ${errData.detail || 'Требуется повторный вход в Kaspi MC'}. Перейдите во вкладку «Подключения & Сессия» и нажмите «Войти в Kaspi MC».`);
+        showToast('warning', `${errData.detail || 'Требуется повторный вход в Kaspi MC'}. Перейдите во вкладку «Подключения & Сессия» и нажмите «Войти в Kaspi MC».`);
       }
     } catch (err) {
       console.error('Error syncing store cookies:', err);
-      alert('⚠️ Ошибка синхронизации кук. Перейдите во вкладку «Подключения & Сессия» и войдите в Kaspi MC заново.');
+      showToast('error', 'Ошибка синхронизации кук. Перейдите во вкладку «Подключения & Сессия» и войдите в Kaspi MC заново.');
     }
   };
 
@@ -284,10 +308,43 @@ export const StoreHub: React.FC = () => {
 
   return (
     <div style={styles.hubContainer}>
+      {toastMessage && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '14px 20px',
+            borderRadius: '12px',
+            background:
+              toastMessage.type === 'success'
+                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.95), rgba(5, 150, 105, 0.95))'
+                : toastMessage.type === 'warning'
+                ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.95), rgba(217, 119, 6, 0.95))'
+                : 'linear-gradient(135deg, rgba(239, 68, 68, 0.95), rgba(220, 38, 38, 0.95))',
+            color: '#ffffff',
+            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(8px)',
+            fontWeight: 500,
+            fontSize: '14px',
+            maxWidth: '420px',
+          }}
+        >
+          {toastMessage.type === 'success' && <CheckCircle2 size={20} style={{ flexShrink: 0 }} />}
+          {toastMessage.type === 'warning' && <AlertTriangle size={20} style={{ flexShrink: 0 }} />}
+          {toastMessage.type === 'error' && <ShieldAlert size={20} style={{ flexShrink: 0 }} />}
+          <span>{toastMessage.text}</span>
+        </div>
+      )}
+
       {/* Header Context Switcher Bar */}
       <div className="glass-card" style={styles.topContextBar}>
         <div style={styles.contextLeft}>
-          <span style={{ fontSize: '20px' }}>🏪</span>
+          <Store size={20} color="var(--primary)" />
           <div>
             <div style={styles.contextLabel}>Текущий активный магазин Kaspi:</div>
             <select
@@ -312,25 +369,30 @@ export const StoreHub: React.FC = () => {
           </div>
         )}
 
-        <button onClick={() => { resetModalState(); setShowAddModal(true); }} className="btn btn-primary">
-          ➕ Подключить магазин Kaspi
+        <button onClick={() => { resetModalState(); setShowAddModal(true); }} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Plus size={16} /> Подключить магазин Kaspi
         </button>
       </div>
 
       {/* Stores List Grid */}
       <div style={{ marginTop: '24px' }}>
-        <h3 style={styles.sectionHeader}>🏬 Ваши магазины Kaspi:</h3>
+        <h3 style={{ ...styles.sectionHeader, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Store size={18} /> Ваши магазины Kaspi:
+        </h3>
 
         {loading ? (
-          <div style={{ color: 'var(--text-muted)' }}>⏳ Загрузка списка магазинов...</div>
+          <div style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Загрузка списка магазинов...
+          </div>
         ) : stores.length === 0 ? (
           <div className="glass-card" style={styles.emptyState}>
-            <div style={{ fontSize: '18px', fontWeight: 600, color: '#fff' }}>🛍️ У вас пока нет подключенных магазинов Kaspi.</div>
+            <img src={emptyStateIllustration} alt="" style={styles.emptyStateIllustration} />
+            <div style={{ fontSize: '18px', fontWeight: 600, color: '#fff' }}>У вас пока нет подключенных магазинов Kaspi.</div>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '8px 0 16px 0' }}>
               Подключите ваш магазин Kaspi по API-токену и email/паролю для автопечати, демпинга и заказов.
             </p>
-            <button onClick={() => { resetModalState(); setShowAddModal(true); }} className="btn btn-primary">
-              🚀 Подключить первый магазин Kaspi
+            <button onClick={() => { resetModalState(); setShowAddModal(true); }} className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <Rocket size={16} /> Подключить первый магазин Kaspi
             </button>
           </div>
         ) : (
@@ -346,8 +408,9 @@ export const StoreHub: React.FC = () => {
               >
                 <div style={styles.cardHeader}>
                   <div style={styles.storeTitle}>{s.name}</div>
-                  <span className={`badge ${s.status === 'ACTIVE' ? 'badge-success' : 'badge-error'}`}>
-                    {s.status === 'ACTIVE' ? '🟢 Подключен' : '🔴 Требуется вход'}
+                  <span className={`badge ${s.status === 'ACTIVE' ? 'badge-success' : 'badge-error'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    {s.status === 'ACTIVE' ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+                    {s.status === 'ACTIVE' ? 'Подключен' : 'Требуется вход'}
                   </span>
                 </div>
 
@@ -362,15 +425,17 @@ export const StoreHub: React.FC = () => {
                 </div>
 
                 <div style={styles.cardActions}>
-                  <button onClick={() => handleVerifyStore(s.id)} className="btn btn-secondary" style={{ flex: 1, padding: '8px', fontSize: '12px' }}>
-                    🔄 Проверить статус
+                  <button onClick={() => handleVerifyStore(s.id)} className="btn btn-secondary" style={{ flex: 1, padding: '8px', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                    <RefreshCw size={13} /> Проверить статус
                   </button>
-                  <button onClick={() => handleSyncCookies(s)} className="btn btn-primary" style={{ padding: '8px 12px', fontSize: '12px' }}>
-                    🔑 Обновить куки
+                  <button onClick={() => handleSyncCookies(s)} className="btn btn-primary" style={{ padding: '8px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <KeyRound size={13} /> Обновить куки
                   </button>
-                  <button onClick={() => handleDeleteStore(s.id)} className="btn" style={styles.deleteBtn}>
-                    🗑️ Удалить
-                  </button>
+                  {s.role === 'OWNER' && (
+                    <button onClick={() => handleDeleteStore(s.id)} className="btn" style={{ ...styles.deleteBtn, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Trash2 size={13} /> Удалить
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -383,9 +448,12 @@ export const StoreHub: React.FC = () => {
         <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
           <div className="glass-card modal-content" style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHeader}>
-              <span>✨ Подключение магазина Kaspi</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Sparkles size={18} color="var(--secondary)" />
+                Подключение магазина Kaspi
+              </span>
               <button onClick={() => setShowAddModal(false)} style={styles.closeBtn}>
-                ✖
+                <X size={18} />
               </button>
             </div>
 
@@ -395,17 +463,17 @@ export const StoreHub: React.FC = () => {
                 type="button"
                 onClick={() => setConnectMode('manual')}
                 className={`btn ${connectMode === 'manual' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ flex: 1, padding: '10px', fontSize: '13px' }}
+                style={{ flex: 1, padding: '10px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
               >
-                🛠️ Ручное подключение
+                <Wrench size={14} /> Ручное подключение
               </button>
               <button
                 type="button"
                 onClick={() => setConnectMode('auto')}
                 className={`btn ${connectMode === 'auto' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ flex: 1, padding: '10px', fontSize: '13px' }}
+                style={{ flex: 1, padding: '10px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
               >
-                ✨ Сделайте всё за меня
+                <Sparkles size={14} /> Сделайте всё за меня
               </button>
             </div>
 
@@ -415,7 +483,11 @@ export const StoreHub: React.FC = () => {
                   Введите номер телефона <strong>владельца</strong> кабинета Kaspi Merchant — мы пришлём SMS-код и
                   подключим магазин сами, без ручного ввода токена и пароля.
                 </p>
-                {autoErrorMsg && <div style={styles.errorBox}>⚠️ {autoErrorMsg}</div>}
+                {autoErrorMsg && (
+                  <div style={styles.errorBox}>
+                    <AlertTriangle size={16} style={{ flexShrink: 0 }} /> {autoErrorMsg}
+                  </div>
+                )}
 
                 {smsStep === 'phone' ? (
                   <form onSubmit={handleSendOwnerSms}>
@@ -442,8 +514,10 @@ export const StoreHub: React.FC = () => {
                       />
                     </div>
                     <div style={{ marginTop: '24px' }}>
-                      <button type="submit" disabled={autoSubmitting} className="btn btn-primary" style={{ width: '100%', padding: '14px 24px', fontSize: '15px' }}>
-                        {autoSubmitting ? '⏳ Отправляем SMS...' : '📲 Отправить SMS-код'}
+                      <button type="submit" disabled={autoSubmitting} className="btn btn-primary" style={{ width: '100%', padding: '14px 24px', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                        {autoSubmitting
+                          ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Отправляем SMS...</>
+                          : <><Send size={16} /> Отправить SMS-код</>}
                       </button>
                     </div>
                   </form>
@@ -461,8 +535,10 @@ export const StoreHub: React.FC = () => {
                       />
                     </div>
                     <div style={{ marginTop: '24px' }}>
-                      <button type="submit" disabled={autoSubmitting} className="btn btn-primary" style={{ width: '100%', padding: '14px 24px', fontSize: '15px' }}>
-                        {autoSubmitting ? '⏳ Подключаем магазин...' : '✅ Подтвердить и подключить'}
+                      <button type="submit" disabled={autoSubmitting} className="btn btn-primary" style={{ width: '100%', padding: '14px 24px', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                        {autoSubmitting
+                          ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Подключаем магазин...</>
+                          : <><CheckCircle2 size={16} /> Подтвердить и подключить</>}
                       </button>
                     </div>
                   </form>
@@ -470,7 +546,11 @@ export const StoreHub: React.FC = () => {
               </div>
             ) : (
             <form onSubmit={handleConnectFullStore} style={{ padding: '20px' }}>
-              {errorMsg && <div style={styles.errorBox}>⚠️ {errorMsg}</div>}
+              {errorMsg && (
+                <div style={styles.errorBox}>
+                  <AlertTriangle size={16} style={{ flexShrink: 0 }} /> {errorMsg}
+                </div>
+              )}
 
               {/* Field 1: Store Name */}
               <div style={styles.formGroup}>
@@ -552,15 +632,17 @@ export const StoreHub: React.FC = () => {
                   ))}
                 </div>
                 {selectedPlanCode && (
-                  <p style={{ fontSize: '12px', color: 'var(--secondary)', margin: '8px 0 0 0' }}>
-                    ✨ Первые 7 дней — бесплатно. Дальше тариф продлевается автоматически по цене выше.
+                  <p style={{ fontSize: '12px', color: 'var(--secondary)', margin: '8px 0 0 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Sparkles size={13} /> Первые 7 дней — бесплатно. Дальше тариф продлевается автоматически по цене выше.
                   </p>
                 )}
               </div>
 
               <div style={{ marginTop: '24px' }}>
-                <button type="submit" disabled={submitting} className="btn btn-primary" style={{ width: '100%', padding: '14px 24px', fontSize: '15px' }}>
-                  {submitting ? '⏳ Подключение магазина и проверка данных...' : '🚀 Подключить магазин Kaspi'}
+                <button type="submit" disabled={submitting} className="btn btn-primary" style={{ width: '100%', padding: '14px 24px', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                  {submitting
+                    ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Подключение магазина и проверка данных...</>
+                    : <><Rocket size={16} /> Подключить магазин Kaspi</>}
                 </button>
               </div>
             </form>
@@ -711,6 +793,15 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '10px 14px',
     borderRadius: '8px',
     fontSize: '13px',
+    marginBottom: '16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  emptyStateIllustration: {
+    width: '200px',
+    maxWidth: '100%',
+    borderRadius: '12px',
     marginBottom: '16px',
   },
 };

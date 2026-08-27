@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { RefreshCw, Package } from 'lucide-react';
 import type { Order } from '../../types';
 import { openImageLightbox } from '../shared/ImageLightbox';
 import { HelpHint } from '../shared/HelpHint';
@@ -157,7 +158,7 @@ export function PackagingTab({
               onClick={onRefresh}
               disabled={fetchingOrders}
             >
-              {fetchingOrders ? '🔄' : t('btn_refresh')}
+              {fetchingOrders ? <RefreshCw size={14} /> : t('btn_refresh')}
             </button>
           </div>
         </div>
@@ -214,7 +215,7 @@ export function PackagingTab({
                           ) : (order.deliveryType === 'Самовывоз' || order.deliveryType === 'Postomat') ? (
                             <span className="badge" style={{ background: 'rgba(139, 92, 246, 0.1)', color: '#a78bfa', border: '1px solid rgba(139, 92, 246, 0.2)' }}>{t('delivery_postomat_badge')}</span>
                           ) : (
-                            <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>📦 {order.deliveryType}</span>
+                            <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', border: '1px solid rgba(255, 255, 255, 0.08)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Package size={14} /> {order.deliveryType}</span>
                           )}
                           <span className="badge" style={{ background: order.status === 'APPROVED_BY_BANK' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(16, 185, 129, 0.1)', color: order.status === 'APPROVED_BY_BANK' ? '#3b82f6' : 'var(--success)' }}>
                             {order.status === 'APPROVED_BY_BANK' ? t('status_new') : t('status_approved')}

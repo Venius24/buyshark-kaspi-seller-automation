@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
+import { Lock } from 'lucide-react';
 import { useActiveStoreId } from '../../storeContext';
 import { fetchBillingSummary, fetchBillingPlans, fetchBillingTransactions } from '../../queries';
 import { formatTenge } from '../../utils/money';
@@ -57,7 +58,7 @@ export const BillingTab: React.FC = () => {
     <div style={styles.wrap}>
       {blocked && (
         <div className="glass-card" style={{ ...styles.card, borderColor: 'var(--error)', background: 'rgba(239, 68, 68, 0.08)' }}>
-          <strong style={{ color: 'var(--error)' }}>🔒 {t('service_blocked')}</strong>
+          <strong style={{ color: 'var(--error)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Lock size={16} /> {t('service_blocked')}</strong>
           <p style={{ margin: '6px 0 0', color: '#d1d5db' }}>{summary.blocked_reason || t(STATUS_LABEL[summary.billing_status])}</p>
         </div>
       )}

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Swords, Trophy, Target } from 'lucide-react';
 
 export interface CompetitorItem {
   name: string;
@@ -38,7 +39,7 @@ export const PriceRadarWidget: React.FC<PriceRadarProps> = ({ topProduct, events
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '24px' }}>⚔️</span>
+          <Swords size={24} />
           <div>
             <h2 style={{ fontSize: '17px', fontWeight: 700, letterSpacing: '-0.3px' }}>
               Live-Монитор Демпинг-Войн
@@ -66,8 +67,8 @@ export const PriceRadarWidget: React.FC<PriceRadarProps> = ({ topProduct, events
           <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>
             Топ-Товар войн: <strong style={{ color: '#fff' }}>{topProduct!.name}</strong>
           </span>
-          <span className="bs-tag" style={{ background: 'linear-gradient(100deg, var(--primary), var(--secondary))', color: '#fff', boxShadow: '0 4px 12px var(--primary-glow)' }}>
-            🏆 {topProduct!.our_rank}-е место на Kaspi
+          <span className="bs-tag" style={{ background: 'linear-gradient(100deg, var(--primary), var(--secondary))', color: '#fff', boxShadow: '0 4px 12px var(--primary-glow)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <Trophy size={14} /> {topProduct!.our_rank}-е место на Kaspi
           </span>
         </div>
 
@@ -123,8 +124,8 @@ export const PriceRadarWidget: React.FC<PriceRadarProps> = ({ topProduct, events
       {/* 🎯 Sniper Feed (Terminal Style Log) */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>
-            🎯 Лог Снайпера (Авто-Перерасчет)
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <Target size={13} /> Лог Снайпера (Авто-Перерасчет)
           </span>
           {events.length > 0 && (
             <span style={{ fontSize: '11px', color: 'var(--secondary)', fontFamily: 'var(--font-mono)' }}>
@@ -138,7 +139,7 @@ export const PriceRadarWidget: React.FC<PriceRadarProps> = ({ topProduct, events
             events.map((evt, index) => (
               <div key={index} className="console-line" style={{ display: 'flex', gap: '8px', alignItems: 'baseline' }}>
                 <span className="console-timestamp">[{evt.timestamp}]</span>
-                <span style={{ color: '#34d399', fontWeight: 600 }}>🎯</span>
+                <span style={{ color: '#34d399', fontWeight: 600, display: 'inline-flex', alignItems: 'center' }}><Target size={12} /></span>
                 <span style={{ color: '#e5e7eb', flex: 1 }}>{evt.message}</span>
                 <span className="badge badge-success" style={{ fontSize: '10px', padding: '2px 6px' }}>
                   +{evt.saved_margin} ₸

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { SlidersHorizontal, Zap, Link2, Package, Bot, type LucideIcon } from 'lucide-react';
 import { fetchFeatureFlagsWithDefault, saveFeatureFlags, DEFAULT_FEATURE_FLAGS } from '../../queries';
 import { ToggleSwitch } from '../shared/ToggleSwitch';
 import { HelpHint } from '../shared/HelpHint';
@@ -9,7 +10,7 @@ import type { ActiveTab, FeatureFlags } from '../../types';
 
 interface FeatureRow {
   key: keyof FeatureFlags;
-  icon: string;
+  icon: LucideIcon;
   titleKey: string;
   descKey: string;
   targetTab: ActiveTab;
@@ -18,10 +19,10 @@ interface FeatureRow {
 }
 
 const ROWS: FeatureRow[] = [
-  { key: 'dumping_enabled', icon: '⚡', titleKey: 'dumping_title', descKey: 'dumping_desc', targetTab: 'dumping', showPreservedNote: true },
-  { key: 'stock_groups_enabled', icon: '🔗', titleKey: 'stock_groups_title', descKey: 'stock_groups_desc', targetTab: 'stock-groups', showPreservedNote: true },
-  { key: 'autoassembly_enabled', icon: '📦', titleKey: 'autoassembly_title', descKey: 'autoassembly_desc', targetTab: 'auto-assembly', showPreservedNote: true },
-  { key: 'chatbot_enabled', icon: '🤖', titleKey: 'chatbot_title', descKey: 'chatbot_desc', targetTab: 'chatbot', showPreservedNote: false },
+  { key: 'dumping_enabled', icon: Zap, titleKey: 'dumping_title', descKey: 'dumping_desc', targetTab: 'dumping', showPreservedNote: true },
+  { key: 'stock_groups_enabled', icon: Link2, titleKey: 'stock_groups_title', descKey: 'stock_groups_desc', targetTab: 'stock-groups', showPreservedNote: true },
+  { key: 'autoassembly_enabled', icon: Package, titleKey: 'autoassembly_title', descKey: 'autoassembly_desc', targetTab: 'auto-assembly', showPreservedNote: true },
+  { key: 'chatbot_enabled', icon: Bot, titleKey: 'chatbot_title', descKey: 'chatbot_desc', targetTab: 'chatbot', showPreservedNote: false },
 ];
 
 export function GlobalControlTab({ onSelectTab }: { onSelectTab: (tab: ActiveTab) => void }) {
@@ -70,7 +71,7 @@ export function GlobalControlTab({ onSelectTab }: { onSelectTab: (tab: ActiveTab
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '820px' }}>
       <div>
         <h1 style={{ marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          🎛️ {t('title')}
+          <SlidersHorizontal size={22} /> {t('title')}
           <HelpHint text="Один переключатель на весь магазин: выключает демпинг, связку остатков, автосборку и ИИ-автоответчика разом, без похода по отдельным разделам. Точечные настройки (per-SKU, per-группа) при этом не сбрасываются — просто перестают срабатывать, пока автоматика выключена." />
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', lineHeight: 1.5 }}>{t('subtitle')}</p>
@@ -103,9 +104,10 @@ export function GlobalControlTab({ onSelectTab }: { onSelectTab: (tab: ActiveTab
         {ROWS.map((row) => {
           const checked = flags[row.key];
           const isSaving = savingKey === row.key;
+          const RowIcon = row.icon;
           return (
             <div key={row.key} className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <span style={{ fontSize: '22px' }}>{row.icon}</span>
+              <span style={{ display: 'flex' }}><RowIcon size={22} /></span>
               <div style={{ flexGrow: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '2px', flexWrap: 'wrap' }}>
                   <h3 style={{ margin: 0 }}>{t(row.titleKey)}</h3>

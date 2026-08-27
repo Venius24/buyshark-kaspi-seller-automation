@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { X } from 'lucide-react';
 import { apiFetch, API_URL } from '../../api';
 import { HelpHint } from '../shared/HelpHint';
 import type { AutolistDraft } from '../../types';
@@ -276,7 +277,7 @@ function DraftEditor({ draft, onClose, t }: { draft: AutolistDraft; onClose: () 
               </span>
             </div>
           </div>
-          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}><X size={18} /></button>
         </div>
 
         {!payload.category_code && (

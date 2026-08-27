@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { X, AlertTriangle, RefreshCw, Check } from 'lucide-react';
 import type { PriceFeedImportStep } from '../hooks/usePriceFeedImport';
 import type { PriceFeedMerchant, PriceFeedPreviewResult, PriceFeedApplyResult } from '../types';
 
@@ -69,9 +70,9 @@ export function PriceFeedImportModal({
           <h3 style={{ fontSize: '18px', fontWeight: 700 }}>{t('title')}</h3>
           <button
             onClick={step === 'done' ? onFinish : onClose}
-            style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer' }}
+            style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer', display: 'flex' }}
           >
-            ✕
+            <X size={20} />
           </button>
         </div>
 
@@ -191,7 +192,11 @@ export function PriceFeedImportModal({
                   wordBreak: 'break-word',
                 }}
               >
-                {preview.warnings.map((w, i) => <div key={i}>⚠️ {w}</div>)}
+                {preview.warnings.map((w, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {w}
+                  </div>
+                ))}
               </div>
             )}
 
@@ -213,7 +218,10 @@ export function PriceFeedImportModal({
                   <tbody>
                     {preview.sample.map((row) => (
                       <tr key={row.sku} style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-                        <td style={{ padding: '6px 8px' }}>{row.sku}{row.already_configured ? ' 🔁' : ''}</td>
+                        <td style={{ padding: '6px 8px' }}>
+                          {row.sku}
+                          {row.already_configured ? <RefreshCw size={11} style={{ display: 'inline', marginLeft: '4px', verticalAlign: 'middle' }} /> : ''}
+                        </td>
                         <td style={{ padding: '6px 8px' }}>{row.min_price}</td>
                         <td style={{ padding: '6px 8px' }}>{row.max_price}</td>
                         <td style={{ padding: '6px 8px' }}>{row.mode}</td>
@@ -275,7 +283,7 @@ export function PriceFeedImportModal({
               justifyContent: 'center', alignItems: 'center',
               color: 'var(--success)', fontSize: '24px',
               margin: '0 auto 16px auto'
-            }}>✓</div>
+            }}><Check size={24} /></div>
             <h4 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>{t('done_title')}</h4>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px' }}>
               {t('done_message')

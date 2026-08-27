@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Clock, CheckCircle2, SkipForward, XCircle, Construction, FlaskConical } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { fetchOutboundQueue, testSendOutbound, testFirstContact } from '../../queries';
 import { useActiveStoreId } from '../../storeContext';
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: '⏳ В очереди',
-  sent: '✅ Отправлено',
-  skipped: '⏭️ Пропущено',
-  failed: '❌ Ошибка',
-  needs_first_contact: '🚧 Нужен первый контакт',
+const STATUS_LABELS: Record<string, ReactNode> = {
+  pending: <><Clock size={13} /> В очереди</>,
+  sent: <><CheckCircle2 size={13} /> Отправлено</>,
+  skipped: <><SkipForward size={13} /> Пропущено</>,
+  failed: <><XCircle size={13} /> Ошибка</>,
+  needs_first_contact: <><Construction size={13} /> Нужен первый контакт</>,
 };
 
 export function OutboundTestCard() {
@@ -59,7 +61,7 @@ export function OutboundTestCard() {
   return (
     <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600 }}>🧪 Каркас рассылок — тест отправки</h3>
+        <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}><FlaskConical size={17} /> Каркас рассылок — тест отправки</h3>
         <span className="badge badge-warning">Фаза 3</span>
       </div>
 
@@ -80,7 +82,7 @@ export function OutboundTestCard() {
 
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h4 style={{ fontSize: '13px', color: '#fff', fontWeight: 600 }}>🚧 Тест первого контакта (GUI-автоматизация)</h4>
+          <h4 style={{ fontSize: '13px', color: '#fff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}><Construction size={16} /> Тест первого контакта (GUI-автоматизация)</h4>
           <span className="badge badge-warning">Не проверено вживую</span>
         </div>
         <p style={{ fontSize: '11px', color: 'var(--warning)' }}>
@@ -110,7 +112,7 @@ export function OutboundTestCard() {
                 <div style={{ fontSize: '12px', fontWeight: 600, color: '#fff' }}>{item.campaign} · заказ {item.order_id}</div>
                 {item.skip_reason && <div style={{ fontSize: '11px', color: 'var(--warning)', marginTop: '2px' }}>{item.skip_reason}</div>}
               </div>
-              <span className="badge">{STATUS_LABELS[item.status] || item.status}</span>
+              <span className="badge" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>{STATUS_LABELS[item.status] || item.status}</span>
             </div>
           ))}
         </div>

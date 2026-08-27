@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Smartphone, Link2, Mail, Unplug } from 'lucide-react';
 import { apiFetch, API_URL } from '../api';
 
 interface TelegramMember {
@@ -100,11 +101,11 @@ export function TelegramLinkPanel() {
           Ссылка одноразовая, действует 15 минут. Откройте её с телефона, на котором установлен Telegram.
         </p>
         {selfLink ? (
-          <a href={selfLink} target="_blank" rel="noreferrer" className="btn btn-primary">
-            📲 Открыть в Telegram
+          <a href={selfLink} target="_blank" rel="noreferrer" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            <Smartphone size={16} /> Открыть в Telegram
           </a>
         ) : (
-          <button className="btn btn-primary" onClick={createSelfLink}>🔗 Создать ссылку привязки</button>
+          <button className="btn btn-primary" onClick={createSelfLink} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}><Link2 size={16} /> Создать ссылку привязки</button>
         )}
       </div>
 
@@ -124,11 +125,11 @@ export function TelegramLinkPanel() {
               <option value="MANAGER">Менеджер</option>
               <option value="VIEWER">Наблюдатель</option>
             </select>
-            <button className="btn btn-secondary" onClick={createInviteLink}>✉️ Создать ссылку-приглашение</button>
+            <button className="btn btn-secondary" onClick={createInviteLink} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}><Mail size={16} /> Создать ссылку-приглашение</button>
           </div>
           {inviteLink && (
-            <a href={inviteLink} target="_blank" rel="noreferrer" className="btn btn-primary">
-              📲 Открыть / переслать сотруднику
+            <a href={inviteLink} target="_blank" rel="noreferrer" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <Smartphone size={16} /> Открыть / переслать сотруднику
             </a>
           )}
         </div>
@@ -151,8 +152,8 @@ export function TelegramLinkPanel() {
               </div>
             </div>
             {isOwner && (
-              <button className="btn btn-secondary" onClick={() => removeMember(m.tg_user_id)}>
-                🔌 Отвязать
+              <button className="btn btn-secondary" onClick={() => removeMember(m.tg_user_id)} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                <Unplug size={15} /> Отвязать
               </button>
             )}
           </div>

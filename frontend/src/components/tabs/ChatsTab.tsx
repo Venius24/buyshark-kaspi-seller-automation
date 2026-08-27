@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { Image, Video, Mic } from 'lucide-react';
 import { apiFetch, API_URL } from '../../api';
 import { useActiveStoreId } from '../../storeContext';
 
@@ -80,7 +81,7 @@ function formatTime(ts?: number): string {
 
 function AttachmentView({ attachment }: { attachment: ChatAttachment }) {
   const { t } = useTranslation('tab_chats');
-  const icon = attachment.type === 'image' ? '🖼️' : attachment.type === 'video' ? '🎬' : '🎤';
+  const Icon = attachment.type === 'image' ? Image : attachment.type === 'video' ? Video : Mic;
   return (
     <a
       href={attachment.url}
@@ -88,7 +89,7 @@ function AttachmentView({ attachment }: { attachment: ChatAttachment }) {
       rel="noreferrer"
       style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'inherit', textDecoration: 'underline' }}
     >
-      <span>{icon}</span>
+      <span style={{ display: 'flex' }}><Icon size={15} /></span>
       <span>{attachment.fileName || t('attachment_file', { type: attachment.type })}</span>
     </a>
   );

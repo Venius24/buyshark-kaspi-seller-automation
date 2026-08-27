@@ -1017,6 +1017,9 @@ export const MasterStockGroups: React.FC = () => {
                               <span
                                 title={`Продано на ${group.oversold} шт. больше, чем числилось. Сбросится при вводе остатка вручную.`}
                                 style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
                                   fontSize: '13px',
                                   fontWeight: 700,
                                   color: 'var(--error)',
@@ -1026,7 +1029,7 @@ export const MasterStockGroups: React.FC = () => {
                                   border: '1px solid rgba(239, 68, 68, 0.3)',
                                   whiteSpace: 'nowrap'
                                 }}>
-                                ⚠ долг {group.oversold}
+                                <AlertTriangle size={14} /> долг {group.oversold}
                               </span>
                             )}
                             <button
@@ -1295,8 +1298,8 @@ export const MasterStockGroups: React.FC = () => {
                   Укажите название, доступный складской остаток и свяжите SKU товаров Kaspi
                 </p>
                 {editingGroupId && (
-                  <p style={{ margin: '10px 0 0 0', fontSize: '13px', color: '#cbd5e1' }}>
-                    📦 На сборке сейчас:{' '}
+                  <p style={{ margin: '10px 0 0 0', fontSize: '13px', color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Package size={14} /> На сборке сейчас:{' '}
                     {modalPackagingLoading
                       ? 'считаем...'
                       : modalPackaging

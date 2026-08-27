@@ -1,5 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  Printer,
+  Tag,
+  RotateCcw,
+  FolderOpen,
+  Save,
+  Zap,
+  ClipboardList,
+  Shield,
+  Package,
+  Folder,
+  AlertTriangle,
+  Hourglass,
+  CheckCircle2,
+  OctagonAlert,
+  Sparkles,
+  Download,
+  X,
+} from 'lucide-react';
 import { apiFetch, API_URL } from '../api';
 import { useActiveStoreId } from '../storeContext';
 import { HelpHint } from './shared/HelpHint';
@@ -419,7 +438,7 @@ export const PrintBatcher: React.FC = () => {
       <div style={styles.header}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
           <div style={styles.headerTitleGroup}>
-            <div style={styles.headerIcon}>🖨️</div>
+            <div style={styles.headerIcon}><Printer size={32} /></div>
             <div>
               <h2 style={styles.headerTitle}>
                 Склейка накладных
@@ -432,11 +451,11 @@ export const PrintBatcher: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={styles.historyStatBadge}>
-              🏷️ Напечатано за сегодня: <strong>{printedCount} заказов</strong>
+            <div style={{ ...styles.historyStatBadge, display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Tag size={13} /> Напечатано за сегодня: <strong>{printedCount} заказов</strong>
             </div>
-            <button onClick={handleResetHistory} style={styles.resetHistoryBtn} title="Сбросить историю печати за сегодня">
-              ♻️ Сбросить историю
+            <button onClick={handleResetHistory} style={{ ...styles.resetHistoryBtn, display: 'inline-flex', alignItems: 'center', gap: '6px' }} title="Сбросить историю печати за сегодня">
+              <RotateCcw size={13} /> Сбросить историю
             </button>
           </div>
         </div>
@@ -448,7 +467,7 @@ export const PrintBatcher: React.FC = () => {
           onClick={() => setCategoriesOpen((v) => !v)}
           style={styles.categoriesToggle}
         >
-          <span>🗂️ Крупные категории магазина{categories.enabled ? ' — включены' : ''}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><FolderOpen size={15} /> Крупные категории магазина{categories.enabled ? ' — включены' : ''}</span>
           <span>{categoriesOpen ? '▲' : '▼'}</span>
         </button>
 
@@ -541,8 +560,8 @@ export const PrintBatcher: React.FC = () => {
             )}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '14px', flexWrap: 'wrap' }}>
-              <button onClick={handleSaveCategories} disabled={categoriesSaving} style={styles.categoriesSaveBtn}>
-                {categoriesSaving ? 'Сохраняю...' : '💾 Сохранить пресет магазина'}
+              <button onClick={handleSaveCategories} disabled={categoriesSaving} style={{ ...styles.categoriesSaveBtn, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                {categoriesSaving ? 'Сохраняю...' : (<><Save size={14} /> Сохранить пресет магазина</>)}
               </button>
               {categoriesNotice && (
                 <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{categoriesNotice}</span>
@@ -557,7 +576,7 @@ export const PrintBatcher: React.FC = () => {
         {/* N-up Layout Selection Buttons Grid */}
         <div style={styles.layoutSelectorCard}>
           <div style={styles.layoutSelectorHeader}>
-            <span style={{ fontSize: '18px' }}>⚡</span>
+            <Zap size={18} />
             <span style={{ fontWeight: 700, fontSize: '15px', color: '#ffffff' }}>
               Формат обработки по умолчанию (Выберите режим раскладки):
             </span>
@@ -649,7 +668,7 @@ export const PrintBatcher: React.FC = () => {
               }}
               onClick={() => setOutputLayout('auto')}
             >
-              ⚡ Авто-категории оборудования (Раздельный пакет)
+<Zap size={14} style={{ verticalAlign: '-2px', marginRight: '4px' }} /> Авто-категории оборудования (Раздельный пакет)
             </button>
           </div>
         </div>
@@ -657,7 +676,7 @@ export const PrintBatcher: React.FC = () => {
         {/* Secondary Settings bar */}
         <div style={styles.settingsGrid}>
           <div style={styles.settingItem}>
-            <label style={styles.settingLabel}>⚡ Обработка Экспресс-заказов (Kaspi Express):</label>
+            <label style={{ ...styles.settingLabel, display: 'flex', alignItems: 'center', gap: '6px' }}><Zap size={13} /> Обработка Экспресс-заказов (Kaspi Express):</label>
             <select
               value={expressMode}
               onChange={(e) => setExpressMode(e.target.value)}
@@ -670,7 +689,7 @@ export const PrintBatcher: React.FC = () => {
           </div>
 
           <div style={styles.settingItem}>
-            <label style={styles.settingLabel}>📋 Порядок сортировки внутри батчей:</label>
+            <label style={{ ...styles.settingLabel, display: 'flex', alignItems: 'center', gap: '6px' }}><ClipboardList size={13} /> Порядок сортировки внутри батчей:</label>
             <select
               value={sortPreset}
               onChange={(e) => setSortPreset(e.target.value)}
@@ -685,7 +704,7 @@ export const PrintBatcher: React.FC = () => {
           </div>
 
           <div style={styles.settingItem}>
-            <label style={styles.settingLabel}>🛡️ Дедупликация & Ориентация:</label>
+            <label style={{ ...styles.settingLabel, display: 'flex', alignItems: 'center', gap: '6px' }}><Shield size={13} /> Дедупликация & Ориентация:</label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={styles.toggleRow}>
                 <input
@@ -740,7 +759,7 @@ export const PrintBatcher: React.FC = () => {
           />
 
           <div style={styles.dropzoneContent}>
-            <div style={styles.dropzoneIcon}>{file ? '📦' : '📁'}</div>
+            <div style={{ ...styles.dropzoneIcon, display: 'flex', justifyContent: 'center' }}>{file ? <Package size={48} /> : <Folder size={48} />}</div>
             {file ? (
               <div>
                 <div style={styles.fileName}>{file.name}</div>
@@ -756,7 +775,7 @@ export const PrintBatcher: React.FC = () => {
         </div>
 
         {/* Error message */}
-        {error && <div style={styles.errorBox}>⚠️ {error}</div>}
+        {error && <div style={{ ...styles.errorBox, display: 'flex', alignItems: 'center', gap: '8px' }}><AlertTriangle size={16} /> {error}</div>}
 
         {/* Action Button */}
         <div style={{ marginTop: '20px', textAlign: 'right' }}>
@@ -768,7 +787,15 @@ export const PrintBatcher: React.FC = () => {
               ...(!file || loading ? styles.btnDisabled : {}),
             }}
           >
-            {loading ? `⏳ ${progress || 'Обрезка полей и подгонка...'}` : '⚡ Сформировать пакеты для печати'}
+            {loading ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <Hourglass size={15} /> {progress || 'Обрезка полей и подгонка...'}
+              </span>
+            ) : (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <Zap size={15} /> Сформировать пакеты для печати
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -778,29 +805,29 @@ export const PrintBatcher: React.FC = () => {
         <div style={{ marginTop: '30px' }}>
           <div style={styles.summaryBar}>
             <div>
-              <div style={styles.summaryBadge}>
-                ✅ Обработано архивов: <strong>{resultManifest.total_files} файлов</strong> (Всего в архиве: {resultManifest.total_pages} листов)
+              <div style={{ ...styles.summaryBadge, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CheckCircle2 size={16} /> Обработано архивов: <strong>{resultManifest.total_files} файлов</strong> (Всего в архиве: {resultManifest.total_pages} листов)
               </div>
-              <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px' }}>
-                🛑 Исключено ранее напечатанных дубликатов: <strong style={{ color: 'var(--error)' }}>{resultManifest.deduplicated_pages} страниц</strong> |
-                ✨ Новых листов в PDF: <strong style={{ color: 'var(--secondary)' }}>{resultManifest.new_pages} страниц</strong> |
+              <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                <OctagonAlert size={13} /> Исключено ранее напечатанных дубликатов: <strong style={{ color: 'var(--error)' }}>{resultManifest.deduplicated_pages} страниц</strong> |
+                <Sparkles size={13} /> Новых листов в PDF: <strong style={{ color: 'var(--secondary)' }}>{resultManifest.new_pages} страниц</strong> |
                 Раскладка: <code>{resultManifest.output_layout}</code>
               </div>
               {/* Отброшенное раньше растворялось в разнице между «файлов в
                   архиве» и «листов в PDF» — теперь названо поимённо. */}
               {!!resultManifest.excluded_express_pages && (
-                <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px' }}>
-                  ⚡ Экспресс отложен (режим «Исключать»): <strong style={{ color: 'var(--warning)' }}>{resultManifest.excluded_express_pages} страниц</strong>
+                <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Zap size={13} /> Экспресс отложен (режим «Исключать»): <strong style={{ color: 'var(--warning)' }}>{resultManifest.excluded_express_pages} страниц</strong>
                 </div>
               )}
               {!!resultManifest.skipped_files && (
-                <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px' }}>
-                  ⚠️ Не удалось прочитать файлов: <strong style={{ color: 'var(--error)' }}>{resultManifest.skipped_files}</strong>
+                <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <AlertTriangle size={13} /> Не удалось прочитать файлов: <strong style={{ color: 'var(--error)' }}>{resultManifest.skipped_files}</strong>
                 </div>
               )}
               {!!resultManifest.store_categories?.length && (
-                <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px' }}>
-                  🗂️ Категории (в порядке печати):{' '}
+                <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <FolderOpen size={13} /> Категории (в порядке печати):{' '}
                   {resultManifest.store_categories.map((c, i) => (
                     <span key={c.key || i}>
                       {i > 0 && ' • '}
@@ -810,8 +837,8 @@ export const PrintBatcher: React.FC = () => {
                 </div>
               )}
               {!!(resultManifest.grouped_pages || resultManifest.ungrouped_pages) && (
-                <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px' }}>
-                  🏷 Связка остатков: <strong style={{ color: 'var(--secondary)' }}>{resultManifest.grouped_pages} со штампом группы</strong>,{' '}
+                <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Tag size={13} /> Связка остатков: <strong style={{ color: 'var(--secondary)' }}>{resultManifest.grouped_pages} со штампом группы</strong>,{' '}
                   <strong style={{ color: 'var(--text-muted)' }}>{resultManifest.ungrouped_pages} без</strong>
                 </div>
               )}
@@ -824,17 +851,17 @@ export const PrintBatcher: React.FC = () => {
           {/* All duplicates warning banner */}
           {resultManifest.all_duplicates && (
             <div style={styles.allDuplicatesBanner}>
-              <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--warning)' }}>
-                ⚠️ Все {resultManifest.total_pages} заказов из этого архива уже были напечатаны ранее!
+              <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertTriangle size={18} /> Все {resultManifest.total_pages} заказов из этого архива уже были напечатаны ранее!
               </div>
               <p style={{ fontSize: '13px', margin: '6px 0 14px 0', color: 'rgba(255,255,255,.75)' }}>
                 Система отфильтровала все старые накладные. Если вы хотите принудительно перепечатать весь этот архив заново — нажмите кнопку ниже:
               </p>
               <button
                 onClick={() => handleProcess(true)}
-                style={styles.forceReprintBtn}
+                style={{ ...styles.forceReprintBtn, display: 'inline-flex', alignItems: 'center', gap: '6px' }}
               >
-                🖨️ Напечатать весь архив заново принудительно
+                <Printer size={14} /> Напечатать весь архив заново принудительно
               </button>
             </div>
           )}
@@ -842,7 +869,7 @@ export const PrintBatcher: React.FC = () => {
           {/* Cards list */}
           {Object.keys(resultManifest.batches).length > 0 && (
             <>
-              <h3 style={styles.sectionTitle}>🖨️ Скомпонованные файлы к печати по категориям оборудования:</h3>
+              <h3 style={{ ...styles.sectionTitle, display: 'flex', alignItems: 'center', gap: '8px' }}><Printer size={18} /> Скомпонованные файлы к печати по категориям оборудования:</h3>
 
               <div style={styles.cardsGrid}>
                 {Object.values(resultManifest.batches).map((batch) => {
@@ -856,7 +883,7 @@ export const PrintBatcher: React.FC = () => {
                       }}
                     >
                       {isExpress && (
-                        <div style={styles.expressBadge}>⚡ СРОЧНЫЙ БАТЧ (KASPI EXPRESS)</div>
+                        <div style={{ ...styles.expressBadge, display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Zap size={11} /> СРОЧНЫЙ БАТЧ (KASPI EXPRESS)</div>
                       )}
 
                       <div style={styles.batchHeader}>
@@ -896,14 +923,14 @@ export const PrintBatcher: React.FC = () => {
                             ...(isExpress ? { background: 'var(--warning)', color: '#1a1305' } : {}),
                           }}
                         >
-                          🖨️ Предпросмотр / Печать
+                          <Printer size={14} style={{ verticalAlign: '-2px', marginRight: '4px' }} /> Предпросмотр / Печать
                         </button>
 
                         <button
                           onClick={() => handleDownload(batch.download_url, batch.file_name)}
                           style={{ ...styles.downloadBtn, cursor: 'pointer' }}
                         >
-                          ⬇️ Скачать PDF
+                          <Download size={14} style={{ verticalAlign: '-2px', marginRight: '4px' }} /> Скачать PDF
                         </button>
                       </div>
                     </div>
@@ -922,7 +949,7 @@ export const PrintBatcher: React.FC = () => {
             <div style={styles.modalHeader}>
               <span>Предпросмотр скомпонованного печатного файла</span>
               <button style={styles.modalCloseBtn} onClick={() => setPreviewUrl(null)}>
-                ✖
+                <X size={18} />
               </button>
             </div>
             <iframe src={previewUrl} style={styles.iframePreview} title="Print Batch Preview" />

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { UserCog, MessageSquare, X, Save } from 'lucide-react';
 import { fetchBotProfile, fetchBotUsage, saveBotProfile } from '../../queries';
 import { useActiveStoreId } from '../../storeContext';
 import type { BotProfile, PickupPoint } from '../../types';
@@ -77,11 +78,11 @@ export function BotProfileCard() {
   return (
     <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-        <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600 }}>🧑‍💼 Профиль ИИ-менеджера</h3>
+        <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}><UserCog size={18} /> Профиль ИИ-менеджера</h3>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {usage && (
-            <span className="badge" title={`Логистические шаблоны в счётчик не идут`}>
-              💬 {usage.total_billed_units} ответов ИИ за {usage.period_days} дн.
+            <span className="badge" title={`Логистические шаблоны в счётчик не идут`} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <MessageSquare size={14} /> {usage.total_billed_units} ответов ИИ за {usage.period_days} дн.
             </span>
           )}
           <span className="badge badge-success">Тариф: {TIER_LABELS[draft.prompt_tier]}</span>
@@ -140,7 +141,7 @@ export function BotProfileCard() {
             <input className="form-input" placeholder="Ссылка на карту (2ГИС)" value={p.map_url} onChange={(e) => updatePoint(idx, 'map_url', e.target.value)} />
             <input className="form-input" placeholder="Часы выдачи" value={p.hours} onChange={(e) => updatePoint(idx, 'hours', e.target.value)} />
             <input className="form-input" placeholder="Заметка (напр. вход со двора)" value={p.notes} onChange={(e) => updatePoint(idx, 'notes', e.target.value)} />
-            <button className="btn btn-secondary" style={{ padding: '6px', fontSize: '11px' }} onClick={() => removePoint(idx)}>✕ Удалить</button>
+            <button className="btn btn-secondary" style={{ padding: '6px', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }} onClick={() => removePoint(idx)}><X size={14} /> Удалить</button>
           </div>
         ))}
       </div>
@@ -203,8 +204,8 @@ export function BotProfileCard() {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <button className="btn btn-primary" style={{ padding: '10px 20px' }} onClick={handleSave} disabled={saving}>
-          {saving ? 'Сохранение...' : '💾 Сохранить профиль'}
+        <button className="btn btn-primary" style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '8px' }} onClick={handleSave} disabled={saving}>
+          {saving ? 'Сохранение...' : <><Save size={16} /> Сохранить профиль</>}
         </button>
         {savedAt && Date.now() - savedAt < 4000 && (
           <span style={{ fontSize: '11px', color: 'var(--success)' }}>Сохранено</span>

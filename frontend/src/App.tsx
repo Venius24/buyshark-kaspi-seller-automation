@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { X, Menu, LogOut, Lock } from 'lucide-react';
 import { apiFetch, setUnauthorizedHandler, API_URL, getWsUrl } from './api';
 import { clearPersistedQueryCache } from './queryClient';
-import { useActiveStoreId, setActiveStoreId } from './storeContext';
+import { useActiveStoreId, setActiveStoreId, useIsStoreOwner, useCanEdit } from './storeContext';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useLogs } from './hooks/useLogs';
 import { useAnalyticsWidgets } from './hooks/useAnalyticsWidgets';
@@ -92,6 +93,14 @@ export default function App() {
   // Автодобавление и «Для разработчиков» ещё сырые — временно видны только этому
   // списку email. Whitelist, не deployment-флаг: снять ограничение — просто удалить.
   const isBetaTester = !!profile?.user.email && BETA_TESTER_EMAILS.includes(profile.user.email.toLowerCase());
+  // Роль в активном магазине (OWNER/MANAGER/VIEWER) — billing/API-ключи
+  // видны и доступны только владельцу, см. Sidebar.tsx.
+  const isStoreOwner = useIsStoreOwner();
+  // Первая волна UI-защиты мутаций для VIEWER — реальная защита уже на
+  // бэкенде (403 через require_store_manager), это только понятная ошибка
+  // в логе вместо непонятного сетевого фейла. Остальные обработчики
+  // получают ту же проверку отдельным проходом позже.
+  const canEdit = useCanEdit();
   // Онбординг-тур — только когда профиль реально загружен и явно не пройден
   // (не просто falsy на старте до ответа /me, иначе тур мигает при каждой загрузке).
   const [tourDismissed, setTourDismissed] = useState(false);
@@ -134,7 +143,8 @@ export default function App() {
     if (activeTab === 'admin' && !isSuperadmin) setActiveTab('stores');
     if (activeTab === 'referral' && !isReferrer) setActiveTab('stores');
     if ((activeTab === 'autolist' || activeTab === 'public-api') && !isBetaTester) setActiveTab('stores');
-  }, [activeTab, isSuperadmin, isReferrer, isBetaTester]);
+    if (activeTab === 'billing' && !isStoreOwner) setActiveTab('stores');
+  }, [activeTab, isSuperadmin, isReferrer, isBetaTester, isStoreOwner]);
 
 
 
@@ -270,6 +280,10 @@ export default function App() {
     blacklistedMerchants: string[] = [],
     displaySku: string = sku
   ) => {
+    if (!canEdit) {
+      addLog('Недостаточно прав: роль "Наблюдатель" может только просматривать');
+      return;
+    }
     addLog(t('log_dumping_save_start', { sku, mode }));
     try {
       const res = await apiFetch(`${API_URL}/api/dumping/config`, {
@@ -311,6 +325,10 @@ export default function App() {
   };
 
   const saveProductUpdate = async (sku: string, price: number, stock: number, brand: string | undefined, status: string | undefined) => {
+    if (!canEdit) {
+      addLog('Недостаточно прав: роль "Наблюдатель" может только просматривать');
+      return;
+    }
     addLog(t('log_product_save_start', { sku }));
     try {
       const res = await apiFetch(`${API_URL}/api/products/update`, {
@@ -782,7 +800,7 @@ export default function App() {
           aria-label={mobileNavOpen ? 'Закрыть меню' : 'Открыть меню'}
           aria-expanded={mobileNavOpen}
         >
-          {mobileNavOpen ? '✕' : '☰'}
+          {mobileNavOpen ? <X size={20} /> : <Menu size={20} />}
         </button>
         <img src="/buyshark-logo.svg" alt="" className="mobile-topbar-logo" />
         <span className="mobile-topbar-title">BuyShark</span>
@@ -792,7 +810,7 @@ export default function App() {
           onClick={handleLogout}
           title="Выйти из аккаунта"
         >
-          🚪
+          <LogOut size={16} />
         </button>
       </div>
 
@@ -815,6 +833,7 @@ export default function App() {
         isSuperadmin={isSuperadmin}
         isReferrer={isReferrer}
         isBetaTester={isBetaTester}
+        isStoreOwner={isStoreOwner}
         billingBlocked={billingBlocked}
         onOpenPriceFeedImport={priceFeedImport.openModal}
         onOpenTour={() => { setManualTourActive(true); setMobileNavOpen(false); }}
@@ -833,8 +852,8 @@ export default function App() {
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
             }}
           >
-            <span style={{ color: '#f87171', fontSize: '13px' }}>
-              🔒 {billingSummary?.blocked_reason || 'Сервис заблокирован по тарифу — оплатите, чтобы продолжить.'}
+            <span style={{ color: '#f87171', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Lock size={14} /> {billingSummary?.blocked_reason || 'Сервис заблокирован по тарифу — оплатите, чтобы продолжить.'}
             </span>
             <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => setActiveTab('billing')}>
               Перейти к оплате

@@ -1,17 +1,35 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import {
+  Zap,
+  Mailbox,
+  Clock,
+  CalendarDays,
+  Truck,
+  Package,
+  Bot,
+  Printer,
+  ScrollText,
+  FlaskConical,
+  Loader2,
+  Save,
+  CheckCircle2,
+  Play,
+  Download,
+  type LucideIcon,
+} from 'lucide-react';
 import { apiFetch, API_URL } from '../../api';
 import { useActiveStoreId } from '../../storeContext';
 import { HelpHint } from '../shared/HelpHint';
 import type { AutoAssemblyLogEntry, AutoAssemblyRule, AutoAssemblySpoolItem } from '../../types';
 
-const DELIVERY_TYPE_META: Record<string, { label: string; icon: string }> = {
-  Express: { label: 'Express', icon: '⚡' },
-  Postomat: { label: 'Постамат (Kaspi Box)', icon: '📮' },
-  Today: { label: 'Kaspi Доставка — сегодня', icon: '🕐' },
-  Tomorrow: { label: 'Kaspi Доставка — завтра', icon: '📅' },
-  'Kaspi Доставка': { label: 'Kaspi Доставка — стандарт', icon: '🚚' },
+const DELIVERY_TYPE_META: Record<string, { label: string; icon: LucideIcon }> = {
+  Express: { label: 'Express', icon: Zap },
+  Postomat: { label: 'Постамат (Kaspi Box)', icon: Mailbox },
+  Today: { label: 'Kaspi Доставка — сегодня', icon: Clock },
+  Tomorrow: { label: 'Kaspi Доставка — завтра', icon: CalendarDays },
+  'Kaspi Доставка': { label: 'Kaspi Доставка — стандарт', icon: Truck },
 };
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; // TODO: use t() from component
@@ -58,7 +76,7 @@ function RuleCard({ rule, onSave, saving }: RuleCardProps) {
     setScheduleOn(!!rule.schedule);
   }, [rule]);
 
-  const meta = DELIVERY_TYPE_META[rule.delivery_type] || { label: rule.delivery_type, icon: '📦' };
+  const meta = DELIVERY_TYPE_META[rule.delivery_type] || { label: rule.delivery_type, icon: Package };
   const days = draft.schedule?.days || [];
 
   const toggleDay = (d: number) => {
@@ -79,7 +97,7 @@ function RuleCard({ rule, onSave, saving }: RuleCardProps) {
     <div className="glass-card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '18px' }}>{meta.icon}</span>
+          <meta.icon size={18} />
           <strong style={{ fontSize: '14px', color: '#fff' }}>{meta.label}</strong>
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px' }}>
@@ -109,7 +127,7 @@ function RuleCard({ rule, onSave, saving }: RuleCardProps) {
               onChange={(e) => setDraft({ ...draft, dry_run: e.target.checked })}
               style={{ width: '16px', height: '16px', cursor: 'pointer' }}
             />
-            🧪 Сухой прогон (только лог, без реальных действий)
+            <FlaskConical size={14} style={{ flexShrink: 0 }} /> Сухой прогон (только лог, без реальных действий)
           </label>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -230,11 +248,11 @@ function RuleCard({ rule, onSave, saving }: RuleCardProps) {
       <button
         type="button"
         className="btn btn-primary"
-        style={{ padding: '8px 16px', fontSize: '12px', alignSelf: 'flex-end' }}
+        style={{ padding: '8px 16px', fontSize: '12px', alignSelf: 'flex-end', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
         onClick={handleSave}
         disabled={saving}
       >
-        {saving ? '⏳ Сохранение...' : '💾 Сохранить'}
+        {saving ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Сохранение...</> : <><Save size={14} /> Сохранить</>}
       </button>
     </div>
   );
@@ -348,7 +366,7 @@ export function AutoAssemblyTab() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h2 style={{ fontSize: '16px', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-            🤖 Автосборка
+            <Bot size={18} /> Автосборка
             <HelpHint text="Автоматически принимает новые заказы и переводит их в «Собран» без ручных кликов, накапливая накладные по видам доставки — вы просто забираете готовую пачку на печать." />
           </h2>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
@@ -357,8 +375,8 @@ export function AutoAssemblyTab() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {runMessage && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{runMessage}</span>}
-          <button type="button" className="btn btn-secondary" style={{ padding: '8px 14px', fontSize: '12px' }} onClick={handleRunOnce} disabled={runningOnce}>
-            {runningOnce ? '⏳ Выполняется...' : '▶️ Проверить сейчас'}
+          <button type="button" className="btn btn-secondary" style={{ padding: '8px 14px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }} onClick={handleRunOnce} disabled={runningOnce}>
+            {runningOnce ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Выполняется...</> : <><Play size={14} /> Проверить сейчас</>}
           </button>
         </div>
       </div>
@@ -375,7 +393,7 @@ export function AutoAssemblyTab() {
 
       <div className="glass-card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-          <h3 style={{ fontSize: '14px', margin: 0 }}>🖨️ Живая пачка накладных</h3>
+          <h3 style={{ fontSize: '14px', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}><Printer size={16} /> Живая пачка накладных</h3>
           <span
             className="badge"
             style={{
@@ -390,21 +408,21 @@ export function AutoAssemblyTab() {
             <button
               type="button"
               className="btn btn-primary"
-              style={{ padding: '8px 14px', fontSize: '12px' }}
+              style={{ padding: '8px 14px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
               onClick={handleDownloadSpool}
               disabled={spool.count === 0 || downloadingSpool}
             >
-              {downloadingSpool ? '⏳ Склейка...' : '📥 Скачать пачку'}
+              {downloadingSpool ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Склейка...</> : <><Download size={14} /> Скачать пачку</>}
             </button>
             {downloadedManifest && (
               <button
                 type="button"
                 className="btn btn-secondary"
-                style={{ padding: '8px 14px', fontSize: '12px' }}
+                style={{ padding: '8px 14px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                 onClick={handleMarkPrinted}
                 disabled={markingPrinted}
               >
-                {markingPrinted ? '⏳...' : '✅ Отметить напечатанным'}
+                {markingPrinted ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <><CheckCircle2 size={14} /> Отметить напечатанным</>}
               </button>
             )}
           </div>
@@ -431,7 +449,7 @@ export function AutoAssemblyTab() {
       </div>
 
       <div className="glass-card" style={{ padding: '16px' }}>
-        <h3 style={{ fontSize: '14px', margin: '0 0 12px' }}>📜 Журнал решений</h3>
+        <h3 style={{ fontSize: '14px', margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: '6px' }}><ScrollText size={16} /> Журнал решений</h3>
         {logEntries.length === 0 ? (
           <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Пока нет записей.</p>
         ) : (

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AlertTriangle, Info } from 'lucide-react';
 import { HELP_ARTICLES, HELP_GROUPS, getArticlesByGroup, type HelpBlock } from '../../../../shared/help-content';
 
 function HelpBlockView({ block }: { block: HelpBlock }) {
@@ -32,7 +33,9 @@ function HelpBlockView({ block }: { block: HelpBlock }) {
       return (
         <div
           style={{
-            display: 'block',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '8px',
             padding: '10px 14px',
             fontSize: '12.5px',
             lineHeight: 1.5,
@@ -42,7 +45,8 @@ function HelpBlockView({ block }: { block: HelpBlock }) {
             color: isWarning ? 'var(--warning)' : '#93c5fd',
           }}
         >
-          {isWarning ? '⚠️ ' : 'ℹ️ '}{block.text}
+          {isWarning ? <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: '1px' }} /> : <Info size={15} style={{ flexShrink: 0, marginTop: '1px' }} />}
+          <span>{block.text}</span>
         </div>
       );
     }

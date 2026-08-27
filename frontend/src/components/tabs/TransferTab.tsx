@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { RefreshCw, CalendarDays, Truck, Printer } from 'lucide-react';
 import { HelpHint } from '../shared/HelpHint';
 import type { Transfer } from '../../types';
 
@@ -49,7 +50,7 @@ export function TransferTab({ transfers, fetchingTransfers, transferFilter, onTr
               onClick={onRefresh}
               disabled={fetchingTransfers}
             >
-              {fetchingTransfers ? '🔄' : t('btn_refresh')}
+              {fetchingTransfers ? <RefreshCw size={14} /> : t('btn_refresh')}
             </button>
           </div>
         </div>
@@ -104,9 +105,9 @@ export function TransferTab({ transfers, fetchingTransfers, transferFilter, onTr
                     ) : transfer.deliveryType === 'Today' ? (
                       <span className="badge badge-warning">{t('delivery_today')}</span>
                     ) : transfer.deliveryType === 'Tomorrow' ? (
-                      <span className="badge badge-warning" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.2)' }}>📅 Завтра</span>
+                      <span className="badge badge-warning" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.2)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><CalendarDays size={14} /> Завтра</span>
                     ) : (
-                      <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>🚚 {transfer.deliveryType}</span>
+                      <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', border: '1px solid rgba(255, 255, 255, 0.08)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Truck size={14} /> {transfer.deliveryType}</span>
                     )}
                   </div>
 
@@ -122,9 +123,9 @@ export function TransferTab({ transfers, fetchingTransfers, transferFilter, onTr
                       target="_blank"
                       rel="noreferrer"
                       className="btn btn-primary"
-                      style={{ padding: '10px 16px', fontSize: '13px', textDecoration: 'none', background: 'linear-gradient(135deg, #3b82f6, #2563eb)', boxShadow: '0 4px 12px rgba(59, 130, 246, 0.2)' }}
+                      style={{ padding: '10px 16px', fontSize: '13px', textDecoration: 'none', background: 'linear-gradient(135deg, #3b82f6, #2563eb)', boxShadow: '0 4px 12px rgba(59, 130, 246, 0.2)', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
                     >
-                      🖨️ Накладная ({transfer.waybillNumber || 'Открыть'})
+                      <Printer size={14} /> Накладная ({transfer.waybillNumber || 'Открыть'})
                     </a>
                   ) : (
                     <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Накладная отсутствует</span>

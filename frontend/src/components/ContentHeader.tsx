@@ -1,26 +1,50 @@
+import type { ComponentType } from 'react';
+import {
+  Store,
+  SlidersHorizontal,
+  LayoutDashboard,
+  Tag,
+  Zap,
+  Bot,
+  MessageSquare,
+  Link2,
+  Sparkles,
+  Code2,
+  Printer,
+  Package,
+  Truck,
+  Cog,
+  CreditCard,
+  ShieldCheck,
+  Handshake,
+  ScrollText,
+  Settings,
+  HelpCircle,
+  LogOut,
+} from 'lucide-react';
 import type { ActiveTab } from '../types';
 
-const TAB_ICON: Record<ActiveTab, string> = {
-  stores: '🏪',
-  'global-control': '🎛️',
-  overview: '📊',
-  products: '🏷️',
-  dumping: '⚡',
-  chatbot: '🤖',
-  chats: '💬',
-  'stock-groups': '🔗',
-  autolist: '✨',
-  'public-api': '💻',
-  'print-batcher': '🖨️',
-  packaging: '📦',
-  transfer: '🚚',
-  'auto-assembly': '🤖',
-  billing: '💳',
-  admin: '🛡️',
-  referral: '🤝',
-  logs: '📜',
-  settings: '⚙️',
-  help: '❓',
+const TAB_ICON: Record<ActiveTab, ComponentType<{ size?: number }>> = {
+  stores: Store,
+  'global-control': SlidersHorizontal,
+  overview: LayoutDashboard,
+  products: Tag,
+  dumping: Zap,
+  chatbot: Bot,
+  chats: MessageSquare,
+  'stock-groups': Link2,
+  autolist: Sparkles,
+  'public-api': Code2,
+  'print-batcher': Printer,
+  packaging: Package,
+  transfer: Truck,
+  'auto-assembly': Cog,
+  billing: CreditCard,
+  admin: ShieldCheck,
+  referral: Handshake,
+  logs: ScrollText,
+  settings: Settings,
+  help: HelpCircle,
 };
 
 const TAB_TITLE: Record<ActiveTab, string> = {
@@ -75,10 +99,11 @@ interface ContentHeaderProps {
 }
 
 export function ContentHeader({ activeTab, onLogout }: ContentHeaderProps) {
+  const TabIcon = TAB_ICON[activeTab];
   return (
     <header className="content-header">
       <div className="content-title-area">
-        <span className="content-title-icon">{TAB_ICON[activeTab]}</span>
+        <span className="content-title-icon"><TabIcon size={22} /></span>
         <div className="content-title-text">
           <h1>{TAB_TITLE[activeTab]}</h1>
           <p>{TAB_SUBTITLE[activeTab]}</p>
@@ -90,8 +115,8 @@ export function ContentHeader({ activeTab, onLogout }: ContentHeaderProps) {
           <span className="glow-dot glow-dot-success"></span>
           <span style={{ fontSize: '12px', fontWeight: 600 }}>REST API Active</span>
         </div>
-        <button className="btn btn-secondary" style={{ padding: '8px 14px' }} onClick={onLogout}>
-          🚪 Выйти
+        <button className="btn btn-secondary" style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '6px' }} onClick={onLogout}>
+          <LogOut size={16} /> Выйти
         </button>
       </div>
     </header>

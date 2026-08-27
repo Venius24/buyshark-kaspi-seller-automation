@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Swords } from 'lucide-react';
+import { Swords, Crown, AlertTriangle, Link2 } from 'lucide-react';
 import { ExpandableCard } from './ExpandableCard';
 import { leaderPrice, type PriceWarStats } from '../hooks/usePriceWarStats';
 
@@ -41,9 +41,11 @@ export const PriceWarSummary: React.FC<{ data: PriceWarStats }> = ({ data }) => 
       headerRight={
         hasData && (
           <div style={{ display: 'flex', gap: '8px' }}>
-            <span className="badge badge-success">👑 {summary.winning_count}</span>
-            <span className="badge" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }}>
-              ⚠️ {summary.losing_count}
+            <span className="badge badge-success" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <Crown size={14} /> {summary.winning_count}
+            </span>
+            <span className="badge" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <AlertTriangle size={14} /> {summary.losing_count}
             </span>
           </div>
         )
@@ -121,9 +123,9 @@ export const PriceWarSummary: React.FC<{ data: PriceWarStats }> = ({ data }) => 
                         href={p.url}
                         target="_blank"
                         rel="noreferrer"
-                        style={{ fontSize: '10px', color: '#3b82f6', textDecoration: 'none', whiteSpace: 'nowrap' }}
+                        style={{ fontSize: '10px', color: '#3b82f6', textDecoration: 'none', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                       >
-                        🔗 Карточка товара
+                        <Link2 size={11} /> Карточка товара
                       </a>
                     )}
                   </div>

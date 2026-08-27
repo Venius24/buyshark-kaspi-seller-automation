@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { AlertTriangle } from 'lucide-react';
 import { LanguageSwitcher } from './shared/LanguageSwitcher';
 import { API_URL } from '../api';
 import { clearPersistedQueryCache } from '../queryClient';
@@ -90,7 +91,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
           {isRegister ? t('title_register') : t('title_login')}
         </h2>
 
-        {error && <div style={styles.errorBox}>⚠️ {error}</div>}
+        {error && (
+          <div style={{ ...styles.errorBox, display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertTriangle size={16} style={{ flexShrink: 0 }} /> {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} style={styles.form}>
           {isRegister && (

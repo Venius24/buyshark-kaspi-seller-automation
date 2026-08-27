@@ -14,6 +14,7 @@ import {
   ExternalLink,
   ShieldCheck,
   AlertCircle,
+  AlertTriangle,
   FileCode,
   Code,
   Clock
@@ -390,8 +391,8 @@ export const IntegrationsPublicApi: React.FC = () => {
         <div className="modal-overlay">
           <div className="glass-card" style={{ width: '100%', maxWidth: '480px' }}>
 
-            <h3 style={{ fontSize: '18px', fontWeight: 700, margin: '0 0 16px 0', color: '#f8fafc' }}>
-              {createdSecret ? '🔑 API-Ключ успешно создан' : 'Сгенерировать новый API-ключ'}
+            <h3 style={{ fontSize: '18px', fontWeight: 700, margin: '0 0 16px 0', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {createdSecret ? (<><Key size={18} /> API-Ключ успешно создан</>) : 'Сгенерировать новый API-ключ'}
             </h3>
 
             {!createdSecret ? (
@@ -430,8 +431,8 @@ export const IntegrationsPublicApi: React.FC = () => {
               </form>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div style={{ padding: '12px', background: 'rgba(224, 163, 62, 0.15)', border: '1px solid rgba(224, 163, 62, 0.3)', borderRadius: '8px', color: 'var(--warning)', fontSize: '12px' }}>
-                  ⚠️ <strong>Внимание!</strong> Скопируйте этот секрет прямо сейчас. Он сохраняется в зашифрованном виде (SHA-256) и больше никогда не будет показан!
+                <div style={{ padding: '12px', background: 'rgba(224, 163, 62, 0.15)', border: '1px solid rgba(224, 163, 62, 0.3)', borderRadius: '8px', color: 'var(--warning)', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <AlertTriangle size={16} style={{ flexShrink: 0 }} /> <strong>Внимание!</strong> Скопируйте этот секрет прямо сейчас. Он сохраняется в зашифрованном виде (SHA-256) и больше никогда не будет показан!
                 </div>
 
                 <div>

@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { RefreshCw } from 'lucide-react';
 import type { Product } from '../../types';
 import { Pagination } from '../shared/Pagination';
 import { ProductCardHeader } from '../shared/ProductCardHeader';
@@ -119,7 +120,7 @@ export function ProductsTab({
             onClick={onRefresh}
             disabled={fetchingProducts}
           >
-            {fetchingProducts ? '🔄' : t('btn_refresh')}
+            {fetchingProducts ? <RefreshCw size={14} /> : t('btn_refresh')}
           </button>
         </form>
       </div>

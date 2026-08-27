@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { MessageCircle, AlertTriangle, Wallet, Save, type LucideIcon } from 'lucide-react';
 import { apiFetch, API_URL } from '../api';
 
 interface Prefs {
@@ -12,10 +13,10 @@ interface Prefs {
   quiet_to?: string | null;
 }
 
-const GROUPS: { key: 'chats' | 'problems' | 'money'; title: string; hint: string }[] = [
-  { key: 'chats', title: '💬 Чаты', hint: 'Новые сообщения от покупателей' },
-  { key: 'problems', title: '⚠️ Проблемы', hint: 'Сбои автосборки, ошибки, требующие внимания' },
-  { key: 'money', title: '💰 Деньги', hint: 'Новые заказы, демпинг подвинул цену (по умолчанию выкл.)' },
+const GROUPS: { key: 'chats' | 'problems' | 'money'; title: string; icon: LucideIcon; hint: string }[] = [
+  { key: 'chats', title: 'Чаты', icon: MessageCircle, hint: 'Новые сообщения от покупателей' },
+  { key: 'problems', title: 'Проблемы', icon: AlertTriangle, hint: 'Сбои автосборки, ошибки, требующие внимания' },
+  { key: 'money', title: 'Деньги', icon: Wallet, hint: 'Новые заказы, демпинг подвинул цену (по умолчанию выкл.)' },
 ];
 
 export function NotificationSettingsPanel() {
@@ -108,7 +109,9 @@ export function NotificationSettingsPanel() {
             {GROUPS.map(g => (
               <div key={g.key} className="status-widget">
                 <div>
-                  <span style={{ fontWeight: 600 }}>{g.title}</span>
+                  <span style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <g.icon size={14} /> {g.title}
+                  </span>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{g.hint}</div>
                 </div>
                 <button
@@ -138,7 +141,7 @@ export function NotificationSettingsPanel() {
                 onChange={e => setMinSum(e.target.value)}
               />
               <button className="btn btn-secondary" disabled={saving === 'minsum'} onClick={saveMinSum}>
-                {saving === 'minsum' ? 'Сохранение...' : '💾 Сохранить'}
+                {saving === 'minsum' ? 'Сохранение...' : (<><Save size={13} style={{ verticalAlign: '-2px', marginRight: '4px' }} /> Сохранить</>)}
               </button>
             </div>
           </div>
@@ -165,7 +168,7 @@ export function NotificationSettingsPanel() {
                 onChange={e => setQuietTo(e.target.value)}
               />
               <button className="btn btn-secondary" disabled={saving === 'quiet'} onClick={saveQuietHours}>
-                {saving === 'quiet' ? 'Сохранение...' : '💾 Сохранить'}
+                {saving === 'quiet' ? 'Сохранение...' : (<><Save size={13} style={{ verticalAlign: '-2px', marginRight: '4px' }} /> Сохранить</>)}
               </button>
             </div>
           </div>

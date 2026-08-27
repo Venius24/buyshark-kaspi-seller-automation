@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { X, Check } from 'lucide-react';
 
 interface McAuthModalProps {
   mcAuthStep: 'idle' | 'credentials' | 'loading' | 'success';
@@ -32,9 +33,9 @@ export function McAuthModal({
           <h3 style={{ fontSize: '18px', fontWeight: 700 }}>{t('title')}</h3>
           <button
             onClick={onClose}
-            style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer' }}
+            style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '20px', cursor: 'pointer', display: 'flex' }}
           >
-            ✕
+            <X size={20} />
           </button>
         </div>
 
@@ -96,7 +97,7 @@ export function McAuthModal({
               justifyContent: 'center', alignItems: 'center',
               color: 'var(--success)', fontSize: '24px',
               margin: '0 auto 16px auto'
-            }}>✓</div>
+            }}><Check size={24} /></div>
             <h4 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>{t('success_title')}</h4>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px' }}>
               {t('success_message')}

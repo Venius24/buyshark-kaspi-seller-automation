@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
+import { MapPin, Star, FlaskConical, BarChart3, CheckCircle2, Clock, Construction, SkipForward, XCircle, MessageSquare } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { fetchOutboundStats } from '../../queries';
 import { useActiveStoreId } from '../../storeContext';
 
-const CAMPAIGN_LABELS: Record<string, string> = {
-  pickup: '📍 Самовывоз',
-  review: '⭐ Отзыв',
-  test: '🧪 Тест',
+const CAMPAIGN_LABELS: Record<string, ReactNode> = {
+  pickup: <><MapPin size={13} /> Самовывоз</>,
+  review: <><Star size={13} /> Отзыв</>,
+  test: <><FlaskConical size={13} /> Тест</>,
 };
 
 export function OutboundStatsCard() {
@@ -21,7 +23,7 @@ export function OutboundStatsCard() {
   return (
     <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600 }}>📊 Статистика рассылок</h3>
+        <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}><BarChart3 size={17} /> Статистика рассылок</h3>
         <span className="badge badge-warning">Фаза 6 · {data?.period_days ?? 30} дн.</span>
       </div>
 
@@ -34,20 +36,20 @@ export function OutboundStatsCard() {
       {campaigns.map(([campaign, stats]) => (
         <div key={campaign} style={{ background: 'rgba(255,255,255,0.03)', padding: '12px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>{CAMPAIGN_LABELS[campaign] || campaign}</span>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}>{CAMPAIGN_LABELS[campaign] || campaign}</span>
             <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{stats.total} всего</span>
           </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', fontSize: '11px' }}>
-            <span className="badge">✅ Отправлено: {stats.sent}</span>
-            <span className="badge">⏳ В очереди: {stats.pending}</span>
-            {stats.needs_first_contact > 0 && <span className="badge badge-warning">🚧 Нужен первый контакт: {stats.needs_first_contact}</span>}
-            {stats.skipped > 0 && <span className="badge">⏭️ Пропущено: {stats.skipped}</span>}
-            {stats.failed > 0 && <span className="badge" style={{ background: 'var(--danger, #e5484d)', color: '#fff' }}>❌ Ошибка: {stats.failed}</span>}
+            <span className="badge" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><CheckCircle2 size={13} /> Отправлено: {stats.sent}</span>
+            <span className="badge" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><Clock size={13} /> В очереди: {stats.pending}</span>
+            {stats.needs_first_contact > 0 && <span className="badge badge-warning" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><Construction size={13} /> Нужен первый контакт: {stats.needs_first_contact}</span>}
+            {stats.skipped > 0 && <span className="badge" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><SkipForward size={13} /> Пропущено: {stats.skipped}</span>}
+            {stats.failed > 0 && <span className="badge" style={{ background: 'var(--danger, #e5484d)', color: '#fff', display: 'flex', alignItems: 'center', gap: '5px' }}><XCircle size={13} /> Ошибка: {stats.failed}</span>}
           </div>
 
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            💬 Доля ответивших: <strong style={{ color: '#fff' }}>{Math.round(stats.reply_rate * 100)}%</strong>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <MessageSquare size={14} /> Доля ответивших: <strong style={{ color: '#fff' }}>{Math.round(stats.reply_rate * 100)}%</strong>
             {' '}({stats.replied} из {stats.sent} отправленных ответили в чате)
           </div>
 
