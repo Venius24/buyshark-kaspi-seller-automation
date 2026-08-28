@@ -1,10 +1,18 @@
 import React, { useMemo, useState } from 'react';
-import { TrendingUp, TrendingDown, Package, Wallet } from 'lucide-react';
+import { TrendingUp, TrendingDown, Package, Wallet, Download } from 'lucide-react';
 import { Area, AreaChart, Bar, BarChart, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
 import { useSalesStats } from '../hooks/useSalesStats';
+import { apiFetch, API_URL } from '../api';
 
 const fmt = (n: number) => new Intl.NumberFormat('ru-RU').format(Math.round(n));
 const PIE_COLORS = ['#35c9a9', '#5fb4e8', '#e8c15f', '#e87f5f', '#a05fe8', '#5fe88f', '#e85f9e'];
+
+const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+const daysAgo = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return isoDate(d);
+};
 
 type SortKey = 'revenue_desc' | 'revenue_asc' | 'qty_desc' | 'qty_asc';
 
@@ -26,6 +34,39 @@ export const SalesStatsWidget: React.FC<SalesStatsWidgetProps> = ({ period = 30,
   const [sort, setSort] = useState<SortKey>('revenue_desc');
   const hasData = data.daily.length > 0;
   const isPieLike = chartType === 'pie' || chartType === 'donut';
+
+  const [exportFrom, setExportFrom] = useState(() => daysAgo(period));
+  const [exportTo, setExportTo] = useState(() => isoDate(new Date()));
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const handleExport = async () => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const res = await apiFetch(
+        `${API_URL}/api/analytics/sales-export?date_from=${exportFrom}&date_to=${exportTo}`
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setExportError(body?.detail || 'Не удалось сформировать отчёт');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sales_${exportFrom}_${exportTo}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError('Не удалось скачать отчёт');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const sortedSkus = useMemo(() => {
     const copy = [...data.top_skus];
@@ -63,6 +104,39 @@ export const SalesStatsWidget: React.FC<SalesStatsWidgetProps> = ({ period = 30,
             </p>
           </div>
         </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px' }}>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>ЭКСПОРТ В EXCEL</span>
+        <input
+          type="date"
+          value={exportFrom}
+          max={exportTo}
+          onChange={(e) => setExportFrom(e.target.value)}
+          className="input"
+          style={{ fontSize: '12px', padding: '4px 8px', width: '140px' }}
+        />
+        <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>
+        <input
+          type="date"
+          value={exportTo}
+          min={exportFrom}
+          max={isoDate(new Date())}
+          onChange={(e) => setExportTo(e.target.value)}
+          className="input"
+          style={{ fontSize: '12px', padding: '4px 8px', width: '140px' }}
+        />
+        <button
+          className="btn btn-secondary"
+          style={{ padding: '5px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+          onClick={handleExport}
+          disabled={exporting}
+        >
+          <Download size={13} /> {exporting ? 'Формируем…' : 'Скачать .xlsx'}
+        </button>
+        {exportError && (
+          <span style={{ fontSize: '11px', color: '#e87f5f' }}>{exportError}</span>
+        )}
       </div>
 
       {!hasData ? (

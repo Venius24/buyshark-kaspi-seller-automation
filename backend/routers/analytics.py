@@ -2,9 +2,11 @@
 FastAPI router for Dashboard Analytics and Widget stats.
 """
 
-from fastapi import APIRouter, Depends
-from datetime import datetime, timedelta
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from datetime import date as _date, datetime, timedelta
 from sqlalchemy import select
+import io
 import json
 import time
 import logging
@@ -18,6 +20,7 @@ from backend.state_helpers import (
 from backend.dumper.config import _decode_base64_if_needed
 from backend.dumper.radar import _fetch_offers_sync
 from backend.security.store_context import StoreContext, get_store_context
+from backend.services.sales_export import build_sales_export_xlsx
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -194,6 +197,34 @@ def get_sales_stats(days: int = 30, ctx: StoreContext = Depends(get_store_contex
     days = max(1, min(days, 365))
     summary = _load_sales_summary(ctx.store_id, days=days)
     return {"success": True, "days": days, **summary}
+
+
+@router.get("/sales-export")
+def export_sales_stats(date_from: str, date_to: str, ctx: StoreContext = Depends(get_store_context)):
+    """
+    Экспорт продаж за выбранный период в Excel — Фото | Артикул | Наименование |
+    Код товара Kaspi | Продано, шт. | Средняя цена продажи | Дней с продажами
+    (период) | Дней с первой продажи. См. backend/services/sales_export.py —
+    там же объяснение, почему «дней с первой продажи» это прокси, а не
+    настоящая дата добавления в каталог (её никто не хранит).
+    """
+    try:
+        d_from = _date.fromisoformat(date_from)
+        d_to = _date.fromisoformat(date_to)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date_from/date_to должны быть в формате YYYY-MM-DD")
+    if d_from > d_to:
+        raise HTTPException(status_code=400, detail="date_from не может быть позже date_to")
+    if (d_to - d_from).days > 366:
+        raise HTTPException(status_code=400, detail="Период не может быть длиннее 366 дней")
+
+    xlsx_bytes = build_sales_export_xlsx(ctx.store_id, d_from, d_to)
+    filename = f"sales_{d_from.isoformat()}_{d_to.isoformat()}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/price-war")
