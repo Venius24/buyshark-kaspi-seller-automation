@@ -372,8 +372,10 @@ def render_plan_report(plan: FeedPlan, limit: int = 25) -> str:
         "  отсутствует в файле   : {}".format(len(plan.missing_from_file)),
         "  снято с продажи (архив, в файл не идёт): {}".format(plan.snapshot.archived_count),
         "  названия и бренды   : {}".format(
-            "из принятого файла {} (вне файла — {})".format(
-                plan.identity_source, plan.identity_unknown)
+            # Источников теперь два — выгрузка Kaspi и принятый файл, — и они
+            # называют себя сами. Зашитое «из принятого файла» врало бы ровно в
+            # том случае, ради которого источник и меняли.
+            "{} (вне источника — {})".format(plan.identity_source, plan.identity_unknown)
             if plan.identity_source else "НЕ СВЕРЕНЫ — отправка заблокирована"
         ),
     ]
