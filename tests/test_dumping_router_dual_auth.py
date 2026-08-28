@@ -26,6 +26,16 @@ def make_scalar_result(value):
     return result
 
 
+def make_store_role_result(store, role="OWNER"):
+    """_resolve_store_for_user selects (Store, UserStore.role) and reads
+    the row via .first() — a plain make_scalar_result() only wires
+    .scalar_one_or_none()/.scalars().first()."""
+    from unittest.mock import MagicMock
+    result = MagicMock()
+    result.first.return_value = (store, role)
+    return result
+
+
 class TestDumpingRouterRequiresAuth(unittest.TestCase):
     """
     Слайс 7: legacy-фоллбек на общую сессию убран целиком — запрос без
@@ -77,8 +87,8 @@ class TestDumpingRouterNewPath(unittest.TestCase):
         # Two HTTP requests below, each triggering get_store_context once
         # (one User lookup + one Store lookup per call) = 4 execute() calls.
         fake_db.execute.side_effect = [
-            make_scalar_result(user), make_scalar_result(store),
-            make_scalar_result(user), make_scalar_result(store),
+            make_scalar_result(user), make_store_role_result(store),
+            make_scalar_result(user), make_store_role_result(store),
         ]
 
         async def fake_get_db_gen():

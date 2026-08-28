@@ -34,6 +34,15 @@ def make_scalar_result(value):
     return result
 
 
+def make_store_role_result(store, role="OWNER"):
+    """_resolve_store_for_user selects (Store, UserStore.role) and reads
+    the row via .first() — a plain make_scalar_result() only wires
+    .scalar_one_or_none()/.scalars().first()."""
+    result = MagicMock()
+    result.first.return_value = (store, role)
+    return result
+
+
 class TestMcStatusReflectsStoreStatus(unittest.TestCase):
     def setUp(self):
         self._orig_cwd = os.getcwd()
@@ -70,7 +79,7 @@ class TestMcStatusReflectsStoreStatus(unittest.TestCase):
 
     def _call_mc_status(self, store: Store):
         fake_db = AsyncMock()
-        fake_db.execute.side_effect = [make_scalar_result(self.user), make_scalar_result(store)]
+        fake_db.execute.side_effect = [make_scalar_result(self.user), make_store_role_result(store)]
 
         async def fake_get_db_gen():
             yield fake_db

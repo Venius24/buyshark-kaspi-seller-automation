@@ -31,6 +31,15 @@ def make_scalar_result(value):
     return result
 
 
+def make_store_role_result(store, role="OWNER"):
+    """_resolve_store_for_user selects (Store, UserStore.role) and reads
+    the row via .first() — a plain make_scalar_result() only wires
+    .scalar_one_or_none()/.scalars().first()."""
+    result = MagicMock()
+    result.first.return_value = (store, role)
+    return result
+
+
 class TestLoginRouterStoreScoped(unittest.TestCase):
     def setUp(self):
         self._orig_cwd = os.getcwd()
@@ -74,7 +83,7 @@ class TestLoginRouterStoreScoped(unittest.TestCase):
         store = Store(id="store-1", merchant_id="m_new", name="Shop", encrypted_api_key="cipher")
 
         fake_db = AsyncMock()
-        fake_db.execute.side_effect = [make_scalar_result(user), make_scalar_result(store)]
+        fake_db.execute.side_effect = [make_scalar_result(user), make_store_role_result(store)]
 
         async def fake_get_db_gen():
             yield fake_db

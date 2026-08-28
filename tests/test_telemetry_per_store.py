@@ -143,7 +143,9 @@ class TestResolveWsStoreId(unittest.IsolatedAsyncioTestCase):
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
         store_result = MagicMock()
-        store_result.scalars.return_value.first.return_value = store
+        # _resolve_store_for_user selects (Store, UserStore.role) and reads
+        # the row via .first() — not .scalars().first().
+        store_result.first.return_value = (store, "OWNER")
 
         db = AsyncMock()
         db.execute.side_effect = [user_result, store_result]
@@ -189,7 +191,9 @@ class TestResolveWsStoreId(unittest.IsolatedAsyncioTestCase):
         not_owned_result = MagicMock()
         not_owned_result.scalars.return_value.first.return_value = None  # not this user's store
         fallback_result = MagicMock()
-        fallback_result.scalars.return_value.first.return_value = default_store
+        # Fallback goes through _resolve_store_for_user, which selects
+        # (Store, UserStore.role) and reads the row via .first().
+        fallback_result.first.return_value = (default_store, "OWNER")
 
         db = AsyncMock()
         db.execute.side_effect = [user_result, not_owned_result, fallback_result]

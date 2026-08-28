@@ -33,6 +33,15 @@ def make_scalar_result(value):
     return result
 
 
+def make_store_role_result(store, role="OWNER"):
+    """_resolve_store_for_user selects (Store, UserStore.role) and reads
+    the row via .first() — a plain make_scalar_result() only wires
+    .scalar_one_or_none()/.scalars().first()."""
+    result = MagicMock()
+    result.first.return_value = (store, role)
+    return result
+
+
 def patch_session(db):
     """
     get_store_context сам открывает и закрывает свою сессию (`async with
@@ -135,7 +144,7 @@ class TestStoreContextNewPath(unittest.IsolatedAsyncioTestCase):
         mock_decrypt.return_value = "plaintext_token"
 
         db = AsyncMock()
-        db.execute.side_effect = [make_scalar_result(user), make_scalar_result(store)]
+        db.execute.side_effect = [make_scalar_result(user), make_store_role_result(store)]
         session_patch, calls = patch_session(db)
         with session_patch:
             ctx = await get_store_context(make_request(auth_header=f"Bearer {access_tok}"))
@@ -153,7 +162,7 @@ class TestStoreContextNewPath(unittest.IsolatedAsyncioTestCase):
         mock_decrypt.return_value = "plaintext_token_2"
 
         db = AsyncMock()
-        db.execute.side_effect = [make_scalar_result(user), make_scalar_result(store)]
+        db.execute.side_effect = [make_scalar_result(user), make_store_role_result(store)]
         session_patch, _ = patch_session(db)
         with session_patch:
             ctx = await get_store_context(
@@ -173,7 +182,7 @@ class TestStoreContextNewPath(unittest.IsolatedAsyncioTestCase):
         mock_decrypt.return_value = ""  # decrypt failure returns "" per crypto.py's contract
 
         db = AsyncMock()
-        db.execute.side_effect = [make_scalar_result(user), make_scalar_result(store)]
+        db.execute.side_effect = [make_scalar_result(user), make_store_role_result(store)]
         session_patch, _ = patch_session(db)
         with session_patch, self.assertRaises(HTTPException) as cm:
             await get_store_context(make_request(auth_header=f"Bearer {access_tok}"))
