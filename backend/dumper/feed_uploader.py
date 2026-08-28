@@ -304,6 +304,11 @@ def archive_sent_file(store_id, name: str, xml: bytes, plan) -> pathlib.Path:
         "changed_offers": plan.changed_offers,
         "identity_source": getattr(plan, "identity_source", None),
         "active_before": plan.snapshot.size,
+        # Архив ДО отправки, поимённо. Без него сверка может сказать только
+        # «активных стало меньше на N», а этого мало: карточка, созданная в
+        # кабинете внутри окна полёта и погашенная нашим файлом как «не указана
+        # в прайс-листе», в счётчике не видна вовсе.
+        "archived_before": list(getattr(plan.snapshot, "archived_skus", []) or []),
     }
     path.with_suffix(path.suffix + ".meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"

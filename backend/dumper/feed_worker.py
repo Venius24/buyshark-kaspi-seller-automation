@@ -136,7 +136,7 @@ def why_not_now(
     return None
 
 
-def run_for_store(store) -> dict:
+def run_for_store(store, on_flight=None) -> dict:
     """
     Один проход по одному магазину. Синхронный — вызывается через to_thread.
 
@@ -239,6 +239,27 @@ def run_for_store(store) -> dict:
     from backend.dumper.feed_uploader import send_plan
 
     feed_state.mark_sent(store.store_id, "pending", plan.snapshot.taken_at)
+    window = feed_state.blind_window(store.store_id)
+    if window:
+        # Единственная защита от потери чужой правки — предупреждение. Ловушки
+        # нет: файл объявляет состояние на момент снимка, и правку, сделанную
+        # в кабинете за эти минуты, он откатит, а сверка этого не увидит —
+        # объявленное и фактическое после отката совпадут.
+        result["blind_until"] = window["until"].isoformat()
+        # Колбэк, а не await: эта функция синхронная и висит в потоке до конца
+        # полёта, а предупреждение обязано уйти ДО него, иначе оно бесполезно.
+        if on_flight is not None:
+            try:
+                on_flight(store.store_id, result["blind_until"])
+            except Exception as err:
+                logger.error("[FeedWorker] Не удалось объявить окно слепоты: %r", err)
+        logger.warning(
+            "🕶 [FeedWorker] Стор %s: ОКНО СЛЕПОТЫ %s → ~%s. Правки в кабинете в эти "
+            "минуты будут откачены файлом.",
+            store.store_id,
+            plan.snapshot.taken_at.strftime("%H:%M:%S"),
+            window["until"].strftime("%H:%M:%S"),
+        )
     try:
         verdict = send_plan(
             plan, store.store_id, str(store.merchant_id),
@@ -273,6 +294,43 @@ def run_for_store(store) -> dict:
         result["disabled"] = "файл отправлен, но не сохранён — сверить исход невозможно"
         feed_state.disable(store.store_id, result["disabled"])
     return result
+
+
+async def notify_blind_window(store_id, until_iso: str) -> None:
+    """
+    Сказать владельцу, что ближайшие минуты каталог трогать не стоит.
+
+    Не urgent: это не авария, а предупреждение по расписанию, и будить им
+    человека ночью незачем — ночью он в кабинете и не сидит. Дедуп по времени
+    закрытия окна, чтобы повтор одного и того же полёта не пришёл дважды.
+    """
+    import datetime as _dt
+
+    from backend.chatbot import notify_dispatch
+
+    try:
+        until = _dt.datetime.fromisoformat(until_iso)
+    except (TypeError, ValueError):
+        return
+
+    text = "\n".join([
+        "📤 *Прайс-лист ушёл в Kaspi*",
+        "",
+        "Применится примерно к *{}*.".format(until.strftime("%H:%M")),
+        "",
+        "Если в эти минуты поменять цену или остаток в кабинете — файл вернёт "
+        "прежнее значение, и мы этого не увидим. Новый товар, созданный сейчас, "
+        "может уехать в архив.",
+        "",
+        "Несколько минут — и правьте спокойно.",
+    ])
+    try:
+        await notify_dispatch.dispatch(
+            str(store_id), "problems", text,
+            dedup_key="feed-flight-{}-{}".format(store_id, until_iso),
+        )
+    except Exception as err:
+        logger.error("[FeedWorker] Предупреждение об окне слепоты не ушло: %r", err)
 
 
 async def notify_feed_disabled(store_id, reason: str) -> None:
@@ -315,7 +373,17 @@ async def run_feed_cycle() -> dict:
     for store in await list_active_stores():
         totals["checked"] += 1
         try:
-            result = await asyncio.to_thread(run_for_store, store)
+            loop = asyncio.get_running_loop()
+
+            def announce(store_id, until_iso):
+                # Из чужого потока в цикл событий: run_for_store синхронный, а
+                # dispatch — корутина. Результат намеренно не ждём: рассылка не
+                # должна задерживать отправку файла.
+                asyncio.run_coroutine_threadsafe(
+                    notify_blind_window(store_id, until_iso), loop
+                )
+
+            result = await asyncio.to_thread(run_for_store, store, announce)
             if result["sent"]:
                 totals["sent"] += 1
                 report = result.get("report")

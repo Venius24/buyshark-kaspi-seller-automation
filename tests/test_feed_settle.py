@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -356,3 +357,56 @@ def test_silence_when_there_is_nothing_to_report(state_dir):
     with patch.object(notify_dispatch, "dispatch", side_effect=lambda *a, **k: sent.append(a)):
         asyncio.run(feed_settle.notify_settle_report("s1", feed_settle.SettleReport("s1", ok=True)))
     assert sent == []
+
+
+class UnexpectedArchiveTestCase(unittest.TestCase):
+    """
+    Детектор «сняли то, чего мы не снимали».
+
+    Ловит он ровно один сценарий, и его нельзя поймать счётчиком: карточка,
+    созданная в кабинете, пока файл летел, в файл не попала — попасть не могла —
+    и была снята как «не указана в прайс-листе». Создание даёт +1 к активным,
+    гашение −1, размер каталога не двигается вовсе.
+    """
+
+    def _snapshot(self, archived):
+        return types.SimpleNamespace(size=100, archived_skus=list(archived))
+
+    def test_card_born_in_the_flight_window_is_caught(self):
+        meta = {"archived_before": ["OLD-1"]}
+        declared = {"A": {"available": True}}
+        snapshot = self._snapshot(["OLD-1", "NEW-CARD"])
+
+        assert feed_settle._unexpected_archived(meta, declared, snapshot) == ["NEW-CARD"]
+
+    def test_offer_we_withdrew_ourselves_is_not_an_alarm(self):
+        """Мы объявили available="no" — его гашение и есть выполненное намерение."""
+        meta = {"archived_before": ["OLD-1"]}
+        declared = {"GONE": {"available": False}}
+        snapshot = self._snapshot(["OLD-1", "GONE"])
+
+        assert feed_settle._unexpected_archived(meta, declared, snapshot) == []
+
+    def test_quiet_when_there_is_nothing_to_compare(self):
+        """
+        Файл, отправленный старой версией, поля не имеет. Ложная тревога на
+        каждом таком файле стоила бы дороже, чем пропуск одного цикла.
+        """
+        snapshot = self._snapshot(["OLD-1", "NEW-CARD"])
+
+        assert feed_settle._unexpected_archived({}, {}, snapshot) == []
+
+    def test_no_threshold_one_card_is_enough(self):
+        """
+        Порога здесь нет намеренно: одна карточка, снятая без нашего ведома, —
+        тот же механизм, что снял однажды 798, просто пойманный в начале.
+        """
+        meta = {"archived_before": []}
+        snapshot = self._snapshot(["X"])
+
+        # Пустой archived_before — «сравнить не с чем», молчим.
+        assert feed_settle._unexpected_archived(meta, {}, snapshot) == []
+
+        meta = {"archived_before": ["SEED"]}
+        snapshot = self._snapshot(["SEED", "X"])
+        assert feed_settle._unexpected_archived(meta, {}, snapshot) == ["X"]

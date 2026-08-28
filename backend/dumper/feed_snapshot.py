@@ -57,6 +57,11 @@ class CatalogSnapshot:
     offers: List[dict]
     taken_at: datetime.datetime
     archived_count: int = 0
+    # Артикулы снятых офферов — поимённо, а не счётчиком. Нужны сверке после
+    # вердикта: карточка, уехавшая в архив, пока файл был в полёте, в счётчике
+    # не видна (её создание и гашение дают нетто-ноль), а в разности множеств
+    # видна сразу. См. feed_settle.
+    archived_skus: List[str] = field(default_factory=list)
     baseline_count: Optional[int] = None
     notes: List[str] = field(default_factory=list)
 
@@ -147,7 +152,8 @@ def build_catalog_snapshot(
         raise FeedSnapshotRefused("не удалось выкачать каталог", repr(err)) from err
 
     active = [p for p in products if _is_active(p)]
-    archived = len(products) - len(active)
+    archived_products = [p for p in products if not _is_active(p)]
+    archived = len(archived_products)
 
     if len(active) < MIN_PLAUSIBLE_OFFERS:
         raise FeedSnapshotRefused(
@@ -220,6 +226,9 @@ def build_catalog_snapshot(
         offers=[_undecorate(p) for p in active],
         taken_at=datetime.datetime.now(),
         archived_count=archived,
+        archived_skus=sorted(
+            str(p.get("merchantSku")) for p in archived_products if p.get("merchantSku")
+        ),
         baseline_count=baseline_count,
         notes=notes,
     )

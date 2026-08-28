@@ -65,7 +65,7 @@ def test_apply_overrides_bff_values():
     result, stats = apply_identity(offers, parse_identity(ACCEPTED))
     assert result[0]["brand"] == "volat"
     assert result[0]["name"] == "Ledgehammer"
-    assert stats == {"applied": 1, "unknown": []}
+    assert stats == {"applied": 1, "unknown": [], "empty": []}
 
 
 def test_offer_outside_accepted_file_gets_empty_fields():

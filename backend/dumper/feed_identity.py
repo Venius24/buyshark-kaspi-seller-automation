@@ -132,9 +132,23 @@ def apply_identity(offers, identity: Dict[str, dict]):
     Оффер, которого в принятом файле нет, получает пустые поля: выдумывать
     название и бренд нельзя — это ровно та ошибка, из-за которой в каталог
     Бархана уехали 65 заглушек «Товар <sku>».
+
+    Статистика различает ДВА разных «пусто», и это не педантизм:
+
+    · `unknown` — SKU в источнике отсутствует. Лечится сменой источника.
+    · `empty`   — SKU есть, но `<model/>` в нём пуст. Не лечится ничем и часто
+      является правдой: в выгрузке Бархана 28.08 таких 115 при нормальных
+      названиях карточек в кабинете.
+
+    Считать их вместе нельзя, потому что счётчик `unknown` **сам себя гасит**.
+    Оффер с пустым `<model/>` уезжает в наш файл; файл становится принятым;
+    на следующем цикле SKU в источнике уже есть — `unknown` его больше не
+    видит, а пустота осталась навсегда. Предупреждение, которое замолкает,
+    не починив причину, хуже отсутствующего.
     """
     applied = 0
     unknown = []
+    empty = []
     result = []
     for offer in offers:
         clean = dict(offer)
@@ -148,5 +162,7 @@ def apply_identity(offers, identity: Dict[str, dict]):
             clean["name"] = known.get("name")
             clean["brand"] = known.get("brand")
             applied += 1
+            if not clean["name"]:
+                empty.append(key)
         result.append(clean)
-    return result, {"applied": applied, "unknown": unknown}
+    return result, {"applied": applied, "unknown": unknown, "empty": empty}

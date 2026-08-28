@@ -78,6 +78,8 @@ class SettleReport:
     mismatches: List[dict] = field(default_factory=list)
     active_before: Optional[int] = None
     active_after: Optional[int] = None
+    # Офферы, снятые Kaspi без нашего ведома — см. `_unexpected_archived`.
+    unexpected_archived: List[str] = field(default_factory=list)
     alarms: List[str] = field(default_factory=list)
 
     @property
@@ -274,6 +276,29 @@ async def notify_settle_report(store_id, report: SettleReport) -> None:
         logger.error("[FeedSettle] Тревога не ушла в Телеграм: %r", err)
 
 
+def _unexpected_archived(meta: dict, declared: Dict[str, dict], snapshot) -> List[str]:
+    """
+    Офферы, уехавшие в архив за время полёта, которых мы туда не отправляли.
+
+    Считается разностью множеств, а не счётчиком: `archived_before` пишется в
+    meta перед отправкой, `archived_skus` приходит со свежим снимком. Из
+    новичков в архиве вычитаются те, кого мы сами объявили снятыми
+    (`available="no"`) — их гашение и есть выполненное намерение.
+
+    Пустой `archived_before` (файл отправлен старой версией, до появления
+    поля) означает «сравнить не с чем» — тогда молчим. Ложная тревога на
+    каждом старом файле стоила бы дороже, чем пропуск одного цикла.
+    """
+    before = meta.get("archived_before")
+    if not before:
+        return []
+    now = set(getattr(snapshot, "archived_skus", []) or [])
+    if not now:
+        return []
+    withdrawn = {sku for sku, d in declared.items() if d.get("available") is False}
+    return sorted((now - set(before)) - withdrawn)
+
+
 def settle_file(store_id, archive_path, verdict, snapshot=None, token=None) -> SettleReport:
     """
     Полная сверка по вердикту: что файл довёз, что откатил, что сломал.
@@ -322,6 +347,32 @@ def settle_file(store_id, archive_path, verdict, snapshot=None, token=None) -> S
             report.alarms.append(reason)
             feed_state.disable(store_id, reason)
             return report
+
+    # Детектор «сняли то, чего мы не снимали». Отдельно от счётчика выше и
+    # БЕЗ порога, потому что ловит он другое.
+    #
+    # Счётчик видит массовую убыль. Этот видит одну карточку — ту, что появилась
+    # в кабинете, пока файл был в полёте, не попала в файл (её там физически не
+    # могло быть) и потому была снята как «не указана в прайс-листе». В нетто
+    # она невидима: создание даёт +1, гашение −1, размер каталога не двигается.
+    #
+    # Порога нет намеренно. Одна карточка, снятая без нашего ведома, — это тот
+    # же механизм, который однажды снял 798, просто пойманный в начале. Цена
+    # ложной тревоги — полчаса без фида; цена пропущенной — товар, который не
+    # продаётся, и никто не знает почему.
+    unexpected = _unexpected_archived(meta, declared, snapshot)
+    if unexpected:
+        reason = (
+            "Kaspi сняла с продажи {} офферов, которых мы не снимали: {}. Похоже, "
+            "карточки появились в кабинете, пока файл был в полёте, и не попали "
+            "в него. Фид выключен, карточки нужно вернуть руками".format(
+                len(unexpected), unexpected[:10]
+            )
+        )
+        report.alarms.append(reason)
+        report.unexpected_archived = unexpected
+        feed_state.disable(store_id, reason)
+        return report
 
     report.mismatches = compare_with_catalog(declared, snapshot)
     if report.mismatches:

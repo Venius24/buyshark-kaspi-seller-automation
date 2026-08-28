@@ -197,9 +197,21 @@ def build_feed_plan(
     # невозможно. Подробности — в feed_identity.
     identity_stats = None
     if identity is None and use_accepted_identity:
-        from backend.dumper.feed_identity import fetch_accepted_identity
+        # Порядок источников — от полного к частичному, а не наоборот.
+        #
+        # Выгрузка Kaspi покрывает ВЕСЬ каталог, включая SKU, которых мы
+        # никогда не отправляли (19 штук на Бархане 25.08, 26 на 28.08), и
+        # несёт бренд слагом. Принятый файл покрывает только то, что мы уже
+        # слали, — то есть систематически не знает всё новое. Пока он был
+        # единственным источником, каждый новый товар магазина уезжал в фид с
+        # пустыми полями, и это состояние закреплялось навсегда.
+        from backend.dumper.feed_export import identity_from_export
 
-        identity_source, identity = fetch_accepted_identity(store_id, snapshot.merchant_id)
+        identity_source, identity = identity_from_export(store_id, snapshot.merchant_id)
+        if not identity:
+            from backend.dumper.feed_identity import fetch_accepted_identity
+
+            identity_source, identity = fetch_accepted_identity(store_id, snapshot.merchant_id)
     if identity:
         from backend.dumper.feed_identity import apply_identity
 
@@ -216,11 +228,24 @@ def build_feed_plan(
             "поля идентичности НЕ сверены с принятым файлом — названия и бренды пришли из BFF "
             "и почти наверняка разойдутся со слагами Kaspi; отправка заблокирована"
         )
-    elif identity_stats["unknown"]:
-        warnings.append(
-            "офферов вне принятого файла: {} — уйдут с пустыми <model/> и <brand/> "
-            "(напр. {})".format(len(identity_stats["unknown"]), identity_stats["unknown"][:5])
-        )
+    else:
+        if identity_stats["unknown"]:
+            warnings.append(
+                "офферов вне источника идентичности: {} — уйдут с пустыми <model/> и "
+                "<brand/> (напр. {})".format(
+                    len(identity_stats["unknown"]), identity_stats["unknown"][:5]
+                )
+            )
+        if identity_stats.get("empty"):
+            # Отдельной строкой и НЕ вместо `unknown`: см. докстринг
+            # apply_identity — общий счётчик гасил бы сам себя после первой же
+            # отправки, оставив пустоту невидимой.
+            warnings.append(
+                "офферов с пустым <model/> в источнике: {} — так у Kaspi и есть, "
+                "название карточки от этого не меняется (напр. {})".format(
+                    len(identity_stats["empty"]), identity_stats["empty"][:5]
+                )
+            )
     if orphans:
         warnings.append(
             "намерений по SKU вне каталога: {} — файлом они не поедут (напр. {})".format(

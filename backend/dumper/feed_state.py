@@ -95,11 +95,49 @@ def disable(store_id, reason: str) -> dict:
     )
 
 
+# Сколько считать окно полёта, пока своего замера нет. Живой замер на Бархане
+# 2026-08-26: снимок 19:05:53, файл применён 19:10:31 — 4 минуты 38 секунд на
+# 1100 офферах. Берём пять минут: ошибиться в большую сторону здесь безопаснее,
+# потому что число это показывается человеку как «не трогай карточки до».
+DEFAULT_FLIGHT_SECONDS = 5 * 60
+
+
+def expected_flight_seconds(store_id) -> float:
+    """
+    Сколько продлится окно, в котором правка в кабинете будет потеряна.
+
+    Считается от факта прошлой обработки (`endDate − createdDate` из карточки
+    файла), а не константой: время разбора растёт с размером каталога, и за
+    пределами замеренных ~1100 офферов оно неизвестно.
+    """
+    processed = load(store_id).get("last_processing_seconds")
+    if not processed:
+        return DEFAULT_FLIGHT_SECONDS
+    return max(float(processed), 60.0)
+
+
 def mark_sent(store_id, file_name: str, snapshot_at) -> dict:
+    """
+    Отметить файл в полёте и посчитать, когда окно слепоты закроется.
+
+    `in_flight_until` — не украшение и не отладка. Пока файл летит, он несёт
+    значения на момент снимка, и правка, сделанная человеком в кабинете за эти
+    минуты, будет молча откачена: сверка сравнивает объявленное с фактом, а
+    после отката они совпадают (см. докстринг feed_settle). Ловушки против
+    этого нет — есть только предупреждение, и оно должно быть предъявимо
+    человеку, а не жить в голове у того, кто читал код.
+
+    Отсчёт идёт от СНИМКА, а не от момента отправки: значения устарели именно
+    тогда, а не когда файл ушёл.
+    """
+    now = datetime.datetime.now()
+    started = snapshot_at if isinstance(snapshot_at, datetime.datetime) else now
+    until = started + datetime.timedelta(seconds=expected_flight_seconds(store_id))
     return save(
         store_id,
         in_flight=file_name,
-        sent_at=datetime.datetime.now().isoformat(),
+        sent_at=now.isoformat(),
+        in_flight_until=until.isoformat(),
         snapshot_at=snapshot_at.isoformat() if hasattr(snapshot_at, "isoformat") else snapshot_at,
     )
 
@@ -108,10 +146,33 @@ def mark_settled(store_id, report) -> dict:
     return save(
         store_id,
         in_flight=None,
+        in_flight_until=None,
         settled_at=datetime.datetime.now().isoformat(),
         last_file_id=report.file_id,
         last_summary=report.summary(),
     )
+
+
+def blind_window(store_id) -> Optional[dict]:
+    """
+    Открытое сейчас окно слепоты, либо None.
+
+    Отдельная функция, а не чтение поля, потому что читателей будет несколько —
+    лог, бот, а со временем и API панели, — и «истёк ли срок» каждый из них
+    считал бы сам, по-своему и рано или поздно неправильно.
+    """
+    state = load(store_id)
+    raw = state.get("in_flight_until")
+    if not raw:
+        return None
+    try:
+        until = datetime.datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return None
+    left = (until - datetime.datetime.now()).total_seconds()
+    if left <= 0:
+        return None
+    return {"until": until, "seconds_left": left, "file": state.get("in_flight")}
 
 
 def eligible(store_id, active_offers: int) -> Optional[str]:
