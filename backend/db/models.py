@@ -347,6 +347,35 @@ class StoreBotProfileDB(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class DashboardLayoutDB(Base):
+    """Персональная раскладка дашборда (вкладка "Обзор") — видимость, порядок
+    и настройки виджетов конкретного пользователя. Персональная, а не по
+    магазину: пользователь работает с несколькими магазинами, но хочет
+    одинаково настроенный дашборд везде. layout_json хранит только оверрайды
+    поверх дефолтного реестра виджетов на фронте (frontend/src/dashboard/
+    widgetRegistry.ts) — так добавление нового виджета в будущем не ломает
+    уже сохранённые раскладки."""
+    __tablename__ = "dashboard_layouts"
+
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    layout_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DashboardRoleDefaultsDB(Base):
+    """Дефолтная видимость виджетов дашборда для роли (MANAGER/VIEWER) внутри
+    конкретного магазина — настраивает OWNER, чтобы не объяснять каждому
+    сотруднику вручную. Оверрайд ниже: registry default -> этот ролевой
+    дефолт -> персональный DashboardLayoutDB пользователя (см. выше) —
+    личный выбор сотрудника всегда побеждает."""
+    __tablename__ = "dashboard_role_defaults"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    role: Mapped[str] = mapped_column(String(20), primary_key=True)  # 'MANAGER' | 'VIEWER'
+    layout_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class ChatStateDB(Base):
     __tablename__ = "chat_states"
 

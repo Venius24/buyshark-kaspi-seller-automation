@@ -49,6 +49,7 @@ from backend.routers import (
     chatbot, stock_groups, api_keys, print_batcher,
     auth_v1, stores_v1, chats, autolist, auto_assembly, telegram_link,
     pricefeed_import, stores_auto_connect, feature_flags as feature_flags_router,
+    dashboard as dashboard_router,
 )
 from backend.routers import billing as billing_router, admin_billing, referral as referral_router
 from backend.routers import webhooks_incoming_email
@@ -109,6 +110,8 @@ async def startup_event():
     asyncio.create_task(start_sales_sync_loop(1800))
     asyncio.create_task(start_quality_metrics_loop())
     asyncio.create_task(start_billing_loop())
+    from backend.services.ops_digest_worker import start_ops_digest_loop
+    asyncio.create_task(start_ops_digest_loop())
 
     # Опциональная инструментация производительности (PERF_PROFILING=1) —
     # см. backend/perf/. Ноль накладных расходов, если флаг не выставлен.
@@ -146,6 +149,7 @@ app.include_router(dumping.router)
 app.include_router(pricefeed_import.router)
 app.include_router(ws.router)
 app.include_router(analytics.router)
+app.include_router(dashboard_router.router)
 app.include_router(chatbot.router)
 app.include_router(chats.router)
 app.include_router(stock_groups.router)

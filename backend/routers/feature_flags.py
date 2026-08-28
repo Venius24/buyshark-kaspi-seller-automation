@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from backend import feature_flags
 from backend.chatbot import config as chatbot_config
 from backend.security.store_context import StoreContext, get_store_context
+from backend.security.store_roles import require_store_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/feature-flags", tags=["feature-flags"])
@@ -31,7 +32,7 @@ def get_feature_flags(ctx: StoreContext = Depends(get_store_context)):
 
 
 @router.post("")
-def save_feature_flags(req: FeatureFlagsRequest, ctx: StoreContext = Depends(get_store_context)):
+def save_feature_flags(req: FeatureFlagsRequest, ctx: StoreContext = Depends(require_store_manager)):
     """Частичное обновление выключателей. Не требует активного тарифа — выключить
     автоматику можно всегда, воркеры и так перепроверяют billing-гейт отдельно."""
     feature_flags.set_flags(

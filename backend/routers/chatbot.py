@@ -11,6 +11,7 @@ from backend.chatbot import outbound as bot_outbound
 from backend.chatbot.kaspi import load_chat_cookies
 from backend.dumper.config import discover_merchant_id
 from backend.security.store_context import StoreContext, get_store_context
+from backend.security.store_roles import require_store_manager
 from backend.state_helpers import _save_chat_cookies_for_store, _load_bot_usage_summary, _load_outbound_stats
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def get_chatbot_config(ctx: StoreContext = Depends(get_store_context)):
     }
 
 @router.post("/config")
-def save_chatbot_config(req: ChatbotConfigRequest, ctx: StoreContext = Depends(get_store_context)):
+def save_chatbot_config(req: ChatbotConfigRequest, ctx: StoreContext = Depends(require_store_manager)):
     """Сохранить пользовательские настройки чат-бота (enabled) этого магазина."""
     update_data = {}
     if req.enabled is not None:
@@ -114,7 +115,7 @@ def get_chatbot_status(ctx: StoreContext = Depends(get_store_context)):
     }
 
 @router.post("/unblock")
-def unblock_chat(req: UnblockChatRequest, ctx: StoreContext = Depends(get_store_context)):
+def unblock_chat(req: UnblockChatRequest, ctx: StoreContext = Depends(require_store_manager)):
     """Разблокировать чат (HUMAN_OVERRIDE) этого магазина из дашборда UI."""
     gid = req.group_id.strip()
     if config.clear_chat_human_override(ctx.store_id, gid):
@@ -123,7 +124,7 @@ def unblock_chat(req: UnblockChatRequest, ctx: StoreContext = Depends(get_store_
     return {"success": True, "message": f"Чат {gid} не был заблокирован."}
 
 @router.post("/mobile-login/start")
-def start_mobile_login(req: MobileLoginStartRequest, ctx: StoreContext = Depends(get_store_context)):
+def start_mobile_login(req: MobileLoginStartRequest, ctx: StoreContext = Depends(require_store_manager)):
     """
     Шаг 1 из 2 повторного входа в Kaspi-чат: отправляет телефон, Kaspi
     высылает SMS-код. Держит свой Chromium открытым до SUBMIT (де-
@@ -137,7 +138,7 @@ def start_mobile_login(req: MobileLoginStartRequest, ctx: StoreContext = Depends
     raise HTTPException(status_code=400, detail=msg)
 
 @router.post("/mobile-login/submit-code")
-def submit_mobile_login_code(req: MobileLoginSubmitRequest, ctx: StoreContext = Depends(get_store_context)):
+def submit_mobile_login_code(req: MobileLoginSubmitRequest, ctx: StoreContext = Depends(require_store_manager)):
     """Шаг 2 из 2: код из SMS завершает вход, куки сохраняются в Store.encrypted_chat_cookies этого стора."""
     from backend.services.playwright_worker import worker, Command
     success, msg, fresh_cookies = worker.send_cmd(Command.SUBMIT_SMS_LOGIN, req.code, store_id=ctx.store_id)
@@ -158,7 +159,7 @@ def get_bot_profile(ctx: StoreContext = Depends(get_store_context)):
     return {"success": True, "profile": profile}
 
 @router.post("/profile")
-def save_bot_profile(req: BotProfileRequest, ctx: StoreContext = Depends(get_store_context)):
+def save_bot_profile(req: BotProfileRequest, ctx: StoreContext = Depends(require_store_manager)):
     """Сохранить профиль ИИ-менеджера этого магазина. prompt_tier пересчитывается
     сервером от длины custom_instructions (символы) — тариф растёт с объёмом
     доп.инструкций владельца."""
@@ -218,7 +219,7 @@ def get_outbound_stats(days: int = 30, ctx: StoreContext = Depends(get_store_con
     return {"success": True, **stats}
 
 @router.post("/outbound/test-send")
-async def test_send_outbound(req: OutboundTestSendRequest, ctx: StoreContext = Depends(get_store_context)):
+async def test_send_outbound(req: OutboundTestSendRequest, ctx: StoreContext = Depends(require_store_manager)):
     """Ручной тест каркаса рассылок (Фаза 3): ставит сообщение в очередь с
     campaign='test' и сразу пытается его обработать (не ждёт тика фонового
     воркера outbound_loop, интервал 60с). Требует, чтобы по этому order_id
@@ -247,7 +248,7 @@ async def test_send_outbound(req: OutboundTestSendRequest, ctx: StoreContext = D
     return {"success": True, "message": "Поставлено в очередь и обработано — проверьте статус через GET /api/chatbot/outbound/queue."}
 
 @router.post("/outbound/first-contact-test")
-async def test_first_contact(req: OutboundTestSendRequest, status: str = "PICKUP", ctx: StoreContext = Depends(get_store_context)):
+async def test_first_contact(req: OutboundTestSendRequest, status: str = "PICKUP", ctx: StoreContext = Depends(require_store_manager)):
     """РУЧНОЙ тест Playwright-первого-контакта (Фаза 4) — открывает браузер,
     находит заказ в кабинете, кликает «Сообщения по заказу» и пытается
     отправить сообщение через GUI-виджет. Требует активной SMS-чат-сессии

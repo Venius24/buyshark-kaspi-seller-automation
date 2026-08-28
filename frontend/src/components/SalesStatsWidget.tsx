@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { TrendingUp, TrendingDown, Package } from 'lucide-react';
-import type { SalesSummary } from '../hooks/useSalesStats';
+import { TrendingUp, TrendingDown, Package, Wallet } from 'lucide-react';
+import { Area, AreaChart, Bar, BarChart, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
+import { useSalesStats } from '../hooks/useSalesStats';
 
 const fmt = (n: number) => new Intl.NumberFormat('ru-RU').format(Math.round(n));
+const PIE_COLORS = ['#35c9a9', '#5fb4e8', '#e8c15f', '#e87f5f', '#a05fe8', '#5fe88f', '#e85f9e'];
 
 type SortKey = 'revenue_desc' | 'revenue_asc' | 'qty_desc' | 'qty_asc';
 
@@ -13,10 +15,17 @@ const SORT_OPTIONS: [SortKey, string][] = [
   ['qty_asc', 'Меньше продаж'],
 ];
 
-export const SalesStatsWidget: React.FC<{ data: SalesSummary }> = ({ data }) => {
+interface SalesStatsWidgetProps {
+  period?: number;
+  chartType?: 'bar' | 'line' | 'area' | 'pie' | 'donut';
+  metric?: 'revenue' | 'orders';
+}
+
+export const SalesStatsWidget: React.FC<SalesStatsWidgetProps> = ({ period = 30, chartType = 'bar', metric = 'revenue' }) => {
+  const data = useSalesStats(period);
   const [sort, setSort] = useState<SortKey>('revenue_desc');
   const hasData = data.daily.length > 0;
-  const maxRevenue = Math.max(1, ...data.daily.map((d) => d.revenue));
+  const isPieLike = chartType === 'pie' || chartType === 'donut';
 
   const sortedSkus = useMemo(() => {
     const copy = [...data.top_skus];
@@ -32,17 +41,25 @@ export const SalesStatsWidget: React.FC<{ data: SalesSummary }> = ({ data }) => 
     }
   }, [data.top_skus, sort]);
 
+  const pieData = useMemo(() => {
+    const valueKey = metric === 'revenue' ? 'revenue' : 'quantity';
+    const sorted = [...data.top_skus].sort((a, b) => (b[valueKey] as number) - (a[valueKey] as number));
+    const top = sorted.slice(0, 6).map((s) => ({ name: s.name, value: s[valueKey] as number }));
+    const restValue = sorted.slice(6).reduce((sum, s) => sum + (s[valueKey] as number), 0);
+    return restValue > 0 ? [...top, { name: 'Остальное', value: restValue }] : top;
+  }, [data.top_skus, metric]);
+
   return (
     <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '24px' }}>💰</span>
+          <Wallet size={24} />
           <div>
             <h2 style={{ fontSize: '17px', fontWeight: 700, letterSpacing: '-0.3px' }}>
               Реальные продажи
             </h2>
             <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              За последние 30 дней, из фактической истории завершённых заказов Kaspi
+              За последние {period} {period === 1 ? 'день' : period < 5 ? 'дня' : 'дней'}, из фактической истории завершённых заказов Kaspi
             </p>
           </div>
         </div>
@@ -69,23 +86,61 @@ export const SalesStatsWidget: React.FC<{ data: SalesSummary }> = ({ data }) => 
             </div>
           </div>
 
-          {/* Daily revenue bars */}
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '4px', height: '80px', overflowX: 'auto', paddingBottom: '4px' }}>
-            {data.daily.map((d) => (
-              <div
-                key={d.date}
-                title={`${d.date}: ${fmt(d.revenue)} ₸, ${d.orders} заказ(ов)`}
-                style={{
-                  flex: '0 0 10px',
-                  height: `${Math.max(4, (d.revenue / maxRevenue) * 80)}px`,
-                  background: 'linear-gradient(180deg, #35c9a9, #2c4ef5)',
-                  borderRadius: '3px 3px 0 0',
-                  transition: 'filter 0.15s ease',
-                }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.filter = 'brightness(1.25)'; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.filter = 'none'; }}
-              />
-            ))}
+          {/* Тип диаграммы, метрика и период настраиваются в режиме редактирования дашборда.
+              Круговая/кольцевая показывают долю товаров в выручке/заказах, а не тренд по дням. */}
+          <div style={{ height: isPieLike ? '160px' : '90px' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              {isPieLike ? (
+                <PieChart margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                  <Tooltip
+                    formatter={(value: number) => (metric === 'revenue' ? `${fmt(value)} ₸` : `${value} шт`)}
+                    contentStyle={{ background: 'rgba(10,10,16,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '12px' }}
+                  />
+                  <Pie
+                    data={pieData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={chartType === 'donut' ? '55%' : 0}
+                    outerRadius="90%"
+                    paddingAngle={2}
+                  >
+                    {pieData.map((entry, i) => (
+                      <Cell key={entry.name} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              ) : chartType === 'line' ? (
+                <LineChart data={data.daily} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                  <XAxis dataKey="date" hide />
+                  <Tooltip
+                    formatter={(value: number) => (metric === 'revenue' ? `${fmt(value)} ₸` : `${value} шт`)}
+                    labelFormatter={(label) => String(label)}
+                    contentStyle={{ background: 'rgba(10,10,16,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '12px' }}
+                  />
+                  <Line type="monotone" dataKey={metric} stroke="#35c9a9" strokeWidth={2} dot={false} />
+                </LineChart>
+              ) : chartType === 'area' ? (
+                <AreaChart data={data.daily} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                  <XAxis dataKey="date" hide />
+                  <Tooltip
+                    formatter={(value: number) => (metric === 'revenue' ? `${fmt(value)} ₸` : `${value} шт`)}
+                    labelFormatter={(label) => String(label)}
+                    contentStyle={{ background: 'rgba(10,10,16,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '12px' }}
+                  />
+                  <Area type="monotone" dataKey={metric} stroke="#35c9a9" fill="#35c9a9" fillOpacity={0.25} strokeWidth={2} />
+                </AreaChart>
+              ) : (
+                <BarChart data={data.daily} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                  <XAxis dataKey="date" hide />
+                  <Tooltip
+                    formatter={(value: number) => (metric === 'revenue' ? `${fmt(value)} ₸` : `${value} шт`)}
+                    labelFormatter={(label) => String(label)}
+                    contentStyle={{ background: 'rgba(10,10,16,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '12px' }}
+                  />
+                  <Bar dataKey={metric} fill="#35c9a9" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              )}
+            </ResponsiveContainer>
           </div>
 
           {data.top_skus.length > 0 && (

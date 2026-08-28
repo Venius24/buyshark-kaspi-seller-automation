@@ -8,6 +8,7 @@ from backend.chatbot.kaspi import load_chat_cookies
 from backend.chatbot import chat_client, config as chatbot_config
 from backend.dumper.config import discover_merchant_id
 from backend.security.store_context import StoreContext, get_store_context
+from backend.security.store_roles import require_store_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chats", tags=["chats"])
@@ -69,7 +70,7 @@ async def get_chat_messages(group_id: str, ctx: StoreContext = Depends(get_store
 
 
 @router.post("/{group_id}/messages")
-async def send_chat_message(group_id: str, req: SendMessageRequest, ctx: StoreContext = Depends(get_store_context)):
+async def send_chat_message(group_id: str, req: SendMessageRequest, ctx: StoreContext = Depends(require_store_manager)):
     text = req.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Текст сообщения не может быть пустым.")
@@ -84,7 +85,7 @@ async def send_chat_message(group_id: str, req: SendMessageRequest, ctx: StoreCo
 
 
 @router.post("/{group_id}/take-over")
-async def take_over_chat(group_id: str, ctx: StoreContext = Depends(get_store_context)):
+async def take_over_chat(group_id: str, ctx: StoreContext = Depends(require_store_manager)):
     """
     Забирает диалог у ИИ без отправки сообщения — менеджер продолжает
     переписку 1-на-1 сам. Та же per-store блокировка (chat_states.human_override),
@@ -97,7 +98,7 @@ async def take_over_chat(group_id: str, ctx: StoreContext = Depends(get_store_co
 
 
 @router.post("/{group_id}/read")
-async def mark_chat_read(group_id: str, req: MarkReadRequest, ctx: StoreContext = Depends(get_store_context)):
+async def mark_chat_read(group_id: str, req: MarkReadRequest, ctx: StoreContext = Depends(require_store_manager)):
     cookies = _require_chat_session(ctx)
     merchant_id = await _resolve_merchant_id(ctx)
     ok = await chat_client.mark_read(

@@ -32,6 +32,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from backend.security.store_context import StoreContext, get_store_context_billed
+from backend.security.store_roles import require_store_manager_billed
 from backend.services import pricefeed_client
 from backend.services.playwright_worker import worker as pw_worker
 from backend.services import pricefeed_mapping
@@ -120,7 +121,7 @@ def _run_fetch(phone: str, password: str, merchant_id: Optional[str]):
 @router.post("/preview")
 async def preview_pricefeed_import(
     req: PriceFeedPreviewRequest,
-    ctx: StoreContext = Depends(get_store_context_billed),
+    ctx: StoreContext = Depends(require_store_manager_billed),
 ):
     _guard_enabled()
     _evict_stale_imports()
@@ -218,7 +219,7 @@ async def preview_pricefeed_import(
 @router.post("/apply")
 async def apply_pricefeed_import(
     req: PriceFeedApplyRequest,
-    ctx: StoreContext = Depends(get_store_context_billed),
+    ctx: StoreContext = Depends(require_store_manager_billed),
 ):
     _guard_enabled()
     _evict_stale_imports()

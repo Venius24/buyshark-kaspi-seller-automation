@@ -18,13 +18,20 @@ class StoreContext:
     token: str
     merchant_id: str
     store_id: str
+    # Роль текущего пользователя в этом магазине (OWNER/MANAGER/VIEWER) — см.
+    # backend/security/store_roles.py. Дефолт OWNER держит обратную
+    # совместимость system-internal конструкторов (list_active_stores,
+    # get_store_by_id, resolve_ws_store_id), у которых нет запрашивающего
+    # пользователя и роль не имеет смысла — они не проходят через
+    # require_store_role.
+    role: str = "OWNER"
 
 
-async def _resolve_store_for_user(request: Request, db: AsyncSession, user_id: str) -> Optional[Store]:
+async def _resolve_store_for_user(request: Request, db: AsyncSession, user_id: str) -> Optional[tuple[Store, str]]:
     store_id_header = request.headers.get("X-Store-Id")
     if store_id_header:
         stmt = (
-            select(Store)
+            select(Store, UserStore.role)
             .join(UserStore, Store.id == UserStore.store_id)
             .where(Store.id == store_id_header, UserStore.user_id == user_id)
         )
@@ -33,13 +40,14 @@ async def _resolve_store_for_user(request: Request, db: AsyncSession, user_id: s
         # Deterministic and matches today's de-facto single-store-per-user reality;
         # a user managing multiple stores concurrently must send X-Store-Id.
         stmt = (
-            select(Store)
+            select(Store, UserStore.role)
             .join(UserStore, Store.id == UserStore.store_id)
             .where(UserStore.user_id == user_id)
             .order_by(Store.created_at.asc())
         )
     res = await db.execute(stmt)
-    return res.scalars().first()
+    row = res.first()
+    return (row[0], row[1]) if row else None
 
 
 async def get_store_context(request: Request) -> StoreContext:
@@ -75,14 +83,16 @@ async def get_store_context(request: Request) -> StoreContext:
                     res = await db.execute(stmt)
                     user = res.scalar_one_or_none()
                     if user and user.is_active:
-                        store = await _resolve_store_for_user(request, db, user.id)
-                        if store and store.encrypted_api_key:
+                        resolved = await _resolve_store_for_user(request, db, user.id)
+                        if resolved and resolved[0].encrypted_api_key:
+                            store, role = resolved
                             decrypted_token = decrypt_data(store.encrypted_api_key)
                             if decrypted_token:
                                 return StoreContext(
                                     token=decrypted_token,
                                     merchant_id=store.merchant_id,
                                     store_id=store.id,
+                                    role=role,
                                 )
 
     raise HTTPException(status_code=401, detail="Требуется вход в аккаунт с подключённым магазином.")
@@ -203,5 +213,5 @@ async def resolve_ws_store_id(websocket: WebSocket, db: AsyncSession) -> Optiona
         # Запрошенный store_id не принадлежит этому пользователю — не
         # угадываем чужой магазин, падаем на обычный резолв ниже.
 
-    store = await _resolve_store_for_user(websocket, db, user.id)
-    return store.id if store else None
+    resolved = await _resolve_store_for_user(websocket, db, user.id)
+    return resolved[0].id if resolved else None

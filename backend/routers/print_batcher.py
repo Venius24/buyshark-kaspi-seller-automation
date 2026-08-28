@@ -15,6 +15,7 @@ from backend.services.print_batcher_service import (
     detect_article_prefixes,
 )
 from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed
+from backend.security.store_roles import require_store_manager, require_store_manager_billed
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ async def process_print_batch(
     deduplicate_history: bool = Form(True),
     force_reprint: bool = Form(False),
     output_layout: str = Form("auto"),              # 'auto' | 'a4_4' | 'a4_8' | 'a4_9' | 'a4_1' | 'thermal_75_120' | 'thermal_100_150' | 'just_merge'
-    ctx: StoreContext = Depends(get_store_context_billed),
+    ctx: StoreContext = Depends(require_store_manager_billed),
 ):
     """
     Принимает ZIP-архив или PDF-файл, выполняет суточную дедупликацию по истории печати,
@@ -176,7 +177,7 @@ async def get_print_settings(ctx: StoreContext = Depends(get_store_context)):
 
 
 @router.put("/settings")
-async def put_print_settings(payload: Dict[str, Any], ctx: StoreContext = Depends(get_store_context_billed)):
+async def put_print_settings(payload: Dict[str, Any], ctx: StoreContext = Depends(require_store_manager_billed)):
     """Сохранить настройки печати магазина (частичное обновление)."""
     from backend.chatbot import config as chatbot_config
 
@@ -222,7 +223,7 @@ async def get_detected_prefixes(ctx: StoreContext = Depends(get_store_context)):
 
 
 @router.post("/reset-history")
-async def reset_history(ctx: StoreContext = Depends(get_store_context)):
+async def reset_history(ctx: StoreContext = Depends(require_store_manager)):
     """Сбросить суточную историю напечатанных заказов"""
     try:
         await asyncio.to_thread(reset_printed_history, ctx.store_id)

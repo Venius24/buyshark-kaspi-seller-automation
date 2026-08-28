@@ -36,10 +36,10 @@ async def _get_bot_username() -> Optional[str]:
 
 
 async def _resolve_store_id(request: Request, db: AsyncSession, user_id: str) -> str:
-    store = await _resolve_store_for_user(request, db, user_id)
-    if not store:
+    resolved = await _resolve_store_for_user(request, db, user_id)
+    if not resolved:
         raise HTTPException(status_code=404, detail="Магазин не найден. Сначала подключите магазин Kaspi.")
-    return store.id
+    return resolved[0].id
 
 
 class InviteTokenRequest(BaseModel):

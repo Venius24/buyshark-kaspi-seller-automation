@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from backend.models import AutoAssemblyRuleRequest, MarkSpoolPrintedRequest
 from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed
+from backend.security.store_roles import require_store_manager, require_store_manager_billed
 from backend.state_helpers import _get_sync_db_session
 from backend.services.auto_assembly_worker import (
     run_auto_assembly_cycle,
@@ -83,7 +84,7 @@ def get_rules(ctx: StoreContext = Depends(get_store_context)):
 
 
 @router.put("/rules")
-def put_rule(req: AutoAssemblyRuleRequest, ctx: StoreContext = Depends(get_store_context_billed)):
+def put_rule(req: AutoAssemblyRuleRequest, ctx: StoreContext = Depends(require_store_manager_billed)):
     """Создать/обновить правило одного вида доставки (upsert по
     store_id+delivery_type)."""
     if req.delivery_type not in DELIVERY_TYPES:
@@ -146,7 +147,7 @@ def get_log(limit: int = Query(100, le=500), ctx: StoreContext = Depends(get_sto
 
 
 @router.post("/run-once")
-async def run_once(ctx: StoreContext = Depends(get_store_context_billed)):
+async def run_once(ctx: StoreContext = Depends(require_store_manager_billed)):
     """Ручной прогон одного цикла автосборки вне 30с фонового тика —
     удобно для проверки правила сразу после сохранения."""
     from backend import feature_flags
@@ -175,7 +176,7 @@ def get_spool(ctx: StoreContext = Depends(get_store_context)):
 @router.post("/spool/download")
 def download_spool(
     output_layout: str = Query("auto"),
-    ctx: StoreContext = Depends(get_store_context),
+    ctx: StoreContext = Depends(require_store_manager),
 ):
     """Склеивает все ещё не напечатанные накладные стора в пачку (тем же
     PDF-пайплайном, что и ручная загрузка в PrintBatcher) — склейка
@@ -205,6 +206,6 @@ def download_spool(
 
 
 @router.post("/spool/mark-printed")
-def mark_printed(req: MarkSpoolPrintedRequest, ctx: StoreContext = Depends(get_store_context)):
+def mark_printed(req: MarkSpoolPrintedRequest, ctx: StoreContext = Depends(require_store_manager)):
     count = mark_spool_printed(ctx.store_id, order_codes=req.order_codes)
     return {"success": True, "marked_count": count}

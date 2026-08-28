@@ -6,6 +6,7 @@ from backend.kaspi_wrapper import KaspiAPI
 from backend.models import UpdateProductRequest
 from backend.state_helpers import _save_override, _apply_overrides, _load_products, _save_products, _purge_stale_overrides
 from backend.security.store_context import StoreContext, get_store_context
+from backend.security.store_roles import require_store_manager
 from backend.dumper import generate_xml_feed
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,7 @@ def get_products(
     }
 
 @router.post("/products/update")
-def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(get_store_context)):
+def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(require_store_manager)):
     """Обновить цену и остаток товара (сохранить в overrides и применить в Kaspi MC)."""
     token = ctx.token
     products = _load_products(ctx.store_id)
@@ -174,7 +175,7 @@ def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(get_st
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/products/refresh")
-def refresh_products(ctx: StoreContext = Depends(get_store_context)):
+def refresh_products(ctx: StoreContext = Depends(require_store_manager)):
     """Принудительно обновить кеш товаров из Kaspi API."""
     try:
         fetched_at = datetime.datetime.utcnow()

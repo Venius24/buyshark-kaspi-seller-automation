@@ -1,18 +1,13 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { apiFetch, API_URL } from '../../api';
-import { PriceLeadGauge } from '../PriceLeadGauge';
-import { SavedMarginCard } from '../SavedMarginCard';
-import { PriceRadarWidget } from '../PriceRadarWidget';
-import { SalesStatsWidget } from '../SalesStatsWidget';
-import { ScoreRing } from '../ScoreRing';
-import { RevenueHeatmap } from '../RevenueHeatmap';
-import { AbcXyzWidget } from '../AbcXyzWidget';
-import { CompetitorLeaderboard } from '../CompetitorLeaderboard';
-import { HelpHint } from '../shared/HelpHint';
-import { CatalogCoverageGauge } from '../CatalogCoverageGauge';
-import { HourlyHeatmap } from '../HourlyHeatmap';
-import { ChatActivityHeatmap } from '../ChatActivityHeatmap';
-import { useSalesStats } from '../../hooks/useSalesStats';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { LayoutGrid, Users, X } from 'lucide-react';
+import { WIDGET_REGISTRY, type OverviewRenderCtx } from '../../dashboard/widgetRegistry';
+import { useDashboardLayout } from '../../hooks/useDashboardLayout';
+import { DashboardWidgetShell } from '../dashboard/DashboardWidgetShell';
+import { RoleDefaultsModal } from '../dashboard/RoleDefaultsModal';
+import { useIsStoreOwner } from '../../storeContext';
 import { useScoreStats } from '../../hooks/useScoreStats';
 import { useQualityMetrics } from '../../hooks/useQualityMetrics';
 import { useAbcXyzStats } from '../../hooks/useAbcXyzStats';
@@ -47,120 +42,99 @@ export function OverviewTab({
   onOpenLogs,
 }: OverviewTabProps) {
   const { t } = useTranslation('tab_overview');
-  const salesStats = useSalesStats();
   const scoreStats = useScoreStats();
   const qualityMetrics = useQualityMetrics();
   const abcXyzStats = useAbcXyzStats();
   const insightsStats = useInsightsStats();
 
+  const { widgets, setWidgetVisible, reorderWidgets, setWidgetConfig } = useDashboardLayout();
+  const [editMode, setEditMode] = useState(false);
+  const [roleModalOpen, setRoleModalOpen] = useState(false);
+  const isStoreOwner = useIsStoreOwner();
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  const ctx: OverviewRenderCtx = {
+    t,
+    analytics,
+    widgetData,
+    scoreStats,
+    qualityMetrics,
+    abcXyzStats,
+    insightsStats,
+    addLog,
+    mcHasSession,
+    onOpenMcAuth,
+    onOpenProducts,
+    onOpenDumping,
+    onOpenPackaging,
+    onOpenLogs,
+  };
+
+  const visibleWidgets = widgets.filter((w) => w.visible);
+  const hiddenWidgets = widgets.filter((w) => !w.visible);
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const ids = visibleWidgets.map((w) => w.id);
+    const oldIndex = ids.indexOf(String(active.id));
+    const newIndex = ids.indexOf(String(over.id));
+    if (oldIndex === -1 || newIndex === -1) return;
+    reorderWidgets(arrayMove(ids, oldIndex, newIndex));
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      {/* 🎯 HERO ROW — composite score + "победа дня" (сохранённая маржа) */}
-      <div className="grid-hero">
-        <ScoreRing data={scoreStats} quality={qualityMetrics} />
-        <SavedMarginCard totalSavedMargin={analytics.total_saved_margin} />
-      </div>
-
-      {/* 🥇 ДОЛЯ ЛУЧШЕЙ ЦЕНЫ + 🗓️ GITHUB-STYLE КАРТА АКТИВНОСТИ ПРОДАЖ */}
-      <div className="grid-hero grid-hero-rev">
-        <PriceLeadGauge
-          percentage={analytics.best_price_share}
-          winningCount={analytics.winning_count}
-          totalScanned={analytics.total_scanned}
-        />
-        <RevenueHeatmap heatmap={scoreStats.heatmap} />
-      </div>
-
-      {/* 💰 REAL SALES STATS (from sales_orders, backfilled by sales_sync_worker) */}
-      <SalesStatsWidget data={salesStats} />
-
-      {/* ⚔️ LIVE PRICE RADAR (REAL-TIME PRICE WAR MONITOR) */}
-      <PriceRadarWidget
-        topProduct={widgetData?.price_radar?.top_product}
-        events={widgetData?.price_radar?.recent_events}
-      />
-
-      {/* 📊 ABC/XYZ-АНАЛИЗ ТОВАРОВ */}
-      <AbcXyzWidget data={abcXyzStats} />
-
-      {/* 🏆 ЛИДЕРБОРД КОНКУРЕНТОВ + 🛡️ ПОКРЫТИЕ КАТАЛОГА */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
-        <CompetitorLeaderboard data={insightsStats.competitor_leaderboard} />
-        <CatalogCoverageGauge data={insightsStats.catalog_coverage} />
-      </div>
-
-      {/* 🕐 ПРОДАЖИ ПО ЧАСАМ/ДНЯМ НЕДЕЛИ */}
-      <HourlyHeatmap grid={insightsStats.hourly_heatmap} />
-
-      {/* 💬 АКТИВНОСТЬ АВТО-ЧАТА */}
-      <ChatActivityHeatmap data={insightsStats.chat_activity} />
-
-      <div className="grid-2">
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <h2 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {t('system_status')}
-            <HelpHint text="Статус двух независимых подключений: REST API — сессия входа в сам кабинет (BuyShark), MC-cookies — доступ к личному кабинету Kaspi (нужен для загрузки товаров, заказов, изменения цен). Если MC истёк — жмите «Войти» и подтвердите вход в Kaspi заново." />
-          </h2>
-          <div className="status-widget">
-            <div>
-              <h3 style={{ fontSize: '14px', fontWeight: 600 }}>{t('rest_api_title')}</h3>
-              <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
-                <span className="glow-dot glow-dot-success"></span>
-                <span className="badge badge-success">{t('badge_active')}</span>
-              </div>
-            </div>
-            <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => {
-              addLog(t('log_checking'));
-              apiFetch(`${API_URL}/api/verify-session`, { method: 'POST' })
-                .then(r => r.json())
-                .then(d => addLog(d.valid ? t('log_active') : t('log_invalid')))
-                .catch(() => addLog(t('log_error')));
-            }}>
-              🔄
-            </button>
-          </div>
-
-          <div className="status-widget">
-            <div>
-              <h3 style={{ fontSize: '14px', fontWeight: 600 }}>{t('mc_cookies_title')}</h3>
-              <div style={{ display: 'flex', alignItems: 'center', marginTop: '6px' }}>
-                <span className={`glow-dot ${mcHasSession ? 'glow-dot-success' : 'glow-dot-warning'}`}></span>
-                {mcHasSession ? (
-                  <span className="badge badge-success">{t('badge_mc_active')}</span>
-                ) : (
-                  <span className="badge badge-warning">{t('badge_mc_required')}</span>
-                )}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={onOpenMcAuth}>
-                {mcHasSession ? t('btn_mc_login_again') : t('btn_mc_login')}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
+        {editMode && hiddenWidgets.length > 0 && (
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Скрытые:</span>
+            {hiddenWidgets.map((w) => (
+              <button
+                key={w.id}
+                className="btn btn-secondary"
+                style={{ padding: '4px 10px', fontSize: '11px' }}
+                onClick={() => setWidgetVisible(w.id, true)}
+              >
+                + {w.title}
               </button>
-            </div>
+            ))}
           </div>
-        </div>
-
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2>{t('quick_actions')}</h2>
-            <span className="badge badge-success">Lumina Engine</span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '8px' }}>
-            <button className="btn btn-primary" style={{ padding: '14px' }} onClick={onOpenProducts}>
-              {t('btn_open_catalog')}
-            </button>
-            <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={onOpenDumping}>
-              {t('btn_setup_dumping')}
-            </button>
-            <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={onOpenPackaging}>
-              {t('btn_pack_orders')}
-            </button>
-            <button className="btn btn-secondary" style={{ padding: '14px' }} onClick={onOpenLogs}>
-              {t('btn_open_logs')}
-            </button>
-          </div>
-        </div>
+        )}
+        {editMode && isStoreOwner && (
+          <button className="btn btn-secondary" style={{ padding: '8px 14px', fontSize: '13px' }} onClick={() => setRoleModalOpen(true)}>
+            <Users size={14} /> Управление ролями
+          </button>
+        )}
+        <button className="btn btn-secondary" style={{ padding: '8px 14px', fontSize: '13px' }} onClick={() => setEditMode((v) => !v)}>
+          {editMode ? <X size={14} /> : <LayoutGrid size={14} />}
+          {editMode ? ' Готово' : ' Настроить дашборд'}
+        </button>
       </div>
+
+      {roleModalOpen && <RoleDefaultsModal onClose={() => setRoleModalOpen(false)} />}
+
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={visibleWidgets.map((w) => w.id)} strategy={verticalListSortingStrategy}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            {visibleWidgets.map((widget) => {
+              const def = WIDGET_REGISTRY.find((d) => d.id === widget.id);
+              if (!def) return null;
+              return (
+                <DashboardWidgetShell
+                  key={widget.id}
+                  widget={widget}
+                  editMode={editMode}
+                  onHide={(id) => setWidgetVisible(id, false)}
+                  onConfigChange={(id, config) => setWidgetConfig(id, config)}
+                >
+                  {def.render(ctx, widget)}
+                </DashboardWidgetShell>
+              );
+            })}
+          </div>
+        </SortableContext>
+      </DndContext>
     </div>
   );
 }

@@ -8,6 +8,7 @@ from backend.models import DumpingConfigRequest
 from backend.state_helpers import _load_dumping_configs, _save_dumping_configs, _save_override, _apply_overrides, _load_products, _save_products
 from backend.dumper import run_price_dumping_job
 from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed, list_active_stores
+from backend.security.store_roles import require_store_manager_billed
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dumping", tags=["dumping"])
@@ -141,7 +142,7 @@ def get_dumping_configs(ctx: StoreContext = Depends(get_store_context)):
     return {"success": True, "configs": configs}
 
 @router.post("/config")
-def save_dumping_config(req: DumpingConfigRequest, ctx: StoreContext = Depends(get_store_context_billed)):
+def save_dumping_config(req: DumpingConfigRequest, ctx: StoreContext = Depends(require_store_manager_billed)):
     """Сохранить или обновить конфигурацию демпинга для SKU."""
     configs = _load_dumping_configs(store_id=ctx.store_id)
     configs[req.sku] = {
@@ -209,7 +210,7 @@ def get_dumping_status(ctx: StoreContext = Depends(get_store_context)):
     }
 
 @router.post("/run")
-async def run_price_dumping(ctx: StoreContext = Depends(get_store_context_billed)):
+async def run_price_dumping(ctx: StoreContext = Depends(require_store_manager_billed)):
     """Запустить расчет авто-демпинга вручную для стора текущего пользователя."""
     from backend import feature_flags
     if not feature_flags.is_dumping_enabled(ctx.store_id):

@@ -31,9 +31,9 @@ const EMPTY_SUMMARY: SalesSummary = {
   avg_order_value: 0,
 };
 
-const fetchSales = async (): Promise<SalesSummary> => {
+const fetchSales = async (days: number): Promise<SalesSummary> => {
   try {
-    const res = await apiFetch(`${API_URL}/api/analytics/sales?days=30`);
+    const res = await apiFetch(`${API_URL}/api/analytics/sales?days=${days}`);
     const data = await res.json();
     return res.ok && data.success ? data : EMPTY_SUMMARY;
   } catch {
@@ -41,11 +41,11 @@ const fetchSales = async (): Promise<SalesSummary> => {
   }
 };
 
-export function useSalesStats() {
+export function useSalesStats(days: number = 30) {
   const activeStoreId = useActiveStoreId();
   const { data } = useQuery({
-    queryKey: ['analytics-sales', activeStoreId],
-    queryFn: fetchSales,
+    queryKey: ['analytics-sales', activeStoreId, days],
+    queryFn: () => fetchSales(days),
     refetchInterval: 60_000,
   });
   return data ?? EMPTY_SUMMARY;

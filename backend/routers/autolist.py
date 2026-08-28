@@ -22,7 +22,8 @@ from backend.autolist import category_mapper as cm
 from backend.autolist import extractor
 from backend.autolist import validator as v
 from backend.models import AutolistDraftPatchRequest
-from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed
+from backend.security.store_context import StoreContext, get_store_context
+from backend.security.store_roles import require_store_manager, require_store_manager_billed
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/autolist", tags=["autolist"])
@@ -32,7 +33,7 @@ router = APIRouter(prefix="/api/autolist", tags=["autolist"])
 async def create_draft(
     photo: UploadFile = File(...),
     title: str = Form(...),
-    ctx: StoreContext = Depends(get_store_context),
+    ctx: StoreContext = Depends(require_store_manager),
 ):
     """Загрузка фото+название → полный AI-пайплайн → черновик в 'needs_review'.
     Ничего не отправляется в Kaspi на этом шаге."""
@@ -133,7 +134,7 @@ async def get_draft_photo(draft_id: str, ctx: StoreContext = Depends(get_store_c
 
 
 @router.patch("/drafts/{draft_id}")
-async def update_draft(draft_id: str, body: AutolistDraftPatchRequest, ctx: StoreContext = Depends(get_store_context)):
+async def update_draft(draft_id: str, body: AutolistDraftPatchRequest, ctx: StoreContext = Depends(require_store_manager)):
     try:
         return await asyncio.to_thread(v.update_draft, draft_id, ctx.store_id, body.patch)
     except v.DraftNotFoundError:
@@ -141,7 +142,7 @@ async def update_draft(draft_id: str, body: AutolistDraftPatchRequest, ctx: Stor
 
 
 @router.post("/drafts/{draft_id}/approve")
-async def approve_draft(draft_id: str, ctx: StoreContext = Depends(get_store_context)):
+async def approve_draft(draft_id: str, ctx: StoreContext = Depends(require_store_manager)):
     try:
         return await asyncio.to_thread(v.approve_draft, draft_id, ctx.store_id)
     except v.DraftNotFoundError:
@@ -151,7 +152,7 @@ async def approve_draft(draft_id: str, ctx: StoreContext = Depends(get_store_con
 
 
 @router.post("/drafts/{draft_id}/submit")
-async def submit_draft(draft_id: str, ctx: StoreContext = Depends(get_store_context_billed)):
+async def submit_draft(draft_id: str, ctx: StoreContext = Depends(require_store_manager_billed)):
     """Реальная отправка в Kaspi — требует, чтобы черновик уже был в статусе
     'approved' (см. /approve). Отправляет ровно один товар; для массовой
     отправки фронтенд вызывает это по очереди на каждый одобренный черновик."""
@@ -164,7 +165,7 @@ async def submit_draft(draft_id: str, ctx: StoreContext = Depends(get_store_cont
 
 
 @router.delete("/drafts/{draft_id}")
-async def delete_draft(draft_id: str, ctx: StoreContext = Depends(get_store_context)):
+async def delete_draft(draft_id: str, ctx: StoreContext = Depends(require_store_manager)):
     try:
         await asyncio.to_thread(v.delete_draft, draft_id, ctx.store_id)
     except v.DraftNotFoundError:

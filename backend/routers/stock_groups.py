@@ -19,6 +19,7 @@ from backend.state_helpers import (
     _load_products,
 )
 from backend.security.store_context import StoreContext, get_store_context
+from backend.security.store_roles import require_store_manager
 from backend.services.stock_sync_worker import execute_broadcast_sync, get_stock_lock
 
 router = APIRouter(prefix="/api/stock-groups", tags=["stock-groups"])
@@ -94,7 +95,7 @@ def get_stock_group_packaging(group_id: str, ctx: StoreContext = Depends(get_sto
 async def create_stock_group(
     req: MasterStockGroupCreateRequest,
     background_tasks: BackgroundTasks,
-    ctx: StoreContext = Depends(get_store_context),
+    ctx: StoreContext = Depends(require_store_manager),
 ):
     """Создать новую Мастер-Группу остатка."""
     token = ctx.token
@@ -151,7 +152,7 @@ async def update_stock_group(
     group_id: str,
     req: MasterStockGroupUpdateRequest,
     background_tasks: BackgroundTasks,
-    ctx: StoreContext = Depends(get_store_context),
+    ctx: StoreContext = Depends(require_store_manager),
 ):
     """Обновить конфигурацию Мастер-Группы."""
     token = ctx.token
@@ -226,7 +227,7 @@ async def update_stock_qty(
     group_id: str,
     req: UpdateStockQtyRequest,
     background_tasks: BackgroundTasks,
-    ctx: StoreContext = Depends(get_store_context),
+    ctx: StoreContext = Depends(require_store_manager),
 ):
     """Быстрое изменение остатка у группы."""
     token = ctx.token
@@ -261,7 +262,7 @@ async def update_stock_qty(
     }
 
 @router.delete("/{group_id}")
-async def delete_stock_group(group_id: str, ctx: StoreContext = Depends(get_store_context)):
+async def delete_stock_group(group_id: str, ctx: StoreContext = Depends(require_store_manager)):
     """Удалить Мастер-Группу."""
     async with get_stock_lock(ctx.store_id):
         groups = _load_master_stock_groups(store_id=ctx.store_id)
@@ -287,7 +288,7 @@ async def delete_stock_group(group_id: str, ctx: StoreContext = Depends(get_stor
 async def manual_sync_stock_group(
     group_id: str,
     background_tasks: BackgroundTasks,
-    ctx: StoreContext = Depends(get_store_context),
+    ctx: StoreContext = Depends(require_store_manager),
 ):
     """Принудительный запуск синхронизации группы."""
     token = ctx.token
@@ -299,7 +300,7 @@ async def manual_sync_stock_group(
     return {"success": True, "message": "Запущена принудительная синхронизация остатков на Kaspi."}
 
 @router.post("/check-packaging-deduction")
-async def trigger_packaging_deduction(ctx: StoreContext = Depends(get_store_context)):
+async def trigger_packaging_deduction(ctx: StoreContext = Depends(require_store_manager)):
     """Принудительный запуск проверки и авто-списания остатков по новым заказам в Упаковке."""
     from backend import feature_flags
     if not feature_flags.is_stock_groups_enabled(ctx.store_id):
