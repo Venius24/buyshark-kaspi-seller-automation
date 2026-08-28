@@ -6,6 +6,8 @@
 Разошедшийся сторож хуже отсутствующего: он говорит «чисто» про каталог,
 который планом чист не будет.
 """
+import asyncio
+
 import pytest
 
 from backend.dumper import feed_guard, feed_state
@@ -21,6 +23,17 @@ def _catalogue(*skus, size=None):
     filler = (size if size is not None else feed_state.MIN_OFFERS_FOR_FEED + 10) - len(offers)
     offers += [_offer("CLEAN-{:05d}".format(i)) for i in range(max(0, filler))]
     return offers
+
+
+def _guard(store_id, products):
+    """
+    `guard_catalogue` асинхронна, а pytest-asyncio в зависимостях нет и не
+    было: остальной репозиторий тестирует корутины стандартным unittest.
+    Заводить плагин ради трёх тестов — менять инфраструктуру под тест, а не
+    тест под инфраструктуру. Сторож ничего не разделяет между вызовами
+    кроме файла состояния, поэтому свой цикл на вызов ему безразличен.
+    """
+    return asyncio.run(feed_guard.guard_catalogue(store_id, products))
 
 
 @pytest.fixture
@@ -112,8 +125,7 @@ def test_clean_catalogue_clears_the_mark_but_not_the_switch(store, monkeypatch):
     assert feed_state.load(store)["enabled"] is False
 
 
-@pytest.mark.asyncio
-async def test_alarm_fires_once_per_set(store, monkeypatch):
+def test_alarm_fires_once_per_set(store, monkeypatch):
     """
     Тревога — на СМЕНУ набора, а не на его наличие. Артикул чинят днями, а
     сторож ходит каждые полчаса: ежечасное «всё ещё сломано» приучает не читать
@@ -127,18 +139,17 @@ async def test_alarm_fires_once_per_set(store, monkeypatch):
 
     monkeypatch.setattr(feed_guard, "_notify", fake_notify)
 
-    await feed_guard.guard_catalogue(store, _catalogue("H477-0009\t"))
-    await feed_guard.guard_catalogue(store, _catalogue("H477-0009\t"))
+    _guard(store, _catalogue("H477-0009\t"))
+    _guard(store, _catalogue("H477-0009\t"))
     assert sent == [["H477-0009\t"]]
 
     # Новый артикул рядом со старым — это новая находка, будим снова.
-    await feed_guard.guard_catalogue(store, _catalogue("H477-0009\t", " S517-0005 "))
+    _guard(store, _catalogue("H477-0009\t", " S517-0005 "))
     assert len(sent) == 2
     assert sent[1] == [" S517-0005 ", "H477-0009\t"]
 
 
-@pytest.mark.asyncio
-async def test_disabled_store_is_not_alarmed(store, monkeypatch):
+def test_disabled_store_is_not_alarmed(store, monkeypatch):
     """
     Фид магазину не работает — останавливать нечего, будить не о чем. Находка
     лежит в состоянии и всплывёт при включении.
@@ -152,14 +163,13 @@ async def test_disabled_store_is_not_alarmed(store, monkeypatch):
     monkeypatch.setattr(feed_guard, "_notify", fake_notify)
     feed_state.disable(store, "выключен вручную")
 
-    verdict = await feed_guard.guard_catalogue(store, _catalogue("H477-0009\t"))
+    verdict = _guard(store, _catalogue("H477-0009\t"))
 
     assert verdict.blockers and not sent
     assert feed_state.load(store)["last_blockers"] == ["H477-0009\t"]
 
 
-@pytest.mark.asyncio
-async def test_broken_telegram_does_not_lose_the_finding(store, monkeypatch):
+def test_broken_telegram_does_not_lose_the_finding(store, monkeypatch):
     """
     Состояние — то, по чему потом объясняются; сообщение можно и переслать.
     Поэтому запись идёт до отправки и падение канала её не отменяет.
@@ -171,7 +181,7 @@ async def test_broken_telegram_does_not_lose_the_finding(store, monkeypatch):
 
     monkeypatch.setattr("backend.chatbot.notify_dispatch.dispatch", boom)
 
-    verdict = await feed_guard.guard_catalogue(store, _catalogue("H477-0009\t"))
+    verdict = _guard(store, _catalogue("H477-0009\t"))
 
     assert verdict.blockers == ["H477-0009\t"]
     assert feed_state.load(store)["last_blockers"] == ["H477-0009\t"]
