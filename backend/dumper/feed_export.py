@@ -166,6 +166,14 @@ def fetch_export(
     except OSError as err:
         logger.warning("[FeedExport] выгрузка не сохранилась на диск: %r", err)
 
+    # Точка восстановления. Штамп берётся из даты ГЕНЕРАЦИИ, а не из момента
+    # скачивания: файл на бакете живёт между генерациями, и качать его мы можем
+    # хоть каждый час — копия при этом должна остаться одна.
+    if available == "ACTIVE":
+        from backend.dumper import feed_backup
+
+        feed_backup.save(store_id, body, "kaspi-export", generated_at)
+
     logger.info(
         "[FeedExport] Выгрузка %s: %s офферов, сгенерирована %s",
         available, len(skus(body)), generated_at,

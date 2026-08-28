@@ -373,6 +373,13 @@ async def run_feed_cycle() -> dict:
     for store in await list_active_stores():
         totals["checked"] += 1
         try:
+            # Ротация копий — до прохода, а не после. Проход может закончиться
+            # отправкой, и тогда вычистка поедет уже по новому файлу; до него
+            # состояние на диске понятное, а `in_flight` пуст.
+            from backend.dumper import feed_backup
+
+            await asyncio.to_thread(feed_backup.rotate, store.store_id)
+
             loop = asyncio.get_running_loop()
 
             def announce(store_id, until_iso):
