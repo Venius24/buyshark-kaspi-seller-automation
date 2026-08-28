@@ -33,6 +33,23 @@ async def _sync_store_products(token: str, store_id=None) -> int:
         await asyncio.to_thread(_purge_stale_overrides, store_id, fetched_at)
 
     logger.info(f"✅ [Products Sync Worker] Успешно обновлено {len(products)} товаров из Kaspi API (store {store_id}).")
+
+    # Сторож прайс-листа. Здесь он стоит не потому, что тут ему место по смыслу,
+    # а потому, что тут уже лежит выкачанный каталог целиком: своя проверка
+    # означала бы второй полный обход bff/offer-view/list раз в полчаса — ровно
+    # тот лишний трафик, за который IP этого VPS уже банили. Проверка идёт по
+    # готовому списку и в Kaspi не ходит вообще.
+    #
+    # Падение сторожа не имеет права уронить синхронизацию каталога: каталог
+    # нужен всему приложению, а сторож — одному фиду.
+    if store_id:
+        try:
+            from backend.dumper.feed_guard import guard_catalogue
+
+            await guard_catalogue(store_id, products)
+        except Exception as e:
+            logger.error(f"❌ [Products Sync Worker] Сторож прайс-листа упал (store {store_id}): {e}")
+
     return len(products)
 
 async def run_products_sync_cycle():

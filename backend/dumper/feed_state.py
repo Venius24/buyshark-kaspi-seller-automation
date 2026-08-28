@@ -30,6 +30,20 @@ logger = logging.getLogger(__name__)
 MIN_OFFERS_FOR_FEED = 250
 
 
+def is_shadow() -> bool:
+    """
+    Теневой режим: планы собираются, файлы не уходят.
+
+    Предикат живёт здесь, а не в воркере, потому что спрашивают его двое —
+    воркер и сторож каталога (`feed_guard`), — а импорт воркера из сторожа дал
+    бы цикл. Модуль состояния зависимостей не имеет вообще, и это делает его
+    единственным местом, куда оба могут смотреть.
+    """
+    import os
+
+    return os.getenv("XML_FEED_WORKER", "0") != "1"
+
+
 def _state_path(store_id) -> pathlib.Path:
     base = pathlib.Path(__file__).resolve().parents[2] / "states" / "feeds" / str(store_id)
     base.mkdir(parents=True, exist_ok=True)

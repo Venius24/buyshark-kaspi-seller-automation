@@ -22,7 +22,6 @@
 from typing import Optional
 import datetime
 import logging
-import os
 
 from backend.dumper import feed_state
 
@@ -63,7 +62,8 @@ MIN_OFFERS_UNKNOWN = 10 ** 9
 
 
 def _shadow() -> bool:
-    return os.getenv("XML_FEED_WORKER", "0") != "1"
+    # Один предикат на воркер и на сторож каталога — см. feed_state.is_shadow.
+    return feed_state.is_shadow()
 
 
 def next_pause_seconds(store_id) -> float:
