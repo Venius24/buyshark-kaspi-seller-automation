@@ -318,6 +318,14 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
     считается живьём из sales_orders, новых таблиц не требует. XYZ-класс
     честно не проставляется (null), если в периоде меньше 4 полных недель
     истории — иначе коэффициент вариации на короткой выборке вводит в заблуждение.
+
+    XYZ-пороги — терцили CV внутри самого магазина, а не учебные 10%/25%.
+    Проверено на живых данных (Бархан, 2026-08-29): классический CV даже
+    у топовых по выручке SKU почти всегда >25%, потому что карточки на
+    Kaspi живут по кривой «буст в выдаче → пик → спад», а не ровным спросом,
+    на который рассчитаны учебные пороги — при 10%/25% абсолютно весь
+    каталог схлопывался в один класс Z. Терцили дают X/Y/Z как ранг
+    стабильности относительно остального каталога того же магазина.
     """
     days = max(28, min(days, 365))
     session = _get_sync_db_session()
@@ -362,7 +370,37 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
                 weekly[week_key] = weekly.get(week_key, 0) + qty
 
         weeks_covered = len(week_keys_seen)
+        weeks_sorted = sorted(week_keys_seen)
         total_revenue = sum(v["revenue"] for v in sku_info.values())
+
+        # Недели до первой продажи (карточка ещё не выставлена) или после
+        # последней (снята с продажи/кончился остаток) — не "нестабильность
+        # спроса", а отсутствие спроса как класса. Считаем CV только по
+        # активному окну между первой и последней ненулевой неделей.
+        MIN_ACTIVE_WEEKS = 4
+        cv_by_sku: dict = {}
+        for sku, weekly in sku_weekly_qty.items():
+            series_full = [weekly.get(wk, 0) for wk in weeks_sorted]
+            nonzero_idx = [i for i, v in enumerate(series_full) if v > 0]
+            if not nonzero_idx:
+                continue
+            active = series_full[nonzero_idx[0]:nonzero_idx[-1] + 1]
+            if len(active) < MIN_ACTIVE_WEEKS:
+                continue
+            mean = sum(active) / len(active)
+            variance = sum((x - mean) ** 2 for x in active) / len(active)
+            cv_by_sku[sku] = (variance ** 0.5) / mean * 100.0
+
+        # Терцильные пороги вместо фиксированных 10%/25% — см. docstring выше.
+        # На маленькой выборке терцили сами по себе шумные, поэтому ниже
+        # некоторого минимума SKU лучше честно не классифицировать вовсе.
+        MIN_SKUS_FOR_TERCILES = 9
+        valid_cvs = sorted(cv_by_sku.values())
+        if len(valid_cvs) >= MIN_SKUS_FOR_TERCILES:
+            cv_x_cutoff = valid_cvs[len(valid_cvs) // 3]
+            cv_y_cutoff = valid_cvs[2 * len(valid_cvs) // 3]
+        else:
+            cv_x_cutoff = cv_y_cutoff = None
 
         items_sorted = sorted(sku_info.values(), key=lambda x: x["revenue"], reverse=True)
         cumulative = 0.0
@@ -378,17 +416,11 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
                 abc_class = "C"
 
             xyz_class = None
-            cv_pct = None
-            if weeks_covered >= 4:
-                weekly = sku_weekly_qty.get(it["sku"], {})
-                series = [weekly.get(wk, 0) for wk in week_keys_seen]
-                mean = sum(series) / len(series)
-                if mean > 0:
-                    variance = sum((x - mean) ** 2 for x in series) / len(series)
-                    cv_pct = round((variance ** 0.5) / mean * 100.0, 1)
-                    xyz_class = "X" if cv_pct <= 10.0 else ("Y" if cv_pct <= 25.0 else "Z")
-                else:
-                    xyz_class = "Z"
+            cv_pct = cv_by_sku.get(it["sku"])
+            if cv_pct is not None:
+                cv_pct = round(cv_pct, 1)
+                if cv_x_cutoff is not None:
+                    xyz_class = "X" if cv_pct <= cv_x_cutoff else ("Y" if cv_pct <= cv_y_cutoff else "Z")
 
             items.append({
                 "sku": it["sku"],
