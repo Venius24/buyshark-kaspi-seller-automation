@@ -483,3 +483,87 @@ def test_enabling_after_a_settle_halt_actually_unblocks_the_feed(archive, store,
     feed_state.enable(store)
 
     assert feed_state.eligible(store, 1000) is None
+
+
+# ── Замок наружу: не молчит ли файл о том, что Kaspi продаёт ────────────────
+
+def _kaspi_export(skus):
+    from backend.dumper.xml_feed import generate_xml_feed
+
+    return generate_xml_feed("20186986", [_offer(s) for s in skus])
+
+
+def test_a_card_kaspi_sells_and_we_forgot_blocks_the_send(monkeypatch):
+    """
+    Механизм, погасивший ~798 карточек. Все внутренние инварианты при этом
+    целы: файл в точности равен снимку — просто снимок сам неполон.
+    """
+    from backend.dumper import feed_plan, feed_export
+
+    monkeypatch.setattr(
+        feed_export, "load_cached", lambda sid, available="ACTIVE": (_kaspi_export(["A", "B"]), None)
+    )
+    snap = _Snapshot([_offer("A")], archived=[])
+
+    missing, note = feed_plan.missing_from_price_list("s", snap, {"A"})
+
+    assert missing == ["B"]
+    assert note
+
+
+def test_a_card_archived_since_the_export_is_not_missing(monkeypatch):
+    """
+    Выгрузка Kaspi генерируется не в момент сборки файла. Карточку могли снять
+    уже после — и тогда её отсутствие в файле правда, а не пропажа. Признак
+    один: наш снимок ЗНАЕТ, что она в архиве.
+    """
+    from backend.dumper import feed_plan, feed_export
+
+    monkeypatch.setattr(
+        feed_export, "load_cached", lambda sid, available="ACTIVE": (_kaspi_export(["A", "B"]), None)
+    )
+    snap = _Snapshot([_offer("A")], archived=["B"])
+
+    missing, note = feed_plan.missing_from_price_list("s", snap, {"A"})
+
+    assert missing == []
+    assert note is None
+
+
+def test_a_complete_file_passes_clean(monkeypatch):
+    from backend.dumper import feed_plan, feed_export
+
+    monkeypatch.setattr(
+        feed_export, "load_cached", lambda sid, available="ACTIVE": (_kaspi_export(["A", "B"]), None)
+    )
+
+    assert feed_plan.missing_from_price_list("s", _Snapshot([]), {"A", "B"}) == ([], None)
+
+
+def test_an_unavailable_export_says_so_instead_of_passing_silently(monkeypatch):
+    """
+    Не сумев проверить, проверка обязана сказать это вслух. Молчаливое «ок» на
+    недоступной выгрузке — худший исход: замок выглядит взведённым, а его нет.
+    """
+    from backend.dumper import feed_plan, feed_export
+
+    monkeypatch.setattr(feed_export, "load_cached", lambda sid, available="ACTIVE": (None, None))
+
+    missing, note = feed_plan.missing_from_price_list("s", _Snapshot([]), {"A"})
+
+    assert missing == []
+    assert "НЕ сверен" in note
+
+
+def test_the_comparison_survives_invisible_characters(monkeypatch):
+    """
+    Выгрузка Kaspi теряет табуляцию в sku ровно так же, как наш файл. Сравнивать
+    надо после одинаковой нормализации, иначе живой оффер выглядел бы пропажей.
+    """
+    from backend.dumper import feed_plan, feed_export
+
+    monkeypatch.setattr(
+        feed_export, "load_cached", lambda sid, available="ACTIVE": (_kaspi_export(["H477-0009"]), None)
+    )
+
+    assert feed_plan.missing_from_price_list("s", _Snapshot([]), {"H477-0009"}) == ([], None)

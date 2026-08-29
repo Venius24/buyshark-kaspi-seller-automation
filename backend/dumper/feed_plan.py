@@ -152,6 +152,53 @@ def _skus_in_xml(xml_bytes: bytes) -> List[str]:
     ]
 
 
+def missing_from_price_list(store_id, snapshot, file_skus) -> tuple:
+    """
+    Товары, которые Kaspi продаёт ПРЯМО СЕЙЧАС, а наш файл о них молчит.
+
+    Возвращает (список артикулов, причина-почему-проверка-не-состоялась).
+
+    Это единственная проверка, которая смотрит наружу. Все остальные инварианты
+    полноты сверяют файл с нашим же снимком и ловят «сериализатор потерял
+    оффер». Они бессильны против другого класса: снимок сам по себе неполон.
+    Тогда всё внутренне согласовано — файл в точности равен снимку, — а Kaspi
+    получает прайс-лист без карточки, которую продаёт, и гасит её с причиной
+    «не указан в прайс-листе». Так однажды слегло ~798 карточек.
+
+    Эталон берётся не у нас: собственная ACTIVE-выгрузка Kaspi и ЕСТЬ текущий
+    прайс-лист. Замерено 29.08 на Бархане — 1098 офферов, все `available="yes"`
+    со стоком > 0, ни одного `available="no"`, ни одного с нулевым остатком.
+
+    Правило без порогов. Артикул, которого нет в файле, безвреден, если наш
+    снимок ЗНАЕТ, что тот в архиве: значит карточку сняли уже после генерации
+    выгрузки, и её отсутствие — правда, а не пропажа. Опасен другой: выгрузка
+    его показывает, а снимок не знает о нём вовсе — ни среди активных, ни среди
+    архивных. Такую карточку мы собираемся погасить вслепую.
+
+    Проверка мягкая по построению: не сумев её выполнить, она не притворяется
+    успешной, а возвращает причину — её печатает предпросмотр и видит человек.
+    """
+    from backend.dumper import feed_export
+
+    body, generated_at = feed_export.load_cached(store_id)
+    if not body:
+        return [], "выгрузка Kaspi недоступна — состав файла НЕ сверен с прайс-листом"
+
+    live = {feed_sku_roundtrip(s) for s in feed_export.skus(body)}
+    if not live:
+        return [], "выгрузка Kaspi пуста — состав файла НЕ сверен с прайс-листом"
+
+    known = set(file_skus) | {
+        feed_sku_roundtrip(str(s)) for s in getattr(snapshot, "archived_skus", []) or []
+    }
+    missing = sorted(live - known)
+    if not missing:
+        return [], None
+    return missing, "выгрузка от {}".format(
+        generated_at.strftime("%Y-%m-%d %H:%M") if generated_at else "неизвестной даты"
+    )
+
+
 def build_feed_plan(
     token: str,
     store_id: str,
@@ -336,13 +383,29 @@ def build_feed_plan(
             "со снимком (напр. {})".format(len(extra), extra[:5])
         )
 
+    # Единственная проверка наружу: не молчит ли файл о товарах, которые Kaspi
+    # продаёт. Всё выше сверяет файл со снимком и неполноту снимка не видит.
+    #
+    # Не исключение, а данные: предпросмотр обязан показать список поимённо, а
+    # отказ живёт в `send_plan` — там он и стоял всё это время, только поле
+    # `missing_from_file` было захардкожено пустым, и замок ни разу не взводился.
+    missing_outside, missing_note = missing_from_price_list(store_id, snapshot, file_skus)
+    if missing_outside:
+        warnings.append(
+            "{} товаров есть в прайс-листе Kaspi ({}), но их нет ни в файле, ни в "
+            "архиве нашего снимка — файл снял бы их с продажи. ОТПРАВКА "
+            "ЗАБЛОКИРОВАНА: {}".format(len(missing_outside), missing_note, missing_outside[:5])
+        )
+    elif missing_note:
+        warnings.append(missing_note)
+
     plan = FeedPlan(
         snapshot=snapshot,
         offers=offers,
         xml=xml,
         diffs=diffs,
         unchanged=len(offers) - len({d.merchant_sku for d in diffs}),
-        missing_from_file=[],
+        missing_from_file=missing_outside,
         blockers=blockers,
         orphan_intents=orphans,
         warnings=warnings,
@@ -351,8 +414,9 @@ def build_feed_plan(
         built_at=datetime.datetime.now(),
     )
     logger.info(
-        "[FeedPlan] Файл собран: всего %s, изменится %s, не изменится %s, отсутствует 0. %s",
-        plan.total, plan.changed_offers, plan.unchanged, "; ".join(warnings) or "замечаний нет",
+        "[FeedPlan] Файл собран: всего %s, изменится %s, не изменится %s, отсутствует %s. %s",
+        plan.total, plan.changed_offers, plan.unchanged, len(plan.missing_from_file),
+        "; ".join(warnings) or "замечаний нет",
     )
     return plan
 
