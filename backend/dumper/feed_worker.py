@@ -379,6 +379,11 @@ async def notify_feed_disabled(store_id, reason: str) -> None:
         logger.error("[FeedWorker] Тревога о выключении фида не ушла в Телеграм: %r", err)
 
 
+# Последняя названная причина отказа по магазину — чтобы печатать её на смене,
+# а не на каждом тике. См. комментарий в run_feed_cycle.
+_last_reason: dict = {}
+
+
 async def run_feed_cycle() -> dict:
     """Один проход по всем активным магазинам. Вынесен ради юнит-тестов."""
     import asyncio
@@ -415,7 +420,18 @@ async def run_feed_cycle() -> dict:
 
                     await notify_settle_report(store.store_id, report)
             elif result["reason"]:
-                logger.debug("[FeedWorker] Стор %s: %s", store.store_id, result["reason"])
+                # INFO на смене причины, DEBUG на повторе. Прод крутится на
+                # INFO, и молчащий отказ превращает «фид не шлёт» в
+                # расследование: 2026-08-29 причину пришлось доставать
+                # запуском why_not_now руками. Печатать её на каждом тике —
+                # другая крайность: отказ стабилен часами.
+                if _last_reason.get(store.store_id) != result["reason"]:
+                    _last_reason[store.store_id] = result["reason"]
+                    logger.info(
+                        "[FeedWorker] Стор %s не шлёт: %s", store.store_id, result["reason"]
+                    )
+                else:
+                    logger.debug("[FeedWorker] Стор %s: %s", store.store_id, result["reason"])
 
             # Отдельно от sent/not-sent: выключиться фид может и после удачной
             # отправки (архив не записался), и вместо неё.
