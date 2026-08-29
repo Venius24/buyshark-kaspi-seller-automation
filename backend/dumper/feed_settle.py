@@ -97,6 +97,15 @@ class SettleReport:
     # Два класса «не смапленных» — см. `classify_unmapped`.
     unmapped_expected: List[str] = field(default_factory=list)
     unmapped_unexplained: List[str] = field(default_factory=list)
+    # Сколько «не смапленных» не объяснила ни одна из двух категорий. Живой
+    # случай 2026-08-29: Kaspi назвала 2, обе категории пусты. Отчёт кабинета
+    # показал H477-0009 и H477-0017 с ошибкой «Товар не связан» — при том что
+    # обе карточки активны, с ценой и остатком, и лежат в собственной выгрузке
+    # Kaspi. То есть у notMapped есть причина, которую по каталогу не видно:
+    # не прицепляется строка файла, а не пропадает карточка. Вреда нет, но
+    # молчать об этом нельзя — иначе «не смаплено 2 / объяснено 0» читается
+    # как «всё разобрано».
+    unmapped_unclassified: int = 0
     # Расхождения, объяснённые движением мира после снимка — см.
     # `_intents_newer_than`. В отчёте они есть, тревогой не будят.
     mismatches_explained: List[dict] = field(default_factory=list)
@@ -116,6 +125,10 @@ class SettleReport:
             )
         if self.unmapped_expected:
             head += ", не смаплено без остатка {}".format(len(self.unmapped_expected))
+        if self.unmapped_unclassified:
+            head += ", не смаплено без объяснения по каталогу {}".format(
+                self.unmapped_unclassified
+            )
         if self.active_before is not None and self.active_after is not None:
             head += ", активных {} -> {}".format(self.active_before, self.active_after)
         if self.alarms:
@@ -582,11 +595,26 @@ def settle_file(store_id, archive_path, verdict, snapshot=None, token=None) -> S
     unexplained, expected_unmapped = classify_unmapped(declared, snapshot)
     report.unmapped_expected = expected_unmapped
     report.unmapped_unexplained = unexplained
+    report.unmapped_unclassified = max(
+        0, int(verdict.not_mapped or 0) - len(expected_unmapped) - len(unexplained)
+    )
     if verdict.not_mapped:
         logger.warning(
             "[FeedSettle] Не смаплено %s: без остатка (ожидаемо) %s, необъяснённых %s%s",
             verdict.not_mapped, len(expected_unmapped), len(unexplained),
             " — " + str(unexplained[:10]) if unexplained else "",
+        )
+    if report.unmapped_unclassified:
+        # Оффер объявлен, карточка активна и в прайс-листе — а строка не
+        # прицепилась. По каталогу это не видно вообще; артикулы называет
+        # только отчёт в кабинете («Результат проверки прайс-листа» →
+        # фильтр «Нераспознанные товары»). Фид НЕ выключаем: замерено
+        # 2026-08-28 и 29 — обе даты по два оффера, карточки целы.
+        logger.warning(
+            "[FeedSettle] Из них %s не объясняются каталогом: карточки на месте, "
+            "но Kaspi не связала с ними строку файла. Артикулы — в отчёте кабинета "
+            "по файлу %s",
+            report.unmapped_unclassified, verdict.file_id,
         )
     if unexplained:
         reason = (

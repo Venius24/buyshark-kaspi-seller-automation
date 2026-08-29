@@ -629,3 +629,50 @@ def test_a_crashed_settle_always_closes_the_flight():
     tail = src[src.index("settle_file("):]
     assert "except Exception" in tail, "падение сверки не перехвачено"
     assert "in_flight=None" in tail, "полёт не закрывается при падении сверки"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Третья причина notMapped, опознанная 2026-08-29 по отчёту кабинета: оффер
+# объявлен, карточка активна и лежит в выгрузке Kaspi, а строка файла к ней не
+# прицепилась («Товар не связан» — H477-0009 и H477-0017). По каталогу это не
+# видно: обе категории классификатора пусты. Молчать нельзя — «не смаплено 2 /
+# объяснено 0» читается как «всё разобрано».
+# ─────────────────────────────────────────────────────────────────────────────
+def test_unmapped_that_the_catalogue_cannot_explain_is_counted(archive, store, monkeypatch):
+    """Живые карточки, которые Kaspi не смапила, попадают в отчёт числом."""
+    monkeypatch.setattr(feed_settle, "settle_intents", lambda *a: (0, 0))
+    path = archive([_offer("H477-0009"), _offer("H477-0017")], active_before=2)
+    snapshot = _Snapshot([_offer("H477-0009"), _offer("H477-0017")])
+
+    report = settle_file(store, path, _Verdict(not_mapped=2), snapshot=snapshot)
+
+    assert report.unmapped_expected == []
+    assert report.unmapped_unexplained == []
+    assert report.unmapped_unclassified == 2, (
+        "необъяснимое не сосчитано — отчёт молча выглядит разобранным"
+    )
+    assert "без объяснения по каталогу 2" in report.summary()
+
+
+def test_unexplainable_unmapped_does_not_switch_the_feed_off(archive, store, monkeypatch):
+    """Карточки целы — выключать фид не за что. Замерено 28.08 и 29.08."""
+    monkeypatch.setattr(feed_settle, "settle_intents", lambda *a: (0, 0))
+    path = archive([_offer("H477-0009"), _offer("H477-0017")], active_before=2)
+    snapshot = _Snapshot([_offer("H477-0009"), _offer("H477-0017")])
+
+    report = settle_file(store, path, _Verdict(not_mapped=2), snapshot=snapshot)
+
+    assert report.alarms == []
+    assert feed_state.is_enabled(store)
+
+
+def test_a_fully_explained_verdict_reports_nothing_unclassified(archive, store, monkeypatch):
+    """Когда каталог объясняет всё, счётчик молчит."""
+    monkeypatch.setattr(feed_settle, "settle_intents", lambda *a: (0, 0))
+    path = archive([_offer("A"), _offer("SOLD-OUT", stock=0.0)], active_before=2)
+
+    report = settle_file(store, path, _Verdict(not_mapped=1), snapshot=_Snapshot([_offer("A")]))
+
+    assert report.unmapped_expected == ["SOLD-OUT"]
+    assert report.unmapped_unclassified == 0
+    assert "без объяснения по каталогу" not in report.summary()
