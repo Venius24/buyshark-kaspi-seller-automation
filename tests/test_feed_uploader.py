@@ -178,20 +178,46 @@ def test_refuses_skus_with_invisible_characters(kaspi):
     assert kaspi["posts"] == []
 
 
-def test_unmapped_offers_are_a_failure_not_a_success(kaspi, monkeypatch):
+def test_unmapped_offers_are_reported_but_do_not_abort(kaspi, monkeypatch):
     """
-    `notMapped` — это карточки, которые Kaspi не нашла по артикулу из файла и
-    потому сняла с продажи. Живая отправка 2026-08-24 отчиталась
-    `FLUSHED, 1097/1097, rejected 0` при `notMapped: 2`, и прежняя проверка
-    считала это успехом, хотя два товара уже лежали в архиве.
+    `notMapped` больше не приговор — и это стоило одного выключения фида.
+
+    Раньше здесь ждали исключения: «не смаплен» читался как «карточка снята с
+    продажи». Живая отправка 2026-08-24 (`FLUSHED, 1097/1097, rejected 0` при
+    `notMapped: 2`) это подтверждала — два товара действительно лежали в архиве.
+
+    Но 28.08 тот же счётчик выключил фид, который не потерял НИЧЕГО: у
+    `X144-0001-2` был нулевой остаток, и прайс-лист его не адресует, потому что
+    товар не торгует. Оба случая дают один счётчик и требуют противоположных
+    действий, поэтому решение переехало туда, где видно каталог
+    (`feed_settle.classify_unmapped`), а отправка теперь только сообщает факт.
+
+    Отличать «принят» от «идеален» — работа `accepted` и `ok`.
     """
     card = _card(distinct=1110, processed=1110)
     card["notMappedOffersCount"] = 2
     monkeypatch.setattr(feed_uploader, "wait_for_verdict",
                         lambda *a, **k: feed_uploader._verdict_from_card(card))
+
+    verdict = send_plan(_Plan(), "store-1", MERCHANT, confirm=MERCHANT)
+
+    assert verdict.accepted and not verdict.ok
+    assert verdict.not_mapped == 2
+
+
+def test_a_file_kaspi_rejected_still_aborts(kaspi, monkeypatch):
+    """
+    Ослабление касается ТОЛЬКО not_mapped. Отклонённые офферы означают, что
+    файл разобран не целиком, — сверять не с чем, и это по-прежнему провал.
+    """
+    card = _card(distinct=1110, processed=1110, rejected=3)
+    monkeypatch.setattr(feed_uploader, "wait_for_verdict",
+                        lambda *a, **k: feed_uploader._verdict_from_card(card))
+
     with pytest.raises(feed_uploader.FeedUploadFailed) as e:
         send_plan(_Plan(), "store-1", MERCHANT, confirm=MERCHANT)
-    assert "не смаплено 2" in str(e.value)
+
+    assert "отклонено 3" in str(e.value)
 
 
 def test_refuses_stale_snapshot(kaspi):

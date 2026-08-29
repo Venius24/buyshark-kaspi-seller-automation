@@ -104,8 +104,17 @@ def main(argv=None) -> int:
         confirm=args.confirm, allow_changes=args.allow_changes,
     )
     print(verdict.summary())
-    print("результат: {}".format("ОК" if verdict.ok else "НЕ ОК"))
-    return 0 if verdict.ok else 1
+    if verdict.ok:
+        print("результат: ОК")
+    else:
+        # Сюда попадаем только принятым файлом (иначе send_plan бросил бы):
+        # значит расхождение — это not_mapped, и класс его определяет сверка
+        # по каталогу, а не эта строчка.
+        print(
+            "результат: принят, но {} офферов не смаплены — класс определит "
+            "сверка по каталогу (feed_settle)".format(verdict.not_mapped)
+        )
+    return 0
 
 
 if __name__ == "__main__":

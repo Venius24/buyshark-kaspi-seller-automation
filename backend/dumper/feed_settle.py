@@ -33,6 +33,7 @@ Kaspi доходит до конца, часть из них уже неверн
 """
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+import datetime
 import json
 import logging
 import re
@@ -48,6 +49,19 @@ logger = logging.getLogger(__name__)
 # карточек, и настоящая убыль такого размера за один цикл — повод разбудить
 # человека раньше, чем он сам заметит.
 MAX_ACTIVE_DROP_RATIO = 0.10
+
+# Сколько максимум держать JSON-писателя от записи по офферу, который прямо
+# сейчас везёт файл. Нормальный полёт кончается раньше: `mark_settled` снимает
+# `in_flight` по вердикту (замеры — 3м22с на 1099 офферах 28.08 и ~18 минут на
+# 1097 24.08). Это страховка на случай, когда сверка не доехала вовсе — упал
+# процесс, оборвалось ожидание вердикта. Держать намерение вечно нельзя:
+# незаписанная цена дороже дублирующей записи, поэтому по истечении срока
+# писатель работает как раньше.
+MAX_HOLD_SECONDS = 30 * 60
+
+# Разбор летящего файла — 480 КБ и ~1100 офферов; флашер ходит раз в 45с, и
+# перечитывать его каждый раз незачем: пока файл тот же, объявленное не меняется.
+_inflight_cache: dict = {}
 
 _OFFER_RE = re.compile(r'<offer sku="([^"]*)"[^>]*>(.*?)</offer>', re.S)
 _PRICE_RE = re.compile(r"<cityprice[^>]*>(\d+)</cityprice>")
@@ -80,6 +94,12 @@ class SettleReport:
     active_after: Optional[int] = None
     # Офферы, снятые Kaspi без нашего ведома — см. `_unexpected_archived`.
     unexpected_archived: List[str] = field(default_factory=list)
+    # Два класса «не смапленных» — см. `classify_unmapped`.
+    unmapped_expected: List[str] = field(default_factory=list)
+    unmapped_unexplained: List[str] = field(default_factory=list)
+    # Расхождения, объяснённые движением мира после снимка — см.
+    # `_intents_newer_than`. В отчёте они есть, тревогой не будят.
+    mismatches_explained: List[dict] = field(default_factory=list)
     alarms: List[str] = field(default_factory=list)
 
     @property
@@ -90,6 +110,12 @@ class SettleReport:
         head = "файл {}: закрыто {}, оставлено в очереди {}, расхождений {}".format(
             self.file_id, self.settled, self.kept_queued, len(self.mismatches)
         )
+        if self.mismatches_explained:
+            head += " (+{} объяснены правками после снимка)".format(
+                len(self.mismatches_explained)
+            )
+        if self.unmapped_expected:
+            head += ", не смаплено без остатка {}".format(len(self.unmapped_expected))
         if self.active_before is not None and self.active_after is not None:
             head += ", активных {} -> {}".format(self.active_before, self.active_after)
         if self.alarms:
@@ -121,21 +147,175 @@ def parse_declared(xml_bytes: bytes) -> Dict[str, dict]:
     return declared
 
 
+def _has_stock(declared_offer: dict) -> bool:
+    """Объявляли ли мы этот оффер торгующим. None и 0.0 — одинаково «нет»."""
+    return bool(declared_offer.get("stock"))
+
+
+def classify_unmapped(declared: Dict[str, dict], snapshot) -> tuple:
+    """
+    Разделить объявленное, не попавшее в активный каталог, на два класса.
+
+    Возвращает (необъяснённые, ожидаемые).
+
+    Счётчик `notMappedOffersCount` говорит СКОЛЬКО, но не КАКИЕ, а списка
+    артикулов Kaspi по API не отдаёт (перебраны ~12 вариантов пути, все 404;
+    в кабинете такой отчёт есть). Поэтому класс восстанавливается по нашим же
+    данным: что мы объявили против того, что лежит в свежем снимке.
+
+    Ожидаемый класс — оффер, объявленный с НУЛЕВЫМ остатком. Прайс-лист живёт
+    в измерении «товар торгует», а не «карточка существует»: замерено 28.08,
+    `X144-0001-2` со стоком 0 отсутствовал в ACTIVE-выгрузке самой Kaspi ещё
+    до нашей отправки. Такому офферу не к чему привязаться, и это не потеря —
+    продавать всё равно нечего.
+
+    Необъяснённый класс — оффер, объявленный с остатком, которого в активном
+    каталоге после обработки нет. Вот это потеря, и её видно поимённо.
+
+    Чего этот классификатор НЕ ловит: подмену артикула невидимыми символами
+    (случай 26.08). После нормализации файл и каталог выглядят одинаково, и
+    разность множеств молчит. Ловится это раньше и надёжнее — замком
+    `blockers` в `send_plan`, который такой файл вообще не выпускает.
+    """
+    from backend.dumper.xml_feed import feed_sku_roundtrip
+
+    active = {
+        feed_sku_roundtrip(str(p.get("merchantSku")))
+        for p in getattr(snapshot, "offers", []) or []
+    }
+    expected: List[str] = []
+    unexplained: List[str] = []
+    for sku, want in declared.items():
+        if sku in active:
+            continue
+        (expected if not _has_stock(want) else unexplained).append(sku)
+    return sorted(unexplained), sorted(expected)
+
+
+def _intents_newer_than(store_id, snapshot_at) -> set:
+    """
+    Артикулы, по которым намерение появилось уже ПОСЛЕ снимка файла.
+
+    Нужны, чтобы отличить «файл не сработал» от «мир уехал вперёд». Файл несёт
+    значения на момент T0 и применяется минутами; всё, что демпер или связка
+    остатков решили за это время, в нём физически быть не могло. Каталог тогда
+    честно показывает НЕ то, что мы объявили, — и это не сбой, а работа
+    транспорта: такое намерение остаётся в очереди и уезжает JSON-ом.
+
+    Правило то же самое, по которому `settle_intents` решает, что гасить
+    (`desired_at <= snapshot_at`), и это не совпадение: закрываем и не будим
+    ровно по одной и той же границе.
+
+    Замер, ради которого это появилось: прогон настоящего файла 28.08 дал 117
+    расхождений (79 по цене, 38 по остатку) при полностью целом каталоге. Не
+    отделив их, сверка слала бы тревогу после каждой отправки.
+    """
+    from sqlalchemy import select
+
+    from backend.db.models import KaspiOfferSyncDB
+    from backend.services.offer_sync import _session
+
+    session = _session()
+    if not session:
+        # Без БД лучше показать лишнее, чем спрятать настоящее.
+        return set()
+    try:
+        rows = session.execute(
+            select(KaspiOfferSyncDB.sku).where(
+                KaspiOfferSyncDB.store_id == store_id,
+                KaspiOfferSyncDB.desired_at.isnot(None),
+                KaspiOfferSyncDB.desired_at > snapshot_at,
+            )
+        ).all()
+        return {str(r[0]) for r in rows}
+    except Exception as err:
+        logger.warning("[FeedSettle] Очередь для объяснения расхождений не прочиталась: %r", err)
+        return set()
+    finally:
+        session.close()
+
+
+def in_flight_declaration(store_id) -> tuple:
+    """
+    Что везёт файл, который прямо сейчас в полёте. `({}, None)` — если файла нет.
+
+    Возвращает (объявленное по артикулам, момент снимка). Момент снимка нужен
+    вызывающему не меньше самих значений: намерение, появившееся ПОСЛЕ снимка,
+    файл нести не мог, и придерживать его нельзя ни при каком совпадении
+    значений — иначе правка, сделанная в кабинете внутри окна полёта, не уедет
+    вообще.
+
+    Зачем это существует. Замер 28.08, окно 20:05:24 → 20:08:46: JSON-писатель
+    записал в нём 81 оффер, и все 81 — теми же ценами, что вёз файл, при том
+    что в том же логе стояло «квота 232/250, откладываем 45 записей». Работа
+    была сделана дважды, и сожжена ровно та квота, ради экономии которой файл
+    и затевался. План допускал, что экономия получится сама («фид применил
+    цену → BFF её показывает → JSON молча пропустит запись»), и это верно
+    только при мгновенном применении файла. На минутах полёта — нет: BFF ещё
+    показывает старое, и писатель честно пишет.
+    """
+    state = feed_state.load(store_id)
+    name = state.get("in_flight")
+    if not name:
+        return {}, None
+
+    raw_snapshot = state.get("snapshot_at")
+    if not raw_snapshot:
+        return {}, None
+    try:
+        snapshot_at = datetime.datetime.fromisoformat(raw_snapshot)
+    except (TypeError, ValueError):
+        return {}, None
+
+    # Страховка от зависшего `in_flight`: см. MAX_HOLD_SECONDS.
+    if (datetime.datetime.now() - snapshot_at).total_seconds() > MAX_HOLD_SECONDS:
+        logger.warning(
+            "[FeedSettle] Файл %s числится в полёте дольше %s мин — придержка снята, "
+            "писатель работает как обычно",
+            name, MAX_HOLD_SECONDS // 60,
+        )
+        return {}, None
+
+    cached = _inflight_cache.get(str(store_id))
+    if cached and cached[0] == name:
+        return cached[1], snapshot_at
+
+    from backend.dumper.feed_uploader import _archive_dir
+
+    try:
+        declared = parse_declared((_archive_dir(store_id) / name).read_bytes())
+    except (OSError, ValueError) as err:
+        # Без файла придержать нечего. Это не повод ломать флаш: писатель
+        # отработает как раньше, максимум продублировав работу файла.
+        logger.warning("[FeedSettle] Летящий файл %s не прочитан (%r)", name, err)
+        return {}, None
+
+    _inflight_cache[str(store_id)] = (name, declared)
+    return declared, snapshot_at
+
+
 def load_meta(archive_path) -> dict:
     meta_path = archive_path.with_suffix(archive_path.suffix + ".meta.json")
     return json.loads(meta_path.read_text(encoding="utf-8"))
 
 
-def compare_with_catalog(declared: Dict[str, dict], snapshot) -> List[dict]:
+def compare_with_catalog(declared: Dict[str, dict], snapshot, ignore=None) -> List[dict]:
     """
     Объявленное против фактического. Возвращает расхождения, а не «ок/не ок».
 
     Сравниваются только цена и остаток: это то, ради чего файл и отправлялся.
     Оффер, которого в свежем снимке нет вовсе, — самый тяжёлый случай (карточка
     ушла из продажи), и он тоже попадает сюда, с `actual: None`.
+
+    `ignore` — артикулы, отсутствие которых уже объяснено выше по потоку
+    (`classify_unmapped`: объявлены с нулевым остатком, торговать нечем). Без
+    этого исключения каждый распроданный товар давал бы расхождение, тревога
+    уходила бы после каждой отправки и канал перестали бы читать — ровно тот
+    исход, против которого он заводился.
     """
     from backend.dumper.xml_feed import feed_sku_roundtrip
 
+    skip = set(ignore or ())
     actual = {
         feed_sku_roundtrip(str(p.get("merchantSku"))): p
         for p in snapshot.offers
@@ -144,6 +324,8 @@ def compare_with_catalog(declared: Dict[str, dict], snapshot) -> List[dict]:
     for sku, want in declared.items():
         have = actual.get(sku)
         if have is None:
+            if sku in skip:
+                continue
             mismatches.append({"sku": sku, "field": "offer", "declared": "active", "actual": None})
             continue
         if want["price"] is not None and int(have.get("price_num") or 0) != want["price"]:
@@ -288,6 +470,19 @@ def _unexpected_archived(meta: dict, declared: Dict[str, dict], snapshot) -> Lis
     Пустой `archived_before` (файл отправлен старой версией, до появления
     поля) означает «сравнить не с чем» — тогда молчим. Ложная тревога на
     каждом старом файле стоила бы дороже, чем пропуск одного цикла.
+
+    Из новичков вычитаются ДВА множества, и второе стоит объяснить отдельно.
+    Оффер с нулевым остатком уезжает в архив не от нашего файла, а оттого, что
+    торговать нечем: `X144-0001-2` был обнулён связкой остатков в 15:31, а файл
+    ушёл в 20:05 — архив был предрешён до отправки. Считать это потерей значит
+    выключать фид каждый раз, когда у магазина кончается товар.
+
+    ЧЕГО Я НЕ ПРОВЕРИЛ: возвращается ли такая карточка в продажу сама, когда
+    остаток снова станет положительным. Косвенно похоже, что да (`S517-0044`
+    после записи нуля 26.08 сейчас снова активен с остатком 1), но прямого
+    замера «архив → приход товара → снова активна» у меня нет. Если окажется,
+    что не возвращается, это дефект связки остатков, а не фида, — и ловить его
+    надо там, где пишется ноль.
     """
     before = meta.get("archived_before")
     if not before:
@@ -296,7 +491,8 @@ def _unexpected_archived(meta: dict, declared: Dict[str, dict], snapshot) -> Lis
     if not now:
         return []
     withdrawn = {sku for sku, d in declared.items() if d.get("available") is False}
-    return sorted((now - set(before)) - withdrawn)
+    out_of_stock = {sku for sku, d in declared.items() if not _has_stock(d)}
+    return sorted((now - set(before)) - withdrawn - out_of_stock)
 
 
 def settle_file(store_id, archive_path, verdict, snapshot=None, token=None) -> SettleReport:
@@ -320,7 +516,9 @@ def settle_file(store_id, archive_path, verdict, snapshot=None, token=None) -> S
         active_before=meta.get("active_before"),
     )
 
-    if not verdict.ok:
+    if not verdict.accepted:
+        # Файл не разобран целиком — сверять не с чем, каталог в неизвестном
+        # состоянии. Это по-прежнему безусловное выключение.
         reason = "вердикт не годен ({}) — намерения оставлены в очереди".format(verdict.summary())
         report.alarms.append(reason)
         feed_state.disable(store_id, reason)
@@ -374,7 +572,47 @@ def settle_file(store_id, archive_path, verdict, snapshot=None, token=None) -> S
         feed_state.disable(store_id, reason)
         return report
 
-    report.mismatches = compare_with_catalog(declared, snapshot)
+    # Не смапленное. Смотрим ПОСЛЕ детекторов пропажи — они уже сказали бы,
+    # что карточки потеряны, и до этой ветки дело бы не дошло. Здесь решается
+    # только одно: объяснимо ли то, что осталось.
+    #
+    # Раньше на этом месте решения не было вовсе: `send_plan` бросал исключение
+    # по `not_mapped != 0` ещё до сверки, и 28.08 фид выключился, не потеряв
+    # ни одной карточки. Прокси заменён прямым измерением по каталогу.
+    unexplained, expected_unmapped = classify_unmapped(declared, snapshot)
+    report.unmapped_expected = expected_unmapped
+    report.unmapped_unexplained = unexplained
+    if verdict.not_mapped:
+        logger.warning(
+            "[FeedSettle] Не смаплено %s: без остатка (ожидаемо) %s, необъяснённых %s%s",
+            verdict.not_mapped, len(expected_unmapped), len(unexplained),
+            " — " + str(unexplained[:10]) if unexplained else "",
+        )
+    if unexplained:
+        reason = (
+            "{} объявленных офферов с остатком не найдены в активном каталоге после "
+            "обработки файла: {}. Фид выключен, карточки проверить руками".format(
+                len(unexplained), unexplained[:10]
+            )
+        )
+        report.alarms.append(reason)
+        feed_state.disable(store_id, reason)
+        return report
+
+    snapshot_at = datetime.datetime.fromisoformat(meta["snapshot_at"])
+
+    # Расхождения делятся на объяснённые и настоящие. Объяснённое — то, по чему
+    # мир уехал вперёд уже после снимка: файл нёс значение на T0, а демпер или
+    # связка остатков решили иначе, пока он летел. Такое намерение остаётся в
+    # очереди и уедет JSON-ом — будить человека тут не о чем.
+    #
+    # Прячется при этом НИЧЕГО: объяснённые лежат в отчёте отдельным полем.
+    # Тревога — только по тем, где мир не двигался, а каталог всё равно
+    # показывает не то, что мы объявили. Вот это и есть «запись не применилась».
+    found = compare_with_catalog(declared, snapshot, ignore=expected_unmapped)
+    moved = _intents_newer_than(store_id, snapshot_at)
+    report.mismatches = [m for m in found if m["sku"] not in moved]
+    report.mismatches_explained = [m for m in found if m["sku"] in moved]
     if report.mismatches:
         report.alarms.append(
             "{} офферов выглядят не так, как мы их объявили (напр. {})".format(
@@ -382,7 +620,6 @@ def settle_file(store_id, archive_path, verdict, snapshot=None, token=None) -> S
             )
         )
 
-    snapshot_at = datetime.datetime.fromisoformat(meta["snapshot_at"])
     report.settled, report.kept_queued = settle_intents(store_id, declared, snapshot_at)
 
     feed_state.mark_settled(store_id, report)

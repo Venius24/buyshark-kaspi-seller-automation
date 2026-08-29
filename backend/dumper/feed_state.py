@@ -75,8 +75,16 @@ def is_enabled(store_id) -> bool:
 
 
 def enable(store_id) -> dict:
-    """Включить фид. Только явным действием — воркер сам себя не включает."""
-    return save(store_id, enabled=True, blocked_reason=None)
+    """
+    Включить фид. Только явным действием — воркер сам себя не включает.
+
+    `in_flight` снимается заодно, и это не уборка мусора. Выключение по сверке
+    оставляет полёт незакрытым (`mark_settled` до него не доходит), а
+    `eligible()` отбивает магазин с «предыдущий файл ещё в полёте». Без этой
+    строки включение было бы молча бесполезным: рубильник поднят, а файл не
+    уходит, и понять почему можно только чтением state.json.
+    """
+    return save(store_id, enabled=True, blocked_reason=None, in_flight=None, in_flight_until=None)
 
 
 def disable(store_id, reason: str) -> dict:

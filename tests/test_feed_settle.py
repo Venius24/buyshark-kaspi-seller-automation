@@ -56,8 +56,16 @@ class _Snapshot:
 
 
 class _Verdict:
-    def __init__(self, ok=True, file_id="file-1"):
+    """
+    Заглушка вердикта. `accepted` отдельно от `ok` не для красоты: с 29.08
+    рубильником служит именно она (файл разобран целиком), а `ok` означает
+    идеальный исход и решения больше не принимает — см. UploadVerdict.
+    """
+
+    def __init__(self, ok=True, file_id="file-1", not_mapped=0, accepted=None):
         self.ok = ok
+        self.accepted = ok if accepted is None else accepted
+        self.not_mapped = not_mapped
         self.file_id = file_id
 
     def summary(self):

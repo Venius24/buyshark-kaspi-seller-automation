@@ -571,6 +571,55 @@ def _payload(merchant_uid: str, d: _Decision) -> dict:
     }
 
 
+def _carried_by_feed_in_flight(store_id, decisions: List[tuple]) -> List[tuple]:
+    """
+    Убрать из очереди на запись то, что прямо сейчас везёт прайс-лист.
+
+    Возвращает придержанные решения (их надо не писать, но и не гасить —
+    намерение остаётся в очереди и уедет, если файл не справится).
+
+    Придерживаем ТОЛЬКО при трёх совпадениях сразу:
+
+      * файл в полёте и по этому артикулу в нём что-то есть;
+      * намерение существовало уже на момент снимка файла — иначе файл его
+        нести не мог, и это как раз правка внутри окна слепоты, которую
+        задержать нельзя ни в коем случае;
+      * значения совпадают дословно. Демпер мог сдвинуть цену после снимка;
+        тогда файл везёт устаревшее, и писать надо немедленно.
+
+    Заметь, чего здесь НЕТ: мы не проставляем `pushed_*` и не гасим намерение.
+    Придержка — это «подожди», а не «сделано». Если файл не доедет, сверка
+    ничего не закроет и намерение уйдёт обычным флашем; если доедет — его
+    закроет `feed_settle.settle_intents`, по тем же правилам.
+    """
+    from backend.dumper import feed_settle
+
+    try:
+        declared, snapshot_at = feed_settle.in_flight_declaration(store_id)
+    except Exception as err:
+        # Придержка — оптимизация, а не корректность. Её падение не имеет
+        # права остановить запись цен.
+        logger.error("[OfferSync] Придержка по летящему файлу не сработала: %r", err)
+        return []
+    if not declared:
+        return []
+
+    held: List[tuple] = []
+    for row, d in decisions:
+        want = declared.get(str(d.sku))
+        if want is None:
+            continue
+        if row.desired_at is None or snapshot_at is None or row.desired_at > snapshot_at:
+            continue
+        if want.get("price") != d.price:
+            continue
+        want_stock = want.get("stock")
+        if want_stock is None or int(want_stock) != int(d.stock):
+            continue
+        held.append((row, d))
+    return held
+
+
 def flush_store(store_id, merchant_uid: str) -> dict:
     """
     Один проход флашера по магазину. Синхронный (сетевой + БД) — вызывать
@@ -588,7 +637,10 @@ def flush_store(store_id, merchant_uid: str) -> dict:
     from backend.db.models import KaspiOfferSyncDB
     from backend.state_helpers import _mc_api_request
 
-    stats = {"candidates": 0, "no_op": 0, "written": 0, "deferred": 0, "verified": 0, "errors": 0}
+    stats = {
+        "candidates": 0, "no_op": 0, "written": 0, "deferred": 0,
+        "verified": 0, "errors": 0, "held_by_feed": 0,
+    }
 
     # Локальная копия поля + запись в журнал обновлений. Сетевые фазы мутируют
     # отсоединённые объекты только через неё: логика читает свежие значения,
@@ -746,6 +798,22 @@ def flush_store(store_id, merchant_uid: str) -> dict:
         if not decisions:
             return stats
 
+        # Придержка по летящему прайс-листу. Стоит ДО распределения квоты —
+        # иначе придержанные съедали бы бюджет окна, то есть ровно ту квоту,
+        # ради экономии которой файл и отправляется.
+        held = _carried_by_feed_in_flight(store_id, decisions)
+        if held:
+            held_keys = {(r.store_id, r.sku) for r, _ in held}
+            decisions = [(r, d) for r, d in decisions if (r.store_id, r.sku) not in held_keys]
+            stats["held_by_feed"] = len(held)
+            stats["deferred"] += len(held)
+            logger.info(
+                "📄 [OfferSync] Стор %s: %d записей придержаны — их везёт летящий прайс-лист.",
+                store_id, len(held),
+            )
+        if not decisions:
+            return stats
+
         state = quota.get(store_id, merchant_uid)
         allowed: List[tuple] = []
         for row, d in decisions:
@@ -858,7 +926,10 @@ async def run_offer_sync_cycle() -> dict:
 
     from backend.security.store_context import list_active_stores
 
-    totals = {"candidates": 0, "no_op": 0, "written": 0, "deferred": 0, "verified": 0, "errors": 0}
+    totals = {
+        "candidates": 0, "no_op": 0, "written": 0, "deferred": 0,
+        "verified": 0, "errors": 0, "held_by_feed": 0,
+    }
     for store in await list_active_stores():
         try:
             # merchant_id берём из БД (Store.merchant_id), а НЕ через
@@ -881,8 +952,11 @@ async def run_offer_sync_cycle() -> dict:
             logger.error("[OfferSync] Стор %s: флаш не удался: %s", store.store_id, e)
     if totals["written"] or totals["no_op"] or totals["deferred"]:
         logger.info(
-            "📤 [OfferSync] Записано %d, погашено вхолостую %d, отложено %d, сверок %d.",
-            totals["written"], totals["no_op"], totals["deferred"], totals["verified"],
+            "📤 [OfferSync] Записано %d, погашено вхолостую %d, отложено %d%s, сверок %d.",
+            totals["written"], totals["no_op"], totals["deferred"],
+            " (из них придержано летящим файлом {})".format(totals["held_by_feed"])
+            if totals["held_by_feed"] else "",
+            totals["verified"],
         )
     return totals
 
