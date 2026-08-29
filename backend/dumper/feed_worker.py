@@ -236,9 +236,12 @@ def run_for_store(store, on_flight=None) -> dict:
         )
         return result
 
-    from backend.dumper.feed_uploader import send_plan
+    from backend.dumper.feed_uploader import make_file_name, send_plan
 
-    feed_state.mark_sent(store.store_id, "pending", plan.snapshot.taken_at)
+    # Имя знаем ДО отправки: по нему летящий файл ищут ротация копий и
+    # придержка JSON. См. докстринг make_file_name.
+    file_name = make_file_name(str(store.merchant_id))
+    feed_state.mark_sent(store.store_id, file_name, plan.snapshot.taken_at)
     window = feed_state.blind_window(store.store_id)
     if window:
         # Единственная защита от потери чужой правки — предупреждение. Ловушки
@@ -264,6 +267,7 @@ def run_for_store(store, on_flight=None) -> dict:
         verdict = send_plan(
             plan, store.store_id, str(store.merchant_id),
             confirm=str(store.merchant_id), allow_changes=True,
+            filename=file_name,
         )
     except Exception as err:
         # Полёт закрываем в любом случае: иначе один неудачный запуск запер бы
@@ -285,9 +289,21 @@ def run_for_store(store, on_flight=None) -> dict:
 
         from backend.dumper.feed_settle import settle_file
 
-        result["report"] = settle_file(
-            store.store_id, pathlib.Path(verdict.archive_path), verdict, token=store.token,
-        )
+        try:
+            result["report"] = settle_file(
+                store.store_id, pathlib.Path(verdict.archive_path), verdict,
+                token=store.token,
+            )
+        except Exception as err:
+            # Полёт закрываем ОБЯЗАТЕЛЬНО: `mark_settled` сюда уже не доедет, а
+            # непустой `in_flight` запирает магазин навсегда. Замерено 2026-08-29:
+            # сверка упала на пропавшем архиве, и фид молча встал.
+            feed_state.save(store.store_id, in_flight=None, in_flight_until=None)
+            result["disabled"] = (
+                "файл отправлен, но сверка не состоялась ({!r}) — исход не проверен".format(err)
+            )
+            feed_state.disable(store.store_id, result["disabled"])
+            logger.error("[FeedWorker] Стор %s: сверка упала: %r", store.store_id, err)
     else:
         # Архив не записался — сверять не с чем. Это не повод считать, что всё
         # хорошо: мы только что объявили весь каталог и не можем проверить исход.

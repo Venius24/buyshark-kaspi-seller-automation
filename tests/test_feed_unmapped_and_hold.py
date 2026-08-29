@@ -567,3 +567,65 @@ def test_the_comparison_survives_invisible_characters(monkeypatch):
     )
 
     assert feed_plan.missing_from_price_list("s", _Snapshot([]), {"H477-0009"}) == ([], None)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ТРЕТИЙ дефект, вскрытый боевой отправкой 2026-08-29. Воркер отмечал полёт
+# литералом "pending" вместо имени файла, а имя рождалось внутри send_plan.
+# Всё, что ищет летящий файл ПО ИМЕНИ, промахивалось: ротация копий сжала его
+# прямо во время полёта (сверка упала на FileNotFoundError и заперла магазин
+# непустым in_flight), а придержка JSON не находила объявленного и молча не
+# придерживала ничего — то есть ВТОРОЙ дефект не был вылечен в бою ни разу.
+# ─────────────────────────────────────────────────────────────────────────────
+def test_worker_marks_the_flight_with_the_real_file_name():
+    """В состоянии полёта обязано лежать имя файла, а не заглушка."""
+    import inspect
+
+    from backend.dumper import feed_worker
+
+    src = inspect.getsource(feed_worker.run_for_store)
+    assert 'mark_sent(store.store_id, "pending"' not in src, (
+        "полёт снова отмечается литералом — ротация и придержка ослепнут"
+    )
+    assert "mark_sent(store.store_id, file_name" in src
+    assert "filename=file_name" in src
+
+
+def test_name_generator_is_shared_with_the_uploader():
+    """Отправитель и воркер зовут один генератор, а не два разных формата."""
+    from backend.dumper.feed_uploader import make_file_name
+
+    name = make_file_name("20186986")
+    assert name.startswith("buyshark-20186986-")
+    assert name.endswith(".xml")
+
+
+def test_rotate_keeps_a_file_whose_name_is_in_flight(tmp_path, monkeypatch):
+    """Ротация не трогает летящий файл — по нему пойдёт сверка после вердикта."""
+    from backend.dumper import feed_backup
+
+    sid = "s-rotate"
+    store_dir = tmp_path / sid
+    (store_dir / "backups").mkdir(parents=True)
+    monkeypatch.setattr(feed_state, "STATE_DIR", tmp_path, raising=False)
+    monkeypatch.setattr(feed_backup, "_backup_dir", lambda s: tmp_path / str(s) / "backups")
+
+    flying = store_dir / "buyshark-1-20260829-085730.xml"
+    flying.write_bytes(b"<offers/>")
+    feed_state.save(sid, in_flight=flying.name)
+
+    feed_backup.rotate(sid)
+
+    assert flying.exists(), "летящий файл сжали — сверке нечего будет читать"
+
+
+def test_a_crashed_settle_always_closes_the_flight():
+    """Упавшая сверка не смеет оставить in_flight — иначе магазин заперт навсегда."""
+    import inspect
+
+    from backend.dumper import feed_worker
+
+    src = inspect.getsource(feed_worker.run_for_store)
+    tail = src[src.index("settle_file("):]
+    assert "except Exception" in tail, "падение сверки не перехвачено"
+    assert "in_flight=None" in tail, "полёт не закрывается при падении сверки"

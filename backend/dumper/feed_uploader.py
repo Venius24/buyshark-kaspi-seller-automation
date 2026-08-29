@@ -361,6 +361,23 @@ def archive_verdict(path, verdict: UploadVerdict) -> None:
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def make_file_name(merchant_uid: str) -> str:
+    """
+    Имя отправляемого файла. Живёт отдельной функцией, потому что его обязан
+    знать не только отправитель.
+
+    Пока имя рождалось внутри `send_plan`, воркер отмечал полёт литералом
+    "pending" — и всё, что ищет летящий файл ПО ИМЕНИ, промахивалось: ротация
+    копий не узнавала его и сжимала прямо во время полёта (сверка после
+    вердикта падала на FileNotFoundError), а придержка JSON не находила
+    объявленного и молча не придерживала ничего. Замерено на Бархане
+    2026-08-29. Поэтому имя генерируется ДО отправки и передаётся вниз.
+    """
+    return "buyshark-{}-{:%Y%m%d-%H%M%S}.xml".format(
+        merchant_uid, datetime.datetime.now()
+    )
+
+
 def send_plan(
     plan,
     store_id,
@@ -452,9 +469,7 @@ def send_plan(
     before = fetch_last_file(store_id, merchant_uid)
     previous_id = (before or {}).get("id")
 
-    name = filename or "buyshark-{}-{:%Y%m%d-%H%M%S}.xml".format(
-        expected_merchant, datetime.datetime.now()
-    )
+    name = filename or make_file_name(expected_merchant)
     logger.warning(
         "[FeedUpload] ОТПРАВКА ФАЙЛА: %s, офферов %s, изменений %s, предыдущий файл %s",
         name, plan.total, plan.changed_offers, previous_id,
