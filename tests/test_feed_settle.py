@@ -418,3 +418,86 @@ class UnexpectedArchiveTestCase(unittest.TestCase):
         meta = {"archived_before": ["SEED"]}
         snapshot = self._snapshot(["SEED", "X"])
         assert feed_settle._unexpected_archived(meta, {}, snapshot) == ["X"]
+
+
+class MovedAfterSnapshotTestCase(unittest.TestCase):
+    """
+    Объяснение расхождений. Файл летит минутами, и всё это время демпер живёт
+    своей жизнью: он и решает, и успевает записать — внутри одного полёта.
+
+    Живой прогон 2026-08-29 (файл 11:25:01 → 11:43:28): в 11:38:41 демпер
+    решил `K471-0003-1 1087 -> 1084`, в 11:39:37 флашер написал 41 запись, а
+    сверка отчиталась «расхождений 54, объяснённых 0». Причина — объяснение
+    искало ТОЛЬКО открытые намерения (`desired_at`), а исполненное намерение
+    погашено и из очереди исчезло. Отсюда и вывод «цену поставили не мы»
+    (HANDOFF §3.82), которого на самом деле не было.
+    """
+
+    def setUp(self):
+        import backend.db.models  # noqa: F401
+        from backend.db.database import Base
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        self._tmp = tempfile.mkdtemp()
+        path = os.path.join(self._tmp, "moved.db").replace(os.sep, "/")
+        self._engine = create_engine(f"sqlite:///{path}", connect_args={"check_same_thread": False})
+        Base.metadata.create_all(self._engine)
+
+        from backend import state_helpers
+        self._patch = patch.object(
+            state_helpers, "_get_sync_db_session", side_effect=lambda: Session(self._engine)
+        )
+        self._patch.start()
+
+    def tearDown(self):
+        self._patch.stop()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _row(self, sku, *, desired_at=None, pushed_at=None, store="s1"):
+        from backend.db.models import KaspiOfferSyncDB
+        from sqlalchemy.orm import Session
+
+        with Session(self._engine) as s:
+            s.add(KaspiOfferSyncDB(
+                store_id=store, sku=sku, master_sku="M1", model="Товар",
+                store_suffix="001", city_id="750000000",
+                desired_at=desired_at, pushed_at=pushed_at,
+                priority=0, reason="test",
+            ))
+            s.commit()
+
+    def test_intent_born_and_executed_inside_the_flight_is_explained(self):
+        """
+        Главный случай, ради которого правка и делалась: намерение родилось и
+        было исполнено, пока файл летел. `desired_at` уже пуст — виден только
+        `pushed_at`, и без него расхождение выглядело бы необъяснённым.
+        """
+        self._row(
+            "K471-0003-1",
+            desired_at=None,
+            pushed_at=SNAP_AT + datetime.timedelta(minutes=13),
+        )
+
+        assert feed_settle._moved_after_snapshot("s1", SNAP_AT) == {"K471-0003-1"}
+
+    def test_intent_still_queued_is_explained(self):
+        """Прежнее правило не потерялось: открытое намерение объясняет по-старому."""
+        self._row("A", desired_at=SNAP_AT + datetime.timedelta(minutes=2))
+
+        assert feed_settle._moved_after_snapshot("s1", SNAP_AT) == {"A"}
+
+    def test_a_write_older_than_the_snapshot_explains_nothing(self):
+        """
+        Зеркало. Запись ДО снимка — это ровно то значение, которое файл и
+        объявил: расходиться нечему, а объяснив его, мы спрятали бы настоящий
+        случай «запись не применилась».
+        """
+        self._row("B", pushed_at=SNAP_AT - datetime.timedelta(minutes=1))
+
+        assert feed_settle._moved_after_snapshot("s1", SNAP_AT) == set()
+
+    def test_another_store_is_not_borrowed_as_an_explanation(self):
+        self._row("C", pushed_at=SNAP_AT + datetime.timedelta(minutes=5), store="s2")
+
+        assert feed_settle._moved_after_snapshot("s1", SNAP_AT) == set()

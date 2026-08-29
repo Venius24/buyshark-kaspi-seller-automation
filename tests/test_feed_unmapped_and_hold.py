@@ -419,7 +419,7 @@ def test_a_price_the_damper_moved_after_the_snapshot_is_not_an_alarm(
     расхождений (79 цена, 38 остаток) при полностью целом каталоге.
     """
     monkeypatch.setattr(feed_settle, "settle_intents", lambda *a: (0, 0))
-    monkeypatch.setattr(feed_settle, "_intents_newer_than", lambda *a: {"A"})
+    monkeypatch.setattr(feed_settle, "_moved_after_snapshot", lambda *a: {"A"})
     path = archive([_offer("A", price=1890)], active_before=1)
 
     report = settle_file(
@@ -438,7 +438,7 @@ def test_a_price_that_did_not_take_is_still_an_alarm(archive, store, monkeypatch
     значит запись не применилась. Ровно ради этого сверка и существует.
     """
     monkeypatch.setattr(feed_settle, "settle_intents", lambda *a: (0, 0))
-    monkeypatch.setattr(feed_settle, "_intents_newer_than", lambda *a: set())
+    monkeypatch.setattr(feed_settle, "_moved_after_snapshot", lambda *a: set())
     path = archive([_offer("A", price=1890)], active_before=1)
 
     report = settle_file(
@@ -456,7 +456,7 @@ def test_explained_mismatches_are_never_swallowed(archive, store, monkeypatch):
     выброшенное расхождение потом невозможно ни объяснить, ни пересчитать.
     """
     monkeypatch.setattr(feed_settle, "settle_intents", lambda *a: (0, 0))
-    monkeypatch.setattr(feed_settle, "_intents_newer_than", lambda *a: {"A"})
+    monkeypatch.setattr(feed_settle, "_moved_after_snapshot", lambda *a: {"A"})
     path = archive([_offer("A", price=1890)], active_before=1)
 
     report = settle_file(

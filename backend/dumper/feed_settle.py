@@ -107,7 +107,7 @@ class SettleReport:
     # как «всё разобрано».
     unmapped_unclassified: int = 0
     # Расхождения, объяснённые движением мира после снимка — см.
-    # `_intents_newer_than`. В отчёте они есть, тревогой не будят.
+    # `_moved_after_snapshot`. В отчёте они есть, тревогой не будят.
     mismatches_explained: List[dict] = field(default_factory=list)
     alarms: List[str] = field(default_factory=list)
 
@@ -205,25 +205,39 @@ def classify_unmapped(declared: Dict[str, dict], snapshot) -> tuple:
     return sorted(unexplained), sorted(expected)
 
 
-def _intents_newer_than(store_id, snapshot_at) -> set:
+def _moved_after_snapshot(store_id, snapshot_at) -> set:
     """
-    Артикулы, по которым намерение появилось уже ПОСЛЕ снимка файла.
+    Артикулы, по которым мир уехал вперёд уже ПОСЛЕ снимка файла.
 
     Нужны, чтобы отличить «файл не сработал» от «мир уехал вперёд». Файл несёт
     значения на момент T0 и применяется минутами; всё, что демпер или связка
     остатков решили за это время, в нём физически быть не могло. Каталог тогда
     честно показывает НЕ то, что мы объявили, — и это не сбой, а работа
-    транспорта: такое намерение остаётся в очереди и уезжает JSON-ом.
+    транспорта.
 
-    Правило то же самое, по которому `settle_intents` решает, что гасить
-    (`desired_at <= snapshot_at`), и это не совпадение: закрываем и не будим
-    ровно по одной и той же границе.
+    Признаков ДВА, и второй не менее важен первого:
 
-    Замер, ради которого это появилось: прогон настоящего файла 28.08 дал 117
-    расхождений (79 по цене, 38 по остатку) при полностью целом каталоге. Не
-    отделив их, сверка слала бы тревогу после каждой отправки.
+      * `desired_at > snapshot_at` — намерение родилось после снимка и всё ещё
+        стоит в очереди. Уедет обычным флашем.
+      * `pushed_at > snapshot_at` — намерение родилось после снимка и уже
+        УЕХАЛО JSON-ом, пока файл летел. Строка при этом погашена
+        (`desired_at IS NULL`), и по первому признаку она не видна вовсе.
+
+    Второй признак стоил разбора живого прогона. 2026-08-29 файл летел с
+    11:25:01 по 11:43:28; в 11:38:41 демпер решил `K471-0003-1 1087 -> 1084` и
+    `X171-0016-2 1277 -> 1273`, в 11:39:37 флашер написал 41 запись — всё
+    внутри полёта. К моменту сверки эти намерения были уже погашены, из
+    очереди исчезли, и отчёт сказал «расхождений 54, объяснённых 0». Вывод
+    «цену поставили не мы, и записи об этом у нас нет» (HANDOFF §3.82) был
+    ошибкой этого запроса, а не находкой: писатель — наш собственный флашер,
+    и `pushed_at` его называет поимённо (проверено по проду: 41 строка с
+    `pushed_at` внутри окна полёта).
+
+    Граница у первого признака та же, по которой `settle_intents` решает, что
+    гасить (`desired_at <= snapshot_at`), и это не совпадение: закрываем и не
+    будим ровно по одной и той же черте.
     """
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
 
     from backend.db.models import KaspiOfferSyncDB
     from backend.services.offer_sync import _session
@@ -236,8 +250,12 @@ def _intents_newer_than(store_id, snapshot_at) -> set:
         rows = session.execute(
             select(KaspiOfferSyncDB.sku).where(
                 KaspiOfferSyncDB.store_id == store_id,
-                KaspiOfferSyncDB.desired_at.isnot(None),
-                KaspiOfferSyncDB.desired_at > snapshot_at,
+                # NULL в сравнении даёт NULL и отсеивается сам — отдельная
+                # проверка на пустоту тут была бы шумом.
+                or_(
+                    KaspiOfferSyncDB.desired_at > snapshot_at,
+                    KaspiOfferSyncDB.pushed_at > snapshot_at,
+                ),
             )
         ).all()
         return {str(r[0]) for r in rows}
@@ -631,14 +649,15 @@ def settle_file(store_id, archive_path, verdict, snapshot=None, token=None) -> S
 
     # Расхождения делятся на объяснённые и настоящие. Объяснённое — то, по чему
     # мир уехал вперёд уже после снимка: файл нёс значение на T0, а демпер или
-    # связка остатков решили иначе, пока он летел. Такое намерение остаётся в
-    # очереди и уедет JSON-ом — будить человека тут не о чем.
+    # связка остатков решили иначе, пока он летел. Такое намерение либо ещё
+    # стоит в очереди, либо уже уехало JSON-ом внутри полёта — будить человека
+    # тут не о чем ни в том, ни в другом случае.
     #
     # Прячется при этом НИЧЕГО: объяснённые лежат в отчёте отдельным полем.
     # Тревога — только по тем, где мир не двигался, а каталог всё равно
     # показывает не то, что мы объявили. Вот это и есть «запись не применилась».
     found = compare_with_catalog(declared, snapshot, ignore=expected_unmapped)
-    moved = _intents_newer_than(store_id, snapshot_at)
+    moved = _moved_after_snapshot(store_id, snapshot_at)
     report.mismatches = [m for m in found if m["sku"] not in moved]
     report.mismatches_explained = [m for m in found if m["sku"] in moved]
     if report.mismatches:
