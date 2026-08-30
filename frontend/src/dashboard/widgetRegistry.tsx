@@ -13,6 +13,7 @@ import { CompetitorLeaderboard } from '../components/CompetitorLeaderboard';
 import { CatalogCoverageGauge } from '../components/CatalogCoverageGauge';
 import { HourlyHeatmap } from '../components/HourlyHeatmap';
 import { ChatActivityHeatmap } from '../components/ChatActivityHeatmap';
+import { ReviewCampaignWidget } from '../components/ReviewCampaignWidget';
 import { HelpHint } from '../components/shared/HelpHint';
 
 export type ChartType = 'bar' | 'line' | 'area' | 'pie' | 'donut';
@@ -159,10 +160,17 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
     render: (ctx) => <ChatActivityHeatmap key="chat_activity" data={ctx.insightsStats.chat_activity} />,
   },
   {
+    id: 'review_campaign',
+    title: 'Рассылка «Отзыв»: воронка и рейтинг',
+    defaultVisible: true,
+    defaultOrder: 8,
+    render: () => <ReviewCampaignWidget key="review_campaign" />,
+  },
+  {
     id: 'system_status',
     title: 'Статус подключений',
     defaultVisible: true,
-    defaultOrder: 8,
+    defaultOrder: 9,
     render: (ctx) => (
       <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }} key="system_status">
         <h2 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -217,7 +225,7 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
     id: 'quick_actions',
     title: 'Быстрые действия',
     defaultVisible: true,
-    defaultOrder: 9,
+    defaultOrder: 10,
     render: (ctx) => (
       <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }} key="quick_actions">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

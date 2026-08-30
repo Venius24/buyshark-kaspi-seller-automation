@@ -2,12 +2,20 @@ import os
 import json
 import logging
 import threading
+import time
 from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+# Анти-шторм релогинов MC: после неудачной попытки логина стор сидит в
+# cooldown (см. _refresh_mc_session) — иначе каждый тикер каждого воркера
+# перезапускает браузер-логин хоть всю ночь. Значение — env, чтобы можно
+# было ужесточить/отключить (0 = как раньше, без cooldown) без деплоя кода.
+_MC_RELOGIN_COOLDOWN_SECONDS = int(os.getenv("MC_RELOGIN_COOLDOWN_SECONDS", "900"))
+_mc_relogin_fail_at: dict = {}  # store_id -> time.monotonic() последней неудачи
 
 # Кэш engine для Postgres-пути (прод) — см. _get_sync_db_session().
 _sync_engine_cache = {"engine": None, "url": None}
@@ -893,6 +901,12 @@ def _refresh_mc_session(store_id: Optional[str] = None) -> bool:
     куки приходят от worker.send_cmd напрямую (не через общий файл — см.
     playwright_worker.py, де-глобализация) и сразу копируются в
     Store.encrypted_cookies ИМЕННО этого стора.
+
+    Анти-шторм: после НЕУДАЧНОГО релогина следующий запуск для этого стора
+    блокируется на MC_RELOGIN_COOLDOWN_SECONDS (env, дефолт 900с). Без него
+    каждый 30-45с тикер всех воркеров перезапускал бы браузер-логин круглосуточно,
+    если пароль сменился/аккаунт залочен — до блокировки аккаунта на стороне Kaspi.
+    Успешный путь не затронут: cooldown ставится только фактом неудачи.
     """
     creds = _load_mc_credentials(store_id=store_id)
     if not creds:
@@ -906,6 +920,18 @@ def _refresh_mc_session(store_id: Optional[str] = None) -> bool:
     # реально параллельно (пул потоков в playwright_worker.py).
     with _get_mc_refresh_lock(store_id):
         try:
+            from backend.services import ops_metrics
+
+            now_mono = time.monotonic()
+            last_fail = _mc_relogin_fail_at.get(store_id)
+            if last_fail is not None and (now_mono - last_fail) < _MC_RELOGIN_COOLDOWN_SECONDS:
+                ops_metrics.inc("mc_relogin_skipped_cooldown")
+                logger.warning(
+                    f"Релогин MC для стора {store_id!r} пропущен: предыдущая попытка провалилась "
+                    f"{int(now_mono - last_fail)}с назад (cooldown {_MC_RELOGIN_COOLDOWN_SECONDS}с). "
+                    "Следующая попытка — по истечении cooldown или после ручного входа."
+                )
+                return False
             from backend.services.playwright_worker import worker, Command
             success, msg, cookies = worker.send_cmd(Command.LOGIN, {"email": email, "password": password})
             if success:
@@ -914,9 +940,21 @@ def _refresh_mc_session(store_id: Optional[str] = None) -> bool:
                     _save_mc_cookies_for_store(store_id, cookies)
             else:
                 logger.error(f"Автообновление сессии Kaspi MC не удалось: {msg}")
+            if success:
+                _mc_relogin_fail_at.pop(store_id, None)
+                ops_metrics.mc_relogin_ok(store_id)
+            else:
+                _mc_relogin_fail_at[store_id] = time.monotonic()
+                ops_metrics.mc_relogin_failed(store_id, str(msg)[:200])
             return bool(success)
         except Exception as e:
             logger.error(f"Автообновление сессии Kaspi MC вызвало исключение: {e}")
+            _mc_relogin_fail_at[store_id] = time.monotonic()
+            try:
+                from backend.services import ops_metrics
+                ops_metrics.mc_relogin_failed(store_id, str(e)[:200])
+            except Exception:
+                pass
             return False
 
 def _mc_api_request(method: str, url: str, store_id: Optional[str] = None, retry_on_401: bool = True, **kwargs):
@@ -1428,6 +1466,28 @@ def _load_quality_metrics_latest(store_id: str) -> Optional[dict]:
             "raw_payload": json.loads(row.raw_payload or "{}"),
             "fetched_at": row.fetched_at.isoformat() if row.fetched_at else None,
         }
+    finally:
+        session.close()
+
+
+def _load_quality_metrics_history(store_id: str, days: int = 30) -> list:
+    """Ряд дневных снапшотов rating_percentage за period — для тренда рейтинга
+    на дашборде рядом с воронкой рассылки «Отзыв» (сама рассылка не
+    атрибутируется к конкретным отзывам, см. review_campaign.py — тренд тут
+    даёт только косвенную корреляцию, не причинность)."""
+    import datetime as _dt
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import KaspiQualityMetricsDailyDB
+        since = (_dt.datetime.utcnow() - _dt.timedelta(days=days)).strftime("%Y-%m-%d")
+        rows = session.scalars(
+            select(KaspiQualityMetricsDailyDB)
+            .where(KaspiQualityMetricsDailyDB.store_id == store_id, KaspiQualityMetricsDailyDB.date >= since)
+            .order_by(KaspiQualityMetricsDailyDB.date.asc())
+        ).all()
+        return [{"date": r.date, "rating_percentage": r.rating_percentage} for r in rows]
     finally:
         session.close()
 

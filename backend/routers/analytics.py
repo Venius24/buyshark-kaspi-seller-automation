@@ -15,7 +15,7 @@ from backend.state_helpers import (
     _load_products, _load_analytics_snapshot, _load_dumper_logs,
     _load_sales_summary, _load_analytics_history, _load_price_war_snapshot,
     _load_competitor_leaderboard, _load_chat_activity, _get_sync_db_session,
-    _load_quality_metrics_latest,
+    _load_quality_metrics_latest, _load_quality_metrics_history,
 )
 from backend.dumper.config import _decode_base64_if_needed
 from backend.dumper.radar import _fetch_offers_sync
@@ -547,3 +547,14 @@ def get_quality_metrics(ctx: StoreContext = Depends(get_store_context)):
     if not snapshot:
         return {"success": True, "has_data": False, "data": None}
     return {"success": True, "has_data": True, "data": snapshot}
+
+
+@router.get("/quality-metrics-history")
+def get_quality_metrics_history(days: int = 30, ctx: StoreContext = Depends(get_store_context)):
+    """Ряд дневных значений rating_percentage за period — для тренда рейтинга
+    на дашборде. Не привязка отзывов к рассылке (Kaspi её не даёт, см.
+    review_campaign.py), а косвенный график "рейтинг магазина во времени"
+    рядом с воронкой рассылки «Отзыв» (/api/chatbot/outbound/stats)."""
+    days = max(7, min(days, 180))
+    history = _load_quality_metrics_history(ctx.store_id, days=days)
+    return {"success": True, "history": history}
