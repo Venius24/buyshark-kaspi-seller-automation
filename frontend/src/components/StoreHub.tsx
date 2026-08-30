@@ -22,6 +22,7 @@ import { apiFetch, API_URL } from '../api';
 import { fetchProfile, fetchStores, fetchBillingPlans } from '../queries';
 import { useActiveStoreId, setActiveStoreId as setSharedActiveStoreId } from '../storeContext';
 import { formatTenge } from '../utils/money';
+import { waLink } from '../data/contacts';
 import emptyStateIllustration from '../assets/sprites/storehub_empty_illustration.png';
 
 export interface StoreItem {
@@ -548,7 +549,18 @@ export const StoreHub: React.FC = () => {
             <form onSubmit={handleConnectFullStore} style={{ padding: '20px' }}>
               {errorMsg && (
                 <div style={styles.errorBox}>
-                  <AlertTriangle size={16} style={{ flexShrink: 0 }} /> {errorMsg}
+                  <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                  <span>
+                    {errorMsg}{' '}
+                    <a
+                      href={waLink('storehub-error', `Здравствуйте! Не получается подключить магазин к BuyShark. Ошибка: ${errorMsg}`)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={styles.errorLink}
+                    >
+                      {t('storehub_error_help')}
+                    </a>
+                  </span>
                 </div>
               )}
 
@@ -600,6 +612,17 @@ export const StoreHub: React.FC = () => {
                   onChange={(e) => setMcPassword(e.target.value)}
                   className="form-input"
                 />
+                <p style={styles.trustLine}>
+                  {t('storehub_connect_help')}{' '}
+                  <a
+                    href={waLink('storehub-connect', 'Здравствуйте! Не уверен(а), как подключить магазин к BuyShark, поможете?')}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: 'var(--accent, #6366f1)', fontWeight: 600 }}
+                  >
+                    {t('storehub_connect_link')}
+                  </a>
+                </p>
               </div>
 
               {/* Field 5: тариф — выбор даёт 7 дней бесплатно на выбранный тариф; без
@@ -797,6 +820,17 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
+  },
+  errorLink: {
+    color: '#f3a2a8',
+    fontWeight: 700,
+    textDecoration: 'underline',
+  },
+  trustLine: {
+    marginTop: '6px',
+    marginBottom: 0,
+    fontSize: '12px',
+    color: '#9ca3af',
   },
   emptyStateIllustration: {
     width: '200px',

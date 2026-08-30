@@ -83,9 +83,22 @@
 
 .actions {
   display: flex;
+  align-items: center;
   gap: 16px;
   margin-bottom: 44px;
   flex-wrap: wrap;
+}
+
+.waLink {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--fog);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.waLink:hover {
+  color: var(--white);
 }
 
 .btn {

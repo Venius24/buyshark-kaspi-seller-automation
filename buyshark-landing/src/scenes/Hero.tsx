@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { TRIAL_DAYS } from '../data/pricing';
+import { waLink } from '../data/contacts';
 import styles from './Hero.module.css';
 
 function scrollToPricing() {
@@ -58,6 +59,14 @@ export function Hero() {
           <button className={styles.btnSecondary} onClick={scrollToPricing}>
             Смотреть тарифы ↓
           </button>
+          <a
+            className={styles.waLink}
+            href={waLink('hero', 'Здравствуйте! У меня вопрос про BuyShark.')}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            или напишите нам в WhatsApp
+          </a>
         </div>
         <div className={styles.stats}>
           <div>

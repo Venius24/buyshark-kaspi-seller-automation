@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { TRIAL_DAYS } from '../data/pricing';
+import { waLink } from '../data/contacts';
 import styles from './FinalCta.module.css';
 
 export function FinalCta() {
@@ -38,6 +39,16 @@ export function FinalCta() {
         <a className={styles.cta} href="https://app.buyshark.kz/">
           Начать бесплатно
         </a>
+        <p className={styles.waLine}>
+          Есть вопросы?{' '}
+          <a
+            href={waLink('final-cta', 'Здравствуйте! У меня вопрос про BuyShark.')}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Ответим в WhatsApp
+          </a>
+        </p>
       </div>
     </section>
   );

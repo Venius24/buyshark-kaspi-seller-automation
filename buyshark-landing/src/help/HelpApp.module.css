@@ -157,6 +157,24 @@
   color: var(--target-yellow);
 }
 
+.contactCta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 1200px;
+  margin: 60px auto 0;
+  padding: 40px var(--section-pad-x);
+  text-align: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.contactCta p {
+  color: var(--fog);
+  font-size: 15px;
+  margin: 0;
+}
+
 .linkButton {
   display: inline-flex;
   align-self: flex-start;

@@ -55,3 +55,16 @@
   background: var(--target-red);
   color: var(--white);
 }
+
+.waLine {
+  margin: 20px 0 0;
+  font-size: 14px;
+  color: var(--fog);
+}
+
+.waLine a {
+  color: var(--white);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

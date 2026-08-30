@@ -7,6 +7,7 @@
     "skip": "Өткізіп жіберу",
     "next": "Келесі",
     "finish": "Түсінікті",
+    "tour_end_contact": "Сұрақтарыңыз бар ма? Байланыстамыз:",
     "step_stores_title": "Kaspi дүкендеріңіз",
     "step_stores_text": "Мұнда қосылған Kaspi дүкендерінің тізімі. Олардың арасында ауысуға және жаңасын қосуға болады.",
     "step_global_control_title": "Жаһандық басқару",
@@ -82,7 +83,13 @@
     "kind_charge_prompt": "Ығысу — кеңейтілген промпт",
     "kind_referral_payout": "Рефераль төлемі",
     "kind_adjustment": "Түзету",
-    "kind_refund": "Қайтарым"
+    "kind_refund": "Қайтарым",
+    "topup_button": "Балансты толықтыру",
+    "topup_modal_title": "Балансты толықтыру",
+    "topup_amount_label": "Ағымдағы тариф бойынша төленетін сома",
+    "topup_instructions": "Kaspi арқылы %phone% нөміріне аударыңыз, содан кейін бізге жазыңыз — бір сағат ішінде есептейміз.",
+    "topup_whatsapp_button": "WhatsApp-қа жазу",
+    "close": "Жабу"
   },
   "sidebar": {
     "subtitle": "Kaspi Автопилот",
@@ -112,6 +119,7 @@
     "help": "Көмек",
     "import_from_pricefeed": "PriceFeed-тен импорт",
     "show_tour": "Кабинет турын көрсету",
+    "support": "Қолдау қызметі",
     "kaspi_api_online": "Kaspi API Online",
     "logout_tooltip": "Есептік жазбадан шығу"
   },
@@ -133,6 +141,7 @@
     "toggle_create_account": "Жүйеде алғашқы рет пе?",
     "toggle_btn_login": "Кіру",
     "toggle_btn_register": "Есептік жазба құру",
+    "need_help": "Көмек керек пе?",
     "error_server": "Сервер қатесі (%code%)",
     "error_502": "Сервер қол жетімсіз (502 Bad Gateway). Бэкенд күйін тексеріңіз!",
     "error_500": "Бэкенд қатесі (500 Internal Server Error)",
@@ -445,7 +454,10 @@
   "component_store_hub": {
     "error_store_name": "Дүкен атауын көрсетіңіз (мысалы, Barkhan)",
     "error_api_token": "Kaspi кабинетінен API токенін (X-Auth-Token) енгізіңіз",
-    "error_connection": "Дүкенді қосу қатесі"
+    "error_connection": "Дүкенді қосу қатесі",
+    "storehub_connect_help": "Сенімді емессіз бе?",
+    "storehub_connect_link": "Бірге жазып қосамыз — тегін",
+    "storehub_error_help": "Болмай тұр ма? Жазыңыз, шешеміз"
   },
   "tab_autolist": {
     "status_draft": "Қараламасы",

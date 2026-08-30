@@ -1,3 +1,4 @@
+import { waLink } from '../data/contacts';
 import styles from './Nav.module.css';
 
 const APP_URL = 'https://app.buyshark.kz/';
@@ -16,6 +17,14 @@ export function Nav() {
         <a href={APP_URL}>Кабинет</a>
       </div>
       <div className={styles.actions}>
+        <a
+          className={styles.btnText}
+          href={waLink('nav', 'Здравствуйте! У меня вопрос про BuyShark.')}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Написать
+        </a>
         <a className={styles.btnGhost} href={APP_URL}>
           Войти
         </a>

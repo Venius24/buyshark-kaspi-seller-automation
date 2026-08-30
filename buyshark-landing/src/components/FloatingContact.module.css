@@ -1,0 +1,30 @@
+.fab {
+  position: fixed;
+  right: clamp(1rem, 3vw, 2rem);
+  bottom: clamp(1rem, 3vw, 2rem);
+  z-index: 60;
+  width: 56px;
+  height: 56px;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--abyss);
+  background: linear-gradient(135deg, #25d366, #1da851);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4), 0 0 20px rgba(37, 211, 102, 0.4);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.fab:hover {
+  transform: scale(1.06);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), 0 0 26px rgba(37, 211, 102, 0.55);
+}
+
+@media (max-width: 600px) {
+  .fab {
+    width: 50px;
+    height: 50px;
+  }
+}

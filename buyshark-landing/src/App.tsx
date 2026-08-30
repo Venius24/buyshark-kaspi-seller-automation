@@ -1,5 +1,6 @@
 import { Nav } from './components/Nav';
 import { Footer } from './components/Footer';
+import { FloatingContact } from './components/FloatingContact';
 import { Hero } from './scenes/Hero';
 import { Problem } from './scenes/Problem';
 import { Features } from './scenes/Features';
@@ -18,6 +19,7 @@ function App() {
         <FinalCta />
       </main>
       <Footer />
+      <FloatingContact />
     </>
   );
 }

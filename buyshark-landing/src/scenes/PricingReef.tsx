@@ -1,12 +1,13 @@
 import { useEffect, useRef, type CSSProperties } from 'react';
 import { gsap, ScrollTrigger } from '../lib/gsap';
 import { PRICING_TIERS, TRIAL_DAYS, formatTenge, type PricingTier } from '../data/pricing';
+import { waLink } from '../data/contacts';
 import styles from './PricingReef.module.css';
 
 // each tier's feature list is additive on top of the previous one — the copy
 // below spells that out explicitly ("всё из ...") rather than leaving it implied
 function ctaLabel(tier: PricingTier): string {
-  return tier.priceMinor === null ? 'Оставить заявку' : `Попробовать ${TRIAL_DAYS} дней`;
+  return tier.priceMinor === null ? 'Обсудить цену' : `Попробовать ${TRIAL_DAYS} дней`;
 }
 
 function priceLabel(tier: PricingTier): { price: string; priceNote?: string } {
@@ -93,13 +94,38 @@ export function PricingReef() {
                   ))}
                 </ul>
 
-                <button className={styles.cta} onClick={scrollToCta}>
-                  {ctaLabel(tier)}
-                </button>
+                {tier.priceMinor === null ? (
+                  <a
+                    className={styles.cta}
+                    href={waLink(
+                      'pricing-giga',
+                      'Здравствуйте! У меня магазин на Kaspi, интересует тариф ГигаПредприятие.',
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {ctaLabel(tier)}
+                  </a>
+                ) : (
+                  <button className={styles.cta} onClick={scrollToCta}>
+                    {ctaLabel(tier)}
+                  </button>
+                )}
               </div>
             );
           })}
         </div>
+
+        <p className={styles.helpLine}>
+          Не подходит ни один тариф или не знаете, какой выбрать?{' '}
+          <a
+            href={waLink('pricing-help', 'Здравствуйте! Не знаю, какой тариф BuyShark мне подойдёт, подскажите?')}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Напишите, подберём
+          </a>
+        </p>
 
         {/* Виден только на телефоне (см. .swipeHint в модуле стилей) — на
             узком экране карточки едут каруселью, и без подписи не все

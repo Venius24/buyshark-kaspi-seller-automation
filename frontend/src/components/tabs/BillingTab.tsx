@@ -1,11 +1,12 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import { Lock } from 'lucide-react';
+import { Lock, X } from 'lucide-react';
 import { useActiveStoreId } from '../../storeContext';
-import { fetchBillingSummary, fetchBillingPlans, fetchBillingTransactions } from '../../queries';
+import { fetchBillingSummary, fetchBillingPlans, fetchBillingTransactions, fetchStores } from '../../queries';
 import { formatTenge } from '../../utils/money';
 import { HelpHint } from '../shared/HelpHint';
+import { CONTACTS, waLink } from '../../data/contacts';
 
 const STATUS_LABEL: Record<string, string> = {
   ACTIVE: 'status_active',
@@ -26,6 +27,7 @@ const KIND_LABEL: Record<string, string> = {
 export const BillingTab: React.FC = () => {
   const { t } = useTranslation('tab_billing');
   const activeStoreId = useActiveStoreId() ?? '';
+  const [topupOpen, setTopupOpen] = React.useState(false);
 
   const { data: summary } = useQuery({
     queryKey: ['billing', 'summary', activeStoreId],
@@ -44,6 +46,9 @@ export const BillingTab: React.FC = () => {
     queryFn: fetchBillingTransactions,
     enabled: !!activeStoreId,
   });
+
+  const { data: stores = [] } = useQuery({ queryKey: ['stores'], queryFn: fetchStores });
+  const storeName = stores.find((s) => s.id === activeStoreId)?.name ?? '';
 
   if (!summary) {
     return <div style={styles.wrap}><div className="glass-card" style={styles.card}>{t('loading')}</div></div>;
@@ -71,6 +76,7 @@ export const BillingTab: React.FC = () => {
           </div>
           <div style={styles.cardValue}>{formatTenge(summary.balance_minor)}</div>
           <div style={styles.cardSub}>{t('block_threshold')} {formatTenge(summary.block_threshold_minor)}</div>
+          <button style={styles.topupButton} onClick={() => setTopupOpen(true)}>{t('topup_button')}</button>
         </div>
 
         <div className="glass-card" style={styles.card}>
@@ -142,6 +148,35 @@ export const BillingTab: React.FC = () => {
           </div>
         )}
       </div>
+
+      {topupOpen && (
+        <div style={styles.modalOverlay} onClick={() => setTopupOpen(false)}>
+          <div className="glass-card" style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <h3 style={styles.sectionTitle}>{t('topup_modal_title')}</h3>
+              <button style={styles.modalClose} onClick={() => setTopupOpen(false)} aria-label={t('close')}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={styles.cardSub}>{t('topup_amount_label')}</div>
+            <div style={styles.cardValue}>{formatTenge(summary.monthly_price_minor)}</div>
+            <p style={{ ...styles.cardSub, marginTop: '12px', lineHeight: 1.5 }}>
+              {t('topup_instructions', { phone: CONTACTS.whatsappDisplay })}
+            </p>
+            <a
+              style={styles.topupWaButton}
+              href={waLink(
+                'billing-topup',
+                `Здравствуйте! Хочу оплатить BuyShark. Магазин: ${storeName || '—'}, тариф: ${summary.plan_name}.`,
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {t('topup_whatsapp_button')}
+            </a>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -166,4 +201,19 @@ const styles: Record<string, React.CSSProperties> = {
   table: { width: '100%', borderCollapse: 'collapse', fontSize: '13px' },
   th: { textAlign: 'left', padding: '8px', color: '#9ca3af', borderBottom: '1px solid rgba(255,255,255,0.08)' },
   td: { padding: '8px', borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#e5e7eb' },
+  topupButton: {
+    marginTop: '10px', padding: '8px 14px', borderRadius: '8px', border: 'none',
+    background: 'var(--accent, #6366f1)', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+  },
+  modalOverlay: {
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex',
+    alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '16px',
+  },
+  modal: { width: '100%', maxWidth: '420px', padding: '20px' },
+  modalHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' },
+  modalClose: { background: 'transparent', border: 'none', color: '#9ca3af', cursor: 'pointer', padding: '4px' },
+  topupWaButton: {
+    display: 'block', textAlign: 'center', marginTop: '16px', padding: '12px', borderRadius: '10px',
+    background: '#25d366', color: '#04120a', fontWeight: 700, fontSize: '14px', textDecoration: 'none',
+  },
 };

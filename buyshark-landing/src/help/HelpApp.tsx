@@ -1,5 +1,6 @@
 import { Nav } from '../components/Nav';
 import { Footer } from '../components/Footer';
+import { waLink } from '../data/contacts';
 import { HELP_ARTICLES, HELP_GROUPS, getArticlesByGroup, type HelpBlock } from '../../../shared/help-content';
 import styles from './HelpApp.module.css';
 
@@ -96,6 +97,18 @@ export function HelpApp() {
             </article>
           ))}
         </div>
+      </div>
+
+      <div className={styles.contactCta}>
+        <p>Не нашли ответ? Напишите — ответим живым человеком</p>
+        <a
+          className={styles.linkButton}
+          href={waLink('help', 'Здравствуйте! Не нашёл ответ в справке BuyShark, есть вопрос.')}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Написать в WhatsApp
+        </a>
       </div>
 
       <Footer />

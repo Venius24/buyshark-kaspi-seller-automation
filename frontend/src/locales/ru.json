@@ -7,6 +7,7 @@
     "skip": "Пропустить",
     "next": "Далее",
     "finish": "Понятно",
+    "tour_end_contact": "Остались вопросы? Мы на связи:",
     "step_stores_title": "Ваши магазины Kaspi",
     "step_stores_text": "Здесь список подключённых магазинов Kaspi. Можно переключаться между ними и подключать новые.",
     "step_global_control_title": "Глобальное управление",
@@ -82,7 +83,13 @@
     "kind_charge_prompt": "Списание — расширенный промпт",
     "kind_referral_payout": "Выплата рефереру",
     "kind_adjustment": "Корректировка",
-    "kind_refund": "Возврат"
+    "kind_refund": "Возврат",
+    "topup_button": "Пополнить баланс",
+    "topup_modal_title": "Пополнение баланса",
+    "topup_amount_label": "Сумма к оплате по текущему тарифу",
+    "topup_instructions": "Переведите на Kaspi по номеру %phone%, затем напишите нам — зачислим в течение часа.",
+    "topup_whatsapp_button": "Написать в WhatsApp",
+    "close": "Закрыть"
   },
   "sidebar": {
     "subtitle": "Каспи Автопилот",
@@ -112,6 +119,7 @@
     "help": "Помощь",
     "import_from_pricefeed": "Импорт из PriceFeed",
     "show_tour": "Показать тур по кабинету",
+    "support": "Поддержка",
     "kaspi_api_online": "Kaspi API Online",
     "logout_tooltip": "Выйти из аккаунта"
   },
@@ -133,6 +141,7 @@
     "toggle_create_account": "Впервые в системе?",
     "toggle_btn_login": "Войти",
     "toggle_btn_register": "Создать аккаунт",
+    "need_help": "Нужна помощь?",
     "error_server": "Ошибка сервера (%code%)",
     "error_502": "Сервер недоступен (502 Bad Gateway). Проверьте статус бэкенда!",
     "error_500": "Ошибка на бэкенде (500 Internal Server Error)",
@@ -445,7 +454,10 @@
   "component_store_hub": {
     "error_store_name": "Укажите название магазина (напр. Barkhan)",
     "error_api_token": "Введите API Токен (X-Auth-Token) из кабинета Kaspi",
-    "error_connection": "Ошибка подключения магазина"
+    "error_connection": "Ошибка подключения магазина",
+    "storehub_connect_help": "Не уверены?",
+    "storehub_connect_link": "Напишем и подключим вместе — бесплатно",
+    "storehub_error_help": "Не получается? Напишите, разберёмся"
   },
   "tab_autolist": {
     "status_draft": "Черновик",

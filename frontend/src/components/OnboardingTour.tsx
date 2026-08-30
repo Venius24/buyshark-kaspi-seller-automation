@@ -1,5 +1,6 @@
 import { useState, useLayoutEffect, useCallback, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
+import { waLink } from '../data/contacts';
 
 // Онбординг-тур (2026-08-22): пошагово подсвечивает пункты сайдбара через
 // data-tour="<id>" атрибуты (см. Sidebar.tsx), не переключает вкладки — чтобы
@@ -106,6 +107,18 @@ export function OnboardingTour({ onFinish, onNavigate, isSuperadmin, isReferrer,
         <div className="onboarding-tooltip-step">{stepIndex + 1} / {STEPS.length}</div>
         <div className="onboarding-tooltip-title">{t(step.titleKey)}</div>
         <div className="onboarding-tooltip-text">{t(step.textKey)}</div>
+        {isLast && (
+          <div className="onboarding-tooltip-text" style={{ marginTop: '4px' }}>
+            {t('tour_end_contact')}{' '}
+            <a
+              href={waLink('tour-end', 'Здравствуйте! Прошёл(а) тур по BuyShark, остались вопросы.')}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              WhatsApp
+            </a>
+          </div>
+        )}
         <div className="onboarding-tooltip-actions">
           <button className="btn btn-secondary" onClick={onFinish}>{t('skip')}</button>
           <button className="btn btn-primary" onClick={handleNext}>{isLast ? t('finish') : t('next')}</button>

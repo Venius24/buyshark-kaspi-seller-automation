@@ -4,6 +4,7 @@ import { AlertTriangle } from 'lucide-react';
 import { LanguageSwitcher } from './shared/LanguageSwitcher';
 import { API_URL } from '../api';
 import { clearPersistedQueryCache } from '../queryClient';
+import { waLink } from '../data/contacts';
 
 interface AuthModalProps {
   onSuccess: () => void;
@@ -160,6 +161,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
             {isRegister ? t('toggle_btn_login') : t('toggle_btn_register')}
           </button>
         </div>
+
+        <div style={styles.helpRow}>
+          <a
+            href={waLink('auth', 'Здравствуйте! Нужна помощь со входом в BuyShark.')}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={styles.helpLink}
+          >
+            {t('need_help')}
+          </a>
+        </div>
       </div>
     </div>
   );
@@ -232,5 +244,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     marginLeft: '6px',
     cursor: 'pointer',
+  },
+  helpRow: {
+    marginTop: '10px',
+    textAlign: 'center',
+  },
+  helpLink: {
+    fontSize: '12px',
+    color: 'var(--text-muted)',
+    textDecoration: 'underline',
   },
 };

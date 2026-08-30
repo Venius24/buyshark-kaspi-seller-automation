@@ -68,6 +68,19 @@
   border: 1px solid rgba(255, 255, 255, 0.16);
 }
 
+.btnText {
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 4px;
+  color: var(--fog);
+  transition: color 0.15s ease;
+}
+
+.btnText:hover {
+  color: var(--white);
+}
+
 .btnPrimary {
   composes: btn;
   background: var(--target-red);
@@ -100,7 +113,8 @@
     height: 32px;
   }
 
-  .btnGhost {
+  .btnGhost,
+  .btnText {
     display: none;
   }
 

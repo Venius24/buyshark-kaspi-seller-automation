@@ -251,7 +251,23 @@
   color: var(--abyss);
   background: linear-gradient(135deg, var(--shark-cyan), var(--shark-cyan-dim));
   cursor: pointer;
+  text-decoration: none;
+  text-align: center;
+  display: inline-block;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.helpLine {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  color: var(--fog);
+  text-align: center;
+}
+
+.helpLine a {
+  color: var(--shark-cyan);
+  font-weight: 700;
 }
 
 .cta:hover {

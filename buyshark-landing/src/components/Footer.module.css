@@ -2,11 +2,48 @@
   padding: 36px clamp(1.25rem, 4vw, 3.5rem);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
+  flex-direction: column;
+  gap: 20px;
+  background: var(--abyss-soft);
+}
+
+.top {
+  display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 16px;
-  background: var(--abyss-soft);
+}
+
+.contacts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+  color: var(--fog);
+}
+
+.contacts a {
+  color: var(--fog);
+}
+
+.contacts a:hover {
+  color: var(--white);
+}
+
+.hours {
+  opacity: 0.75;
+}
+
+@media (max-width: 600px) {
+  .contacts {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
 }
 
 .brand {

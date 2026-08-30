@@ -23,8 +23,10 @@ import {
   Download,
   Compass,
   LogOut,
+  MessageCircle,
 } from 'lucide-react';
 import { LanguageSwitcher } from './shared/LanguageSwitcher';
+import { waLink } from '../data/contacts';
 import type { ActiveTab, FeatureFlags } from '../types';
 
 interface SidebarProps {
@@ -390,6 +392,24 @@ export function Sidebar({
           <Compass size={13} />
           <span>{t('show_tour')}</span>
         </button>
+        <a
+          href={waLink('sidebar', 'Здравствуйте! У меня вопрос про BuyShark.')}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={t('support')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '6px', width: '100%',
+            padding: '4px 6px', marginBottom: '6px', background: 'transparent',
+            border: 'none', borderRadius: '6px', cursor: 'pointer',
+            color: 'var(--text-muted)', fontSize: '11px', opacity: 0.6,
+            transition: 'opacity 0.15s ease', textDecoration: 'none',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; }}
+        >
+          <MessageCircle size={13} />
+          <span>{t('support')}</span>
+        </a>
         <div className="sidebar-user-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span className="glow-dot glow-dot-success"></span>
