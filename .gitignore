@@ -58,3 +58,6 @@ ds-bundle/
 
 # ── Playwright MCP artifacts ──
 .playwright-mcp/
+
+.env.lead
+lead_service/data/*.db*
