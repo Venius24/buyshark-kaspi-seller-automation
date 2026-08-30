@@ -23,6 +23,7 @@ from backend.dumper.telemetry import telemetry_manager
 from backend.services.webhook_dispatcher import dispatch_webhook_event
 from backend.security.store_context import list_active_stores
 from backend.chatbot.pickup_campaign import maybe_trigger_pickup_campaign
+from backend.product_name_overrides import resolve_product_name
 
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus
             code = trigger_order_info.get("order_code") or trigger_order_info.get("code") or "N/A"
             sku = trigger_order_info.get("sku") or "N/A"
             units = trigger_order_info.get("units") or 1
-            title = trigger_order_info.get("title") or "Товар"
+            title = resolve_product_name(sku, trigger_order_info.get("title")) or "Товар"
             customer = trigger_order_info.get("customer") or "Покупатель"
 
             order_section = (
@@ -382,7 +383,7 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
             stock=kaspi_push_stock,
             available=kaspi_push_stock > 0,
             master_sku=decoded_master,
-            model=target_p.get("name", "Товар"),
+            model=resolve_product_name(physical_sku, target_p.get("name")),
             store_suffix=store_suffix,
             city_id="750000000",
         )
@@ -956,7 +957,7 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                     "order_code": order_code,
                     "sku": m_sku,
                     "units": units,
-                    "title": title or "Товар",
+                    "title": resolve_product_name(m_sku, title) or "Товар",
                     "customer": order.get("customer") or "Покупатель",
                 }
 

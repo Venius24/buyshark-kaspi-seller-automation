@@ -32,6 +32,7 @@ from typing import Optional, List
 from sqlalchemy import select
 
 from backend.services.kaspi_quota import quota
+from backend.product_name_overrides import resolve_product_name
 
 logger = logging.getLogger(__name__)
 
@@ -551,7 +552,7 @@ def _decide(row, base_price, base_stock, base_available, now_ts: float):
         available=bool(want_available),
         base_price=base_price,
         base_stock=base_stock,
-        model=row.model or "Товар",
+        model=resolve_product_name(row.sku, row.model) or "Товар",
         store_suffix=row.store_suffix or "001",
         city_id=row.city_id or "750000000",
     )

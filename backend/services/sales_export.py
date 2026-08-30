@@ -30,6 +30,8 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
+from backend.product_name_overrides import is_placeholder_name
+
 import openpyxl
 import requests
 from openpyxl.drawing.image import Image as XLImage
@@ -153,7 +155,7 @@ def build_sales_export_xlsx(store_id: str, date_from: dt.date, date_to: dt.date)
                     if m_sku:
                         meta["merchant_sku"] = str(m_sku)
                     name = e.get("name")
-                    if name and name != "Товар":
+                    if name and not is_placeholder_name(name, m_sku):
                         meta["name"] = name
 
                     daily = sku_daily.setdefault(key, {})

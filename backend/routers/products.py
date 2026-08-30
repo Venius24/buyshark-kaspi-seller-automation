@@ -8,6 +8,7 @@ from backend.state_helpers import _save_override, _apply_overrides, _load_produc
 from backend.security.store_context import StoreContext, get_store_context
 from backend.security.store_roles import require_store_manager
 from backend.dumper import generate_xml_feed
+from backend.product_name_overrides import resolve_product_name
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["products"])
@@ -149,7 +150,7 @@ def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(requir
                 merchant_uid=merchant_id,
                 sku=target_p.get("merchantSku") or req.sku,
                 master_sku=decoded_master,
-                model_name=target_p.get("name", "Товар"),
+                model_name=resolve_product_name(target_p.get("merchantSku") or req.sku, target_p.get("name")) or "",
                 new_price=int(req.price),
                 stock=int(req.stock),
                 store_id_suffix=store_suffix,

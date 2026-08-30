@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import Session
+from backend.product_name_overrides import resolve_product_name, is_placeholder_name
 
 logger = logging.getLogger(__name__)
 
@@ -1781,7 +1782,7 @@ def _load_sales_summary(store_id: str, days: int = 30) -> dict:
         catalog_names = {
             p.get("sku"): p.get("name")
             for p in _load_products(store_id)
-            if p.get("sku") and p.get("name")
+            if p.get("sku") and p.get("name") and not is_placeholder_name(p.get("name"), p.get("sku"))
         }
 
         daily: dict = {}
@@ -1799,7 +1800,7 @@ def _load_sales_summary(store_id: str, days: int = 30) -> dict:
                 entries = []
             for e in entries:
                 sku = e.get("sku") or "?"
-                name = catalog_names.get(sku) or e.get("name") or sku
+                name = resolve_product_name(sku, e.get("name"), catalog_names=catalog_names) or sku
                 entry = sku_revenue.setdefault(sku, {"sku": sku, "name": name, "revenue": 0.0, "quantity": 0})
                 entry["revenue"] += e.get("totalPrice", 0) or 0
                 entry["quantity"] += e.get("quantity", 0) or 0

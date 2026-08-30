@@ -14,6 +14,8 @@ import requests
 from typing import Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from backend.product_name_overrides import resolve_product_name
+
 logger = logging.getLogger(__name__)
 
 
@@ -498,7 +500,9 @@ class KaspiAPI:
                         e_attr = entry_data.get("attributes", {})
                         offer = e_attr.get("offer", {})
                         merchant_sku = str(offer.get("code", "")).strip()
-                        product_name = offer.get("name") or offer.get("title") or "Товар без названия"
+                        product_name = resolve_product_name(
+                            merchant_sku, offer.get("name") or offer.get("title")
+                        ) or "Товар без названия"
 
                         entries_enriched.append({
                             "entryId": entry_id,
@@ -621,7 +625,7 @@ class KaspiAPI:
                     product_code = KaspiAPI._decode_base64_if_needed(product_ref.get("id", ""))
                     entries_enriched.append({
                         "sku": sku,
-                        "name": offer.get("name") or offer.get("title") or "Товар",
+                        "name": resolve_product_name(sku, offer.get("name") or offer.get("title")) or "Товар",
                         "quantity": e_attr.get("quantity", 1),
                         "totalPrice": e_attr.get("totalPrice") or e_attr.get("entryTotalPrice", 0),
                         "productCode": product_code if product_code.isdigit() else "",
@@ -848,7 +852,9 @@ class KaspiAPI:
                     if entry_data:
                         e_attrs = entry_data.get("attributes", {})
                         offer = e_attrs.get("offer", {})
-                        title = offer.get("name") or offer.get("title") or "Товар без названия"
+                        title = resolve_product_name(
+                            offer.get("code"), offer.get("name") or offer.get("title")
+                        ) or "Товар без названия"
                         order_items.append({
                             "title": title,
                             "merchant_sku": offer.get("code"),

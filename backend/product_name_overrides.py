@@ -19,6 +19,37 @@
 испорченного `title`/`model`.
 """
 
+def is_placeholder_name(name, sku=None) -> bool:
+    """True, если `name` — одна из наших собственных заглушек, а не реальное
+    название (пустое, голое "Товар"/"Товар без названия", или "Товар <sku>")."""
+    if not name:
+        return True
+    name = str(name).strip()
+    if name in ("", "Товар", "Товар без названия"):
+        return True
+    if sku and name == f"Товар {sku}":
+        return True
+    return False
+
+
+def resolve_product_name(sku, name=None, catalog_names=None):
+    """Настоящее название товара или None, если взять неоткуда.
+
+    Порядок: переданное `name`, если оно не заглушка → `catalog_names[sku]`
+    (кэш каталога магазина), если тоже не заглушка → ручной список ниже.
+    Вызывающий код сам решает, чем заменить None (обычно — старым значением
+    или "Товар" как последним средством), см. [[project_kaspi_legacy_feed_ban]]
+    и HANDOFF §3.67.5/3.83.
+    """
+    if not is_placeholder_name(name, sku):
+        return name
+    if catalog_names:
+        candidate = catalog_names.get(str(sku))
+        if candidate and not is_placeholder_name(candidate, sku):
+            return candidate
+    return KNOWN_PRODUCT_NAMES.get(str(sku)) if sku else None
+
+
 # merchantSku -> настоящее название
 KNOWN_PRODUCT_NAMES = {
     # данные магазина вырезаны при публикации

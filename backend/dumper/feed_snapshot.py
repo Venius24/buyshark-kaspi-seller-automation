@@ -93,9 +93,11 @@ def _undecorate(product: dict) -> dict:
     заглушек уже лежат в каталоге: они уехали туда с ручной загрузкой бэкапа
     15.08. Фид не имеет права дописывать то, чего в источнике не было.
     """
+    from backend.product_name_overrides import is_placeholder_name
+
     clean = dict(product)
     sku = str(product.get("merchantSku") or "")
-    if clean.get("name") and sku and clean["name"] == f"Товар {sku}":
+    if clean.get("name") and is_placeholder_name(clean["name"], sku):
         clean["name"] = None
     if clean.get("brand") == BRAND_PLACEHOLDER:
         clean["brand"] = None

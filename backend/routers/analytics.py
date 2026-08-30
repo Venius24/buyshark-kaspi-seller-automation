@@ -18,6 +18,7 @@ from backend.state_helpers import (
     _load_quality_metrics_latest, _load_quality_metrics_history,
 )
 from backend.dumper.config import _decode_base64_if_needed
+from backend.product_name_overrides import resolve_product_name, is_placeholder_name
 from backend.dumper.radar import _fetch_offers_sync
 from backend.security.store_context import StoreContext, get_store_context
 from backend.services.sales_export import build_sales_export_xlsx
@@ -110,7 +111,10 @@ def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
     our_rank = None
 
     if active_product:
-        top_product_name = active_product.get("name", "Товар")
+        top_product_name = resolve_product_name(
+            active_product.get("merchantSku") or active_product.get("sku"),
+            active_product.get("name"),
+        ) or "Товар"
         our_price = int(active_product.get("price_num") or 0)
         
         raw_kaspi_sku = active_product.get("kaspiSku") or active_product.get("sku") or ""
@@ -344,7 +348,7 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
         catalog_names = {
             p.get("sku"): p.get("name")
             for p in _load_products(ctx.store_id)
-            if p.get("sku") and p.get("name")
+            if p.get("sku") and p.get("name") and not is_placeholder_name(p.get("name"), p.get("sku"))
         }
 
         sku_info: dict = {}
@@ -360,7 +364,7 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
             week_keys_seen.add(week_key)
             for e in entries:
                 sku = e.get("sku") or "?"
-                name = catalog_names.get(sku) or e.get("name") or sku
+                name = resolve_product_name(sku, e.get("name"), catalog_names=catalog_names) or sku
                 qty = e.get("quantity", 0) or 0
                 total_price = e.get("totalPrice", 0) or 0
                 info = sku_info.setdefault(sku, {"sku": sku, "name": name, "revenue": 0.0, "quantity": 0})

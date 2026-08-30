@@ -1,6 +1,8 @@
 import logging
 from typing import List, Optional
 
+from backend.product_name_overrides import is_placeholder_name, resolve_product_name
+
 logger = logging.getLogger(__name__)
 
 def _load_mc_cookies(store_id: Optional[str] = None) -> dict:
@@ -81,18 +83,25 @@ class RateLimitExecutorWorker:
             "X-Auth-Version": "3"
         }
 
-        # Если цена не передана или равна дефолтному 1000, запрашиваем реальные детали карточки через BFF
-        if not new_price or new_price <= 0 or new_price == 1000:
+        # Если цена не передана, равна дефолтному 1000, или название — наша
+        # собственная заглушка, запрашиваем реальные детали карточки через BFF.
+        need_details = not new_price or new_price <= 0 or new_price == 1000 or is_placeholder_name(model_name, sku)
+        if need_details:
             details = RateLimitExecutorWorker._fetch_kaspi_offer_details(merchant_uid, sku, internal_store_id=internal_store_id)
             if details.get("price"):
                 new_price = int(details["price"])
             if details.get("master_sku") and not master_sku:
                 master_sku = details["master_sku"]
-            if details.get("title") and not model_name:
+            if details.get("title") and not is_placeholder_name(details["title"], sku):
                 model_name = details["title"]
 
         if not new_price or new_price <= 0:
             new_price = 1000
+
+        # Не даём в Kaspi уехать нашей заглушке или буквальному "None" —
+        # см. [[project_kaspi_xml_feed_incident]] и HANDOFF §3.67.5/3.83 про
+        # то, как "Товар <SKU>" однажды закрепился в самом кабинете.
+        model_name = resolve_product_name(sku, model_name) or model_name or "Товар"
 
         # Шаг 0: Pre-edit Validation (ON_SALE__PRICE_EDIT)
         edit_val_url = "https://mc.shop.kaspi.kz/offer-validation-api/merchant/offer/validate/v2"
@@ -290,7 +299,7 @@ class RateLimitExecutorWorker:
                     price=int(new_price),
                     stock=stock_val,
                     master_sku=config.master_sku,
-                    model=p.get("name", "Товар"),
+                    model=resolve_product_name(p.get("merchantSku") or sku_key, p.get("name")),
                     store_suffix=store_suffix,
                     city_id=config.city_code,
                 )
