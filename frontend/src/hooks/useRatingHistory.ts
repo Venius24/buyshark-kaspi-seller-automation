@@ -5,6 +5,7 @@ import { useActiveStoreId } from '../storeContext';
 export interface RatingHistoryPoint {
   date: string;
   rating_percentage: number | null;
+  review_count: number | null;
 }
 
 const fetchRatingHistory = async (days: number): Promise<RatingHistoryPoint[]> => {

@@ -19,14 +19,16 @@ export function ReviewCampaignWidget() {
 
   const review = outboundStats?.by_campaign?.review;
   const replyRatePct = review ? Math.round(review.reply_rate * 100) : 0;
-  const hasRatingTrend = ratingHistory.filter((p) => p.rating_percentage != null).length >= 2;
+  const reviewCountPoints = ratingHistory.filter((p) => p.review_count != null);
+  const hasReviewCountTrend = reviewCountPoints.length >= 2;
+  const latestReviewCount = reviewCountPoints.length > 0 ? reviewCountPoints[reviewCountPoints.length - 1].review_count : null;
 
   return (
     <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h3 style={{ fontSize: '14px', color: '#fff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Star size={17} /> Рассылка «Отзыв»
-          <HelpHint text="Kaspi не даёт связку между конкретным отзывом и заказом/рассылкой — ссылка в сообщении только открывает форму отзыва с предзаполненной оценкой, дальше клиент сам пишет и отправляет. Поэтому здесь воронка отправки (сколько ушло сообщений и сколько клиентов ответили в чат), а не «конверсия в отзывы», плюс тренд общего рейтинга магазина рядом — как косвенный ориентир, не причинно-следственная связь." />
+          <HelpHint text="Kaspi не даёт связку между конкретным отзывом и заказом/рассылкой — ссылка в сообщении только открывает форму отзыва с предзаполненной оценкой, дальше клиент сам пишет и отправляет. Поэтому здесь воронка отправки (сколько ушло сообщений и сколько клиентов ответили в чат), а не «конверсия в отзывы», плюс тренд общего числа отзывов в магазине рядом — как косвенный ориентир (растёт ли база отзывов вообще), не причинно-следственная связь с конкретной рассылкой." />
         </h3>
         <span className="badge badge-warning">{PERIOD_DAYS} дн.</span>
       </div>
@@ -47,10 +49,11 @@ export function ReviewCampaignWidget() {
       )}
 
       <div>
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: '6px' }}>
-          РЕЙТИНГ МАГАЗИНА, %
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span>ОТЗЫВОВ В МАГАЗИНЕ</span>
+          {latestReviewCount != null && <span style={{ fontSize: '15px', fontWeight: 800, color: '#fff' }}>{latestReviewCount}</span>}
         </div>
-        {!hasRatingTrend ? (
+        {!hasReviewCountTrend ? (
           <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
             Недостаточно ночных снапшотов показателей качества для графика — появится через несколько дней.
           </p>
@@ -59,13 +62,13 @@ export function ReviewCampaignWidget() {
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={ratingHistory} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
                 <XAxis dataKey="date" hide />
-                <YAxis hide domain={['dataMin - 2', 'dataMax + 2']} />
+                <YAxis hide domain={['dataMin - 1', 'dataMax + 1']} />
                 <Tooltip
-                  formatter={(value: number) => `${value}%`}
+                  formatter={(value: number) => `${value} отзывов`}
                   labelFormatter={(label) => String(label)}
                   contentStyle={{ background: 'rgba(10,10,16,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '12px' }}
                 />
-                <Line type="monotone" dataKey="rating_percentage" stroke="#e8c15f" strokeWidth={2} dot={false} connectNulls />
+                <Line type="monotone" dataKey="review_count" stroke="#e8c15f" strokeWidth={2} dot={false} connectNulls />
               </LineChart>
             </ResponsiveContainer>
           </div>

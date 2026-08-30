@@ -1472,10 +1472,13 @@ def _load_quality_metrics_latest(store_id: str) -> Optional[dict]:
 
 
 def _load_quality_metrics_history(store_id: str, days: int = 30) -> list:
-    """Ряд дневных снапшотов rating_percentage за period — для тренда рейтинга
-    на дашборде рядом с воронкой рассылки «Отзыв» (сама рассылка не
-    атрибутируется к конкретным отзывам, см. review_campaign.py — тренд тут
-    даёт только косвенную корреляцию, не причинность)."""
+    """Ряд дневных снапшотов за period — рейтинг магазина (%) и ОБЩЕЕ число
+    отзывов (сумма гистограммы 1-5 звёзд, qualityControl.ratingWithStatistics.
+    statistics — уже скрапится ночным воркером в raw_payload, см.
+    kaspi_quality_metrics.py). Для дашборда рядом с воронкой рассылки «Отзыв»:
+    сама рассылка не атрибутируется к конкретным отзывам (Kaspi не даёт эту
+    связку, см. review_campaign.py) — тренд числа отзывов тут даёт только
+    косвенную корреляцию, не причинность."""
     import datetime as _dt
     session = _get_sync_db_session()
     if not session:
@@ -1488,7 +1491,20 @@ def _load_quality_metrics_history(store_id: str, days: int = 30) -> list:
             .where(KaspiQualityMetricsDailyDB.store_id == store_id, KaspiQualityMetricsDailyDB.date >= since)
             .order_by(KaspiQualityMetricsDailyDB.date.asc())
         ).all()
-        return [{"date": r.date, "rating_percentage": r.rating_percentage} for r in rows]
+        result = []
+        for r in rows:
+            review_count = None
+            try:
+                stats = (json.loads(r.raw_payload or "{}").get("rating") or {}).get("statistics") or None
+                if stats:
+                    review_count = sum(
+                        stats.get(k) or 0
+                        for k in ("oneCount", "twoCount", "threeCount", "fourCount", "fiveCount")
+                    )
+            except Exception:
+                review_count = None
+            result.append({"date": r.date, "rating_percentage": r.rating_percentage, "review_count": review_count})
+        return result
     finally:
         session.close()
 
