@@ -50,6 +50,13 @@ async def _sync_store_products(token: str, store_id=None) -> int:
         except Exception as e:
             logger.error(f"❌ [Products Sync Worker] Сторож прайс-листа упал (store {store_id}): {e}")
 
+        try:
+            from backend.dumper.archive_watch import watch_archived
+
+            await watch_archived(store_id, products)
+        except Exception as e:
+            logger.error(f"❌ [Products Sync Worker] Сторож снятых товаров упал (store {store_id}): {e}")
+
     return len(products)
 
 async def run_products_sync_cycle():
