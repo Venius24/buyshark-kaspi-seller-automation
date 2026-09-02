@@ -61,21 +61,26 @@ class ArchiveVerdict:
 
 
 def _available_false_skus(products: list) -> dict:
-    """SKU → название, для офферов с явным `available: false`.
+    """SKU → название, для офферов, которых Kaspi считает снятыми.
 
-    Не путать с `feed_snapshot._is_active`: там фолбэк на `status`, потому
-    что снимок фида должен быть строгим при любом состоянии поля. Здесь
-    фолбэка нет намеренно — по договорённости считаем «снятием» только
-    явный флаг, а не наши догадки поверх других полей.
+    Изначально здесь читалось сырое поле `available`. Оказалось, что до
+    этого словаря оно не доезжает: `KaspiAPI.sync_merchant_assortment`
+    ходит двумя раздельными запросами (`a=true`/`a=false` — см.
+    kaspi_wrapper.py:1155) и КАЖДЫЙ оффер уже приходит из своей однозначной
+    выборки; сырого булева поля в самом объекте offer нет, есть только
+    посчитанный по этому же признаку `status` ("Активен"/"Архив",
+    kaspi_wrapper.py:1244). Значит `status == "Архив"` здесь и есть тот
+    самый явный, а не выведенный нами сигнал — то же самое, чем в
+    `feed_snapshot._is_active` служит фолбэк, только здесь он единственный
+    источник, а не подстраховка.
     """
     out = {}
     for p in products or []:
-        if p.get("available") is not True and p.get("available") is not False:
+        if p.get("status") != "Архив":
             continue
-        if p.get("available") is False:
-            sku = str(p.get("merchantSku") or "")
-            if sku:
-                out[sku] = p.get("name") or p.get("model") or sku
+        sku = str(p.get("merchantSku") or "")
+        if sku:
+            out[sku] = p.get("name") or sku
     return out
 
 

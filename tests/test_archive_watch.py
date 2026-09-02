@@ -1,7 +1,11 @@
 """
-Сторож снятых товаров: ловит переход `available: true → false` между двумя
+Сторож снятых товаров: ловит переход `status: Активен → Архив` между двумя
 синхронизациями каталога и не путает настоящее снятие с исчерпанием пула
 мастер-группы.
+
+`status` — не наша догадка поверх сырых полей: `KaspiAPI.sync_merchant_assortment`
+ходит двумя раздельными запросами (`a=true`/`a=false`), и каждый оффер уже
+приходит из своей однозначной выборки Kaspi (kaspi_wrapper.py:1155/1244).
 
 Проверяется не «функция вернула список», а поведение на границе: кто именно
 попадает в тревогу, кто из неё вычитается, и не путает ли первый прогон
@@ -15,7 +19,11 @@ from backend.dumper import archive_watch, feed_state
 
 
 def _offer(sku, available=True, name=None):
-    return {"merchantSku": sku, "available": available, "name": name or sku}
+    return {
+        "merchantSku": sku,
+        "status": "Активен" if available else "Архив",
+        "name": name or sku,
+    }
 
 
 def _watch(store_id, products):
@@ -78,10 +86,11 @@ def test_already_known_archival_does_not_refire(store, monkeypatch):
     assert not verdict.needs_attention
 
 
-def test_missing_available_field_is_not_a_removal(store, monkeypatch):
+def test_missing_status_field_is_not_a_removal(store, monkeypatch):
     """
-    Только явный `available: false` — по решению владельца. Оффер без поля
-    вообще (сбой выкачки, старый формат) не должен считаться снятым.
+    Только явный `status == "Архив"`. Оффер без поля вообще (сбой выкачки,
+    неожиданный формат записи) не должен считаться снятым — молчание не
+    равно явному сигналу от Kaspi.
     """
     _no_groups(monkeypatch)
     _watch(store, [_offer("OK-0001")])
