@@ -220,3 +220,53 @@ class TestBroadcastSyncNeverInventsAnOffer(unittest.IsolatedAsyncioTestCase):
         """Пустой кэш — это «не знаем ничего», а не «всё новое»."""
         enq = await self._run([])
         enq.assert_not_called()
+
+
+class TestStopQtyNotifiesOnlyOnTransition(unittest.IsolatedAsyncioTestCase):
+    """До фикса Телеграм-тревога о стоп-кол-ве стреляла на КАЖДЫЙ вызов
+    рассылки, пока остаток оставался <= stop_qty — то есть на каждый
+    следующий заказ по уже остановленной группе, а не только на переход
+    через порог (жалоба 2026-09-03: "уведомления даже по поводу снятых из
+    мастер-группы"). Теперь флаг stop_notified — персистентный, per-group."""
+
+    def _patches(self, groups):
+        return [
+            patch.object(worker, "_load_products", return_value=[
+                {"sku": "s1", "merchantSku": "SKU1", "kaspiSku": "s1",
+                 "name": "Товар", "price_num": 1000},
+            ]),
+            patch.object(worker, "_load_master_stock_groups", return_value=groups),
+            patch.object(worker, "_save_master_stock_groups"),
+            patch.object(worker, "_save_products"),
+            patch.object(worker, "_save_override"),
+            patch.object(worker, "discover_merchant_id", return_value="20186986"),
+            patch.object(worker, "broadcast_ws_event", new_callable=AsyncMock),
+        ]
+
+    async def _run(self, shared_stock, stop_notified):
+        groups = {"grp_1": {
+            "group_id": "grp_1", "group_name": "Палочки", "linked_skus": ["SKU1"],
+            "shared_stock": shared_stock, "stop_qty": 5, "stop_notified": stop_notified,
+        }}
+        cm = self._patches(groups)
+        for p in cm:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in cm])
+        with patch.object(worker.offer_sync, "enqueue"), \
+             patch.object(worker.offer_sync, "last_known_stock", return_value=None), \
+             patch.object(worker.offer_sync, "should_push_stock", return_value=True), \
+             patch.object(worker, "notify_zero_stock_telegram", new_callable=AsyncMock) as notify:
+            await worker._execute_broadcast_sync_impl("grp_1", "tok", store_id="store-a")
+        return notify
+
+    async def test_first_drop_below_stop_qty_notifies(self):
+        notify = await self._run(shared_stock=0, stop_notified=False)
+        notify.assert_awaited_once()
+
+    async def test_staying_below_stop_qty_does_not_renotify(self):
+        notify = await self._run(shared_stock=0, stop_notified=True)
+        notify.assert_not_called()
+
+    async def test_restock_above_stop_qty_does_not_notify(self):
+        notify = await self._run(shared_stock=40, stop_notified=False)
+        notify.assert_not_called()

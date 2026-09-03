@@ -400,11 +400,25 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
             logger.exception("Failed to persist updated products cache for store %s", store_id)
 
     # Итоговое обновление статуса группы
+    need_notify = False
     async with get_stock_lock(store_id):
         groups = _load_master_stock_groups(store_id=store_id)
         if group_id in groups:
             g = groups[group_id]
             g["last_synced_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Уведомляем о стоп-кол-ве по ПЕРЕХОДУ через порог, не на каждом
+            # вызове рассылки. Раньше это стояло ниже без флага — и стреляло
+            # на КАЖДЫЙ следующий заказ по уже остановленной группе (заказы
+            # продолжают приходить, пока карточка не уйдёт в архив на Kaspi),
+            # владелец получал одно и то же "снято с продажи" по многу раз в
+            # день, пока группа не пополнится (жалоба 2026-09-03). Флаг
+            # персистентный (миграция 039) — переживает рестарт сервиса, в
+            # отличие от старого 10-минутного in-memory дедупа.
+            if shared_stock <= stop_qty:
+                need_notify = not g.get("stop_notified", False)
+                g["stop_notified"] = True
+            else:
+                g["stop_notified"] = False
             order_tail = (
                 f" Причина: заказ #{trigger_order_info.get('order_code')}."
                 if trigger_order_info else ""
@@ -432,10 +446,14 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
             _save_master_stock_groups(groups, store_id=store_id)
             await broadcast_ws_event("stock_group_updated", g, store_id=store_id)
 
-    # Обработка Stop Qty Protection: остаток просел до/ниже кастомного "Стоп кол-ва" группы
+    # Обработка Stop Qty Protection: остаток просел до/ниже кастомного "Стоп кол-ва" группы.
+    # Телеграм-тревога — только на сам переход (need_notify, см. выше); WS-событие
+    # для UI шлём при каждом обходе, пока группа остановлена — это не спам, а
+    # обновление счётчика на клиенте, которое ничего не пишет пользователю.
     if shared_stock <= stop_qty:
         logger.warning(f"🚨 [Stop Qty Protection] Группа '{group_name}' остаток {shared_stock} <= стоп кол-во {stop_qty}!")
-        await notify_zero_stock_telegram(group_name, group_id, linked_skus, store_id=store_id, trigger_order_info=trigger_order_info, shared_stock=shared_stock, stop_qty=stop_qty)
+        if need_notify:
+            await notify_zero_stock_telegram(group_name, group_id, linked_skus, store_id=store_id, trigger_order_info=trigger_order_info, shared_stock=shared_stock, stop_qty=stop_qty)
         await broadcast_ws_event("zero_stock_alert", {
             "group_id": group_id,
             "group_name": group_name,

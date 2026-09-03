@@ -192,6 +192,10 @@ class MasterStockGroupDB(Base):
     # Раньше это число угадывалось по хвосту артикула и угадывалось неверно,
     # см. миграцию 034 и AUTO_DEDUCTION_ENGINE.md.
     deduct_per_unit: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    # Уже уведомили о текущем снятии по стоп-кол-ву — не переспамить владельца
+    # на каждый следующий заказ, пока группа не пополнится выше stop_qty.
+    # См. миграцию 039 и notify_zero_stock_telegram.
+    stop_notified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     dumping_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-stringified dict
     # SKU из linked_skus, исключённые из ГРУППОВОГО демпинга (dumping_config
     # выше их игнорирует) — но их собственный individual dumping_config (см.
