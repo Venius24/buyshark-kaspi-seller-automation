@@ -510,6 +510,21 @@ export const MasterStockGroups: React.FC = () => {
     }
   };
 
+  // SKU, привязанные к группе, но отсутствующие в текущем кэше ассортимента
+  // (offer архивирован/удалён на Kaspi). Такой SKU навсегда проваливает
+  // рассылку остатка ("нет в ассортименте — пропущен") и держит статус
+  // группы в error/warning, при этом обычный пикер его не показывает —
+  // его там просто нет, выбрать/снять нечего. См. HANDOFF §sync-мастер-групп.
+  const orphanSkus = useMemo(
+    () => formSelectedSkus.filter(s => !products.some(p => p.sku === s || p.merchantSku === s || p.kaspiSku === s)),
+    [formSelectedSkus, products]
+  );
+
+  const handleRemoveOrphanSku = (sku: string) => {
+    setFormSelectedSkus(prev => prev.filter(s => s !== sku));
+    setFormDumpingExcludedSkus(prev => prev.filter(s => s !== sku));
+  };
+
   // Filtered Products for Modal SKU Picker — уже привязанные к группе товары
   // всплывают наверх списка, чтобы их не приходилось искать среди всего
   // каталога при повторном открытии окна редактирования.
@@ -1569,6 +1584,60 @@ export const MasterStockGroups: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {/* Orphan SKU Section — привязанные SKU, которых нет в текущем ассортименте */}
+              {orphanSkus.length > 0 && (
+                <div style={{
+                  background: 'rgba(245, 158, 11, 0.08)',
+                  border: '1px solid rgba(245, 158, 11, 0.35)',
+                  borderRadius: '10px',
+                  padding: '12px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', color: '#f59e0b', fontSize: '13px', fontWeight: 600 }}>
+                    <AlertTriangle size={15} />
+                    <span>Пропавшие из каталога SKU ({orphanSkus.length})</span>
+                  </div>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 10px' }}>
+                    Эти SKU привязаны к группе, но не найдены в текущем ассортименте Kaspi (карточка удалена/архивирована). Рассылка остатка будет спотыкаться о них при каждой синхронизации. Отвяжите ненужные — кнопкой ниже.
+                  </p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {orphanSkus.map(sku => (
+                      <span
+                        key={sku}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '4px 8px 4px 10px',
+                          borderRadius: '20px',
+                          background: 'rgba(245, 158, 11, 0.12)',
+                          border: '1px solid rgba(245, 158, 11, 0.45)',
+                          color: '#f59e0b',
+                          fontSize: '12px',
+                          fontFamily: 'monospace',
+                        }}
+                      >
+                        {sku}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveOrphanSku(sku)}
+                          title="Отвязать этот SKU от группы"
+                          style={{
+                            display: 'inline-flex',
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#f59e0b',
+                            cursor: 'pointer',
+                            padding: 0,
+                          }}
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Multi-Select SKU Section */}
               <div>
