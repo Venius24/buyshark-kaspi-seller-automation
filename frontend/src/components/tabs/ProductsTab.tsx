@@ -5,6 +5,7 @@ import type { Product } from '../../types';
 import { Pagination } from '../shared/Pagination';
 import { ProductCardHeader } from '../shared/ProductCardHeader';
 import { HelpHint } from '../shared/HelpHint';
+import { ParcelLoader } from '../shared/ParcelLoader';
 
 interface ProductsTabProps {
   totalCount: number;
@@ -129,7 +130,9 @@ export function ProductsTab({
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flexGrow: 1 }}>
         {fetchingProducts && products.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-            <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+            <div style={{ marginBottom: '16px' }}>
+              <ParcelLoader />
+            </div>
             <p>{t('loading_message')}</p>
           </div>
         ) : products.length === 0 && !fetchingProducts ? (

@@ -421,6 +421,21 @@ p {
   }
 }
 
+@keyframes parcel-flip {
+  0%, 100% {
+    transform: rotateY(0deg);
+  }
+  50% {
+    transform: rotateY(180deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .parcel-loader-svg {
+    animation-duration: 3.5s !important;
+  }
+}
+
 
 @keyframes console-slide-in {
   to {
