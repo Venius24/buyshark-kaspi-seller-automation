@@ -39,6 +39,12 @@ const BUCKET_META: Record<StockBucket, { label: string; short: string; color: st
     hint: 'Кончится раньше, чем придёт поставка, даже если заказать сегодня',
   },
   ok: { label: 'Запаса хватает', short: 'Норма', color: '#10b981', hint: 'Остатка хватает с запасом' },
+  slow: {
+    label: 'Продаётся медленно',
+    short: 'Медленный',
+    color: '#8b5cf6',
+    hint: 'Продажи есть, но остатка хватит надолго — деньги оборачиваются слишком медленно',
+  },
   dead: {
     label: 'Не продаётся',
     short: 'Мёртвый',
@@ -47,7 +53,12 @@ const BUCKET_META: Record<StockBucket, { label: string; short: string; color: st
   },
 };
 
-const BUCKET_ORDER: StockBucket[] = ['out_of_stock', 'critical', 'warning', 'ok', 'dead'];
+const BUCKET_ORDER: StockBucket[] = ['out_of_stock', 'critical', 'warning', 'ok', 'slow', 'dead'];
+
+// В «медленном» и «мёртвом» вёдрах интересен не срок до нуля, а сколько денег
+// лежит в остатке: продавец начинает разбор с самой дорогой позиции. В
+// остальных ведрах порядок с бэкенда (самое срочное — наверх) верный.
+const FROZEN_FIRST: StockBucket[] = ['slow', 'dead'];
 
 const FORECAST_INFO_TEXT =
   'Как считаем:\n' +
@@ -64,15 +75,16 @@ const NumberField: React.FC<{
   title: string;
   value: number;
   onChange: (v: number) => void;
-}> = ({ label, title, value, onChange }) => (
+  max?: number;
+}> = ({ label, title, value, onChange, max = 180 }) => (
   <label title={title} style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', color: 'var(--text-muted)' }}>
     {label}
     <input
       type="number"
       min={1}
-      max={180}
+      max={max}
       value={value}
-      onChange={(e) => onChange(Math.max(1, Math.min(180, Number(e.target.value) || 1)))}
+      onChange={(e) => onChange(Math.max(1, Math.min(max, Number(e.target.value) || 1)))}
       style={{
         width: '72px',
         padding: '5px 8px',
@@ -107,6 +119,9 @@ export const StockForecastWidget: React.FC = () => {
     let rows: StockForecastItem[] = items;
     if (bucketFilter) rows = rows.filter((it) => it.bucket === bucketFilter);
     if (onlyReorder) rows = rows.filter((it) => it.recommended_qty > 0);
+    if (bucketFilter && FROZEN_FIRST.includes(bucketFilter)) {
+      rows = [...rows].sort((a, b) => b.stock * b.price - a.stock * a.price);
+    }
     return rows;
   }, [items, bucketFilter, onlyReorder]);
 
@@ -153,12 +168,11 @@ export const StockForecastWidget: React.FC = () => {
       }
       headerRight={
         <>
-          <Info
-            size={15}
-            color="var(--text-muted)"
-            style={{ flexShrink: 0, cursor: 'help' }}
-            title={FORECAST_INFO_TEXT}
-          />
+          {/* lucide-иконки не пробрасывают title в SVG — тултип вешаем на обёртку,
+              иначе tsc падает, а подсказки с формулами всё равно не видно. */}
+          <span title={FORECAST_INFO_TEXT} style={{ display: 'inline-flex', cursor: 'help' }}>
+            <Info size={15} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+          </span>
           {urgentCount > 0 && (
             <span
               className="badge"
@@ -243,6 +257,13 @@ export const StockForecastWidget: React.FC = () => {
               value={settings.horizonDays}
               onChange={(v) => patch({ horizonDays: v })}
             />
+            <NumberField
+              label="Медленно от, дн."
+              title="С какого запаса позиция считается медленной: если текущего остатка хватит дольше этого срока, товар попадает в «Продаётся медленно»."
+              value={settings.slowDays}
+              onChange={(v) => patch({ slowDays: v })}
+              max={720}
+            />
             <button
               className="btn btn-primary"
               style={{ padding: '8px 14px', fontSize: '12px' }}
@@ -258,7 +279,8 @@ export const StockForecastWidget: React.FC = () => {
             </button>
             {settings.leadTimeDays !== DEFAULT_FORECAST_SETTINGS.leadTimeDays ||
             settings.coverDays !== DEFAULT_FORECAST_SETTINGS.coverDays ||
-            settings.horizonDays !== DEFAULT_FORECAST_SETTINGS.horizonDays ? (
+            settings.horizonDays !== DEFAULT_FORECAST_SETTINGS.horizonDays ||
+            settings.slowDays !== DEFAULT_FORECAST_SETTINGS.slowDays ? (
               <button
                 className="btn btn-secondary"
                 style={{ padding: '8px 12px', fontSize: '11px' }}
@@ -425,6 +447,8 @@ export const StockForecastWidget: React.FC = () => {
           <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
             Скорость — по продажам за {data.window.from} — {data.window.to} с перевесом в сторону последних двух
             недель. Мастер-группы считаются одной строкой на общий остаток.
+            {summary.slow > 0 &&
+              ` Медленно продаётся ${summary.slow} позиц. на ${fmt(summary.slow_cost)} ₸ — запаса больше чем на ${data.params.slow_days} дн.`}
             {summary.dead > 0 && ` Не продаётся ${summary.dead} позиц. на ${fmt(summary.frozen_cost)} ₸ по цене продажи.`}
             {summary.unmatched_skus > 0 && (
               <>

@@ -61,6 +61,7 @@ DEFAULT_RECENT_DAYS = 14       # окно «быстрой» скорости (�
 DEFAULT_LEAD_TIME_DAYS = 14    # сколько идёт поставка от поставщика
 DEFAULT_COVER_DAYS = 14        # на сколько дней продаж закупаемся сверх поставки
 DEFAULT_HORIZON_DAYS = 7       # «закончится в течение недели»
+DEFAULT_SLOW_DAYS = 90         # запаса больше чем на столько дней — «продаётся слишком медленно»
 
 # Вес свежего окна в итоговой скорости. Спрос на Kaspi живёт по кривой
 # «буст в выдаче → пик → спад» (то же наблюдение, что в analytics.py::abc-xyz),
@@ -68,7 +69,7 @@ DEFAULT_HORIZON_DAYS = 7       # «закончится в течение нед
 # и в фазе затухания. Берём смесь с перевесом в сторону последних двух недель.
 _RECENT_WEIGHT = 0.6
 
-BUCKETS = ("out_of_stock", "critical", "warning", "ok", "dead")
+BUCKETS = ("out_of_stock", "critical", "warning", "ok", "slow", "dead")
 
 
 def _local_day(created_at: dt.datetime) -> dt.date:
@@ -106,7 +107,7 @@ def _blend(recent: float, long: float, first_day: Optional[dt.date], recent_star
 
 
 def _bucket(stock: int, velocity: float, sold: int, days_to_zero: Optional[float],
-            horizon_days: int, lead_time_days: int) -> str:
+            horizon_days: int, lead_time_days: int, slow_days: int) -> str:
     if velocity <= 0:
         # Ноль продаж за всё окно при живом остатке — это замороженные деньги,
         # а не «всё хорошо»: отдельная категория, ради которой продавец и
@@ -120,6 +121,14 @@ def _bucket(stock: int, velocity: float, sold: int, days_to_zero: Optional[float
         # Успеет кончиться раньше, чем приедет поставка, даже если заказать
         # прямо сейчас — но позже, чем через неделю.
         return "warning"
+    if days_to_zero is not None and days_to_zero >= slow_days:
+        # Продажи есть, но остатка хватит на квартал и дальше: деньги лежат
+        # в товаре, который оборачивается слишком медленно. От "dead" это
+        # отличается тем, что товар живой — его имеет смысл разгонять
+        # (цена, реклама), а не только списывать. Закупать такое не надо:
+        # recommended_qty у него всё равно 0, потому что целевой запас
+        # (срок поставки + покрытие) заведомо меньше текущего остатка.
+        return "slow"
     return "ok"
 
 
@@ -135,8 +144,14 @@ def _select_items_for_response(items: list, max_items: Optional[int]) -> tuple:
     Правило: сначала ВСЁ «горящее» (out_of_stock/critical/warning) и ВСЁ, что
     реально попадает в заявку (recommended_qty > 0) — это никогда не режется,
     иначе таблица могла бы молча не показать позицию, которую summary уже
-    посчитал в reorder_units. Остаток бюджета — под обычные ok/dead, просто
-    чтобы в списке было на что посмотреть, а не полторы тысячи мёртвых строк.
+    посчитал в reorder_units.
+
+    Остаток бюджета делится между спокойными вёдрами (ok/slow/dead) поровну,
+    а не отдаётся первым по сортировке: сортировка идёт по возрастанию «дней
+    до нуля», поэтому сплошной срез съел бы бюджет на «ok» и оставил бы
+    фильтры «продаётся медленно» и «не продаётся» пустыми ровно на тех
+    каталогах, где они нужнее всего. Внутри этих двух вёдер вперёд идут
+    позиции с наибольшей замороженной суммой — с них продавец и начнёт.
 
     Экспорт в Excel (build_purchase_order_xlsx) получает ПОЛНЫЙ список
     отдельным вызовом без max_items — урезание касается только экрана.
@@ -150,7 +165,26 @@ def _select_items_for_response(items: list, max_items: Optional[int]) -> tuple:
         else:
             rest.append(it)
     budget = max(0, max_items - len(priority))
-    return priority + rest[:budget], True
+    order = {id(it): n for n, it in enumerate(rest)}
+
+    by_bucket: dict = {}
+    for it in rest:
+        by_bucket.setdefault(it["bucket"], []).append(it)
+    for bucket in ("slow", "dead"):
+        if bucket in by_bucket:
+            by_bucket[bucket].sort(key=lambda it: -(it["stock"] * (it.get("price") or 0)))
+
+    share = budget // len(by_bucket) if by_bucket else 0
+    picked, spare = [], []
+    for rows in by_bucket.values():
+        picked.extend(rows[:share])
+        spare.extend(rows[share:])
+    # Ведро могло не выбрать свою квоту (в нём просто меньше строк) — остаток
+    # бюджета отдаём обратно в общий котёл, в исходном порядке сортировки.
+    spare.sort(key=lambda it: order[id(it)])
+    picked.extend(spare[: max(0, budget - len(picked))])
+    picked.sort(key=lambda it: order[id(it)])
+    return priority + picked, True
 
 
 def build_forecast(
@@ -163,6 +197,7 @@ def build_forecast(
     lead_time_days: int = DEFAULT_LEAD_TIME_DAYS,
     cover_days: int = DEFAULT_COVER_DAYS,
     horizon_days: int = DEFAULT_HORIZON_DAYS,
+    slow_days: int = DEFAULT_SLOW_DAYS,
     max_items: Optional[int] = None,
 ) -> dict:
     """Чистое ядро: никаких походов в БД, только уже загруженные данные.
@@ -244,7 +279,8 @@ def build_forecast(
             (today + dt.timedelta(days=int(days_to_zero))).isoformat()
             if days_to_zero is not None and 0 < days_to_zero < 3650 else None
         )
-        row["bucket"] = _bucket(stock, velocity, row["sold"], days_to_zero, horizon_days, lead_time_days)
+        row["bucket"] = _bucket(stock, velocity, row["sold"], days_to_zero,
+                                horizon_days, lead_time_days, slow_days)
         # Целевой запас — на срок поставки плюс период, который она должна
         # закрыть. Заказываем разницу с тем, что уже лежит на складе.
         if velocity > 0:
@@ -365,6 +401,7 @@ def build_forecast(
             "lead_time_days": lead_time_days,
             "cover_days": cover_days,
             "horizon_days": horizon_days,
+            "slow_days": slow_days,
         },
         "window": {"from": window_start.isoformat(), "to": window_end.isoformat()},
         "summary": {
@@ -375,6 +412,11 @@ def build_forecast(
             "reorder_cost": round(sum(it["reorder_cost"] for it in reorder), 2),
             "frozen_cost": round(sum(it["stock"] * (it.get("price") or 0)
                                      for it in items if it["bucket"] == "dead"), 2),
+            # Те же замороженные деньги, но в живом, просто медленном товаре —
+            # считаем отдельно от "dead", иначе одна цифра смешивала бы то,
+            # что надо распродавать, с тем, что надо разгонять.
+            "slow_cost": round(sum(it["stock"] * (it.get("price") or 0)
+                                   for it in items if it["bucket"] == "slow"), 2),
             # Артикулы из истории продаж, которых нет в текущем каталоге —
             # в вёдра не входят, см. комментарий у отбора строк.
             "unmatched_skus": unmatched_skus,
@@ -450,6 +492,7 @@ def compute_stock_forecast(
     lead_time_days: int = DEFAULT_LEAD_TIME_DAYS,
     cover_days: int = DEFAULT_COVER_DAYS,
     horizon_days: int = DEFAULT_HORIZON_DAYS,
+    slow_days: int = DEFAULT_SLOW_DAYS,
     max_items: Optional[int] = None,
 ) -> dict:
     """Прогноз для магазина: тянет каталог, мастер-группы и историю продаж.
@@ -470,6 +513,7 @@ def compute_stock_forecast(
         lead_time_days=lead_time_days,
         cover_days=cover_days,
         horizon_days=horizon_days,
+        slow_days=slow_days,
         max_items=max_items,
     )
 

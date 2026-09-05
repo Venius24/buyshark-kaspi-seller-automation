@@ -24,7 +24,8 @@ from backend.security.store_context import StoreContext, get_store_context
 from backend.security.store_roles import store_section_guard
 from backend.services.sales_export import build_sales_export_xlsx
 from backend.services.stock_forecast import (
-    DEFAULT_COVER_DAYS, DEFAULT_HORIZON_DAYS, DEFAULT_LEAD_TIME_DAYS, DEFAULT_WINDOW_DAYS,
+    DEFAULT_COVER_DAYS, DEFAULT_HORIZON_DAYS, DEFAULT_LEAD_TIME_DAYS, DEFAULT_SLOW_DAYS,
+    DEFAULT_WINDOW_DAYS,
     build_purchase_order_xlsx, compute_stock_forecast,
 )
 
@@ -575,12 +576,16 @@ def get_quality_metrics_history(days: int = 30, ctx: StoreContext = Depends(get_
 # цифра на весь магазин» в настройках была бы враньём. Фронт помнит последний
 # выбор локально, выгрузка получает те же значения, что видел продавец на экране.
 
-def _forecast_params(window_days: int, lead_time_days: int, cover_days: int, horizon_days: int) -> dict:
+def _forecast_params(window_days: int, lead_time_days: int, cover_days: int,
+                     horizon_days: int, slow_days: int) -> dict:
     return {
         "window_days": max(14, min(window_days, 180)),
         "lead_time_days": max(0, min(lead_time_days, 180)),
         "cover_days": max(1, min(cover_days, 180)),
         "horizon_days": max(1, min(horizon_days, 90)),
+        # Ниже срока поставки порог «медленно» терял бы смысл: он бы пересёкся
+        # с ведром «не успеет приехать» и забрал бы у него строки.
+        "slow_days": max(30, min(slow_days, 720)),
     }
 
 
@@ -599,6 +604,7 @@ def get_stock_forecast(
     lead_time_days: int = DEFAULT_LEAD_TIME_DAYS,
     cover_days: int = DEFAULT_COVER_DAYS,
     horizon_days: int = DEFAULT_HORIZON_DAYS,
+    slow_days: int = DEFAULT_SLOW_DAYS,
     ctx: StoreContext = Depends(get_store_context),
 ):
     """
@@ -614,7 +620,7 @@ def get_stock_forecast(
     (summary при этом честный по полному набору) — см. items_truncated и
     /purchase-order-export для полного списка.
     """
-    params = _forecast_params(window_days, lead_time_days, cover_days, horizon_days)
+    params = _forecast_params(window_days, lead_time_days, cover_days, horizon_days, slow_days)
     return {
         "success": True,
         **compute_stock_forecast(ctx.store_id, max_items=_STOCK_FORECAST_MAX_ITEMS, **params),
@@ -627,11 +633,12 @@ def export_purchase_order(
     lead_time_days: int = DEFAULT_LEAD_TIME_DAYS,
     cover_days: int = DEFAULT_COVER_DAYS,
     horizon_days: int = DEFAULT_HORIZON_DAYS,
+    slow_days: int = DEFAULT_SLOW_DAYS,
     only_reorder: bool = True,
     ctx: StoreContext = Depends(get_store_context),
 ):
     """Заявка поставщику в Excel по тому же прогнозу, что показан на экране."""
-    params = _forecast_params(window_days, lead_time_days, cover_days, horizon_days)
+    params = _forecast_params(window_days, lead_time_days, cover_days, horizon_days, slow_days)
     forecast = compute_stock_forecast(ctx.store_id, **params)
     xlsx_bytes = build_purchase_order_xlsx(forecast, only_reorder=only_reorder)
     filename = f"purchase_order_{_date.today().isoformat()}.xlsx"

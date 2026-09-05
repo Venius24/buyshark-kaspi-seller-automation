@@ -192,30 +192,94 @@ def test_buckets_and_summary():
         _product("ZERO-1", stock=0),      # продавался, кончился
         _product("CRIT-1", stock=6),      # 3 дня до нуля
         _product("WARN-1", stock=20),     # 10 дней: позже недели, раньше поставки
-        _product("OK-1", stock=200),      # 100 дней
+        _product("OK-1", stock=100),      # 50 дней: и не горит, и не залежалось
+        _product("SLOW-1", stock=300),    # 150 дней — оборачивается слишком долго
         _product("DEAD-1", stock=50),     # ни одной продажи
     ]
     daily = {}
-    for s in ("ZERO-1", "CRIT-1", "WARN-1", "OK-1"):
+    for s in ("ZERO-1", "CRIT-1", "WARN-1", "OK-1", "SLOW-1"):
         daily.update(_daily(s, 2, 30))
     res = build_forecast(
         products=products, groups={}, daily_by_sku=daily, today=TODAY,
-        lead_time_days=14, cover_days=14, horizon_days=7,
+        lead_time_days=14, cover_days=14, horizon_days=7, slow_days=90,
     )
     keys = _by_key(res)
     assert keys["ZERO-1"]["bucket"] == "out_of_stock"
     assert keys["CRIT-1"]["bucket"] == "critical"
     assert keys["WARN-1"]["bucket"] == "warning"
     assert keys["OK-1"]["bucket"] == "ok"
+    assert keys["SLOW-1"]["bucket"] == "slow"
     assert keys["DEAD-1"]["bucket"] == "dead"
 
     summary = res["summary"]
     assert summary["out_of_stock"] == 1
     assert summary["critical"] == 1
     assert summary["warning"] == 1
+    assert summary["ok"] == 1
+    assert summary["slow"] == 1
     assert summary["dead"] == 1
     # Замороженные деньги: 50 шт по 1000 ₸
     assert summary["frozen_cost"] == pytest.approx(50_000)
+    # Медленные считаются отдельной суммой: 300 шт по 1000 ₸
+    assert summary["slow_cost"] == pytest.approx(300_000)
+
+
+def test_slow_threshold_is_configurable_and_never_eats_the_urgent():
+    """Порог «медленно» двигается продавцом и не забирает строки у вёдер,
+    которые говорят «закупай»: их проверки идут раньше."""
+    products = [_product("A-1", stock=120), _product("B-1", stock=20)]
+    daily = {**_daily("A-1", 2, 30), **_daily("B-1", 2, 30)}
+    common = dict(products=products, groups={}, daily_by_sku=daily, today=TODAY,
+                  lead_time_days=14, cover_days=14, horizon_days=7)
+
+    # A-1: 60 дней запаса. Порог 90 — норма, порог 45 — уже медленный.
+    assert _by_key(build_forecast(slow_days=90, **common))["A-1"]["bucket"] == "ok"
+    assert _by_key(build_forecast(slow_days=45, **common))["A-1"]["bucket"] == "slow"
+    # B-1: 10 дней, не успеет приехать поставка. Даже с абсурдно низким
+    # порогом это остаётся «warning», а не «медленный».
+    assert _by_key(build_forecast(slow_days=30, **common))["B-1"]["bucket"] == "warning"
+
+
+def test_slow_items_are_not_reordered():
+    """Медленный товар в заявку поставщику не попадает: целевой запас
+    (поставка + покрытие) заведомо меньше того, что уже лежит на складе."""
+    res = build_forecast(
+        products=[_product("SLOW-1", stock=300)], groups={},
+        daily_by_sku=_daily("SLOW-1", 2, 30), today=TODAY,
+        lead_time_days=14, cover_days=14, slow_days=90,
+    )
+    item = _by_key(res)["SLOW-1"]
+    assert item["bucket"] == "slow"
+    assert item["recommended_qty"] == 0
+    assert res["summary"]["reorder_positions"] == 0
+
+
+def test_max_items_still_shows_slow_and_dead():
+    """Урезание не имеет права выкосить целое ведро. Сортировка идёт по
+    возрастанию «дней до нуля», поэтому сплошной срез оставил бы на экране
+    одни «ok», а фильтры «медленно»/«не продаётся» показывали бы пусто —
+    ровно на тех каталогах, где они и нужны."""
+    products = [_product(f"OK-{i}", stock=100) for i in range(20)]
+    products += [_product(f"SLOW-{i}", stock=400, price=1000 + i) for i in range(20)]
+    products += [_product(f"DEAD-{i}", stock=10, price=1000 + i) for i in range(20)]
+    daily = {}
+    for i in range(20):
+        daily.update(_daily(f"OK-{i}", 2, 30))
+        daily.update(_daily(f"SLOW-{i}", 2, 30))
+
+    res = build_forecast(products=products, groups={}, daily_by_sku=daily, today=TODAY,
+                         lead_time_days=14, cover_days=14, slow_days=90, max_items=12)
+
+    assert res["items_truncated"] is True
+    assert len(res["items"]) == 12
+    shown = {b: 0 for b in ("ok", "slow", "dead")}
+    for it in res["items"]:
+        shown[it["bucket"]] += 1
+    assert shown["ok"] == shown["slow"] == shown["dead"] == 4
+    # Внутри «медленных» и «мёртвых» вперёд идут самые дорогие остатки —
+    # с них продавец и начнёт разбор.
+    slow_shown = {it["key"] for it in res["items"] if it["bucket"] == "slow"}
+    assert slow_shown == {f"SLOW-{i}" for i in (19, 18, 17, 16)}
 
 
 def test_recommended_qty_covers_lead_time_plus_cover():
