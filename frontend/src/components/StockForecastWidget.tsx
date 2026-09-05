@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { PackageSearch, Download, Layers } from 'lucide-react';
+import { PackageSearch, Download, Layers, Info } from 'lucide-react';
 import { ExpandableCard } from './ExpandableCard';
 import { apiFetch, API_URL } from '../api';
 import {
@@ -48,6 +48,16 @@ const BUCKET_META: Record<StockBucket, { label: string; short: string; color: st
 };
 
 const BUCKET_ORDER: StockBucket[] = ['out_of_stock', 'critical', 'warning', 'ok', 'dead'];
+
+const FORECAST_INFO_TEXT =
+  'Как считаем:\n' +
+  '• Скорость продаж — смесь 60% за последние 14 дней + 40% за последние 60 дней (свежий тренд весит больше).\n' +
+  '• Дней до нуля = остаток ÷ скорость.\n' +
+  '• «Кончится за неделю» — уложится в горизонт; «Не успеет приехать» — кончится раньше, чем придёт поставка.\n' +
+  '• «Не продаётся» — 0 продаж за 60 дней при живом остатке.\n' +
+  '• Заказать = скорость × (срок поставки + запас) − текущий остаток.\n' +
+  '• Сумма заявки — по цене продажи (закупочных цен система не знает).\n' +
+  '• Товары на одном складском остатке (мастер-группы) считаются одной строкой.';
 
 const NumberField: React.FC<{
   label: string;
@@ -142,20 +152,28 @@ export const StockForecastWidget: React.FC = () => {
           : `${urgentCount} позиц. требуют закупа сейчас · заявка на ${fmt(summary.reorder_units)} шт.`
       }
       headerRight={
-        urgentCount > 0 ? (
-          <span
-            className="badge"
-            style={{
-              background: '#f9731622',
-              color: '#f97316',
-              border: '1px solid #f9731655',
-              fontSize: '11px',
-              fontWeight: 700,
-            }}
-          >
-            {urgentCount}
-          </span>
-        ) : undefined
+        <>
+          <Info
+            size={15}
+            color="var(--text-muted)"
+            style={{ flexShrink: 0, cursor: 'help' }}
+            title={FORECAST_INFO_TEXT}
+          />
+          {urgentCount > 0 && (
+            <span
+              className="badge"
+              style={{
+                background: '#f9731622',
+                color: '#f97316',
+                border: '1px solid #f9731655',
+                fontSize: '11px',
+                fontWeight: 700,
+              }}
+            >
+              {urgentCount}
+            </span>
+          )}
+        </>
       }
     >
       {!hasData ? (
