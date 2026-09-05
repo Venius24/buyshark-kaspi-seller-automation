@@ -13,7 +13,8 @@ from backend.services.print_batcher_service import (
     reset_printed_history,
     load_printed_history,
     peek_already_printed,
-    count_already_printed_orders
+    count_already_printed_orders,
+    fetch_order_skus
 )
 from backend.services.auto_assembly_worker import (
     get_unprinted_spool_rows,
@@ -1255,11 +1256,22 @@ def register_handlers():
             # async-хэндлере блокировал бы весь event loop процесса — а это
             # тот же процесс, что обслуживает веб-кабинет и API всех
             # магазинов (см. docs/TELEGRAM_BOT_PLAN.md §7.1).
+            # Тот же состав заказов, что и при загрузке из кабинета: иначе
+            # одна и та же партия раскладывалась бы по-разному в зависимости
+            # от того, откуда её напечатали.
+            sort_preset = stg.get("sort_preset", "filename")
+            order_skus = None
+            if sort_preset in ("master_group", "product_name"):
+                store_ctx = await get_store_by_id(store_id)
+                if store_ctx:
+                    order_skus = await asyncio.to_thread(fetch_order_skus, store_ctx.token)
+
             manifest = await asyncio.to_thread(
                 process_zip_or_pdfs,
                 file_bytes=file_bytes,
                 original_filename=pending["file_name"],
-                sort_preset=stg.get("sort_preset", "filename"),
+                sort_preset=sort_preset,
+                order_skus=order_skus,
                 auto_rotate=stg.get("auto_rotate", True),
                 express_mode=stg.get("express_mode", "separate"),
                 deduplicate_history=stg.get("deduplicate_history", True),

@@ -1,9 +1,10 @@
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Tag } from 'lucide-react';
 import type { Product } from '../../types';
 import { Pagination } from '../shared/Pagination';
 import { ProductCardHeader } from '../shared/ProductCardHeader';
+import { ProductTagsEditor } from '../shared/ProductTagsEditor';
 import { HelpHint } from '../shared/HelpHint';
 import { ParcelLoader } from '../shared/ParcelLoader';
 
@@ -198,6 +199,24 @@ export function ProductsTab({
                             {t('link_product_card')}
                           </a>
                         )}
+
+                        {(product.tags ?? []).map((tag) => (
+                          <span
+                            key={tag}
+                            className="badge"
+                            style={{
+                              background: 'rgba(255,255,255,0.05)',
+                              color: 'var(--secondary)',
+                              border: '1px solid rgba(255,255,255,0.08)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <Tag size={11} />
+                            {tag}
+                          </span>
+                        ))}
                       </div>
                     </div>
 
@@ -275,6 +294,13 @@ export function ProductsTab({
                             <option value="Архив">{t('edit_status_option_archive')}</option>
                           </select>
                         </div>
+                      </div>
+
+                      <div style={{ paddingTop: '4px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                        <ProductTagsEditor
+                          sku={product.merchantSku || product.sku}
+                          tags={product.tags ?? []}
+                        />
                       </div>
 
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>

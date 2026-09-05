@@ -1314,6 +1314,97 @@ def resolve_external_code(store_id: str, sku: Optional[str], merchant_sku: Optio
     return None
 
 
+def _load_product_tags(store_id: str, skus: Optional[list] = None) -> dict:
+    """
+    Метки товаров магазина: {sku: [тег, ...]}.
+
+    skus=None — весь магазин (кабинет), список — только эти артикулы (печать
+    спрашивает ровно по составу партии, а не тянет всю таблицу).
+    """
+    session = _get_sync_db_session()
+    if not session:
+        return {}
+    try:
+        from backend.db.models import ProductTagDB
+        stmt = select(ProductTagDB).where(ProductTagDB.store_id == store_id)
+        if skus is not None:
+            wanted = [str(s).strip() for s in skus if str(s or "").strip()]
+            if not wanted:
+                return {}
+            stmt = stmt.where(ProductTagDB.sku.in_(wanted))
+        out: dict = {}
+        for row in session.scalars(stmt).all():
+            out.setdefault(row.sku, []).append(row.tag)
+        for tags in out.values():
+            tags.sort()
+        return out
+    except Exception as e:
+        logger.error(f"Не удалось загрузить метки товаров: {e}")
+        return {}
+    finally:
+        session.close()
+
+
+def _save_product_tags(store_id: str, sku: str, tags: list) -> list:
+    """Полностью заменяет набор меток товара. Возвращает то, что осталось."""
+    sku = str(sku or "").strip()
+    if not sku:
+        return []
+    cleaned, seen = [], set()
+    for raw in tags or []:
+        tag = str(raw or "").strip()
+        # Верхняя граница — ширина колонки в БД; на этикетке столько всё равно
+        # не поместится, но резать чужой текст молча тут не наше дело.
+        if not tag or len(tag) > 60:
+            continue
+        low = tag.lower()
+        if low not in seen:
+            seen.add(low)
+            cleaned.append(tag)
+
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import ProductTagDB
+        session.query(ProductTagDB).filter(
+            ProductTagDB.store_id == store_id, ProductTagDB.sku == sku
+        ).delete(synchronize_session=False)
+        for tag in cleaned:
+            session.add(ProductTagDB(store_id=store_id, sku=sku, tag=tag))
+        session.commit()
+        return cleaned
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Не удалось сохранить метки товара {sku}: {e}")
+        return []
+    finally:
+        session.close()
+
+
+def _list_store_tags(store_id: str) -> list:
+    """Все метки магазина с числом товаров — справочник собирается из фактов."""
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import ProductTagDB
+        rows = session.execute(
+            select(ProductTagDB.tag, func.count(ProductTagDB.sku))
+            .where(ProductTagDB.store_id == store_id)
+            .group_by(ProductTagDB.tag)
+        ).all()
+        return sorted(
+            [{"tag": tag, "products": count} for tag, count in rows],
+            key=lambda e: (-e["products"], e["tag"]),
+        )
+    except Exception as e:
+        logger.error(f"Не удалось загрузить список меток: {e}")
+        return []
+    finally:
+        session.close()
+
+
 def _get_latest_sales_order_date(store_id: str):
     """Дата самого свежего заказа, уже сохранённого для этого стора —
     воркер использует её, чтобы понять, откуда продолжать инкрементальный

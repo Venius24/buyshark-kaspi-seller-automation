@@ -13,6 +13,7 @@ from backend.services.print_batcher_service import (
     reset_printed_history,
     load_printed_history,
     detect_article_prefixes,
+    fetch_order_skus,
 )
 from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed
 from backend.security.store_roles import require_store_manager, require_store_manager_billed, store_section_guard
@@ -54,13 +55,19 @@ def _make_progress_cb(job_id: str):
     return _cb
 
 
-def _run_job(job_id: str, kwargs: Dict[str, Any]) -> None:
+def _run_job(job_id: str, kwargs: Dict[str, Any], kaspi_token: Optional[str] = None) -> None:
     """
     Выполняется в отдельном потоке, а не задачей event loop: конвейер
     синхронный и CPU-тяжёлый, и он обязан пережить завершение HTTP-запроса,
     который его породил.
     """
     try:
+        if kaspi_token:
+            # Состав заказов тянем здесь, а не в обработчике запроса: это
+            # несколько секунд сети, и держать на них открытый HTTP-запрос
+            # незачем — клиент уже ушёл опрашивать статус задачи.
+            _set_job(job_id, progress={"stage": "Состав заказов из Kaspi", "done": 0, "total": 0})
+            kwargs["order_skus"] = fetch_order_skus(kaspi_token)
         manifest = process_zip_or_pdfs(**kwargs)
         _set_job(job_id, status="done", manifest=manifest)
     except ValueError as ve:
@@ -108,6 +115,10 @@ async def process_print_batch(
 
     # process_zip_or_pdfs — синхронный CPU-тяжёлый конвейер PyMuPDF: в потоке,
     # чтобы не морозить единственный воркер uvicorn на всё время склейки.
+    # Артикул из состава заказа снимает нужду угадывать товар по тексту
+    # накладной — но только на сортировке, где товар вообще участвует.
+    kaspi_token = ctx.token if sort_preset in ("master_group", "product_name") else None
+
     threading.Thread(target=_run_job, daemon=True, name=f"print-batch-{job_id[:8]}", args=(job_id, dict(
         file_bytes=content,
         original_filename=file.filename,
@@ -127,7 +138,7 @@ async def process_print_batch(
         # один и тот же пресет обязан действовать и в кабинете, и в боте.
         store_categories=_load_store_categories(ctx.store_id),
         progress_cb=_make_progress_cb(job_id),
-    ))).start()
+    ), kaspi_token)).start()
 
     return JSONResponse(status_code=202, content={"job_id": job_id, "status": "processing"})
 

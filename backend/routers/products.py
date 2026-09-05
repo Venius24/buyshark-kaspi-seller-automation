@@ -5,8 +5,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from backend.kaspi_wrapper import KaspiAPI
-from backend.models import UpdateProductRequest
-from backend.state_helpers import _save_override, _apply_overrides, _load_products, _save_products, _purge_stale_overrides
+from backend.models import ProductTagsRequest, UpdateProductRequest
+from backend.state_helpers import (
+    _save_override, _apply_overrides, _load_products, _save_products, _purge_stale_overrides,
+    _list_store_tags, _load_product_tags, _save_product_tags,
+)
 from backend.security.store_context import StoreContext
 from backend.security.store_roles import require_section, require_store_owner
 from backend.dumper import generate_xml_feed
@@ -20,6 +23,11 @@ router = APIRouter(prefix="/api", tags=["products"])
 # каталога наружу, цена ошибки — снятые с продажи офферы (HANDOFF §3.67).
 _products = require_section("products")
 _products_write = require_section("products", min_role="MANAGER")
+
+
+def _tag_key(product: dict) -> str:
+    """Артикул, под которым у товара живут метки."""
+    return str(product.get("merchantSku") or product.get("sku") or "").strip()
 
 @router.get("/products")
 def get_products(
@@ -81,6 +89,13 @@ def get_products(
         all_products, dumping_configs, master_groups, price_war_items
     )
 
+    # Метки товара. Ключ — артикул продавца: именно он приходит в составе
+    # заказа из Kaspi Order API, по нему же печать находит теги для этикетки.
+    product_tags = _load_product_tags(ctx.store_id)
+    if product_tags:
+        for p in all_products:
+            p["tags"] = product_tags.get(_tag_key(p), [])
+
     if status and status != "all":
         target_status = "Активен" if status == "active" else ("Архив" if status == "archive" else status)
         filtered = [p for p in all_products if p.get("status") == target_status]
@@ -139,6 +154,21 @@ def get_products(
         "facets": facets,
         "competitors_range": {"min": comp_min, "max": comp_max},
     }
+
+@router.get("/products/tags")
+def list_product_tags(ctx: StoreContext = Depends(_products)):
+    """Все метки магазина с числом товаров — для подсказок при вводе."""
+    return {"success": True, "tags": _list_store_tags(ctx.store_id)}
+
+
+@router.put("/products/{sku}/tags")
+def set_product_tags(sku: str, req: ProductTagsRequest, ctx: StoreContext = Depends(_products_write)):
+    """Заменить набор меток товара целиком."""
+    if len(req.tags) > 20:
+        raise HTTPException(status_code=400, detail="Слишком много меток на одном товаре (максимум 20)")
+    saved = _save_product_tags(ctx.store_id, sku, req.tags)
+    return {"success": True, "sku": sku, "tags": saved}
+
 
 @router.post("/products/update")
 def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(_products_write)):

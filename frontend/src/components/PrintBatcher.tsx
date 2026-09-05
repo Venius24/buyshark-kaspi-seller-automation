@@ -54,6 +54,7 @@ interface ManifestResponse {
   skipped_files?: number;
   grouped_pages?: number;
   ungrouped_pages?: number;
+  sku_matched_pages?: number;
   store_categories?: { key: string; title: string; pages: number }[];
   separator_pages?: boolean;
   new_pages: number;
@@ -840,6 +841,11 @@ export const PrintBatcher: React.FC = () => {
                 <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Tag size={13} /> Связка остатков: <strong style={{ color: 'var(--secondary)' }}>{resultManifest.grouped_pages} со штампом группы</strong>,{' '}
                   <strong style={{ color: 'var(--text-muted)' }}>{resultManifest.ungrouped_pages} без</strong>
+                  {!!resultManifest.sku_matched_pages && (
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      · из них <strong style={{ color: 'var(--secondary)' }}>{resultManifest.sku_matched_pages}</strong> по артикулу из заказа
+                    </span>
+                  )}
                 </div>
               )}
             </div>

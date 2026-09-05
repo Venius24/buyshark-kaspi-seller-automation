@@ -301,6 +301,28 @@ class StoreProductDB(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class ProductTagDB(Base):
+    """
+    Метка на товаре — свободная, помагазинная и НЕ связанная с Мастер-Группой.
+
+    Мастер-Группа существует ради общего остатка, и печать лишь паразитировала
+    на ней как на способе сгруппировать накладные: товар без группы не мог
+    получить на этикетку вообще ничего. Тег вешается прямо на артикул, поэтому
+    работает и для товаров в группе, и для одиночных, и печатается рядом со
+    штампом группы.
+
+    Справочника тегов намеренно нет: список тегов магазина — это DISTINCT по
+    этой таблице. Отдельная таблица-справочник дала бы рассинхрон (тег есть в
+    справочнике, но ни на чём не висит, и наоборот) без единого выигрыша.
+    """
+    __tablename__ = "product_tags"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    sku: Mapped[str] = mapped_column(String(100), primary_key=True)
+    tag: Mapped[str] = mapped_column(String(60), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class ApiKeyDB(Base):
     __tablename__ = "api_keys"
 

@@ -530,6 +530,66 @@ _ORDER_ID_LINE_RE = re.compile(r'^\d[\d\s]{8,}\d$')
 # 2026-08-22). Склеиваем разорванные "N" + "шт" обратно перед поиском.
 _WRAPPED_QTY_UNIT_RE = re.compile(r'(\d)\s*\n\s*(шт\.?)')
 
+# Название, не влезающее в ширину этикетки, Kaspi переносит на вторую строку
+# ЦЕЛИКОМ вместе с пунктиром и счётчиком: "Barkhan H974-0004 Праздничная
+# одноразовая посуда для праздника \nна 10 пе . . . .  1 шт.". Построчный
+# _PRODUCT_DOT_LEADER_RE в таком тексте находил ХВОСТ переноса и возвращал
+# его как название товара — "на 10 пе", "нержавеющей стали", "пластик 4шт",
+# "объемом 1", "см". Артикул (H974-0004, X171-0027, D970-0022) остаётся в
+# первой строке, поэтому накладная теряла и Мастер-Группу, и категорию по
+# префиксу и уезжала в "Прочее" (11 накладных из 33 в партии Бархана
+# 2026-09-04). Склеиваем перенос обратно перед поиском.
+#
+# Закрывающей считается строка, кончающаяся на "N шт." ИМЕННО С ТОЧКОЙ:
+# точка — единица измерения в конце строки списка, а количество внутри
+# названия Kaspi печатает без неё ("...Большой футбол 116 шт"), иначе
+# первая строка выглядела бы уже закрытой и склейки не случилось бы.
+_CLOSING_QTY_RE = re.compile(r'\d+\s*шт\.\s*$')
+_HAS_LETTER_RE = re.compile(r'[A-Za-zА-Яа-яЁё]')
+
+# Пунктира может не быть вовсе: если название занимает всю ширину, точкам
+# просто не остаётся места ("H477-0030 Набор воздушных шаров Barkhan "Большой
+# футбол" 116 шт  \n1 шт."). Такие накладные ловим вторым, ослабленным
+# проходом — только когда основной шаблон с пунктиром не сработал.
+_PRODUCT_LOOSE_RE = re.compile(r'^\s*(?:\d+\.\s*)?(.+?)\s*(?:\.\s*)*\d+\s*шт\.\s*$', re.MULTILINE)
+
+
+# Kaspi (и рендерер PDF под ним) печатает в накладных типографские варианты
+# пробела и дефиса: неразрывный пробел вместо обычного встречается в 12
+# накладных из 248 живой партии 2026-09-04, а перенос строки внутри артикула
+# приходит мягким дефисом. Для глаза они неотличимы, а для _ARTICLE_RE
+# "S517\xad0003" — уже не артикул, и товар теряет категорию на ровном месте.
+_TEXT_LOOKALIKES = {
+    "\xa0": " ", " ": " ", " ": " ", " ": " ",  # пробелы
+    "\xad": "-", "‐": "-", "‑": "-", "‒": "-",  # дефисы
+    "–": "-", "—": "-",
+}
+_LOOKALIKE_RE = re.compile("[" + "".join(_TEXT_LOOKALIKES) + "]")
+
+
+def normalize_waybill_text(text: str) -> str:
+    """Типографские пробелы и дефисы → обычные ASCII."""
+    if not text:
+        return text
+    return _LOOKALIKE_RE.sub(lambda m: _TEXT_LOOKALIKES[m.group(0)], text)
+
+
+def _is_open_product_line(line: str) -> bool:
+    """Строка похожа на НЕзакрытое название товара — есть буквы, нет "N шт."."""
+    s = line.strip()
+    return bool(s) and bool(_HAS_LETTER_RE.search(s)) and not _CLOSING_QTY_RE.search(s)
+
+
+def merge_wrapped_product_lines(text: str) -> str:
+    """Приклеивает перенесённый хвост названия обратно к его первой строке."""
+    out: List[str] = []
+    for line in text.splitlines():
+        if out and _CLOSING_QTY_RE.search(line) and _is_open_product_line(out[-1]):
+            out[-1] = out[-1].rstrip() + " " + line.strip()
+            continue
+        out.append(line)
+    return "\n".join(out)
+
 
 def extract_product_name(text: str, filename: str) -> Optional[str]:
     """
@@ -547,7 +607,10 @@ def extract_product_name(text: str, filename: str) -> Optional[str]:
     if not text:
         return None
 
-    m = _PRODUCT_DOT_LEADER_RE.search(_WRAPPED_QTY_UNIT_RE.sub(r'\1 \2', text))
+    text = normalize_waybill_text(text)
+    prepared = merge_wrapped_product_lines(_WRAPPED_QTY_UNIT_RE.sub(r'\1 \2', text))
+
+    m = _PRODUCT_DOT_LEADER_RE.search(prepared)
     if m:
         name = m.group(1).strip(" .")
         if name:
@@ -562,6 +625,19 @@ def extract_product_name(text: str, filename: str) -> Optional[str]:
                 if candidate and not candidate.replace(" ", "").isdigit():
                     return candidate
                 break
+
+    # Ослабленный проход — последним: у квитанции "НА ТОВАР" свой шаблон, и в
+    # её тексте хватает строк с "N шт.", из которых он выдёргивает обрывки
+    # ('"Happy Birthday" 53 шт', 'ABS-пластик'), перехватывая управление у
+    # точной ветки выше.
+    m = _PRODUCT_LOOSE_RE.search(prepared)
+    if m:
+        name = m.group(1).strip(" .")
+        # Без пунктира отличить название от случайной строки с "N шт." нечем,
+        # кроме наличия букв: иначе в название попадала бы служебная цифирь
+        # накладной.
+        if name and _HAS_LETTER_RE.search(name):
+            return name
 
     return None
 
@@ -677,6 +753,13 @@ class MasterGroupMatcher:
         # группу нельзя, любой выбор был бы монеткой.
         self._ambiguous_codes: Set[str] = set()
 
+        # Точный индекс по ВСЕМ linked_skus — для матча по артикулу из заказа
+        # (см. match_by_sku). В отличие от _by_code сюда попадают и числовые
+        # kaspiSku (175489569), которые под маску артикула не подходят, но в
+        # ответе Kaspi Order API приходят как есть.
+        self._by_linked_sku: Dict[str, Dict[str, Any]] = {}
+        self._ambiguous_linked_skus: Set[str] = set()
+
         for group in master_groups:
             if not group.get("is_active", True):
                 continue
@@ -687,6 +770,9 @@ class MasterGroupMatcher:
                 if not sku:
                     continue
                 low = sku.lower()
+                owner_exact = self._by_linked_sku.setdefault(low, group)
+                if owner_exact is not group:
+                    self._ambiguous_linked_skus.add(low)
                 if _CODE_TOKEN_RE.match(low) and not _is_measure_token(low):
                     owner = self._by_code.setdefault(low, group)
                     if owner is not group:
@@ -766,6 +852,24 @@ class MasterGroupMatcher:
             return 0.0
         return 2 * cov_name * cov_group / (cov_name + cov_group)
 
+    def match_by_sku(self, sku: Optional[str]) -> Optional[Dict[str, Any]]:
+        """
+        Группа по АРТИКУЛУ товара из заказа — без единой эвристики.
+
+        Артикул приходит из Kaspi Order API по коду заказа (см.
+        fetch_order_skus), то есть это те же данные, что лежат в linked_skus,
+        а не текст, распознанный с картинки накладной. Совпало — группа та
+        самая; не совпало — молчим и оставляем разбираться match() по названию.
+        Артикул из нескольких групп пропускаем по той же причине, что и в
+        match(): любой выбор был бы монеткой.
+        """
+        if not sku:
+            return None
+        low = str(sku).strip().lower()
+        if not low or low in self._ambiguous_linked_skus:
+            return None
+        return self._by_linked_sku.get(low)
+
     def match(self, product_name: Optional[str]) -> Optional[Dict[str, Any]]:
         if not product_name:
             return None
@@ -831,6 +935,69 @@ class MasterGroupMatcher:
 
 
 # ---------------------------------------------------------------------------
+# Состав заказа из Kaspi Order API — источник артикулов вместо распознавания
+#
+# Всё, что печатает Kaspi на накладной — это название ВИТРИНЫ, и артикул
+# продавца в него попадает не всегда. Отсюда весь ворох эвристик: разбор
+# пунктирной строки, склейка переносов, схожесть названий. Между тем код
+# заказа на накладной есть всегда (он же в имени файла KASPI_SHOP-<код>.pdf),
+# а Order API по нему отдаёт entries[].offer.code — ровно тот артикул, что
+# лежит в linked_skus Мастер-Группы.
+#
+# Ограничения, из-за которых это дополнение, а не замена: API отдаёт окно в
+# 13 дней и только заказы в обработке, поэтому накладную из старой выгрузки
+# в карте не найти — для неё остаётся прежний путь по названию.
+# ---------------------------------------------------------------------------
+
+# Обе вкладки кабинета: «На сборке» (assembled=False) и «Ожидает курьера»
+# (assembled=True). Печатают и то, и другое, а один запрос отдаёт что-то одно.
+_ORDER_FETCH_STAGES = (False, True)
+_ORDER_FETCH_LIMIT = 1000
+
+
+def fetch_order_skus(token: str, limit: int = _ORDER_FETCH_LIMIT) -> Dict[str, List[str]]:
+    """
+    Карта «код заказа → артикулы его товаров» для одной партии печати.
+
+    Сетевая часть намеренно вынесена из конвейера: в process_zip_or_pdfs
+    карта приходит готовым словарём, поэтому пайплайн остаётся синхронным,
+    детерминированным и тестируемым без Kaspi.
+    """
+    from backend.kaspi_wrapper import KaspiAPI
+
+    order_skus: Dict[str, List[str]] = {}
+    for assembled in _ORDER_FETCH_STAGES:
+        try:
+            orders = KaspiAPI.get_orders_with_products(
+                token,
+                state="KASPI_DELIVERY",
+                status="ACCEPTED_BY_MERCHANT",
+                limit=limit,
+                assembled=assembled,
+            )
+        except Exception as e:
+            # Печать не должна падать из-за Kaspi: без карты партия просто
+            # раскладывается по-старому, как до этой фичи.
+            logger.warning(f"Print Batcher: состав заказов не получен (assembled={assembled}): {e}")
+            continue
+
+        for order in orders or []:
+            code = str(order.get("id") or "").strip()
+            if not code:
+                continue
+            skus = [
+                str(e.get("sku") or "").strip()
+                for e in (order.get("entries") or [])
+                if str(e.get("sku") or "").strip()
+            ]
+            if skus:
+                order_skus.setdefault(code, skus)
+
+    logger.info(f"Print Batcher: состав получен по {len(order_skus)} заказам")
+    return order_skus
+
+
+# ---------------------------------------------------------------------------
 # Категории магазина («огромные категории» поверх Мастер-Групп)
 #
 # У Бархана артикул продавца устроен как <БУКВА><3 цифры>-<4 цифры>
@@ -858,7 +1025,7 @@ def extract_article_prefix(*candidates: Optional[str]) -> Optional[str]:
     for text in candidates:
         if not text:
             continue
-        m = _ARTICLE_RE.search(str(text))
+        m = _ARTICLE_RE.search(normalize_waybill_text(str(text)))
         if m:
             return m.group(1).upper()
     return None
@@ -1117,7 +1284,9 @@ def _draw_fitted_text(target_page: fitz.Page, rect: fitz.Rect, text: str, font: 
     return True
 
 
-def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: fitz.Page, src_clip: fitz.Rect, label: str) -> None:
+def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: fitz.Page,
+                     src_clip: fitz.Rect, label: Optional[str],
+                     tags: Optional[List[str]] = None) -> None:
     """
     Штамп "ГРУППА: <название>" — контурная рамка с подписью, вставляется в
     первый найденный свободный участок накладной. Место ищется на ИСХОДНОЙ
@@ -1125,7 +1294,16 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
     в target_page/target_rect — координаты и размер шрифта масштабируются
     так же, как show_pdf_page масштабирует src_clip в target_rect (единый
     механизм для склеенных термоэтикеток, A4-сеток и страниц "как есть").
+
+    Метки товара печатаются строкой в том же боксе — упаковщику нужен один
+    ориентир, а не два разных прямоугольника в разных углах этикетки. Товар
+    без Мастер-Группы, но с метками, получает бокс из одних меток: раньше
+    ему не доставалось вообще ничего.
     """
+    tags = [t for t in (tags or []) if str(t).strip()]
+    if not label and not tags:
+        return
+
     font_bold, font_regular = _resolve_stamp_fonts()
     if not font_bold or not font_regular:
         return
@@ -1170,13 +1348,30 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
     top_pad = 2.0 * size_ref
     label_h = label_fs * 1.5
     label_rect = fitz.Rect(box.x0 + pad, box.y0 + top_pad, box.x1 - pad, box.y0 + top_pad + label_h)
-    _draw_fitted_text(target_page, label_rect, "ГРУППА", regular, label_fs,
+    _draw_fitted_text(target_page, label_rect, "ГРУППА" if label else "МЕТКИ", regular, label_fs,
                       (0.55, 0.55, 0.55), label_fs * 0.7)
 
-    name_rect = fitz.Rect(box.x0 + pad, label_rect.y1, box.x1 - pad, box.y1 - 1.5 * size_ref)
-    if not _draw_fitted_text(target_page, name_rect, label, bold, name_fs,
-                             (0.3, 0.3, 0.3), max(3.5, 5.0 * size_ref)):
-        logger.warning(f"Print Batcher: название группы '{label}' не поместилось в штамп")
+    bottom = box.y1 - 1.5 * size_ref
+    tags_line = " · ".join(tags)
+    if tags and label:
+        # Метки забирают нижнюю треть бокса, название группы — остальное.
+        # Полоса под метки не должна съедать название: оно главный ориентир.
+        tags_h = min((bottom - label_rect.y1) * 0.34, name_fs * 1.4)
+        tags_rect = fitz.Rect(box.x0 + pad, bottom - tags_h, box.x1 - pad, bottom)
+        bottom = tags_rect.y0
+        _draw_fitted_text(target_page, tags_rect, tags_line, regular, name_fs * 0.62,
+                          (0.35, 0.35, 0.35), max(3.0, 4.0 * size_ref))
+
+    if label:
+        name_rect = fitz.Rect(box.x0 + pad, label_rect.y1, box.x1 - pad, bottom)
+        if not _draw_fitted_text(target_page, name_rect, label, bold, name_fs,
+                                 (0.3, 0.3, 0.3), max(3.5, 5.0 * size_ref)):
+            logger.warning(f"Print Batcher: название группы '{label}' не поместилось в штамп")
+    else:
+        tags_rect = fitz.Rect(box.x0 + pad, label_rect.y1, box.x1 - pad, bottom)
+        if not _draw_fitted_text(target_page, tags_rect, tags_line, bold, name_fs,
+                                 (0.3, 0.3, 0.3), max(3.5, 5.0 * size_ref), center=True):
+            logger.warning(f"Print Batcher: метки '{tags_line}' не поместились в штамп")
 
 
 def draw_separator_page(out_doc: fitz.Document, width_pt: float, height_pt: float,
@@ -1229,7 +1424,8 @@ class PageItem:
                  group_sort_key: Optional[str] = None,
                  store_category_key: Optional[str] = None,
                  store_category_title: Optional[str] = None,
-                 store_category_order: int = 0):
+                 store_category_order: int = 0,
+                 tags: Optional[List[str]] = None):
         self.pdf_path = pdf_path
         self.page_num = page_num
         self.source_filename = source_filename
@@ -1243,6 +1439,7 @@ class PageItem:
         self.unique_key = unique_key
         self.product_name = product_name
         self.stamp_label = stamp_label
+        self.tags = tags or []
         self.group_sort_key = group_sort_key
         # Крупная категория магазина (S/T/K/D/... у Бархана) — см.
         # StoreCategoryResolver. У магазина без настроенных категорий пусто.
@@ -1452,9 +1649,9 @@ def generate_nup_a4_pdf(
             c_rect = get_content_rect(src_page)
 
             current_a4_page.show_pdf_page(target_rect, src_doc, item.page_num, clip=c_rect, keep_proportion=True)
-            if item.stamp_label:
+            if item.stamp_label or item.tags:
                 try:
-                    draw_group_stamp(current_a4_page, target_rect, src_page, c_rect, item.stamp_label)
+                    draw_group_stamp(current_a4_page, target_rect, src_page, c_rect, item.stamp_label, item.tags)
                 except Exception as e:
                     logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
             item_count_on_page += 1
@@ -1497,9 +1694,9 @@ def generate_thermal_pdf(
 
             c_rect = get_content_rect(src_page)
             new_p.show_pdf_page(target_rect, src_doc, item.page_num, clip=c_rect, keep_proportion=True)
-            if item.stamp_label:
+            if item.stamp_label or item.tags:
                 try:
-                    draw_group_stamp(new_p, target_rect, src_page, c_rect, item.stamp_label)
+                    draw_group_stamp(new_p, target_rect, src_page, c_rect, item.stamp_label, item.tags)
                 except Exception as e:
                     logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
             _report(progress_cb, "Компоновка страниц", idx + 1, len(items))
@@ -1547,7 +1744,9 @@ def process_zip_or_pdfs(
     store_id: Optional[str] = None,
     progress_cb: Optional[Callable[[str, int, int], None]] = None,
     filter_duplicates: Optional[bool] = None,
-    store_categories: Optional[Dict[str, Any]] = None
+    store_categories: Optional[Dict[str, Any]] = None,
+    order_skus: Optional[Dict[str, List[str]]] = None,
+    product_tags: Optional[Dict[str, List[str]]] = None
 ) -> Dict[str, Any]:
     """
     Основной пайплайн обработки, подгонки и аудита геометрии накладных.
@@ -1579,6 +1778,8 @@ def process_zip_or_pdfs(
             progress_cb=progress_cb,
             filter_duplicates=filter_duplicates,
             store_categories=store_categories,
+            order_skus=order_skus,
+            product_tags=product_tags,
         )
 
 
@@ -1594,7 +1795,9 @@ def _process_zip_or_pdfs_locked(
     store_id: Optional[str],
     progress_cb: Optional[Callable[[str, int, int], None]],
     filter_duplicates: Optional[bool],
-    store_categories: Optional[Dict[str, Any]] = None
+    store_categories: Optional[Dict[str, Any]] = None,
+    order_skus: Optional[Dict[str, List[str]]] = None,
+    product_tags: Optional[Dict[str, List[str]]] = None
 ) -> Dict[str, Any]:
     batch_id = str(uuid.uuid4())
     batch_out_dir = TEMP_BATCH_DIR / batch_id
@@ -1640,12 +1843,20 @@ def _process_zip_or_pdfs_locked(
     excluded_express_count = 0
     grouped_pages_count = 0
     ungrouped_pages_count = 0
+    sku_matched_pages_count = 0
     new_keys_to_save: Set[str] = set()
 
     category_resolver = StoreCategoryResolver(store_categories)
     # Крупные категории имеют смысл только там, где вообще извлекается товар:
     # сортировки по имени файла/номеру заказа о товаре ничего не знают.
     use_categories = category_resolver.enabled and sort_preset in ("master_group", "product_name")
+
+    # Метки товаров — локальная таблица, тянем прямо здесь (в отличие от
+    # состава заказов, который идёт по сети и приходит параметром). Явно
+    # переданная карта побеждает: на ней держатся тесты.
+    if product_tags is None and store_id and sort_preset in ("master_group", "product_name"):
+        from backend.state_helpers import _load_product_tags
+        product_tags = _load_product_tags(store_id)
 
     group_matcher: Optional[MasterGroupMatcher] = None
     if sort_preset == "master_group" and store_id:
@@ -1686,30 +1897,58 @@ def _process_zip_or_pdfs_locked(
 
                 product_name = None
                 stamp_label = None
+                page_tags: List[str] = []
                 group_sort_key = None
                 cat_key = cat_title = None
                 cat_order = 0
                 matched_group = None
                 if sort_preset in ("product_name", "master_group"):
                     product_name = extract_product_name(text, basename)
+                    # Артикул из состава заказа, если Kaspi его отдал. Это
+                    # данные, а не результат распознавания картинки, поэтому
+                    # он главнее всего, что удалось вычитать с накладной.
+                    order_sku = None
+                    if order_skus and order_id:
+                        order_sku = next(iter(order_skus.get(order_id) or []), None)
+
                     if sort_preset == "master_group":
-                        matched_group = group_matcher.match(product_name) if group_matcher else None
+                        matched_group = group_matcher.match_by_sku(order_sku) if group_matcher else None
+                        matched_by_sku = matched_group is not None
+                        if matched_group is None and group_matcher:
+                            matched_group = group_matcher.match(product_name)
                         if matched_group:
                             stamp_label = matched_group.get("group_name") or product_name
                             group_sort_key = f"0_{stamp_label}"
                             grouped_pages_count += 1
+                            if matched_by_sku:
+                                sku_matched_pages_count += 1
                         else:
                             ungrouped_pages_count += 1
                             # Товар не привязан ни к одной Мастер-Группе — фолбэк на сортировку по названию товара
                             group_sort_key = f"1_{product_name or basename}"
 
+                    if product_tags:
+                        # Метки ищем по артикулу из заказа, а если его нет —
+                        # по привязкам найденной группы: у товара в группе тег
+                        # может висеть на любом из её артикулов.
+                        tag_skus = [order_sku] if order_sku else []
+                        if not tag_skus and matched_group:
+                            tag_skus = [str(s) for s in (matched_group.get("linked_skus") or [])]
+                        seen_tags: Set[str] = set()
+                        for candidate in tag_skus:
+                            for tag in product_tags.get(str(candidate).strip(), []):
+                                if tag not in seen_tags:
+                                    seen_tags.add(tag)
+                                    page_tags.append(tag)
+
                     if use_categories:
-                        # Артикул ищем сначала в привязках Мастер-Группы (там он
-                        # лежит как данные, а не как текст на накладной), потом в
-                        # названии группы и лишь затем в названии товара с
-                        # накладной — по убыванию надёжности.
+                        # Артикул ищем сначала в составе заказа, потом в
+                        # привязках Мастер-Группы (там он лежит как данные, а не
+                        # как текст на накладной), потом в названии группы и лишь
+                        # затем в названии товара — по убыванию надёжности.
                         linked = " ".join(str(x) for x in ((matched_group or {}).get("linked_skus") or []))
                         cat_key, cat_title, cat_order = category_resolver.resolve(
+                            order_sku,
                             linked or None,
                             (matched_group or {}).get("group_name"),
                             product_name,
@@ -1747,6 +1986,7 @@ def _process_zip_or_pdfs_locked(
                     unique_key=unique_key,
                     product_name=product_name,
                     stamp_label=stamp_label,
+                    tags=page_tags,
                     group_sort_key=group_sort_key,
                     store_category_key=cat_key,
                     store_category_title=cat_title,
@@ -1895,11 +2135,11 @@ def _process_zip_or_pdfs_locked(
                                             _category_subtitle(all_pages, item, page_ranges.get(item.store_category_key)))
                         prev_category = item.store_category_key
                     out_doc.insert_pdf(src_doc, from_page=item.page_num, to_page=item.page_num)
-                    if item.stamp_label:
+                    if item.stamp_label or item.tags:
                         try:
                             last_page = out_doc[-1]
                             c_rect = get_content_rect(src_doc[item.page_num])
-                            draw_group_stamp(last_page, last_page.rect, src_doc[item.page_num], c_rect, item.stamp_label)
+                            draw_group_stamp(last_page, last_page.rect, src_doc[item.page_num], c_rect, item.stamp_label, item.tags)
                         except Exception as e:
                             logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
 
@@ -1956,10 +2196,10 @@ def _process_zip_or_pdfs_locked(
                     out_doc.insert_pdf(src_doc, from_page=item.page_num, to_page=item.page_num)
                     last_page = out_doc[-1]
 
-                    if item.stamp_label:
+                    if item.stamp_label or item.tags:
                         try:
                             c_rect = get_content_rect(src_doc[item.page_num])
-                            draw_group_stamp(last_page, last_page.rect, src_doc[item.page_num], c_rect, item.stamp_label)
+                            draw_group_stamp(last_page, last_page.rect, src_doc[item.page_num], c_rect, item.stamp_label, item.tags)
                         except Exception as e:
                             logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
 
@@ -2044,6 +2284,10 @@ def _process_zip_or_pdfs_locked(
         # сортировке по Мастер-Группам, иначе сопоставление вообще не делалось.
         "grouped_pages": grouped_pages_count,
         "ungrouped_pages": ungrouped_pages_count,
+        # Сколько групп проставлено по артикулу из состава заказа, а не
+        # угадано по названию: видно, работает ли связь с Order API вообще.
+        "sku_matched_pages": sku_matched_pages_count,
+        "tagged_pages": sum(1 for p in all_pages if p.tags),
         # Что реально попало в каждую крупную категорию — чтобы владелец видел,
         # не уехала ли треть партии в «Прочее» из-за неназванного префикса.
         "store_categories": _summarize_categories(all_pages) if use_categories else [],

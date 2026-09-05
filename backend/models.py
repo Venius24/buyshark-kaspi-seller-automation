@@ -17,6 +17,10 @@ class UpdateProductRequest(BaseModel):
     brand: Optional[str] = None
     status: Optional[str] = None
 
+class ProductTagsRequest(BaseModel):
+    """Полный набор меток товара — присланный список заменяет прежний."""
+    tags: List[str] = []
+
 class LoginCredentialsRequest(BaseModel):
     email: str
     password: str

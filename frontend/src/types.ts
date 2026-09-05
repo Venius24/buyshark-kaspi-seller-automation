@@ -32,6 +32,8 @@ export interface Product {
   } | null;
   /** Превью с CDN Kaspi (resources.cdn-kaspi.kz), размер "small". */
   image?: string;
+  /** Метки товара — печатаются на этикетке рядом со штампом Мастер-Группы. */
+  tags?: string[];
 }
 
 export interface OrderEntry {
