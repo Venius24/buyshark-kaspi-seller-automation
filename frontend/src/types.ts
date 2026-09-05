@@ -278,6 +278,7 @@ export type ActiveTab =
   | 'transfer'
   | 'auto-assembly'
   | 'billing'
+  | 'employees'
   | 'admin'
   | 'referral'
   | 'logs'

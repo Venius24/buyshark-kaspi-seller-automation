@@ -58,6 +58,9 @@ SECTIONS: tuple[Section, ...] = (
     Section("settings", "Настройки", owner_only=True),
     Section("billing", "Тариф и баланс", owner_only=True),
     Section("public-api", "API для 1С/ERP", owner_only=True),
+    # Управление самими сотрудниками — рекурсивно владельческое: если это
+    # отдать сотруднику, он сможет выдать себе любой другой раздел.
+    Section("employees", "Сотрудники", owner_only=True),
 )
 
 SECTION_KEYS: frozenset[str] = frozenset(s.key for s in SECTIONS)

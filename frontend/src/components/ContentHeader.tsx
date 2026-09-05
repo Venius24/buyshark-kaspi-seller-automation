@@ -15,6 +15,7 @@ import {
   Truck,
   Cog,
   CreditCard,
+  Users,
   ShieldCheck,
   Handshake,
   ScrollText,
@@ -40,11 +41,13 @@ const TAB_ICON: Record<ActiveTab, ComponentType<{ size?: number }>> = {
   transfer: Truck,
   'auto-assembly': Cog,
   billing: CreditCard,
+  employees: Users,
   admin: ShieldCheck,
   referral: Handshake,
   logs: ScrollText,
   settings: Settings,
   help: HelpCircle,
+  assistant: Sparkles,
 };
 
 const TAB_TITLE: Record<ActiveTab, string> = {
@@ -63,11 +66,13 @@ const TAB_TITLE: Record<ActiveTab, string> = {
   transfer: 'Передача Курьеру',
   'auto-assembly': 'Автосборка',
   billing: 'Тариф и Баланс',
+  employees: 'Сотрудники',
   admin: 'Админ-панель',
   referral: 'Реферальная программа',
   logs: 'Терминал Системных Событий',
   settings: 'Статус Сессии & Настройки',
   help: 'Помощь и Энциклопедия',
+  assistant: 'ИИ-помощник',
 };
 
 const TAB_SUBTITLE: Record<ActiveTab, string> = {
@@ -86,11 +91,13 @@ const TAB_SUBTITLE: Record<ActiveTab, string> = {
   transfer: 'Управление актами приема-сдачи и курьерскими передачами',
   'auto-assembly': 'Автопринятие, автоупаковка и накопление накладных по видам доставки — с расписанием и лимитами',
   billing: 'Текущий тариф, баланс, расход дневных кредитов ИИ-ответов и история списаний',
+  employees: 'Сотрудники магазина — должности, роли и разделы кабинета, доступные каждому',
   admin: 'Все подключённые магазины, их тарифы, баланс и статус блокировки',
   referral: 'Ваша реферальная ссылка, приведённые магазины и начисления',
   logs: 'Поток событий системы в реальном времени через WebSocket',
   settings: 'Состояние авторизации Kaspi REST API и сессии Kaspi MC',
   help: 'Как устроены все механики сервиса — простым языком',
+  assistant: 'Помощник по вашему магазину: заказы, товары, остатки и цены — вопросом на человеческом языке',
 };
 
 interface ContentHeaderProps {

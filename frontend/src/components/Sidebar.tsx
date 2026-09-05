@@ -24,6 +24,7 @@ import {
   Compass,
   LogOut,
   MessageCircle,
+  Users,
 } from 'lucide-react';
 import { LanguageSwitcher } from './shared/LanguageSwitcher';
 import { waLink } from '../data/contacts';
@@ -256,6 +257,19 @@ export function Sidebar({
                 <span>{t('billing_and_balance')}</span>
               </div>
               {billingBlocked && <span className="sidebar-pill" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>{t('billing_blocked')}</span>}
+            </button>
+          )}
+
+          {isStoreOwner && can('employees') && (
+            <button
+              data-tour="employees"
+              className={`sidebar-item ${activeTab === 'employees' ? 'active' : ''}`}
+              onClick={() => onSelectTab('employees')}
+            >
+              <div className="sidebar-item-left">
+                <span className="sidebar-icon"><Users size={17} /></span>
+                <span>{t('employees')}</span>
+              </div>
             </button>
           )}
 

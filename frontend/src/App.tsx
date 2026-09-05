@@ -14,6 +14,7 @@ import { LogsTab } from './components/tabs/LogsTab';
 import { OverviewTab } from './components/tabs/OverviewTab';
 import { SettingsTab } from './components/tabs/SettingsTab';
 import { HelpTab } from './components/tabs/HelpTab';
+import { AssistantTab } from './components/tabs/AssistantTab';
 import { AutolistTab } from './components/tabs/AutolistTab';
 import { MasterStockGroups } from './components/MasterStockGroups';
 import { IntegrationsPublicApi } from './components/IntegrationsPublicApi';
@@ -35,11 +36,13 @@ import { ProductsTab } from './components/tabs/ProductsTab';
 import { DumpingTab } from './components/tabs/DumpingTab';
 import { AutoAssemblyTab } from './components/tabs/AutoAssemblyTab';
 import { BillingTab } from './components/tabs/BillingTab';
+import { EmployeesTab } from './components/tabs/EmployeesTab';
 import { AdminPanel } from './components/admin/AdminPanel';
 import { ReferralTab } from './components/tabs/ReferralTab';
 import { fetchProfile, fetchBillingSummary, completeOnboarding, fetchFeatureFlagsWithDefault } from './queries';
 import { OnboardingTour } from './components/OnboardingTour';
-import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig, KaspiQuotaStatus } from './types';
+import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig, DumpingFacets, DumpingFilters, KaspiQuotaStatus } from './types';
+import { EMPTY_DUMPING_FILTERS } from './types';
 
 // Сырые фичи (Автодобавление, Для разработчиков) — доступны только этим email,
 // пока не будут готовы к общему релизу. См. isBetaTester ниже.
@@ -144,6 +147,7 @@ export default function App() {
     if (activeTab === 'referral' && !isReferrer) setActiveTab('stores');
     if ((activeTab === 'autolist' || activeTab === 'public-api') && !isBetaTester) setActiveTab('stores');
     if (activeTab === 'billing' && !isStoreOwner) setActiveTab('stores');
+    if (activeTab === 'employees' && !isStoreOwner) setActiveTab('stores');
   }, [activeTab, isSuperadmin, isReferrer, isBetaTester, isStoreOwner]);
 
 
@@ -212,7 +216,12 @@ export default function App() {
   const [kaspiQuota, setKaspiQuota] = useState<KaspiQuotaStatus | null>(null);
   const [queuePending, setQueuePending] = useState<number>(0);
   const [dumpingOnlyFilter, setDumpingOnlyFilter] = useState(false);
-  const [dumpingStatusFilter, setDumpingStatusFilter] = useState<string>('');
+  // Срезы вкладки демпинга (упёрлись в минимум / стоят на максимуме / N
+  // конкурентов / демпинг выключен, хотя конкуренты есть). Фильтрует бэкенд —
+  // иначе срез видел бы только текущую страницу пагинации.
+  const [dumpingFilters, setDumpingFilters] = useState<DumpingFilters>(EMPTY_DUMPING_FILTERS);
+  const [dumpingFacets, setDumpingFacets] = useState<DumpingFacets | null>(null);
+  const [competitorsRange, setCompetitorsRange] = useState<{ min: number | null; max: number | null } | null>(null);
 
   const { isConnected: isWsConnected, lastEvent: wsEvent } = useWebSocket(getWsUrl());
   const { analytics, widgetData } = useAnalyticsWidgets(wsEvent);
@@ -307,7 +316,7 @@ export default function App() {
       if (res.ok && data.success) {
         addLog(t('log_dumping_save_ok', { sku }));
         loadDumpingConfigs();
-        loadProducts(currentPage, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, dumpingStatusFilter);
+        loadProducts(currentPage, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, dumpingFilters);
         // Закрываем панель редактирования — ключ expandedSkus это product.sku
         // (см. DumpingTab.tsx), а не cfgKey, который может быть merchantSku
         // при мерчант-скоуп-конфиге, поэтому закрываем по displaySku, не sku.
@@ -469,19 +478,35 @@ export default function App() {
     search: string = searchQuery,
     pSize: number = pageSize,
     dumpingOnly: boolean = dumpingOnlyFilter,
-    statusFilterParam: string = dumpingStatusFilter
+    dumping: DumpingFilters = dumpingFilters
   ) => {
     setFetchingProducts(true);
-    addLog(t('log_products_loading', { page: pageNum, limit: pSize, status, dumping: dumpingOnly, filter: statusFilterParam || 'Все' }));
+    addLog(t('log_products_loading', { page: pageNum, limit: pSize, status, dumping: dumpingOnly, filter: dumping.status || 'Все' }));
     try {
-      const res = await apiFetch(
-        `${API_URL}/api/products?page=${pageNum}&status=${status}&search=${encodeURIComponent(search)}&page_size=${pSize}&dumping_only=${dumpingOnly}&dumping_status_filter=${encodeURIComponent(statusFilterParam)}`
-      );
+      const params = new URLSearchParams({
+        page: String(pageNum),
+        status,
+        search,
+        page_size: String(pSize),
+        dumping_only: String(dumpingOnly),
+      });
+      // Пустые срезы не отправляем вовсе — бэкенд трактует отсутствие
+      // параметра как "не фильтровать".
+      if (dumping.status) params.set('dumping_status_filter', dumping.status);
+      if (dumping.dumpingState) params.set('dumping_state', dumping.dumpingState);
+      if (dumping.priceState) params.set('price_state', dumping.priceState);
+      if (dumping.rankState) params.set('rank_state', dumping.rankState);
+      if (dumping.minCompetitors !== null) params.set('min_competitors', String(dumping.minCompetitors));
+      if (dumping.maxCompetitors !== null) params.set('max_competitors', String(dumping.maxCompetitors));
+
+      const res = await apiFetch(`${API_URL}/api/products?${params.toString()}`);
       const data = await res.json();
       if (res.ok && data.success) {
         setProducts(data.products);
         setTotalPages(data.total_pages || 1);
         setTotalCount(data.total_count || 0);
+        setDumpingFacets(data.facets ?? null);
+        setCompetitorsRange(data.competitors_range ?? null);
         addLog(t('log_products_loaded', { count: data.products.length, total: data.total_count }));
       } else {
         addLog(t('log_products_error', { detail: data.detail || 'Ошибка бэкенда' }));
@@ -514,7 +539,7 @@ export default function App() {
 
   const priceFeedImport = usePriceFeedImport(() => {
     loadDumpingConfigs();
-    loadProducts(currentPage, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, dumpingStatusFilter);
+    loadProducts(currentPage, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, dumpingFilters);
   });
 
   const getOrderParams = (statusFilter: 'NEW' | 'ASSEMBLY') => {
@@ -718,10 +743,10 @@ export default function App() {
     // остаётся поверх контента, ради которого его и открывали.
     setMobileNavOpen(false);
     if (tab === 'products') {
-      loadProducts(1, statusFilter, searchQuery, pageSize, false);
+      loadProducts(1, statusFilter, searchQuery, pageSize, false, EMPTY_DUMPING_FILTERS);
       loadDumpingConfigs();
     } else if (tab === 'dumping') {
-      loadProducts(1, statusFilter, searchQuery, pageSize, dumpingOnlyFilter);
+      loadProducts(1, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, dumpingFilters);
       loadDumpingConfigs();
     } else if (tab === 'chatbot') {
       loadChatbotConfig();
@@ -736,19 +761,19 @@ export default function App() {
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setCurrentPage(1);
-    loadProducts(1, statusFilter, searchQuery, pageSize, activeTab === 'dumping' ? dumpingOnlyFilter : false);
+    loadProducts(1, statusFilter, searchQuery, pageSize, activeTab === 'dumping' ? dumpingOnlyFilter : false, activeTab === 'dumping' ? dumpingFilters : EMPTY_DUMPING_FILTERS);
   };
 
   const handleStatusFilterChange = (status: 'active' | 'archive') => {
     setStatusFilter(status);
     setCurrentPage(1);
-    loadProducts(1, status, searchQuery, pageSize, activeTab === 'dumping' ? dumpingOnlyFilter : false);
+    loadProducts(1, status, searchQuery, pageSize, activeTab === 'dumping' ? dumpingOnlyFilter : false, activeTab === 'dumping' ? dumpingFilters : EMPTY_DUMPING_FILTERS);
   };
 
   const handlePageChange = (page: number) => {
     if (page < 1 || page > totalPages) return;
     setCurrentPage(page);
-    loadProducts(page, statusFilter, searchQuery, pageSize, activeTab === 'dumping' ? dumpingOnlyFilter : false);
+    loadProducts(page, statusFilter, searchQuery, pageSize, activeTab === 'dumping' ? dumpingOnlyFilter : false, activeTab === 'dumping' ? dumpingFilters : EMPTY_DUMPING_FILTERS);
   };
 
   const [pkgDeliveryFilter, setPkgDeliveryFilter] = useState<'ALL' | 'EXPRESS' | 'POSTOMAT' | 'STANDARD'>('ALL');
@@ -910,6 +935,8 @@ export default function App() {
         {/* ❓ TAB: HELP / ENCYCLOPEDIA */}
         {activeTab === 'help' && <HelpTab />}
 
+        {activeTab === 'assistant' && <AssistantTab />}
+
         {/* 🏷️ TAB 1, ⚡ TAB 2, 📦 TAB 3, 🚚 TAB 4: RENDER IN GLASS CARD */}
         {(activeTab === 'products' || activeTab === 'dumping' || activeTab === 'packaging' || activeTab === 'transfer') && (
           <div className="glass-card" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
@@ -969,14 +996,16 @@ export default function App() {
                 onDumpingOnlyFilterChange={(val) => {
                   setDumpingOnlyFilter(val);
                   setCurrentPage(1);
-                  loadProducts(1, statusFilter, searchQuery, pageSize, val, dumpingStatusFilter);
+                  loadProducts(1, statusFilter, searchQuery, pageSize, val, dumpingFilters);
                 }}
-                dumpingStatusFilter={dumpingStatusFilter}
-                onDumpingStatusFilterChange={(val) => {
-                  setDumpingStatusFilter(val);
+                filters={dumpingFilters}
+                onFiltersChange={(next) => {
+                  setDumpingFilters(next);
                   setCurrentPage(1);
-                  loadProducts(1, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, val);
+                  loadProducts(1, statusFilter, searchQuery, pageSize, dumpingOnlyFilter, next);
                 }}
+                facets={dumpingFacets}
+                competitorsRange={competitorsRange}
                 onRefreshConfigs={loadDumpingConfigs}
                 dumpingConfigs={dumpingConfigs}
                 expandedSkus={expandedSkus}
@@ -1080,6 +1109,9 @@ export default function App() {
 
         {/* 💳 TAB: BILLING */}
         {activeTab === 'billing' && <BillingTab />}
+
+        {/* 👥 TAB: EMPLOYEES (только владелец) */}
+        {activeTab === 'employees' && isStoreOwner && <EmployeesTab onSelectTab={setActiveTab} />}
 
         {/* 🛡️ TAB: ADMIN (только суперадмин) */}
         {activeTab === 'admin' && isSuperadmin && <AdminPanel />}
