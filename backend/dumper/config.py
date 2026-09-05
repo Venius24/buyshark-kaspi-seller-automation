@@ -68,3 +68,73 @@ class DumpingProductConfig:
     blacklisted_merchants: Optional[List[str]] = None
     city_code: str = "750000000"
 
+
+
+def build_sku_alias_map(products) -> dict:
+    """
+    Псевдоним оффера -> его канонический ключ (merchantSku).
+
+    Даёт возможность сравнивать SKU "по физическому товару", а не по строке:
+    "102050852" (код мастер-карточки Kaspi) и "247353364" (наш merchantSku) —
+    один и тот же оффер, и настройка, заданная на любом из них, должна
+    действовать на оба.
+    """
+    alias_map: dict = {}
+    for p in products or []:
+        merchant_sku = p.get("merchantSku")
+        canonical = str(merchant_sku or p.get("sku") or p.get("kaspiSku") or "")
+        if not canonical:
+            continue
+        for alias in (p.get("sku"), p.get("merchantSku"), p.get("kaspiSku")):
+            if alias:
+                alias_map[str(alias)] = canonical
+    return alias_map
+
+
+def build_effective_dumping_configs(products, configs: dict, master_groups: dict):
+    """
+    Реально действующие настройки демпинга: индивидуальные конфиги SKU,
+    поверх которых разворачиваются настройки активных Мастер-Групп.
+
+    Вынесено из run_price_dumping_job, чтобы UI и движок отвечали на вопрос
+    "демпингуется ли этот товар" ОДНИМ И ТЕМ ЖЕ кодом. Раньше вкладка
+    демпинга смотрела только на индивидуальные конфиги и показывала «демпинг
+    выключен» у товаров, которые движок в это же время исправно демпинговал
+    по групповой настройке.
+
+    Возвращает (effective_configs, source_by_sku), где source_by_sku:
+    sku -> "individual" | "group".
+    """
+    effective_configs = dict(configs or {})
+    source_by_sku = {sku: "individual" for sku in effective_configs}
+
+    canonical = build_sku_alias_map(products)
+
+    for _gid, group in (master_groups or {}).items():
+        if not group.get("is_active", True):
+            continue
+        g_dump_cfg = group.get("dumping_config")
+        if not (g_dump_cfg and g_dump_cfg.get("enabled")):
+            continue
+        # Один физический оффер известен под двумя идентификаторами (наш
+        # merchantSku и код мастер-карточки Kaspi), и в linked_skus регулярно
+        # лежат ОБА — поэтому исключение, заданное одним идентификатором,
+        # разворачиваем на все псевдонимы.
+        excluded_skus = {
+            canonical.get(str(s), str(s)) for s in (group.get("dumping_excluded_skus") or [])
+        }
+        for sku in group.get("linked_skus", []):
+            if canonical.get(str(sku), str(sku)) in excluded_skus:
+                # Товар явно исключён из группового демпинга — групповой
+                # конфиг его не касается, но собственный individual конфиг
+                # (если задан) продолжает работать как обычно.
+                continue
+            indiv_cfg = effective_configs.get(sku)
+            # Если индивидуального конфига нет или он выключен — применяем демпинг группы
+            if not indiv_cfg or not indiv_cfg.get("enabled"):
+                merged = dict(g_dump_cfg)
+                merged["sku"] = sku
+                effective_configs[sku] = merged
+                source_by_sku[sku] = "group"
+
+    return effective_configs, source_by_sku
