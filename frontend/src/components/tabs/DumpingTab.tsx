@@ -1,12 +1,13 @@
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Product, DumpingConfig, KaspiQuotaStatus } from '../../types';
+import type { Product, DumpingConfig, DumpingFacets, DumpingFilters, KaspiQuotaStatus } from '../../types';
 import { Pagination } from '../shared/Pagination';
 import { ProductCardHeader } from '../shared/ProductCardHeader';
 import { PriceWarSummary } from '../PriceWarSummary';
 import { usePriceWarStats, leaderPrice, type PriceWarProduct } from '../../hooks/usePriceWarStats';
 import { HelpHint } from '../shared/HelpHint';
 import { ParcelLoader } from '../shared/ParcelLoader';
+import { DumpingFilterBar } from './DumpingFilterBar';
 
 const EMPTY_CONFIG: DumpingConfig = {
   min_price: 0, max_price: 0, dump_step: 2, enabled: false,
@@ -31,6 +32,60 @@ function getStatusBadge(status: string, t: (key: string) => string) {
   }
 }
 
+const badgeBase: React.CSSProperties = {
+  background: 'rgba(255,255,255,0.05)',
+  color: '#ccc',
+  border: '1px solid rgba(255,255,255,0.08)',
+};
+
+/** "5 конкурентов · мы 2-е · проверено 05.09 14:30" — расклад последнего скана. */
+function CompetitorBadge({ product, t }: { product: Product; t: (key: string, opts?: Record<string, unknown>) => string }) {
+  const pw = product.price_war;
+  // null — товар ни разу не попадал в скан радара. Это НЕ "0 конкурентов",
+  // и рисовать здесь ноль значило бы врать продавцу.
+  if (!pw) {
+    return (
+      <span className="badge" style={{ ...badgeBase, opacity: 0.6 }} title={t('badge_no_scan_hint')}>
+        {t('badge_no_scan')}
+      </span>
+    );
+  }
+  const checked = pw.checked_at ? new Date(pw.checked_at + 'Z') : null;
+  const rankPart = pw.our_rank ? t('badge_our_rank', { rank: pw.our_rank }) : t('badge_rank_unknown');
+  return (
+    <span
+      className="badge"
+      style={{
+        ...badgeBase,
+        color: pw.our_rank === 1 ? '#10b981' : '#ccc',
+        borderColor: pw.our_rank === 1 ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.08)',
+      }}
+      title={checked ? t('badge_checked_at', { at: checked.toLocaleString('ru-RU') }) : ''}
+    >
+      {t('badge_competitors', { n: pw.competitors_count })} · {rankPart}
+    </span>
+  );
+}
+
+/** Бейдж "цена упёрлась в минимум / стоит на максимуме". */
+function PriceStateBadge({ product, t }: { product: Product; t: (key: string) => string }) {
+  if (product.price_state === 'AT_MIN') {
+    return (
+      <span className="badge" style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' }}>
+        {t('badge_at_min')}
+      </span>
+    );
+  }
+  if (product.price_state === 'AT_MAX') {
+    return (
+      <span className="badge" style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)' }}>
+        {t('badge_at_max')}
+      </span>
+    );
+  }
+  return null;
+}
+
 interface DumpingTabProps {
   products: Product[];
   fetchingProducts: boolean;
@@ -46,8 +101,10 @@ interface DumpingTabProps {
   onSearchSubmit: (e: FormEvent) => void;
   dumpingOnlyFilter: boolean;
   onDumpingOnlyFilterChange: (val: boolean) => void;
-  dumpingStatusFilter: string;
-  onDumpingStatusFilterChange: (val: string) => void;
+  filters: DumpingFilters;
+  onFiltersChange: (next: DumpingFilters) => void;
+  facets: DumpingFacets | null;
+  competitorsRange: { min: number | null; max: number | null } | null;
   onRefreshConfigs: () => void;
   dumpingConfigs: Record<string, DumpingConfig>;
   expandedSkus: Set<string>;
@@ -90,8 +147,10 @@ export function DumpingTab({
   onSearchSubmit,
   dumpingOnlyFilter,
   onDumpingOnlyFilterChange,
-  dumpingStatusFilter,
-  onDumpingStatusFilterChange,
+  filters,
+  onFiltersChange,
+  facets,
+  competitorsRange,
   onRefreshConfigs,
   dumpingConfigs,
   expandedSkus,
@@ -269,22 +328,6 @@ export function DumpingTab({
             </button>
           </div>
 
-          {/* Dumping Status Filter Selector */}
-          <select
-            value={dumpingStatusFilter}
-            onChange={(e) => onDumpingStatusFilterChange(e.target.value)}
-            className="form-input"
-            style={{ background: 'var(--input-bg)', color: '#fff', border: '1px solid var(--input-border)', height: '38px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px' }}
-          >
-            <option value="">{t('all_statuses')}</option>
-            <option value="WINNING_1ST">{t('option_1st_place')}</option>
-            <option value="HOLDING_2ND">{t('option_2nd_place')}</option>
-            <option value="TARGET_POS_REACHED">{t('option_target_position')}</option>
-            <option value="AT_MIN_PRICE">{t('option_min_price')}</option>
-            <option value="MAX_PRICE_SINGLE">{t('option_max_price')}</option>
-            <option value="OFF">{t('option_disabled')}</option>
-          </select>
-
           <button type="submit" className="btn btn-primary" style={{ padding: '10px 16px' }}>
             {t('btn_search')}
           </button>
@@ -297,6 +340,13 @@ export function DumpingTab({
             {t('btn_refresh_config')}
           </button>
         </form>
+
+        <DumpingFilterBar
+          filters={filters}
+          onChange={onFiltersChange}
+          facets={facets}
+          competitorsRange={competitorsRange}
+        />
       </div>
 
       {/* Products List with Dumping Controls */}
@@ -355,9 +405,18 @@ export function DumpingTab({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
                         {getStatusBadge(dStatus, t)}
 
-                        <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: '#ccc', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <span className="badge" style={badgeBase}>
                           {t('mode_label')} {cfg.mode || 'TOP_1'}
                         </span>
+
+                        {product.dumping_config_source === 'group' && (
+                          <span className="badge" style={badgeBase} title={t('badge_from_group_hint')}>
+                            {t('badge_from_group')}
+                          </span>
+                        )}
+
+                        <PriceStateBadge product={product} t={t} />
+                        <CompetitorBadge product={product} t={t} />
 
                         {product.url && (
                           <a
