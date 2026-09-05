@@ -9,6 +9,7 @@ import { RevenueHeatmap } from '../components/RevenueHeatmap';
 import { SalesStatsWidget } from '../components/SalesStatsWidget';
 import { PriceRadarWidget } from '../components/PriceRadarWidget';
 import { AbcXyzWidget } from '../components/AbcXyzWidget';
+import { StockForecastWidget } from '../components/StockForecastWidget';
 import { CompetitorLeaderboard } from '../components/CompetitorLeaderboard';
 import { CatalogCoverageGauge } from '../components/CatalogCoverageGauge';
 import { HourlyHeatmap } from '../components/HourlyHeatmap';
@@ -132,6 +133,18 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
     defaultVisible: true,
     defaultOrder: 4,
     render: (ctx) => <AbcXyzWidget key="abc_xyz" data={ctx.abcXyzStats} />,
+  },
+  {
+    id: 'stock_forecast',
+    title: 'Прогноз остатков и закуп',
+    defaultVisible: true,
+    // Дробный порядок намеренно: виджет должен встать сразу после ABC/XYZ, но
+    // перенумеровать соседей нельзя — у пользователей, которые уже двигали
+    // дашборд, в БД лежат СВОИ order, и сдвиг дефолтов перетасовал бы им
+    // ленту. sort по числу с 4.5 справляется, а первый же ручной reorder
+    // всё равно перезапишет порядок целыми числами.
+    defaultOrder: 4.5,
+    render: () => <StockForecastWidget key="stock_forecast" />,
   },
   {
     id: 'competitor_leaderboard',

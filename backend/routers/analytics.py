@@ -22,6 +22,10 @@ from backend.product_name_overrides import resolve_product_name, is_placeholder_
 from backend.dumper.radar import _fetch_offers_sync
 from backend.security.store_context import StoreContext, get_store_context
 from backend.services.sales_export import build_sales_export_xlsx
+from backend.services.stock_forecast import (
+    DEFAULT_COVER_DAYS, DEFAULT_HORIZON_DAYS, DEFAULT_LEAD_TIME_DAYS, DEFAULT_WINDOW_DAYS,
+    build_purchase_order_xlsx, compute_stock_forecast,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -562,3 +566,76 @@ def get_quality_metrics_history(days: int = 30, ctx: StoreContext = Depends(get_
     days = max(7, min(days, 180))
     history = _load_quality_metrics_history(ctx.store_id, days=days)
     return {"success": True, "history": history}
+
+
+# ── Прогноз остатков и закуп ────────────────────────────────────────────
+# Параметры срока поставки/периода покрытия приходят из UI и не хранятся на
+# бэкенде: у одного магазина разные поставщики с разными сроками, и «одна
+# цифра на весь магазин» в настройках была бы враньём. Фронт помнит последний
+# выбор локально, выгрузка получает те же значения, что видел продавец на экране.
+
+def _forecast_params(window_days: int, lead_time_days: int, cover_days: int, horizon_days: int) -> dict:
+    return {
+        "window_days": max(14, min(window_days, 180)),
+        "lead_time_days": max(0, min(lead_time_days, 180)),
+        "cover_days": max(1, min(cover_days, 180)),
+        "horizon_days": max(1, min(horizon_days, 90)),
+    }
+
+
+
+# Дашборд опрашивает эту ручку каждые 5 минут с каждого открытого клиента.
+# На каталоге в 5000+ позиций (Q-STEPPE, живые данные) полный ответ весит
+# ~3 МБ JSON — тот же класс проблемы, что p95=27.6с на /api/stock-groups
+# (HANDOFF §3.52). Урезаем именно items (summary всегда честный по полному
+# набору, см. _select_items_for_response) — экспорт в Excel ходит без лимита.
+_STOCK_FORECAST_MAX_ITEMS = 500
+
+
+@router.get("/stock-forecast")
+def get_stock_forecast(
+    window_days: int = DEFAULT_WINDOW_DAYS,
+    lead_time_days: int = DEFAULT_LEAD_TIME_DAYS,
+    cover_days: int = DEFAULT_COVER_DAYS,
+    horizon_days: int = DEFAULT_HORIZON_DAYS,
+    ctx: StoreContext = Depends(get_store_context),
+):
+    """
+    Прогноз «дней до нуля» по каждой позиции и рекомендованный объём закупа.
+
+    Скорость продаж — из sales_orders (реальные завершённые заказы), остаток —
+    из синхронизированного каталога, мастер-группы схлопнуты в одну строку на
+    общий остаток. Подробности расчёта и его сознательные ограничения —
+    backend/services/stock_forecast.py. Пусто, пока sales_sync_worker не
+    сделал первый проход по стору.
+
+    Ответ на большом каталоге урезан до _STOCK_FORECAST_MAX_ITEMS строк
+    (summary при этом честный по полному набору) — см. items_truncated и
+    /purchase-order-export для полного списка.
+    """
+    params = _forecast_params(window_days, lead_time_days, cover_days, horizon_days)
+    return {
+        "success": True,
+        **compute_stock_forecast(ctx.store_id, max_items=_STOCK_FORECAST_MAX_ITEMS, **params),
+    }
+
+
+@router.get("/purchase-order-export")
+def export_purchase_order(
+    window_days: int = DEFAULT_WINDOW_DAYS,
+    lead_time_days: int = DEFAULT_LEAD_TIME_DAYS,
+    cover_days: int = DEFAULT_COVER_DAYS,
+    horizon_days: int = DEFAULT_HORIZON_DAYS,
+    only_reorder: bool = True,
+    ctx: StoreContext = Depends(get_store_context),
+):
+    """Заявка поставщику в Excel по тому же прогнозу, что показан на экране."""
+    params = _forecast_params(window_days, lead_time_days, cover_days, horizon_days)
+    forecast = compute_stock_forecast(ctx.store_id, **params)
+    xlsx_bytes = build_purchase_order_xlsx(forecast, only_reorder=only_reorder)
+    filename = f"purchase_order_{_date.today().isoformat()}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

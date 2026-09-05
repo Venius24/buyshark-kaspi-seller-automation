@@ -657,6 +657,81 @@ def _sku_base(sku: str) -> str:
     return m.group(1) if m else sku
 
 
+def build_group_index(groups: dict) -> dict:
+    """Обратный индекс «артикул -> группы» для match_group_for_sku_indexed.
+
+    Нужен там, где матчинг гоняется по всему каталогу, а не по позициям
+    одного заказа: прямой перебор стоит O(артикулов x групп) и на живом
+    Бархане (1589 артикулов x 286 групп, с перенормализацией linked_skus
+    внутри каждой итерации) занимал 14 секунд на один прогон прогноза
+    остатков. Индекс строится один раз за O(групп) и сводит матчинг к
+    трём словарным лукапам.
+
+    Три словаря — ровно три правила match_group_for_sku, в том же порядке
+    строгости; отбор «первое непустое правило побеждает» и отказ при
+    неоднозначности живут в match_group_for_sku_indexed, чтобы правило
+    существовало в одном экземпляре.
+    """
+    verbatim: dict = {}   # артикул как есть        -> [gid]  (правило 1)
+    exact: dict = {}      # нормализованный артикул -> [gid]  (правило 2)
+    linked_base: dict = {}  # база привязанного     -> [gid]  (правило 3b)
+
+    def _add(d: dict, key: str, gid: str):
+        if not key:
+            return
+        bucket = d.setdefault(key, [])
+        if gid not in bucket:
+            bucket.append(gid)
+
+    for gid, g in groups.items():
+        for s in (g.get("linked_skus") or []):
+            raw = _canon_sku(s)
+            norm = _normalize_sku(s)
+            _add(verbatim, raw, gid)
+            _add(exact, norm, gid)
+            _add(linked_base, _sku_base(norm), gid)
+
+    return {"groups": groups, "verbatim": verbatim, "exact": exact, "linked_base": linked_base}
+
+
+def match_group_for_sku_indexed(m_sku: str, index: dict):
+    """То же, что match_group_for_sku, но по готовому build_group_index."""
+    raw = _canon_sku(m_sku)
+    sku = _normalize_sku(m_sku)
+    if not sku:
+        return None, None
+    base = _sku_base(sku)
+
+    verbatim = list(index["verbatim"].get(raw, ()))
+    seen = set(verbatim)
+
+    # elif-цепочка оригинала: группа, попавшая в более строгое правило, в
+    # менее строгих уже не участвует.
+    exact = [gid for gid in index["exact"].get(sku, ()) if gid not in seen]
+    seen.update(exact)
+
+    by_base = []
+    # "base in linked" и "любой привязанный, чья база равна артикулу" — обе
+    # половины третьего правила.
+    for gid in list(index["exact"].get(base, ())) + list(index["linked_base"].get(sku, ())):
+        if gid not in seen:
+            seen.add(gid)
+            by_base.append(gid)
+
+    hits = verbatim or exact or by_base
+    if not hits:
+        return None, None
+    groups = index["groups"]
+    if len(hits) > 1:
+        logger.warning(
+            "⚠️ [AutoDeduction] Артикул %s подходит сразу к %d Мастер-Группам (%s) — "
+            "списание пропущено, чтобы не вычесть у чужой. Разведите привязки.",
+            m_sku, len(hits), ", ".join(str(groups[gid].get("group_name")) for gid in hits),
+        )
+        return None, None
+    return hits[0], groups[hits[0]]
+
+
 def match_group_for_sku(m_sku: str, groups: dict):
     """
     Мастер-группа для артикула из заказа. Возвращает (group_id, group) либо
@@ -678,37 +753,12 @@ def match_group_for_sku(m_sku: str, groups: dict):
     Если под правило подходит больше одной группы — НЕ угадываем: возвращаем
     пусто и пишем предупреждение. Молча вычесть у не той группы хуже, чем не
     вычесть вовсе.
+
+    Индекс строится на каждый вызов — для перебора позиций одного заказа это
+    дешевле, чем держать его между тиками. Тому, кто гоняет матчинг по всему
+    каталогу, нужен build_group_index + match_group_for_sku_indexed.
     """
-    raw = _canon_sku(m_sku)
-    sku = _normalize_sku(m_sku)
-    if not sku:
-        return None, None
-
-    base = _sku_base(sku)
-    verbatim, exact, by_base = [], [], []
-    for gid, g in groups.items():
-        linked_raw = {_canon_sku(s) for s in (g.get("linked_skus") or [])}
-        linked_raw.discard("")
-        linked = {_normalize_sku(s) for s in linked_raw}
-        linked.discard("")
-        if raw in linked_raw:
-            verbatim.append((gid, g))
-        elif sku in linked:
-            exact.append((gid, g))
-        elif base in linked or any(_sku_base(s) == sku for s in linked):
-            by_base.append((gid, g))
-
-    hits = verbatim or exact or by_base
-    if not hits:
-        return None, None
-    if len(hits) > 1:
-        logger.warning(
-            "⚠️ [AutoDeduction] Артикул %s подходит сразу к %d Мастер-Группам (%s) — "
-            "списание пропущено, чтобы не вычесть у чужой. Разведите привязки.",
-            m_sku, len(hits), ", ".join(str(g.get("group_name")) for _, g in hits),
-        )
-        return None, None
-    return hits[0]
+    return match_group_for_sku_indexed(m_sku, build_group_index(groups))
 
 
 def _claim_key(order_id: str, sku: str) -> str:

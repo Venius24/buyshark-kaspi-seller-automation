@@ -18,6 +18,8 @@ from backend.services.stock_sync_worker import (
     _calculate_physical_units,
     _normalize_sku,
     match_group_for_sku,
+    match_group_for_sku_indexed,
+    build_group_index,
     process_packaging_auto_deduction,
 )
 
@@ -513,3 +515,48 @@ class TestStuckStatusSweep(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIndexedMatcherEquivalence(unittest.TestCase):
+    """build_group_index + match_group_for_sku_indexed — быстрый путь для
+    матчинга по всему каталогу (прогноз остатков). Он обязан отвечать ровно
+    то же, что перебор: расхождение означало бы списание/прогноз не у той
+    группы. match_group_for_sku сама делегирует индексу, поэтому тест ловит
+    именно расхождение правил, а не двух реализаций.
+    """
+
+    GROUPS = {
+        "a": {"group_name": "A", "linked_skus": ["T219-0005", "H422-0007-9"]},
+        "b": {"group_name": "B", "linked_skus": ["H422-0007-9 2шт", "K474-0003-1"]},
+        "c": {"group_name": "C", "linked_skus": ["K474-0003-2", "D697-0011"]},
+        "d": {"group_name": "D", "linked_skus": ["X470-0010"]},
+        "e": {"group_name": "E", "linked_skus": ["X470-0010"]},  # намеренный дубль
+    }
+
+    CASES = [
+        "T219-0005", "T219-0005-4", "H422-0007-9", "H422-0007-9 2шт",
+        "h422-0007-9   2  шт", "K474-0003-1", "K474-0003-2", "K474-0003",
+        "D697-0011", "D697-0011-3", "X470-0010", "X470-0010-2",
+        "", "   ", "НЕТ-ТАКОГО", "t219-0005",
+    ]
+
+    def test_indexed_matches_direct_call(self):
+        index = build_group_index(self.GROUPS)
+        for sku in self.CASES:
+            with self.subTest(sku=sku):
+                self.assertEqual(
+                    match_group_for_sku_indexed(sku, index)[0],
+                    match_group_for_sku(sku, self.GROUPS)[0],
+                )
+
+    def test_index_is_reusable_across_lookups(self):
+        """Индекс строится один раз и не портится последующими лукапами."""
+        index = build_group_index(self.GROUPS)
+        first = [match_group_for_sku_indexed(s, index)[0] for s in self.CASES]
+        second = [match_group_for_sku_indexed(s, index)[0] for s in self.CASES]
+        self.assertEqual(first, second)
+
+    def test_ambiguous_sku_still_refuses(self):
+        """Дубль привязки — по-прежнему отказ, а не угадывание."""
+        index = build_group_index(self.GROUPS)
+        self.assertIsNone(match_group_for_sku_indexed("X470-0010", index)[0])
