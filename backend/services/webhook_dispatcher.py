@@ -70,3 +70,11 @@ async def dispatch_webhook_event(event_type: str, payload_data: Dict[str, Any], 
             await asyncio.sleep(delays[attempt])
 
     logger.error(f"❌ [Webhook] Не удалось доставить событие '{event_type}' на {url} после 3 попыток.")
+    try:
+        from backend.services import ops_metrics
+
+        host = url.split("/")[2] if url.count("/") >= 2 else url
+        ops_metrics.inc("webhook_fail")
+        ops_metrics.record(f"webhook недоставлен: '{event_type}' -> {host}")
+    except Exception:
+        pass
