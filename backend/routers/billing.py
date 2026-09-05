@@ -11,18 +11,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.database import get_db
 from backend.db.models import StoreTariffDB, StoreBalanceDB
+from backend.security.store_roles import store_section_guard
 from backend.security.store_context import StoreContext, get_store_context
 from backend.billing import catalog, credits as billing_credits, ledger as billing_ledger
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/billing", tags=["Billing"])
+router = APIRouter(prefix="/api/billing", tags=["Billing"], dependencies=[Depends(store_section_guard("billing"))])
 
 
 class PlanOut(BaseModel):
     code: str
     name: str
     max_products: Optional[int]
+    max_employees: Optional[int]
     monthly_price_minor: Optional[int]
     daily_credit_limit_milli: Optional[int]
     badge: Optional[str]
@@ -32,6 +34,7 @@ class BillingSummaryOut(BaseModel):
     plan_code: str
     plan_name: str
     max_products: Optional[int]
+    max_employees: Optional[int]
     monthly_price_minor: int
     billing_status: str
     blocked_reason: Optional[str]
@@ -65,6 +68,7 @@ async def get_billing_summary(
         plan_code=plan.code,
         plan_name=plan.name,
         max_products=plan.max_products,
+        max_employees=plan.max_employees,
         monthly_price_minor=catalog.plan_price_minor(plan_code, tariff.custom_monthly_price_minor if tariff else None),
         billing_status=tariff.billing_status if tariff else "ACTIVE",
         blocked_reason=tariff.blocked_reason if tariff else None,
@@ -81,7 +85,7 @@ async def get_billing_summary(
 @router.get("/plans", response_model=list[PlanOut])
 async def get_billing_plans():
     return [
-        PlanOut(code=p.code, name=p.name, max_products=p.max_products, monthly_price_minor=p.monthly_price_minor, daily_credit_limit_milli=p.daily_credit_limit_milli, badge=p.badge)
+        PlanOut(code=p.code, name=p.name, max_products=p.max_products, max_employees=p.max_employees, monthly_price_minor=p.monthly_price_minor, daily_credit_limit_milli=p.daily_credit_limit_milli, badge=p.badge)
         for p in catalog.public_plans()
     ]
 

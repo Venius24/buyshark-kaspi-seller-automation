@@ -55,6 +55,26 @@ export function useCanEdit(): boolean {
   return useActiveStoreRole() !== 'VIEWER';
 }
 
+// Разделы кабинета, доступные в активном магазине (вторая ось прав, см.
+// backend/security/sections.py). Источник — тот же ['stores'] queryKey, что и
+// у роли: справочника разделов на клиенте нет, показываем ровно то, что
+// разрешил бэкенд. null = ещё не загрузилось или магазин не отдал список.
+export function useActiveStoreSections(): Set<string> | null {
+  const activeStoreId = useActiveStoreId();
+  const { data: stores = [] } = useQuery({ queryKey: ['stores'], queryFn: fetchStores });
+  const store = stores.find((s) => s.id === activeStoreId) ?? (stores.length === 1 ? stores[0] : undefined);
+  if (!store || !store.sections) return null;
+  return new Set(store.sections);
+}
+
+// Fail-open, пока список не загружен: настоящая проверка всё равно на
+// бэкенде (403 из store_section_guard), здесь только UX. Иначе на каждой
+// перезагрузке страницы сайдбар на долю секунды схлопывался бы в пустоту.
+export function useHasSection(): (section: string) => boolean {
+  const sections = useActiveStoreSections();
+  return (section: string) => sections === null || sections.has(section);
+}
+
 export function useIsStoreOwner(): boolean {
   // Fail-open, пока роль ещё не загружена (null) — реальная защита всё
   // равно на бэкенде (403), здесь только UX. Без этого OWNER на долю

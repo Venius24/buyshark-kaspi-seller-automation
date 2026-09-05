@@ -23,10 +23,10 @@ from backend.autolist import extractor
 from backend.autolist import validator as v
 from backend.models import AutolistDraftPatchRequest
 from backend.security.store_context import StoreContext, get_store_context
-from backend.security.store_roles import require_store_manager, require_store_manager_billed
+from backend.security.store_roles import require_store_manager, require_store_manager_billed, store_section_guard
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/autolist", tags=["autolist"])
+router = APIRouter(prefix="/api/autolist", tags=["autolist"], dependencies=[Depends(store_section_guard("autolist"))])
 
 
 @router.post("/drafts")

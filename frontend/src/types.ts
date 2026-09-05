@@ -11,7 +11,25 @@ export interface Product {
   stock?: number;
   brand?: string;
   dumping_status?: string;
-  dumping_config?: any;
+  dumping_config?: DumpingConfig | null;
+  /** "individual" — свой конфиг товара, "group" — унаследован от активной Мастер-Группы. */
+  dumping_config_source?: 'individual' | 'group' | null;
+  /** Состояние самой настройки демпинга (эффективной, с учётом Мастер-Групп). */
+  dumping_state?: 'ON' | 'OFF' | 'NO_CONFIG';
+  /** Где цена относительно коридора min/max из конфига. */
+  price_state?: 'AT_MIN' | 'AT_MAX' | 'IN_RANGE' | 'NO_LIMITS';
+  /** Наша позиция по последнему скану радара. */
+  rank_state?: 'LEADER' | 'NOT_LEADER' | 'NO_DATA';
+  /** null — товар ни разу не сканировался (это НЕ ноль конкурентов). */
+  competitors_count?: number | null;
+  price_war?: {
+    our_rank: number | null;
+    competitors_count: number;
+    best_competitor_price: number | null;
+    best_competitor_name: string | null;
+    /** Момент последнего скана — расклад конкурентов это снимок, а не онлайн-истина. */
+    checked_at: string | null;
+  } | null;
   /** Превью с CDN Kaspi (resources.cdn-kaspi.kz), размер "small". */
   image?: string;
 }
@@ -148,6 +166,32 @@ export interface DumpingConfig {
   blacklisted_merchants?: string[];
 }
 
+/** Срезы вкладки авто-демпинга. Пустая строка / null = фильтр не применён. */
+export interface DumpingFilters {
+  /** Рабочий статус из последнего расчёта движка: WINNING_1ST, AT_MIN_PRICE, ... */
+  status: string;
+  /** ON | OFF | NO_CONFIG | OFF_WITH_RIVALS */
+  dumpingState: string;
+  /** AT_MIN | AT_MAX | IN_RANGE | NO_LIMITS */
+  priceState: string;
+  /** LEADER | NOT_LEADER | NO_DATA */
+  rankState: string;
+  minCompetitors: number | null;
+  maxCompetitors: number | null;
+}
+
+export const EMPTY_DUMPING_FILTERS: DumpingFilters = {
+  status: '',
+  dumpingState: '',
+  priceState: '',
+  rankState: '',
+  minCompetitors: null,
+  maxCompetitors: null,
+};
+
+/** Сколько товаров попало бы в каждый срез — приходит с /api/products. */
+export type DumpingFacets = Record<string, number>;
+
 export interface AutolistFeatureMeta {
   name: string;
   mandatory: boolean;
@@ -239,6 +283,7 @@ export type ActiveTab =
   | 'logs'
   | 'settings'
   | 'help'
+  | 'assistant'
   | 'global-control';
 
 export interface FeatureFlags {

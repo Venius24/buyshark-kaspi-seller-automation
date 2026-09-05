@@ -37,6 +37,17 @@ class StoreResponse(BaseModel):
     name: str
     status: str
     role: str
+    # Разделы кабинета, доступные текущему пользователю в этом магазине
+    # (см. backend/security/sections.py). Фронтенд гейтит сайдбар ровно по
+    # этому списку — второго справочника разделов на клиенте нет. Для
+    # владельца тут все ключи, включая владельческие.
+    #
+    # Заполняется ТОЛЬКО списочным GET /api/v1/stores. Точечные ответы
+    # (подключение, verify, sync-cookies) оставляют None = «не рассчитано»:
+    # пустой список там читался бы как «доступа нет ни к чему» и мигал бы
+    # пустым сайдбаром, а честно посчитать права в этих путях не из чего.
+    sections: Optional[List[str]] = None
+    job_title: Optional[str] = None
     last_sync_at: Optional[str]
     created_at: str
 
@@ -69,15 +80,18 @@ async def list_user_stores(
 ):
     """Получение списка магазинов Kaspi, доступных текущему пользователю"""
     stmt = (
-        select(Store, UserStore.role)
+        select(Store, UserStore.role, UserStore.allowed_sections, UserStore.job_title)
         .join(UserStore, Store.id == UserStore.store_id)
         .where(UserStore.user_id == user.id)
     )
     result = await db.execute(stmt)
     rows = result.all()
 
+    from backend.security.sections import effective_sections
+    from backend.security.store_context import _parse_allowed_sections
+
     stores_list = []
-    for store, role in rows:
+    for store, role, raw_sections, job_title in rows:
         stores_list.append(
             StoreResponse(
                 id=store.id,
@@ -85,6 +99,8 @@ async def list_user_stores(
                 name=store.name,
                 status=store.status,
                 role=role,
+                sections=sorted(effective_sections(role, _parse_allowed_sections(raw_sections))),
+                job_title=job_title,
                 last_sync_at=store.last_sync_at.isoformat() if store.last_sync_at else None,
                 created_at=store.created_at.isoformat()
             )

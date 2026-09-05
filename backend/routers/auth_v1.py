@@ -36,6 +36,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -227,7 +232,11 @@ async def login_user(
             "id": user.id,
             "email": user.email,
             "full_name": user.full_name,
-            "phone": user.phone
+            "phone": user.phone,
+            # Сотрудник вошёл с временным паролем, который владелец видел
+            # своими глазами (см. routers/employees.py) — кабинет обязан
+            # показать экран смены пароля вместо рабочих вкладок.
+            "must_change_password": user.must_change_password,
         },
         subscription={
             "plan_type": sub.plan_type if sub else "STARTER",
@@ -290,6 +299,7 @@ async def get_me(
             "is_verified": user.is_verified,
             "is_superadmin": user.is_superadmin,
             "is_referrer": is_referrer,
+            "must_change_password": user.must_change_password,
             "onboarding_completed": user.onboarding_completed_at is not None,
         },
         "subscription": {
@@ -300,6 +310,30 @@ async def get_me(
             "valid_until": sub.valid_until.isoformat() if sub else None
         }
     }
+
+
+@router.post("/change-password")
+async def change_password(
+    req: ChangePasswordRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Смена собственного пароля. Для сотрудника с временным паролем это
+    единственное действие, доступное до снятия must_change_password."""
+    if user.is_telegram_only:
+        raise HTTPException(status_code=403, detail="У Telegram-аккаунта нет пароля от веб-кабинета")
+    if not verify_password(req.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Текущий пароль неверен")
+    if len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Новый пароль должен быть не короче 8 символов")
+    if verify_password(req.new_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Новый пароль совпадает со старым")
+
+    user.password_hash = hash_password(req.new_password)
+    user.must_change_password = False
+    await db.commit()
+    logger.info("Пользователь %s сменил пароль", user.email)
+    return {"success": True}
 
 
 @router.post("/onboarding-complete")

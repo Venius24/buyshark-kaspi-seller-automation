@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from backend.models import AutoAssemblyRuleRequest, MarkSpoolPrintedRequest
 from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed
-from backend.security.store_roles import require_store_manager, require_store_manager_billed
+from backend.security.store_roles import require_store_manager, require_store_manager_billed, store_section_guard
 from backend.state_helpers import _get_sync_db_session
 from backend.services.auto_assembly_worker import (
     run_auto_assembly_cycle,
@@ -19,7 +19,7 @@ from backend.services.auto_assembly_worker import (
 from backend.services.print_batcher_service import process_zip_or_pdfs
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/auto-assembly", tags=["auto-assembly"])
+router = APIRouter(prefix="/api/auto-assembly", tags=["auto-assembly"], dependencies=[Depends(store_section_guard("auto-assembly"))])
 
 # Категории, что возвращает KaspiAPI._parse_delivery_type — единый список
 # для формирования полной сетки правил на фронте, даже если у стора ещё нет

@@ -15,11 +15,11 @@ from backend.services.print_batcher_service import (
     detect_article_prefixes,
 )
 from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed
-from backend.security.store_roles import require_store_manager, require_store_manager_billed
+from backend.security.store_roles import require_store_manager, require_store_manager_billed, store_section_guard
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/print-batcher", tags=["Print Batcher Engine"])
+router = APIRouter(prefix="/api/print-batcher", tags=["Print Batcher Engine"], dependencies=[Depends(store_section_guard("print-batcher"))])
 
 # Склейка крупной партии — это десятки секунд чистого CPU (1200 накладных ≈ 55с
 # на проде). Держать на это открытый HTTP-запрос нельзя: перед сервисом стоит

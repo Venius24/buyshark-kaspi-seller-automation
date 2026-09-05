@@ -32,7 +32,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from backend.security.store_context import StoreContext, get_store_context_billed
-from backend.security.store_roles import require_store_manager_billed
+from backend.security.store_roles import require_store_manager_billed, store_section_guard
 from backend.services import pricefeed_client
 from backend.services.playwright_worker import worker as pw_worker
 from backend.services import pricefeed_mapping
@@ -40,7 +40,15 @@ from backend.state_helpers import _load_dumping_configs, _save_dumping_configs, 
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/dumping/pricefeed", tags=["PriceFeed Import"])
+# billed=True: оба эндпоинта здесь (preview/apply) — мутирующие POST'ы, уже
+# сами резолвятся через get_store_context_billed, а не get_store_context.
+# Гейт раздела ходит по той же billed-версии, а не заводит второй,
+# небилледный резолв стора поверх (см. store_section_guard).
+router = APIRouter(
+    prefix="/api/dumping/pricefeed",
+    tags=["PriceFeed Import"],
+    dependencies=[Depends(store_section_guard("dumping", billed=True))],
+)
 
 _PENDING_TTL_SECONDS = 900
 _IMPORT_COOLDOWN_SECONDS = 300

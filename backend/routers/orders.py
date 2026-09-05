@@ -4,9 +4,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.kaspi_wrapper import KaspiAPI
 from backend.models import PackOrderRequest
 from backend.security.store_context import StoreContext, get_store_context
+from backend.security.store_roles import require_section
 from backend.state_helpers import _load_products
 
+# Единственный роутер с ДВУМЯ разделами под одним префиксом: /orders* — это
+# вкладка «Упаковка», /transfers — «Передача». Поэтому охрана здесь
+# поэндпоинтная, а не на роутере целиком, как у остальных (см.
+# security/store_roles.py::store_section_guard).
 router = APIRouter(prefix="/api", tags=["orders"])
+
+_packaging = require_section("packaging")
+_packaging_write = require_section("packaging", min_role="MANAGER")
+_transfer = require_section("transfer")
 
 
 def _image_map_for_store(store_id: str) -> dict:
@@ -34,7 +43,7 @@ def _attach_entry_images(orders: list, image_map: dict):
 
 
 @router.get("/orders/packaging/tabs")
-def get_packaging_tabs(ctx: StoreContext = Depends(get_store_context)):
+def get_packaging_tabs(ctx: StoreContext = Depends(_packaging)):
     """Разбор заказов по 3 вкладкам: На сборке, Ожидает курьера, Переданы на доставку (JSON:API benchmark)."""
     token = ctx.token
     try:
@@ -50,7 +59,7 @@ def get_packaging_tabs(ctx: StoreContext = Depends(get_store_context)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/orders/packaging/by-prefix")
-def get_packaging_orders_by_prefix(prefix: str = Query("T219-0005"), ctx: StoreContext = Depends(get_store_context)):
+def get_packaging_orders_by_prefix(prefix: str = Query("T219-0005"), ctx: StoreContext = Depends(_packaging)):
     """Получить заказы на сборке/в упаковке по префиксу артикула товара (например T219-0005, T219-0005-1,2...)."""
     token = ctx.token
     try:
@@ -64,7 +73,7 @@ def get_orders(
     status: str = Query("APPROVED_BY_BANK"),
     limit: int = Query(20),
     assembled: Optional[bool] = None,
-    ctx: StoreContext = Depends(get_store_context),
+    ctx: StoreContext = Depends(_packaging),
 ):
     """Получить заказы с полной цепочкой."""
     token = ctx.token
@@ -76,7 +85,7 @@ def get_orders(
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/orders/pack")
-def pack_order(req: PackOrderRequest, ctx: StoreContext = Depends(get_store_context)):
+def pack_order(req: PackOrderRequest, ctx: StoreContext = Depends(_packaging_write)):
     """Перевести заказ в новый статус или упаковать."""
     token = ctx.token
     try:
@@ -101,7 +110,7 @@ def pack_order(req: PackOrderRequest, ctx: StoreContext = Depends(get_store_cont
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/orders/pack-all")
-def pack_all_orders(ctx: StoreContext = Depends(get_store_context)):
+def pack_all_orders(ctx: StoreContext = Depends(_packaging_write)):
     """Принять все новые заказы и упаковать все заказы на сборке."""
     token = ctx.token
     try:
@@ -138,7 +147,7 @@ def pack_all_orders(ctx: StoreContext = Depends(get_store_context)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/transfers")
-def get_transfers(filter: str = Query("ALL"), ctx: StoreContext = Depends(get_store_context)):
+def get_transfers(filter: str = Query("ALL"), ctx: StoreContext = Depends(_transfer)):
     """Получить список передач."""
     token = ctx.token
     try:

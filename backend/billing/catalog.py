@@ -32,6 +32,12 @@ class Plan:
     max_products: Optional[int]  # None = безлимит
     monthly_price_minor: Optional[int]  # None = договорная (ГигаПредприятие)
     daily_credit_limit_milli: Optional[int] = None  # None = договорной/безлимит (GIGA/DEV)
+    # Сколько сотрудников (не считая владельца) можно завести в кабинет —
+    # вторая ось апсейла после товаров (2026-09-05). None = безлимит
+    # (GIGA/DEV). 0 — валидное значение: на самом дешёвом тарифе магазин
+    # работает в одно лицо, и это ровно тот повод повысить тариф, ради
+    # которого лимит и вводится.
+    max_employees: Optional[int] = 0
     badge: Optional[str] = None
     is_free: bool = False
     is_public: bool = True  # показывать ли в публичном прайс-листе кабинета
@@ -42,32 +48,38 @@ PLANS: dict[str, Plan] = {
         code="START", name="Бодрый старт",
         max_products=50, monthly_price_minor=640_000,
         daily_credit_limit_milli=20_000,
+        max_employees=0,
     ),
     "HUNTER": Plan(
         code="HUNTER", name="Охотник",
         max_products=200, monthly_price_minor=1_130_000,
         daily_credit_limit_milli=50_000,
+        max_employees=2,
     ),
     "PREDATOR": Plan(
         code="PREDATOR", name="Хищник",
         max_products=1000, monthly_price_minor=1_790_000,
         daily_credit_limit_milli=100_000,
+        max_employees=5,
         badge="ХИТ ПРОДАЖ",
     ),
     "PREDATOR_PLUS": Plan(
         code="PREDATOR_PLUS", name="Хищник+",
         max_products=2000, monthly_price_minor=2_980_000,
         daily_credit_limit_milli=200_000,
+        max_employees=10,
     ),
     "GIGA": Plan(
         code="GIGA", name="ГигаПредприятие",
         max_products=None, monthly_price_minor=None,
         daily_credit_limit_milli=None,  # договорной, см. custom_daily_credits_milli
+        max_employees=None,
     ),
     "DEV": Plan(
         code="DEV", name="DEV",
         max_products=None, monthly_price_minor=0,
         daily_credit_limit_milli=None,  # безлимит через is_free, не через каталог
+        max_employees=None,
         is_free=True, is_public=False,
     ),
 }

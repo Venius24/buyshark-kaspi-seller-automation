@@ -30,12 +30,14 @@ def make_scalar_result(value):
     return result
 
 
-def make_store_role_result(store, role="OWNER"):
-    """_resolve_store_for_user selects (Store, UserStore.role) and reads
-    the row via .first() — a plain make_scalar_result() only wires
-    .scalar_one_or_none()/.scalars().first()."""
+def make_store_role_result(store, role="OWNER", allowed_sections=None):
+    """_resolve_store_for_user selects (Store, UserStore.role,
+    UserStore.allowed_sections) and reads the row via .first() — a plain
+    make_scalar_result() only wires .scalar_one_or_none()/.scalars().first().
+    allowed_sections=None (JSON-текст в БД) = «ограничений по разделам нет»,
+    см. backend/security/sections.py."""
     result = MagicMock()
-    result.first.return_value = (store, role)
+    result.first.return_value = (store, role, allowed_sections)
     return result
 
 

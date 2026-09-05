@@ -19,10 +19,10 @@ from backend.state_helpers import (
     _load_products,
 )
 from backend.security.store_context import StoreContext, get_store_context
-from backend.security.store_roles import require_store_manager
+from backend.security.store_roles import require_store_manager, store_section_guard
 from backend.services.stock_sync_worker import execute_broadcast_sync, get_stock_lock
 
-router = APIRouter(prefix="/api/stock-groups", tags=["stock-groups"])
+router = APIRouter(prefix="/api/stock-groups", tags=["stock-groups"], dependencies=[Depends(store_section_guard("stock-groups"))])
 
 def _expand_linked_skus(skus: List[str], store_id: Optional[str]) -> List[str]:
     """

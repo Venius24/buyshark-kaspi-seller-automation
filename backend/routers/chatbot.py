@@ -11,11 +11,11 @@ from backend.chatbot import outbound as bot_outbound
 from backend.chatbot.kaspi import load_chat_cookies
 from backend.dumper.config import discover_merchant_id
 from backend.security.store_context import StoreContext, get_store_context
-from backend.security.store_roles import require_store_manager
+from backend.security.store_roles import require_store_manager, store_section_guard
 from backend.state_helpers import _save_chat_cookies_for_store, _load_bot_usage_summary, _load_outbound_stats
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/chatbot", tags=["chatbot"])
+router = APIRouter(prefix="/api/chatbot", tags=["chatbot"], dependencies=[Depends(store_section_guard("chatbot"))])
 
 class ChatbotConfigRequest(BaseModel):
     enabled: Optional[bool] = True

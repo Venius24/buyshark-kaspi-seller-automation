@@ -21,6 +21,11 @@ class User(Base):
     # веб-кабинет для него заблокирован на уровне auth_v1.py, существует
     # только для того, чтобы иметь UserStore-запись (роль в конкретном сторе).
     is_telegram_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Аккаунт заведён владельцем магазина как сотрудник, пароль выдан
+    # одноразовый (см. routers/employees.py) — до его смены кабинет
+    # показывает только экран смены пароля. Владелец видел этот пароль,
+    # поэтому пускать с ним дальше первого входа нельзя.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Тарификация (2026-08-12): платформенная роль суперадмина — полный
     # доступ к /api/admin/* (все магазины, тарифы, балансы, рефералы).
     # Ортогонально referral_profiles (наличие строки = "этот юзер реферер")
@@ -127,6 +132,22 @@ class UserStore(Base):
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
     role: Mapped[str] = mapped_column(String(50), default="OWNER")  # 'OWNER', 'MANAGER', 'VIEWER'
+    # Сотрудники и роли (2026-09-05, миграция 040). Две ОРТОГОНАЛЬНЫЕ оси прав,
+    # подробное обоснование — в backend/security/sections.py:
+    #   role             — глубина прав (смотреть/работать/управлять);
+    #   allowed_sections — ширина прав: JSON-список ключей разделов кабинета.
+    # NULL в allowed_sections = «ограничений нет» (все владельцы и все строки,
+    # существовавшие до миграции). Пустой список — это НЕ NULL, это «ничего
+    # не разрешено», валидное состояние отстранённого сотрудника.
+    allowed_sections: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Код должностного пресета (sections.JOB_PRESETS) — чисто информативный:
+    # права всегда читаются из role+allowed_sections, а не из этого поля,
+    # иначе правка пресета в коде задним числом меняла бы права живых
+    # сотрудников. Хранится, чтобы UI показывал «Сборщик», а не список из
+    # пяти галочек, и чтобы было видно, где владелец отошёл от пресета.
+    job_preset: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    job_title: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     user: Mapped["User"] = relationship("User", back_populates="user_stores")
     store: Mapped["Store"] = relationship("Store", back_populates="user_stores")
@@ -940,3 +961,42 @@ class ReferralAccrualDB(Base):
     payout_ref: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
+
+
+class AssistantConversationDB(Base):
+    """Переписка владельца магазина с ИИ-помощником кабинета (каркас,
+    2026-09-05). Привязана к магазину, а не только к пользователю: сотрудники
+    одного стора видят общий контекст, а данные разных сторов не смешиваются —
+    тот же принцип, что и у остальных store-scoped таблиц."""
+    __tablename__ = "assistant_conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Кто начал переписку. NULL допустим — пользователь может быть удалён,
+    # переписка магазина от этого пропадать не должна.
+    user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False, default="Новый диалог")
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AssistantMessageDB(Base):
+    """Сообщение в переписке с помощником. role — те же значения, что у
+    провайдера (user/assistant/tool/system, см. backend/assistant/provider.py).
+    tool_calls/tool_result хранятся строкой JSON, чтобы показывать в UI трассу
+    «чем помощник пользовался» и уметь воспроизвести ход при отладке."""
+    __tablename__ = "assistant_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    conversation_id: Mapped[str] = mapped_column(String(36), ForeignKey("assistant_conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # JSON-массив вызовов инструментов этого хода (может быть пустым).
+    tool_trace: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    provider: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

@@ -8,10 +8,10 @@ from backend.models import DumpingConfigRequest
 from backend.state_helpers import _load_dumping_configs, _save_dumping_configs, _save_override, _apply_overrides, _load_products, _save_products
 from backend.dumper import run_price_dumping_job
 from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed, list_active_stores
-from backend.security.store_roles import require_store_manager_billed
+from backend.security.store_roles import require_store_manager_billed, store_section_guard
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/dumping", tags=["dumping"])
+router = APIRouter(prefix="/api/dumping", tags=["dumping"], dependencies=[Depends(store_section_guard("dumping"))])
 
 class _SchedulerState:
     def __init__(self):

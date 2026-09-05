@@ -31,6 +31,11 @@ export interface StoreItem {
   name: string;
   status: 'ACTIVE' | 'COOKIE_EXPIRED' | 'PAUSED';
   role: string;
+  /** Разделы кабинета, доступные текущему пользователю в этом магазине
+   *  (ключи совпадают с ActiveTab). Заполняет только списочный GET
+   *  /api/v1/stores; null = «не рассчитано», гейт не применяем. */
+  sections?: string[] | null;
+  job_title?: string | null;
   last_sync_at: string | null;
   created_at: string;
 }
@@ -42,6 +47,7 @@ export interface UserProfile {
     full_name: string;
     is_superadmin?: boolean;
     is_referrer?: boolean;
+    must_change_password?: boolean;
     onboarding_completed?: boolean;
   };
   subscription: {

@@ -1,17 +1,25 @@
 import datetime
 import logging
 import os
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from backend.kaspi_wrapper import KaspiAPI
 from backend.models import UpdateProductRequest
 from backend.state_helpers import _save_override, _apply_overrides, _load_products, _save_products, _purge_stale_overrides
-from backend.security.store_context import StoreContext, get_store_context
-from backend.security.store_roles import require_store_manager
+from backend.security.store_context import StoreContext
+from backend.security.store_roles import require_section, require_store_owner
 from backend.dumper import generate_xml_feed
 from backend.product_name_overrides import resolve_product_name
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["products"])
+
+# Префикс /api общий с orders.py, поэтому охрана раздела поэндпоинтная.
+# XML-фид (/feed) сознательно оставлен владельческим: это декларация всего
+# каталога наружу, цена ошибки — снятые с продажи офферы (HANDOFF §3.67).
+_products = require_section("products")
+_products_write = require_section("products", min_role="MANAGER")
 
 @router.get("/products")
 def get_products(
@@ -21,7 +29,14 @@ def get_products(
     status: str = Query("active"),
     dumping_only: bool = Query(False),
     dumping_status_filter: str = Query(""),
-    ctx: StoreContext = Depends(get_store_context),
+    # Разрезы вкладки авто-демпинга (см. backend/services/dumping_filters.py).
+    # Все комбинируются через И; пустые/None — не фильтруют.
+    dumping_state: str = Query("", description="ON | OFF | NO_CONFIG | OFF_WITH_RIVALS"),
+    price_state: str = Query("", description="AT_MIN | AT_MAX | IN_RANGE | NO_LIMITS"),
+    rank_state: str = Query("", description="LEADER | NOT_LEADER | NO_DATA"),
+    min_competitors: Optional[int] = Query(None, ge=0),
+    max_competitors: Optional[int] = Query(None, ge=0),
+    ctx: StoreContext = Depends(_products),
 ):
     """Получить список товаров из кэша или Kaspi API с конфигурациями и статусами демпинга."""
     token = ctx.token
@@ -41,22 +56,30 @@ def get_products(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Не удалось получить товары: {e}")
 
-    # Загружаем конфигурации демпинга и обогащаем товары
-    from backend.state_helpers import _load_dumping_configs, dumping_config_for_product
-    dumping_configs = _load_dumping_configs(store_id=ctx.store_id)
+    # Обогащаем товары состоянием демпинга: эффективный конфиг (свой +
+    # развёрнутый поверх него конфиг активной Мастер-Группы — ровно тем же
+    # кодом, что и у движка), где цена относительно коридора min/max, и
+    # расклад конкурентов из последнего скана радара.
+    #
+    # Матч конфига — сперва по merchantSku, потом по sku. Раньше здесь был
+    # матч ТОЛЬКО по sku, а конфиги пишутся по merchantSku: на проде 374 из
+    # 377 конфигов были невидимы для этой ручки — товары показывались как
+    # "демпинг выключен", фильтр «только с демпингом» отдавал пустоту, и
+    # успешный импорт из PriceFeed выглядел как несостоявшийся.
+    from backend.state_helpers import (
+        _load_dumping_configs,
+        _load_master_stock_groups,
+        _load_price_war_snapshot,
+    )
+    from backend.services import dumping_filters
 
-    for p in all_products:
-        # Матч сперва по merchantSku, потом по sku (dumping_config_for_product).
-        # Раньше здесь был матч ТОЛЬКО по sku, а конфиги пишутся по merchantSku:
-        # на проде 374 из 377 конфигов были невидимы для этой ручки — товары
-        # показывались как "демпинг выключен", фильтр «только с демпингом» отдавал
-        # пустоту, и успешный импорт из PriceFeed выглядел как несостоявшийся.
-        cfg = dumping_config_for_product(p, dumping_configs)
-        p["dumping_config"] = cfg
-        if not cfg or not cfg.get("enabled"):
-            p["dumping_status"] = "OFF"
-        elif "dumping_status" not in p:
-            p["dumping_status"] = "WINNING_1ST"
+    dumping_configs = _load_dumping_configs(store_id=ctx.store_id)
+    master_groups = _load_master_stock_groups(store_id=ctx.store_id)
+    price_war_items = _load_price_war_snapshot(ctx.store_id)
+
+    dumping_filters.annotate_products(
+        all_products, dumping_configs, master_groups, price_war_items
+    )
 
     if status and status != "all":
         target_status = "Активен" if status == "active" else ("Архив" if status == "archive" else status)
@@ -64,15 +87,6 @@ def get_products(
     else:
         filtered = list(all_products)
 
-
-    # Фильтр только активных товаров в авто-демпинге
-    if dumping_only:
-        filtered = [p for p in filtered if p.get("dumping_config") and p["dumping_config"].get("enabled")]
-
-    # Фильтр по рабочему статусу демпинга
-    if dumping_status_filter:
-        q_status = dumping_status_filter.strip().upper()
-        filtered = [p for p in filtered if str(p.get("dumping_status", "")).upper() == q_status]
 
     if search:
         q = search.lower()
@@ -90,6 +104,28 @@ def get_products(
                 filtered_list.append(p)
         filtered = filtered_list
 
+    # Счётчики срезов считаем ДО применения самих демпинг-фильтров (поиск и
+    # активен/архив уже учтены) — иначе в выпадающих списках стояли бы числа
+    # уже отфильтрованной выборки, и пустой результат выглядел бы поломкой.
+    facets = dumping_filters.facet_counts(filtered)
+    comp_min, comp_max = dumping_filters.competitors_range(filtered)
+
+    # Фильтр только активных товаров в авто-демпинге. Теперь учитывает и
+    # групповой демпинг Мастер-Групп: такие товары движок реально демпингует,
+    # и прятать их из среза «только с демпингом» было враньём.
+    if dumping_only:
+        filtered = [p for p in filtered if p.get("dumping_state") == dumping_filters.DUMPING_STATE_ON]
+
+    filtered = dumping_filters.apply_dumping_filters(
+        filtered,
+        dumping_state=dumping_state,
+        price_state=price_state,
+        rank_state=rank_state,
+        dumping_status_filter=dumping_status_filter,
+        min_competitors=min_competitors,
+        max_competitors=max_competitors,
+    )
+
     total_count = len(filtered)
     total_pages = max(1, (total_count + page_size - 1) // page_size)
     start = (page - 1) * page_size
@@ -100,10 +136,12 @@ def get_products(
         "products": sliced,
         "total_count": total_count,
         "total_pages": total_pages,
+        "facets": facets,
+        "competitors_range": {"min": comp_min, "max": comp_max},
     }
 
 @router.post("/products/update")
-def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(require_store_manager)):
+def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(_products_write)):
     """Обновить цену и остаток товара (сохранить в overrides и применить в Kaspi MC)."""
     token = ctx.token
     products = _load_products(ctx.store_id)
@@ -176,7 +214,7 @@ def update_product(req: UpdateProductRequest, ctx: StoreContext = Depends(requir
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/products/refresh")
-def refresh_products(ctx: StoreContext = Depends(require_store_manager)):
+def refresh_products(ctx: StoreContext = Depends(_products_write)):
     """Принудительно обновить кеш товаров из Kaspi API."""
     try:
         fetched_at = datetime.datetime.utcnow()
@@ -191,7 +229,7 @@ def refresh_products(ctx: StoreContext = Depends(require_store_manager)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/feed")
-def get_xml_feed(ctx: StoreContext = Depends(get_store_context)):
+def get_xml_feed(ctx: StoreContext = Depends(require_store_owner)):
     """Сгенерировать XML-фид для Kaspi Catalog Sync (магазина текущего пользователя).
 
     Раньше был вообще без авторизации (читал states/session.json напрямую) —

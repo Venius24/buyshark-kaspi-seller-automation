@@ -1,4 +1,5 @@
 import logging
+import json
 from dataclasses import dataclass
 from typing import Optional
 from fastapi import Request, WebSocket, Depends, HTTPException
@@ -25,13 +26,37 @@ class StoreContext:
     # пользователя и роль не имеет смысла — они не проходят через
     # require_store_role.
     role: str = "OWNER"
+    # Разделы кабинета, доступные пользователю в этом магазине (вторая ось
+    # прав, см. backend/security/sections.py). None = ограничений нет —
+    # дефолт для system-internal конструкторов ниже (list_active_stores,
+    # get_store_by_id, resolve_ws_store_id), у которых запрашивающего
+    # пользователя нет вообще; они не проходят через require_section.
+    sections: Optional[frozenset[str]] = None
 
 
-async def _resolve_store_for_user(request: Request, db: AsyncSession, user_id: str) -> Optional[tuple[Store, str]]:
+def _parse_allowed_sections(raw: Optional[str]) -> Optional[list[str]]:
+    """user_stores.allowed_sections хранится как JSON-текст. Битое значение
+    трактуем как NULL («ограничений нет»), а не как пустой список: иначе одна
+    испорченная строка молча заперла бы сотрудника в кабинете без разделов, и
+    выглядело бы это как баг интерфейса, а не как проблема данных."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        logger.warning("allowed_sections не разобрался как JSON: %r", raw)
+        return None
+    if not isinstance(parsed, list):
+        logger.warning("allowed_sections не список: %r", raw)
+        return None
+    return [str(x) for x in parsed]
+
+
+async def _resolve_store_for_user(request: Request, db: AsyncSession, user_id: str) -> Optional[tuple[Store, str, Optional[str]]]:
     store_id_header = request.headers.get("X-Store-Id")
     if store_id_header:
         stmt = (
-            select(Store, UserStore.role)
+            select(Store, UserStore.role, UserStore.allowed_sections)
             .join(UserStore, Store.id == UserStore.store_id)
             .where(Store.id == store_id_header, UserStore.user_id == user_id)
         )
@@ -40,14 +65,14 @@ async def _resolve_store_for_user(request: Request, db: AsyncSession, user_id: s
         # Deterministic and matches today's de-facto single-store-per-user reality;
         # a user managing multiple stores concurrently must send X-Store-Id.
         stmt = (
-            select(Store, UserStore.role)
+            select(Store, UserStore.role, UserStore.allowed_sections)
             .join(UserStore, Store.id == UserStore.store_id)
             .where(UserStore.user_id == user_id)
             .order_by(Store.created_at.asc())
         )
     res = await db.execute(stmt)
     row = res.first()
-    return (row[0], row[1]) if row else None
+    return (row[0], row[1], row[2]) if row else None
 
 
 async def get_store_context(request: Request) -> StoreContext:
@@ -85,14 +110,16 @@ async def get_store_context(request: Request) -> StoreContext:
                     if user and user.is_active:
                         resolved = await _resolve_store_for_user(request, db, user.id)
                         if resolved and resolved[0].encrypted_api_key:
-                            store, role = resolved
+                            store, role, raw_sections = resolved
                             decrypted_token = decrypt_data(store.encrypted_api_key)
                             if decrypted_token:
+                                from backend.security.sections import effective_sections
                                 return StoreContext(
                                     token=decrypted_token,
                                     merchant_id=store.merchant_id,
                                     store_id=store.id,
                                     role=role,
+                                    sections=effective_sections(role, _parse_allowed_sections(raw_sections)),
                                 )
 
     raise HTTPException(status_code=401, detail="Требуется вход в аккаунт с подключённым магазином.")

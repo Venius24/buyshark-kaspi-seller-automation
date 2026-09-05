@@ -21,6 +21,7 @@ from backend.dumper.config import _decode_base64_if_needed
 from backend.product_name_overrides import resolve_product_name, is_placeholder_name
 from backend.dumper.radar import _fetch_offers_sync
 from backend.security.store_context import StoreContext, get_store_context
+from backend.security.store_roles import store_section_guard
 from backend.services.sales_export import build_sales_export_xlsx
 from backend.services.stock_forecast import (
     DEFAULT_COVER_DAYS, DEFAULT_HORIZON_DAYS, DEFAULT_LEAD_TIME_DAYS, DEFAULT_WINDOW_DAYS,
@@ -28,7 +29,7 @@ from backend.services.stock_forecast import (
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+router = APIRouter(prefix="/api/analytics", tags=["analytics"], dependencies=[Depends(store_section_guard("overview"))])
 
 # Казахстан не переходит на летнее время — фиксированный UTC+5 круглый год
 # (тот же оффсет, что в chatbot/outbound.py ALMATY_TZ и billing/catalog.py

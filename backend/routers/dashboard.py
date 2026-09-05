@@ -12,10 +12,10 @@ from backend.db.database import get_db
 from backend.db.models import User, DashboardLayoutDB, DashboardRoleDefaultsDB
 from backend.routers.auth_v1 import get_current_user
 from backend.security.store_context import StoreContext, get_store_context
-from backend.security.store_roles import require_store_owner
+from backend.security.store_roles import require_store_owner, store_section_guard
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(store_section_guard("overview"))])
 
 # Держать синхронно с id виджетов во frontend/src/dashboard/widgetRegistry.ts —
 # это whitelist, защищающий от мусора/опечаток в сохраняемом layout_json.

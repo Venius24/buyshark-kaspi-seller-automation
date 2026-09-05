@@ -12,10 +12,11 @@ from backend.state_helpers import (
     _load_webhook_config,
     _save_webhook_config
 )
+from backend.security.store_roles import store_section_guard
 from backend.security.store_context import StoreContext, get_store_context
 from backend.services.webhook_dispatcher import dispatch_webhook_event
 
-router = APIRouter(prefix="/api/integrations", tags=["integrations"])
+router = APIRouter(prefix="/api/integrations", tags=["integrations"], dependencies=[Depends(store_section_guard("public-api"))])
 
 @router.get("/keys")
 def get_api_keys(ctx: StoreContext = Depends(get_store_context)):

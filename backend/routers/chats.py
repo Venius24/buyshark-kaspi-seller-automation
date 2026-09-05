@@ -8,10 +8,10 @@ from backend.chatbot.kaspi import load_chat_cookies
 from backend.chatbot import chat_client, config as chatbot_config
 from backend.dumper.config import discover_merchant_id
 from backend.security.store_context import StoreContext, get_store_context
-from backend.security.store_roles import require_store_manager
+from backend.security.store_roles import require_store_manager, store_section_guard
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/chats", tags=["chats"])
+router = APIRouter(prefix="/api/chats", tags=["chats"], dependencies=[Depends(store_section_guard("chats"))])
 
 
 class SendMessageRequest(BaseModel):
