@@ -271,13 +271,20 @@ async def _flush_quiet_queues():
 
 
 def _all_store_ids() -> List[str]:
+    """Магазины, которым положена вечерняя сводка.
+
+    PAUSED исключены: это снятые с обслуживания магазины (то же поле, по
+    которому фильтрует list_active_stores), и телеграм-дайджест по ним —
+    такое же обслуживание, как работа воркеров. Данные при этом остаются
+    на месте, просто никто их не рассылает.
+    """
     from backend.state_helpers import _get_sync_db_session
     session = _get_sync_db_session()
     if not session:
         return []
     try:
         from backend.db.models import Store
-        return [s.id for s in session.query(Store).all()]
+        return [s.id for s in session.query(Store).filter(Store.status != "PAUSED").all()]
     finally:
         session.close()
 

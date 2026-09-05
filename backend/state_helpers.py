@@ -719,8 +719,10 @@ def _load_mc_cookies(store_id: Optional[str] = None) -> dict:
 def _save_mc_cookies_for_store(store_id: str, cookies: dict) -> bool:
     """
     Сохраняет куки mc-session/mc-sid (dict) в Store.encrypted_cookies для
-    этого стора и помечает store.status='ACTIVE'. Используется сразу после
-    успешного логина/автообновления сессии, чтобы источником правды при
+    этого стора и помечает store.status='ACTIVE' — КРОМЕ магазинов со
+    статусом 'PAUSED' (снятых с обслуживания оператором): им куки
+    обновляются, а статус остаётся. Используется сразу после успешного
+    логина/автообновления сессии, чтобы источником правды при
     чтении (_load_mc_cookies(store_id=...)) была БД, а не общий файл.
     """
     if not cookies or "mc-session" not in cookies or "mc-sid" not in cookies:
@@ -737,7 +739,12 @@ def _save_mc_cookies_for_store(store_id: str, cookies: dict) -> bool:
             return False
         cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
         store.encrypted_cookies = encrypt_data(cookie_str)
-        store.status = "ACTIVE"
+        # Куки сохраняем всегда (это хранение данных магазина), но статус
+        # PAUSED не трогаем: он означает «оператор снял магазин с
+        # обслуживания», и авто-перевыпуск сессии не повод вернуть его во
+        # все фоновые воркеры (list_active_stores фильтрует по этому полю).
+        if store.status != "PAUSED":
+            store.status = "ACTIVE"
         store.last_sync_at = datetime.datetime.utcnow()
         session.commit()
         return True

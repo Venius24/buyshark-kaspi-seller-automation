@@ -134,6 +134,16 @@ async def get_store_context_billed(ctx: StoreContext = Depends(get_store_context
     оплаты) — только в этот отдельный, применяемый выборочно на
     action-роутах. Тарификация, 2026-08-12 (Слайс 6)."""
     import asyncio
+    from backend.state_helpers import _get_store_status
+    status = await asyncio.to_thread(_get_store_status, ctx.store_id)
+    if status == "PAUSED":
+        # Магазин снят с обслуживания оператором. Кабинет и свои данные он
+        # видит (get_store_context пропускает), но потреблять сервис не
+        # может — тот же смысл, по которому его не берут фоновые воркеры.
+        raise HTTPException(status_code=403, detail={
+            "code": "SERVICE_DISABLED",
+            "reason": "Магазин снят с обслуживания. Данные доступны только для просмотра.",
+        })
     from backend.billing import enforcement
     blocked, reason = await asyncio.to_thread(enforcement.is_service_blocked, ctx.store_id)
     if blocked:

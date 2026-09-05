@@ -425,7 +425,15 @@ async def verify_store_cookies(
     async with AsyncSessionLocal() as db:
         db_store = await db.get(Store, store_id)
         if db_store:
-            db_store.status = final_status
+            # PAUSED — это решение оператора «магазин снят с обслуживания»,
+            # а не состояние куков. Проверка сессии его не отменяет: иначе
+            # один вход владельца в кабинет молча возвращал бы магазин во
+            # все восемь фоновых воркеров (list_active_stores фильтрует
+            # ровно по этому полю).
+            if db_store.status == "PAUSED":
+                final_status = "PAUSED"
+            else:
+                db_store.status = final_status
             if checked_at is not None:
                 db_store.last_sync_at = checked_at
             await db.commit()
@@ -500,7 +508,12 @@ async def sync_store_cookies(
     async with AsyncSessionLocal() as db:
         db_store = await db.get(Store, store_id)
         if db_store:
-            db_store.status = final_status
+            # Снятый с обслуживания магазин обновлением куков не воскрешается —
+            # см. тот же комментарий в verify-session выше.
+            if db_store.status == "PAUSED":
+                final_status = "PAUSED"
+            else:
+                db_store.status = final_status
             if checked_at is not None:
                 db_store.last_sync_at = checked_at
             await db.commit()
