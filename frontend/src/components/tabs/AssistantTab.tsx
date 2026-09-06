@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Sparkles, Send, Plus, Trash2, Wrench, AlertTriangle } from 'lucide-react';
 import { MarkdownLite } from '../MarkdownLite';
@@ -33,6 +33,33 @@ export function AssistantTab() {
   // полный, хуже честного «данных не хватило».
   const [truncated, setTruncated] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // Высота чата считается от его позиции на экране до низа окна.
+  //
+  // Просто «flex:1 до самого низа» здесь не работает: вся цепочка над нами
+  // (#root, .app-shell, .main-content в index.css) задана через min-height,
+  // а не height. min-height — это пол, а не потолок, поэтому flex-элемент
+  // спокойно вырастает под содержимое, внутренний overflow-y не срабатывает,
+  // и вместо прокрутки списка сообщений растёт вся страница. Проверено
+  // замером: список раздувался до 8919px при экране 401px.
+  //
+  // Отсюда же flex:'none' в rootStyle: у флекс-элемента flex-grow перебивает
+  // явную height, и с flex:1 измеренная высота просто игнорировалась.
+  const [fitHeight, setFitHeight] = useState<number>();
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = rootRef.current;
+      if (!el) return;
+      const top = el.getBoundingClientRect().top;
+      // 28 — padding-bottom у .main-content (index.css), иначе композер
+      // упирается в самый край окна.
+      setFitHeight(Math.max(MIN_CHAT_HEIGHT, window.innerHeight - top - 28));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [status.stub_mode]);
 
   const { messages, isFetching } = useAssistantMessages(activeId);
 
@@ -89,7 +116,7 @@ export function AssistantTab() {
   );
 
   return (
-    <div className="assistant-tab">
+    <div className="assistant-tab" ref={rootRef} style={{ ...rootStyle, height: fitHeight }}>
       {status.stub_mode && (
         <div className="alert alert-warning" style={bannerStyle}>
           <AlertTriangle size={16} />
@@ -117,7 +144,7 @@ export function AssistantTab() {
             </div>
           ))}
 
-          <div style={{ marginTop: 20 }}>
+          <div style={{ marginTop: 20, flexShrink: 0 }}>
             <div style={sectionTitleStyle}><Wrench size={13} /> {t('tools_title')}</div>
             {status.tools.length === 0 && <div style={mutedStyle}>{t('tools_empty')}</div>}
             {status.tools.map((tool) => (
@@ -256,10 +283,30 @@ function describeArgs(args: Record<string, unknown> | undefined): string {
 // Инлайн-стили: вкладка каркасная, отдельный CSS-раздел заводить рано —
 // когда UI устоится, переедет в App.css рядом с остальными вкладками.
 const bannerStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 };
-const layoutStyle: React.CSSProperties = { display: 'flex', gap: 16, alignItems: 'stretch', minHeight: 520 };
-const sidebarStyle: React.CSSProperties = { width: 240, flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.08)', paddingRight: 12 };
-const chatStyle: React.CSSProperties = { flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 };
-const messagesStyle: React.CSSProperties = { flex: 1, overflowY: 'auto', padding: 12, maxHeight: 520 };
+// Высота: вкладка тянется на всю оставшуюся высоту экрана, а не живёт в
+// коробке на 520px с пустотой под ней. `.main-content` — это флекс-колонка с
+// min-height:100vh (index.css), поэтому корню вкладки достаточно flex:1.
+//
+// minHeight:0 на КАЖДОМ звене цепочки обязателен: у флекс-элемента
+// min-height по умолчанию auto, он распирается содержимым, и внутренний
+// overflow-y:auto тогда не срабатывает — вместо прокрутки списка сообщений
+// растёт вся страница.
+const MIN_CHAT_HEIGHT = 360;
+
+const rootStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', flex: 'none', minHeight: MIN_CHAT_HEIGHT };
+const layoutStyle: React.CSSProperties = { display: 'flex', gap: 16, alignItems: 'stretch', flex: 1, minHeight: 0 };
+const sidebarStyle: React.CSSProperties = {
+  width: 240,
+  flexShrink: 0,
+  borderRight: '1px solid rgba(255,255,255,0.08)',
+  paddingRight: 12,
+  display: 'flex',
+  flexDirection: 'column',
+  overflowY: 'auto',
+  minHeight: 0,
+};
+const chatStyle: React.CSSProperties = { flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 };
+const messagesStyle: React.CSSProperties = { flex: 1, overflowY: 'auto', padding: 12, minHeight: 0 };
 const composerStyle: React.CSSProperties = { display: 'flex', gap: 8, padding: 12, borderTop: '1px solid rgba(255,255,255,0.08)' };
 const textareaStyle: React.CSSProperties = { flex: 1, resize: 'vertical', padding: 8, borderRadius: 8 };
 const bubbleStyle: React.CSSProperties = { maxWidth: '80%', padding: '10px 12px', borderRadius: 12, fontSize: 14, lineHeight: 1.5 };
