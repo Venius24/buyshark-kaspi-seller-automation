@@ -24,6 +24,7 @@ import { useActiveStoreId, setActiveStoreId as setSharedActiveStoreId } from '..
 import { formatTenge } from '../utils/money';
 import { waLink } from '../data/contacts';
 import emptyStateIllustration from '../assets/sprites/storehub_empty_illustration.png';
+import { ParcelLoader } from './shared/ParcelLoader';
 
 export interface StoreItem {
   id: string;
@@ -389,7 +390,7 @@ export const StoreHub: React.FC = () => {
 
         {loading ? (
           <div style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Загрузка списка магазинов...
+            <ParcelLoader size={16} /> Загрузка списка магазинов...
           </div>
         ) : stores.length === 0 ? (
           <div className="glass-card" style={styles.emptyState}>
@@ -432,14 +433,14 @@ export const StoreHub: React.FC = () => {
                 </div>
 
                 <div style={styles.cardActions}>
-                  <button onClick={() => handleVerifyStore(s.id)} className="btn btn-secondary" style={{ flex: 1, padding: '8px', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                  <button onClick={() => handleVerifyStore(s.id)} className="btn btn-secondary" style={{ flex: '1 1 140px', padding: '8px', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                     <RefreshCw size={13} /> Проверить статус
                   </button>
-                  <button onClick={() => handleSyncCookies(s)} className="btn btn-primary" style={{ padding: '8px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button onClick={() => handleSyncCookies(s)} className="btn btn-primary" style={{ flex: '1 1 120px', padding: '8px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                     <KeyRound size={13} /> Обновить куки
                   </button>
                   {s.role === 'OWNER' && (
-                    <button onClick={() => handleDeleteStore(s.id)} className="btn" style={{ ...styles.deleteBtn, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <button onClick={() => handleDeleteStore(s.id)} className="btn" style={{ ...styles.deleteBtn, flex: '1 1 90px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                       <Trash2 size={13} /> Удалить
                     </button>
                   )}
@@ -757,6 +758,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   cardActions: {
     display: 'flex',
+    flexWrap: 'wrap',
     gap: '10px',
     marginTop: '12px',
   },
