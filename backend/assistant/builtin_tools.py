@@ -344,6 +344,51 @@ async def _annotated_catalog(store_id: str, only_active: bool) -> Optional[list]
     return products
 
 
+def _maybe_int(raw) -> Optional[int]:
+    """Модель иногда шлёт число строкой — это не повод падать."""
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _stock_of(product: dict) -> Optional[int]:
+    raw = product.get("stock")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _stock_filter_label(min_stock: Optional[int], max_stock: Optional[int]) -> str:
+    if min_stock is None and max_stock is None:
+        return "нет"
+    if max_stock is None:
+        return f"от {min_stock}"
+    if min_stock is None:
+        return f"до {max_stock}"
+    return f"от {min_stock} до {max_stock}"
+
+
+def _sorted_products(products: list, sort_key: str) -> list:
+    """Товары без известного остатка/цены уезжают в конец при любой
+    сортировке: «неизвестно» — это не «ноль», и показывать их первыми в
+    ответе на «что скоро закончится» было бы враньём."""
+    if sort_key == "stock_asc":
+        return sorted(products, key=lambda p: (_stock_of(p) is None, _stock_of(p) or 0))
+    if sort_key == "stock_desc":
+        return sorted(products, key=lambda p: (_stock_of(p) is None, -(_stock_of(p) or 0)))
+    if sort_key == "price_asc":
+        return sorted(products, key=lambda p: (p.get("price_num") is None, p.get("price_num") or 0))
+    if sort_key == "price_desc":
+        return sorted(products, key=lambda p: (p.get("price_num") is None, -(p.get("price_num") or 0)))
+    return products
+
+
 _CATALOG_NOT_SYNCED = {
     "status": "unavailable",
     "message": "Каталог этого магазина ещё не синхронизирован. Открой вкладку «Товары» — она подтянет его из Kaspi.",
@@ -353,9 +398,12 @@ _CATALOG_NOT_SYNCED = {
 @tool(
     name="search_products",
     description=(
-        "Поиск товаров магазина по названию, артикулу продавца, Kaspi SKU или бренду. "
-        "Возвращает цену, остаток, статус и состояние демпинга (учитывая Мастер-Группы). "
-        "Пустой query = весь каталог. "
+        "Поиск и подборки по каталогу: цена, остаток, статус, состояние демпинга "
+        "(учитывая Мастер-Группы). Пустой query = весь каталог. "
+        "НЕ перебирай этот инструмент много раз с разными угаданными словами — "
+        "вместо этого оставь query пустым и возьми нужный срез фильтрами. "
+        "«Что скоро закончится» = query пустой, max_stock 5, sort stock_asc. "
+        "«Самые дорогие» = query пустой, sort price_desc. "
         "Фильтр dumping_state: ON — демпинг работает; OFF — настроен, но выключен; "
         "NO_CONFIG — не настраивали; OFF_WITH_RIVALS — не работает, хотя конкуренты есть. "
         "Поле «сводка_по_демпингу» считается по ВСЕМУ найденному, а не по показанному срезу: "
@@ -380,6 +428,19 @@ _CATALOG_NOT_SYNCED = {
                 "description": "Фильтр по состоянию демпинга",
                 "enum": ["ON", "OFF", "NO_CONFIG", "OFF_WITH_RIVALS"],
             },
+            "max_stock": {
+                "type": "integer",
+                "description": "Только товары с остатком не больше этого числа (для «скоро закончится»)",
+            },
+            "min_stock": {
+                "type": "integer",
+                "description": "Только товары с остатком не меньше этого числа",
+            },
+            "sort": {
+                "type": "string",
+                "description": "Порядок выдачи. По умолчанию — как в каталоге",
+                "enum": ["stock_asc", "stock_desc", "price_asc", "price_desc"],
+            },
         },
         "required": ["query"],
         "additionalProperties": False,
@@ -393,6 +454,9 @@ async def search_products(args: dict, ctx: ToolContext) -> dict:
     limit = max(1, min(int(args.get("limit") or 10), _MAX_PRODUCTS))
     only_active = args.get("only_active", True) is not False
     wanted_state = str(args.get("dumping_state") or "").strip().upper()
+    max_stock = _maybe_int(args.get("max_stock"))
+    min_stock = _maybe_int(args.get("min_stock"))
+    sort_key = str(args.get("sort") or "").strip().lower()
 
     # Сознательно НЕ дёргаем sync_merchant_assortment: полная синхронизация
     # каталога — минуты и запись в БД, это не то, что должен молча запускать
@@ -418,9 +482,18 @@ async def search_products(args: dict, ctx: ToolContext) -> dict:
     if wanted_state:
         products = dumping_filters.apply_dumping_filters(products, dumping_state=wanted_state)
 
+    if max_stock is not None:
+        products = [p for p in products if _stock_of(p) is not None and _stock_of(p) <= max_stock]
+    if min_stock is not None:
+        products = [p for p in products if _stock_of(p) is not None and _stock_of(p) >= min_stock]
+
+    products = _sorted_products(products, sort_key)
+
     return {
         "запрос": args.get("query") or "",
         "фильтр_демпинга": wanted_state or "нет",
+        "фильтр_остатка": _stock_filter_label(min_stock, max_stock),
+        "сортировка": sort_key or "как в каталоге",
         "найдено": len(products),
         "показано": min(len(products), limit),
         "сводка_по_демпингу": {

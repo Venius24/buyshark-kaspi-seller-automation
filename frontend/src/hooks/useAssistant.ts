@@ -134,7 +134,11 @@ export function useAssistantActions() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : `HTTP ${res.status}`);
-      return data.messages as AssistantMessage[];
+      // truncated = модель упёрлась в лимит обращений к данным, и ответ
+      // собран из того, что успела получить. Флаг живёт только в этом
+      // ответе: в БД он не сохраняется, после перезагрузки предупреждения
+      // не будет (см. HANDOFF §3.93).
+      return { messages: data.messages as AssistantMessage[], truncated: !!data.truncated };
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['assistant-messages', storeId, variables.conversationId] });

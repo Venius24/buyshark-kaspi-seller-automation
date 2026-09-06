@@ -52,9 +52,11 @@ class ScriptedProvider(LLMProvider):
     def __init__(self, script: list[LLMResult]):
         self.script = list(script)
         self.calls: list[list[Message]] = []
+        self.tools_per_call: list = []
 
     async def complete(self, messages, tools=None):
         self.calls.append(list(messages))
+        self.tools_per_call.append(tools)
         return self.script.pop(0) if self.script else LLMResult(text="конец")
 
 
@@ -440,6 +442,67 @@ def test_search_products_distinguishes_no_radar_data_from_zero_rivals(monkeypatc
     assert "нет данных" in by_sku["ART-3"]["демпинг"]["конкуренты"]
 
 
+def test_search_products_low_stock_in_one_call(monkeypatch):
+    """Регрессия с прода 2026-09-06: на «какие товары скоро закончатся» у
+    модели не было ни фильтра по остатку, ни сортировки, и она 11 раз звала
+    search_products с угаданными словами, пока не кончился бюджет итераций.
+    Теперь это один вызов."""
+    _wire_catalog(monkeypatch)
+
+    res = asyncio.run(
+        tool_registry.execute(
+            "search_products",
+            {"query": "", "max_stock": 3, "sort": "stock_asc", "limit": 25},
+            _ctx(),
+        )
+    )
+    result = res["result"]
+    # Остатки в _catalog(): 3, 7, 1, 0 у активных.
+    assert [p["остаток"] for p in result["товары"]] == [0, 1, 3]
+    assert result["найдено"] == 3
+
+
+def test_search_products_unknown_stock_is_not_treated_as_zero(monkeypatch):
+    """«Остаток неизвестен» — не «остаток ноль». В ответе на «что скоро
+    закончится» такой товар не должен стоять первым и вообще попадать под
+    фильтр по остатку."""
+    products = [
+        {"name": "Известный", "sku": "1", "merchantSku": "A-1", "kaspiSku": "1",
+         "status": "Активен", "price_num": 100, "stock": 2, "brand": "B"},
+        {"name": "Без остатка", "sku": "2", "merchantSku": "A-2", "kaspiSku": "2",
+         "status": "Активен", "price_num": 100, "stock": None, "brand": "B"},
+    ]
+    monkeypatch.setattr(state_helpers, "_load_products", lambda store_id: list(products))
+    monkeypatch.setattr(state_helpers, "_apply_overrides", lambda items, store_id: items)
+    monkeypatch.setattr(state_helpers, "_load_dumping_configs", lambda store_id: {})
+    monkeypatch.setattr(state_helpers, "_load_master_stock_groups", lambda store_id: {})
+    monkeypatch.setattr(state_helpers, "_load_price_war_snapshot", lambda store_id: [])
+
+    res = asyncio.run(
+        tool_registry.execute("search_products", {"query": "", "max_stock": 5, "sort": "stock_asc"}, _ctx())
+    )
+    assert [p["артикул"] for p in res["result"]["товары"]] == ["A-1"]
+
+
+def test_search_products_sorts_by_price(monkeypatch):
+    _wire_catalog(monkeypatch)
+    res = asyncio.run(
+        tool_registry.execute("search_products", {"query": "", "sort": "price_desc", "limit": 2}, _ctx())
+    )
+    prices = [p["цена"] for p in res["result"]["товары"]]
+    assert prices == sorted(prices, reverse=True)
+
+
+def test_search_products_tolerates_numbers_sent_as_strings(monkeypatch):
+    """Модели свойственно прислать \"5\" вместо 5 — это не повод падать."""
+    _wire_catalog(monkeypatch)
+    res = asyncio.run(
+        tool_registry.execute("search_products", {"query": "", "max_stock": "3", "limit": "5"}, _ctx())
+    )
+    assert res["ok"] is True
+    assert res["result"]["найдено"] == 3
+
+
 def test_get_dumping_status_reports_who_outbids_us(monkeypatch):
     _wire_catalog(
         monkeypatch,
@@ -538,11 +601,53 @@ def test_engine_executes_tool_then_answers():
 
 
 def test_engine_stops_at_iteration_limit():
+    """Бюджет итераций конечен: 3 хода при max_tool_iterations=2 (итерации
+    0,1,2), дальше движок обязан прекратить, а не крутиться."""
     loop_forever = [LLMResult(tool_calls=[ToolCall(id=f"c{i}", name="get_store_overview", arguments={})]) for i in range(10)]
     provider = ScriptedProvider(loop_forever)
     turn = asyncio.run(run_turn("зациклись", [], _brief(), _ctx(), cfg=_cfg(max_tool_iterations=2), provider=provider))
     assert turn.truncated is True
-    assert len(turn.tool_trace) == 2
+    assert len(turn.tool_trace) == 3
+
+
+def test_engine_forces_a_real_answer_when_budget_runs_out():
+    """Регрессия с прода 2026-09-06. На вопрос «какие товары скоро
+    закончатся» модель 11 раз позвала search_products, упёрлась в лимит, и
+    пользователь увидел её обрывок плана — «сейчас поищу ещё пару
+    категорий» — вместо ответа. Текст, написанный ВМЕСТЕ с вызовом
+    инструментов, это не ответ, и показывать его нельзя."""
+    script = [
+        LLMResult(text="Сейчас поищу ещё пару категорий",
+                  tool_calls=[ToolCall(id="c1", name="get_store_overview", arguments={})]),
+        LLMResult(text="И ещё немного поищу",
+                  tool_calls=[ToolCall(id="c2", name="get_store_overview", arguments={})]),
+        LLMResult(text="Вот итог: в каталоге 3 товара."),  # добор без инструментов
+    ]
+    provider = ScriptedProvider(script)
+    turn = asyncio.run(run_turn("что скоро закончится", [], _brief(), _ctx(), cfg=_cfg(max_tool_iterations=1), provider=provider))
+
+    assert turn.truncated is True
+    assert turn.reply == "Вот итог: в каталоге 3 товара."
+    assert "поищу" not in turn.reply
+    # Последний запрос к модели идёт БЕЗ инструментов — иначе она снова
+    # попросит их звать и добор ничего не добирает.
+    assert provider.tools_per_call[-1] is None
+    assert provider.tools_per_call[0] is not None
+
+
+def test_engine_explains_itself_if_forced_answer_also_fails():
+    """Добор тоже не дал текста — пользователь должен получить объяснение и
+    совет, а не пустой пузырь."""
+    script = [
+        LLMResult(tool_calls=[ToolCall(id="c1", name="get_store_overview", arguments={})]),
+        LLMResult(text=""),
+    ]
+    turn = asyncio.run(
+        run_turn("что скоро закончится", [], _brief(), _ctx(), cfg=_cfg(max_tool_iterations=0),
+                 provider=ScriptedProvider(script))
+    )
+    assert turn.truncated is True
+    assert "конкретнее" in turn.reply
 
 
 def test_engine_propagates_provider_error():

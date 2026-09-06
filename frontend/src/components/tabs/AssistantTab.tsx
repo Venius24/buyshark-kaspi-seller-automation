@@ -8,6 +8,7 @@ import {
   useAssistantMessages,
   useAssistantStatus,
   type AssistantMessage,
+  type AssistantToolTraceItem,
 } from '../../hooks/useAssistant';
 
 /**
@@ -27,6 +28,10 @@ export function AssistantTab() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Модель упёрлась в лимит обращений к данным — ответ собран из того, что
+  // успела получить. Показываем это явно: неполный ответ, поданный как
+  // полный, хуже честного «данных не хватило».
+  const [truncated, setTruncated] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const { messages, isFetching } = useAssistantMessages(activeId);
@@ -56,6 +61,7 @@ export function AssistantTab() {
     const text = draft.trim();
     if (!text || busy) return;
     setError(null);
+    setTruncated(false);
 
     let conversationId = activeId;
     try {
@@ -65,7 +71,8 @@ export function AssistantTab() {
         setActiveId(convo.id);
       }
       setDraft('');
-      await sendMessage.mutateAsync({ conversationId, text });
+      const res = await sendMessage.mutateAsync({ conversationId, text });
+      setTruncated(!!res.truncated);
     } catch (e) {
       setError(String(e));
     }
@@ -148,6 +155,13 @@ export function AssistantTab() {
             <div ref={bottomRef} />
           </div>
 
+          {truncated && (
+            <div className="alert alert-warning" style={{ margin: '0 12px 8px', display: 'flex', gap: 8, alignItems: 'center' }}>
+              <AlertTriangle size={15} />
+              <span style={{ fontSize: 13 }}>{t('truncated')}</span>
+            </div>
+          )}
+
           {error && <div className="alert alert-danger" style={{ margin: '0 12px 8px' }}>{error}</div>}
 
           <div style={composerStyle}>
@@ -188,10 +202,15 @@ function MessageBubble({ message, toolsLabel }: { message: AssistantMessage; too
         {message.tool_trace.length > 0 && (
           <div style={traceStyle}>
             <div style={{ marginBottom: 4 }}>{toolsLabel}</div>
-            {message.tool_trace.map((call, i) => (
-              <div key={`${call.name}-${i}`}>
-                <code>{call.name}</code>
-                {call.result?.ok === false && <span style={{ color: '#f87171' }}> — {call.result.error}</span>}
+            {/* Схлопываем повторы: модель может позвать один инструмент
+                десяток раз подряд, и десять одинаковых строк в трассе — это
+                шум, из которого не видно ни аргументов, ни ошибок. */}
+            {collapseTrace(message.tool_trace).map((row, i) => (
+              <div key={`${row.name}-${i}`}>
+                <code>{row.name}</code>
+                {row.count > 1 && <span style={{ opacity: 0.7 }}> ×{row.count}</span>}
+                {row.hint && <span style={{ opacity: 0.6 }}> · {row.hint}</span>}
+                {row.error && <span style={{ color: '#f87171' }}> — {row.error}</span>}
               </div>
             ))}
           </div>
@@ -199,6 +218,39 @@ function MessageBubble({ message, toolsLabel }: { message: AssistantMessage; too
       </div>
     </div>
   );
+}
+
+interface TraceRow {
+  name: string;
+  count: number;
+  hint: string;
+  error: string;
+}
+
+/** Одинаковые подряд идущие вызовы в одну строку со счётчиком. */
+function collapseTrace(trace: AssistantToolTraceItem[]): TraceRow[] {
+  const rows: TraceRow[] = [];
+  for (const call of trace) {
+    const hint = describeArgs(call.arguments);
+    const error = call.result?.ok === false ? String(call.result.error || '') : '';
+    const last = rows[rows.length - 1];
+    if (last && last.name === call.name && last.hint === hint && last.error === error) {
+      last.count += 1;
+    } else {
+      rows.push({ name: call.name, count: 1, hint, error });
+    }
+  }
+  return rows;
+}
+
+/** Короткая подпись аргументов: из неё должно быть видно, ЧТО спрашивали. */
+function describeArgs(args: Record<string, unknown> | undefined): string {
+  if (!args) return '';
+  return Object.entries(args)
+    .filter(([, v]) => v !== '' && v !== null && v !== undefined)
+    .map(([k, v]) => `${k}=${String(v)}`)
+    .join(', ')
+    .slice(0, 80);
 }
 
 // Инлайн-стили: вкладка каркасная, отдельный CSS-раздел заводить рано —

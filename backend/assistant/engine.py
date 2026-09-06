@@ -26,6 +26,15 @@ from backend.assistant.tools import ToolContext
 
 logger = logging.getLogger(__name__)
 
+# Что говорим модели, когда бюджет вызовов инструментов исчерпан.
+FORCE_ANSWER_PROMPT = (
+    "Лимит обращений к данным исчерпан. Ответь пользователю ПРЯМО СЕЙЧАС, "
+    "опираясь только на уже полученные результаты инструментов. Инструменты "
+    "больше не доступны — не обещай ничего искать и не проси подождать. "
+    "Если собранного не хватает для полного ответа, дай то, что есть, и одной "
+    "строкой скажи, чего не хватило и как переформулировать вопрос."
+)
+
 
 @dataclass
 class ToolInvocation:
@@ -72,13 +81,17 @@ async def run_turn(
     trace: list[ToolInvocation] = []
     usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "model": ""}
 
-    for iteration in range(cfg.max_tool_iterations + 1):
-        result = await provider.complete(messages, tools=wire_tools or None)
-
+    def _account(result) -> None:
         if result.usage:
             usage_total["model"] = result.usage.get("model") or usage_total["model"]
             usage_total["prompt_tokens"] += result.usage.get("prompt_tokens") or 0
             usage_total["completion_tokens"] += result.usage.get("completion_tokens") or 0
+
+    truncated = False
+
+    for iteration in range(cfg.max_tool_iterations + 1):
+        result = await provider.complete(messages, tools=wire_tools or None)
+        _account(result)
 
         if result.error:
             return AssistantTurn(
@@ -97,18 +110,6 @@ async def run_turn(
                 provider=provider.name,
             )
 
-        # Последняя итерация исчерпана, а модель всё ещё зовёт инструменты —
-        # прекращаем, чтобы не крутиться бесконечно.
-        if iteration >= cfg.max_tool_iterations:
-            logger.warning(f"⚠️ Ассистент: достигнут лимит итераций tool-calling ({cfg.max_tool_iterations})")
-            return AssistantTurn(
-                reply=result.text or "Не удалось завершить ответ: слишком много обращений к данным подряд.",
-                tool_trace=trace,
-                usage=usage_total,
-                provider=provider.name,
-                truncated=True,
-            )
-
         messages.append(Message(role=ROLE_ASSISTANT, content=result.text, tool_calls=result.tool_calls))
         for call in result.tool_calls:
             payload = await tool_registry.execute(call.name, call.arguments, ctx, allow_write=cfg.allow_write_tools)
@@ -122,5 +123,41 @@ async def run_turn(
                 )
             )
 
-    # Недостижимо: цикл всегда выходит через return выше.
-    return AssistantTurn(reply="", tool_trace=trace, usage=usage_total, provider=provider.name, error="Внутренняя ошибка движка")
+        if iteration >= cfg.max_tool_iterations:
+            truncated = True
+            break
+
+    # Бюджет итераций исчерпан, а модель всё ещё хочет звать инструменты.
+    #
+    # Раньше здесь возвращался `result.text` последнего хода — а это текст,
+    # который модель написала ВМЕСТЕ с вызовом инструментов, то есть обрывок
+    # плана вида «сейчас поищу ещё пару категорий». Пользователь видел
+    # незаконченную мысль вместо ответа (прод, 2026-09-06: вопрос «какие
+    # товары скоро закончатся» → 11 вызовов search_products и ни одной цифры).
+    #
+    # Теперь делаем ещё один ход БЕЗ инструментов: у модели уже есть всё, что
+    # она успела собрать, и единственное, что ей остаётся — ответить.
+    logger.warning(f"⚠️ Ассистент: лимит итераций tool-calling ({cfg.max_tool_iterations}), добираю ответ без инструментов")
+    messages.append(Message(role=ROLE_SYSTEM, content=FORCE_ANSWER_PROMPT))
+    final = await provider.complete(messages, tools=None)
+    _account(final)
+
+    if final.error or not final.text:
+        return AssistantTurn(
+            reply=(
+                "Не удалось собрать ответ: запрос потребовал слишком много обращений к данным. "
+                "Попробуй спросить конкретнее — например, назови категорию или артикул."
+            ),
+            tool_trace=trace,
+            usage=usage_total,
+            provider=provider.name,
+            truncated=True,
+        )
+
+    return AssistantTurn(
+        reply=final.text,
+        tool_trace=trace,
+        usage=usage_total,
+        provider=provider.name,
+        truncated=truncated,
+    )
