@@ -123,7 +123,7 @@ def test_unknown_tool_returns_error_not_raise():
 
 def test_read_tool_returns_not_implemented_stub():
     """Ещё не реализованный инструмент честно говорит об этом, а не выдумывает."""
-    res = asyncio.run(tool_registry.execute("get_dumping_status", {}, _ctx()))
+    res = asyncio.run(tool_registry.execute("get_sales_stats", {"date_from": "2026-09-01", "date_to": "2026-09-06"}, _ctx()))
     assert res["ok"] is True
     assert res["result"]["status"] == "not_implemented"
     # store_id всегда из контекста, не из аргументов модели
@@ -330,33 +330,148 @@ def test_search_products_reports_unsynced_catalog(monkeypatch):
     assert res["result"]["status"] == "unavailable"
 
 
-def test_search_products_filters_and_matches_dumping_config(monkeypatch):
-    """Конфиг демпинга матчится по merchantSku, а не по sku — наивный матч уже
-    стоил проду 374 из 377 «невидимых» конфигов."""
-    products = [
+def _catalog():
+    return [
         {"name": "Чехол синий", "sku": "111", "merchantSku": "ART-1", "kaspiSku": "111",
          "status": "Активен", "price_num": 5000, "stock": 3, "brand": "NoName"},
-        {"name": "Кабель", "sku": "222", "merchantSku": "ART-2", "kaspiSku": "222",
-         "status": "Активен", "price_num": 900, "stock": 0, "brand": "NoName"},
-        {"name": "Чехол архивный", "sku": "333", "merchantSku": "ART-3", "kaspiSku": "333",
+        {"name": "Чехол групповой", "sku": "222", "merchantSku": "ART-2", "kaspiSku": "222",
+         "status": "Активен", "price_num": 900, "stock": 7, "brand": "NoName"},
+        {"name": "Чехол ничей", "sku": "333", "merchantSku": "ART-3", "kaspiSku": "333",
+         "status": "Активен", "price_num": 700, "stock": 1, "brand": "NoName"},
+        {"name": "Кабель", "sku": "444", "merchantSku": "ART-4", "kaspiSku": "444",
+         "status": "Активен", "price_num": 300, "stock": 0, "brand": "NoName"},
+        {"name": "Чехол архивный", "sku": "555", "merchantSku": "ART-5", "kaspiSku": "555",
          "status": "Архив", "price_num": 100, "stock": 0, "brand": "NoName"},
     ]
-    monkeypatch.setattr(state_helpers, "_load_products", lambda store_id: list(products))
-    monkeypatch.setattr(state_helpers, "_apply_overrides", lambda items, store_id: items)
-    monkeypatch.setattr(
-        state_helpers,
-        "_load_dumping_configs",
-        lambda store_id: {"ART-1": {"sku": "ART-1", "enabled": True, "min_price": 4000.0,
-                                    "max_price": 6000.0, "mode": "TOP_1"}},
-    )
 
-    res = asyncio.run(tool_registry.execute("search_products", {"query": "чехол"}, _ctx()))
+
+def _wire_catalog(monkeypatch, *, configs=None, groups=None, war=None):
+    """Подставляем слой данных, но dumping_filters.annotate_products оставляем
+    настоящим — именно он и проверяется."""
+    monkeypatch.setattr(state_helpers, "_load_products", lambda store_id: _catalog())
+    monkeypatch.setattr(state_helpers, "_apply_overrides", lambda items, store_id: items)
+    monkeypatch.setattr(state_helpers, "_load_dumping_configs", lambda store_id: configs or {})
+    monkeypatch.setattr(state_helpers, "_load_master_stock_groups", lambda store_id: groups or {})
+    monkeypatch.setattr(state_helpers, "_load_price_war_snapshot", lambda store_id: war or [])
+
+
+_OWN_CONFIG = {"ART-1": {"sku": "ART-1", "enabled": True, "min_price": 4000.0,
+                         "max_price": 6000.0, "mode": "TOP_1"}}
+
+# Мастер-Группа, которая демпингует ART-2 — своего конфига у товара нет.
+_GROUP = {
+    "g1": {
+        "is_active": True,
+        "linked_skus": ["ART-2"],
+        "dumping_config": {"enabled": True, "min_price": 500.0, "max_price": 1500.0, "mode": "TOP_1"},
+    }
+}
+
+
+def test_search_products_sees_dumping_from_master_group(monkeypatch):
+    """Регрессия с прода 2026-09-06: помощник считал «включён ли демпинг» по
+    одному лишь индивидуальному конфигу и называл товары из Мастер-Группы
+    «демпинг не настроен», хотя движок их в это время демпингует."""
+    _wire_catalog(monkeypatch, configs=_OWN_CONFIG, groups=_GROUP)
+
+    res = asyncio.run(tool_registry.execute("search_products", {"query": "чехол", "limit": 25}, _ctx()))
+    by_sku = {p["артикул"]: p for p in res["result"]["товары"]}
+
+    assert by_sku["ART-1"]["демпинг"]["состояние"] == "включён"
+    assert by_sku["ART-1"]["демпинг"]["источник_настройки"] == "свой конфиг"
+
+    assert by_sku["ART-2"]["демпинг"]["состояние"] == "включён"
+    assert by_sku["ART-2"]["демпинг"]["источник_настройки"] == "из Мастер-Группы"
+
+    assert by_sku["ART-3"]["демпинг"]["состояние"] == "не настроен"
+
+
+def test_search_products_summary_counts_whole_catalog_not_the_slice(monkeypatch):
+    """«Сколько у меня товаров без демпинга» должно отвечаться числом по всему
+    каталогу. На проде модель видела только первые 25 из 1022 и честно
+    оговаривалась, что полной картины у неё нет."""
+    _wire_catalog(monkeypatch, configs=_OWN_CONFIG, groups=_GROUP)
+
+    res = asyncio.run(tool_registry.execute("search_products", {"query": "", "limit": 1}, _ctx()))
     result = res["result"]
-    # Архивный отфильтрован по умолчанию, кабель не совпал с запросом.
+
+    assert result["показано"] == 1  # показали один
+    summary = result["сводка_по_демпингу"]
+    assert summary["всего_товаров"] == 4  # архивный отфильтрован
+    assert summary["демпинг_включён"] == 2  # свой конфиг + Мастер-Группа
+    assert summary["не_настроен"] == 2  # ART-3 и кабель
+
+
+def test_search_products_can_filter_by_dumping_state(monkeypatch):
+    _wire_catalog(monkeypatch, configs=_OWN_CONFIG, groups=_GROUP)
+
+    res = asyncio.run(
+        tool_registry.execute("search_products", {"query": "", "dumping_state": "NO_CONFIG", "limit": 25}, _ctx())
+    )
+    result = res["result"]
+    assert result["найдено"] == 2
+    assert {p["артикул"] for p in result["товары"]} == {"ART-3", "ART-4"}
+    # Сводка считается ДО фильтра — иначе она бы схлопнулась под сам фильтр.
+    assert result["сводка_по_демпингу"]["всего_товаров"] == 4
+
+
+def test_search_products_archived_excluded_and_query_matches(monkeypatch):
+    _wire_catalog(monkeypatch, configs=_OWN_CONFIG, groups=_GROUP)
+    res = asyncio.run(tool_registry.execute("search_products", {"query": "кабель", "limit": 25}, _ctx()))
+    result = res["result"]
     assert result["найдено"] == 1
-    item = result["товары"][0]
-    assert item["артикул"] == "ART-1"
-    assert item["демпинг"]["включён"] is True
+    assert result["товары"][0]["артикул"] == "ART-4"
+
+
+def test_search_products_distinguishes_no_radar_data_from_zero_rivals(monkeypatch):
+    """None конкурентов и 0 конкурентов — разные вещи, и путать их нельзя."""
+    _wire_catalog(
+        monkeypatch,
+        configs=_OWN_CONFIG,
+        groups=_GROUP,
+        war=[{"sku": "ART-1", "our_rank": 3, "competitors_count": 5,
+              "best_competitor_price": 4800, "best_competitor_name": "Конкурент", "updated_at": "2026-09-06"}],
+    )
+    res = asyncio.run(tool_registry.execute("search_products", {"query": "чехол", "limit": 25}, _ctx()))
+    by_sku = {p["артикул"]: p for p in res["result"]["товары"]}
+
+    assert by_sku["ART-1"]["демпинг"]["конкурентов"] == 5
+    assert by_sku["ART-1"]["демпинг"]["наша_позиция"] == 3
+    assert "нет данных" in by_sku["ART-3"]["демпинг"]["конкуренты"]
+
+
+def test_get_dumping_status_reports_who_outbids_us(monkeypatch):
+    _wire_catalog(
+        monkeypatch,
+        configs=_OWN_CONFIG,
+        groups=_GROUP,
+        war=[
+            {"sku": "ART-1", "our_rank": 4, "competitors_count": 6,
+             "best_competitor_price": 4800, "best_competitor_name": "Магазин А", "updated_at": "2026-09-06"},
+            {"sku": "ART-2", "our_rank": 1, "competitors_count": 2,
+             "best_competitor_price": 950, "best_competitor_name": "Магазин Б", "updated_at": "2026-09-06"},
+        ],
+    )
+    monkeypatch.setattr(feature_flags, "get_flags", lambda store_id: {"dumping_enabled": True})
+
+    res = asyncio.run(tool_registry.execute("get_dumping_status", {}, _ctx()))
+    result = res["result"]
+
+    assert result["включён_по_магазину"] is True
+    assert result["сводка"]["демпинг_включён"] == 2
+    assert result["сводка"]["мы_первые"] == 1
+    # Перебивают только там, где демпинг включён и позиция не первая.
+    assert result["нас_перебивают_всего"] == 1
+    loser = result["нас_перебивают"][0]
+    assert loser["артикул"] == "ART-1"
+    assert loser["конкурент"] == "Магазин А"
+    assert loser["наша_позиция"] == 4
+
+
+def test_get_dumping_status_needs_synced_catalog(monkeypatch):
+    monkeypatch.setattr(state_helpers, "_load_products", lambda store_id: [])
+    res = asyncio.run(tool_registry.execute("get_dumping_status", {}, _ctx()))
+    assert res["result"]["status"] == "unavailable"
 
 
 def test_store_overview_aggregates_orders_catalog_and_dumping(monkeypatch):

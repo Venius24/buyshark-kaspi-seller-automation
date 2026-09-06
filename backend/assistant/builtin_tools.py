@@ -1,6 +1,6 @@
 """Инструменты помощника.
 
-Реализованы три читающих инструмента — обзор, заказы, товары. Остальные пока
+Реализованы четыре читающих инструмента — обзор, заказы, товары, демпинг. Остальные пока
 объявлены заглушками: модель их видит, зовёт и получает честное
 `status=not_implemented`, а не выдуманные числа.
 
@@ -254,7 +254,48 @@ async def get_orders(args: dict, ctx: ToolContext) -> dict:
 # ─────────────────────────────── Товары ───────────────────────────────
 
 
-def _product_projection(product: dict, config: Optional[dict]) -> dict:
+# Состояния демпинга человеческим языком — модель не должна догадываться,
+# что значит NO_CONFIG против OFF (первое «никогда не настраивали», второе
+# «настроили и выключили», и продавцу это разные разговоры).
+_DUMPING_STATE_RU = {
+    "ON": "включён",
+    "OFF": "настроен, но выключен",
+    "NO_CONFIG": "не настроен",
+}
+
+_CONFIG_SOURCE_RU = {
+    "group": "из Мастер-Группы",
+    "master_group": "из Мастер-Группы",
+    "own": "свой конфиг",
+    "individual": "свой конфиг",
+}
+
+
+def _product_projection(product: dict) -> dict:
+    """Товар -> компактная запись. Состояние демпинга берём из аннотации
+    dumping_filters (эффективный конфиг: свой + развёрнутая Мастер-Группа) —
+    тем же кодом, что и вкладка «Товары», и что сам движок демпинга."""
+    cfg = product.get("dumping_config")
+    source = product.get("dumping_config_source")
+    war = product.get("price_war")
+
+    dumping: dict = {
+        "состояние": _DUMPING_STATE_RU.get(product.get("dumping_state"), product.get("dumping_state")),
+    }
+    if cfg:
+        dumping["источник_настройки"] = _CONFIG_SOURCE_RU.get(str(source), source or "свой конфиг")
+        dumping["мин_цена"] = cfg.get("min_price")
+        dumping["макс_цена"] = cfg.get("max_price")
+        dumping["режим"] = cfg.get("mode")
+    if war:
+        dumping["конкурентов"] = war.get("competitors_count")
+        dumping["наша_позиция"] = war.get("our_rank")
+        dumping["лучшая_цена_конкурента"] = war.get("best_competitor_price")
+        dumping["данные_на"] = war.get("checked_at")
+    else:
+        # None и 0 — разные вещи: радар этот товар никогда не сканировал.
+        dumping["конкуренты"] = "нет данных — товар не попадал в скан радара"
+
     return {
         "название": product.get("name"),
         "артикул": product.get("merchantSku"),
@@ -263,30 +304,67 @@ def _product_projection(product: dict, config: Optional[dict]) -> dict:
         "остаток": product.get("stock"),
         "статус": product.get("status"),
         "бренд": product.get("brand"),
-        "демпинг": (
-            {
-                "включён": bool(config.get("enabled")),
-                "мин_цена": config.get("min_price"),
-                "макс_цена": config.get("max_price"),
-                "режим": config.get("mode"),
-            }
-            if config
-            else "не настроен"
-        ),
+        "демпинг": dumping,
     }
+
+
+async def _annotated_catalog(store_id: str, only_active: bool) -> Optional[list]:
+    """Каталог магазина с проставленным состоянием демпинга.
+
+    Один путь для search_products и get_dumping_status: оба обязаны считать
+    «включён ли демпинг» ЭФФЕКТИВНЫМ конфигом. Наивный матч по своему конфигу
+    показывал товары из Мастер-Группы как «демпинг не настроен», хотя движок
+    их в это время исправно демпингует — то же враньё, от которого в
+    routers/products.py стоит отдельный комментарий.
+
+    None — каталог ещё не синхронизирован.
+    """
+    from backend.services import dumping_filters
+    from backend.state_helpers import (
+        _apply_overrides,
+        _load_dumping_configs,
+        _load_master_stock_groups,
+        _load_price_war_snapshot,
+        _load_products,
+    )
+
+    products = await asyncio.to_thread(_load_products, store_id)
+    if not products:
+        return None
+
+    products = await asyncio.to_thread(_apply_overrides, products, store_id)
+
+    configs = await asyncio.to_thread(_load_dumping_configs, store_id)
+    groups = await asyncio.to_thread(_load_master_stock_groups, store_id)
+    war = await asyncio.to_thread(_load_price_war_snapshot, store_id)
+    await asyncio.to_thread(dumping_filters.annotate_products, products, configs, groups, war)
+
+    if only_active:
+        products = [p for p in products if p.get("status") == "Активен"]
+    return products
+
+
+_CATALOG_NOT_SYNCED = {
+    "status": "unavailable",
+    "message": "Каталог этого магазина ещё не синхронизирован. Открой вкладку «Товары» — она подтянет его из Kaspi.",
+}
 
 
 @tool(
     name="search_products",
     description=(
         "Поиск товаров магазина по названию, артикулу продавца, Kaspi SKU или бренду. "
-        "Возвращает цену, остаток, статус (Активен/Архив) и настройки демпинга. "
-        "Пустой query вернёт первые товары каталога."
+        "Возвращает цену, остаток, статус и состояние демпинга (учитывая Мастер-Группы). "
+        "Пустой query = весь каталог. "
+        "Фильтр dumping_state: ON — демпинг работает; OFF — настроен, но выключен; "
+        "NO_CONFIG — не настраивали; OFF_WITH_RIVALS — не работает, хотя конкуренты есть. "
+        "Поле «сводка_по_демпингу» считается по ВСЕМУ найденному, а не по показанному срезу: "
+        "на вопрос «сколько товаров без демпинга» отвечай числом оттуда, а не пересчётом списка."
     ),
     parameters={
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "Название, артикул, SKU или бренд"},
+            "query": {"type": "string", "description": "Название, артикул, SKU или бренд. Пусто = весь каталог"},
             "limit": {
                 "type": "integer",
                 "description": f"Сколько вернуть, максимум {_MAX_PRODUCTS}",
@@ -297,6 +375,11 @@ def _product_projection(product: dict, config: Optional[dict]) -> dict:
                 "description": "Только товары в продаже (по умолчанию да)",
                 "default": True,
             },
+            "dumping_state": {
+                "type": "string",
+                "description": "Фильтр по состоянию демпинга",
+                "enum": ["ON", "OFF", "NO_CONFIG", "OFF_WITH_RIVALS"],
+            },
         },
         "required": ["query"],
         "additionalProperties": False,
@@ -304,31 +387,19 @@ def _product_projection(product: dict, config: Optional[dict]) -> dict:
     section="products",
 )
 async def search_products(args: dict, ctx: ToolContext) -> dict:
-    from backend.state_helpers import (
-        _apply_overrides,
-        _load_dumping_configs,
-        _load_products,
-        dumping_config_for_product,
-    )
+    from backend.services import dumping_filters
 
     query = str(args.get("query") or "").strip().lower()
     limit = max(1, min(int(args.get("limit") or 10), _MAX_PRODUCTS))
     only_active = args.get("only_active", True) is not False
+    wanted_state = str(args.get("dumping_state") or "").strip().upper()
 
-    products = await asyncio.to_thread(_load_products, ctx.store_id)
-    if not products:
-        # Сознательно НЕ дёргаем sync_merchant_assortment: полная
-        # синхронизация каталога — минуты и запись в БД, это не то, что
-        # должен молча запускать вопрос в чате.
-        return {
-            "status": "unavailable",
-            "message": "Каталог этого магазина ещё не синхронизирован. Открой вкладку «Товары» — она подтянет его из Kaspi.",
-        }
-
-    products = await asyncio.to_thread(_apply_overrides, products, ctx.store_id)
-
-    if only_active:
-        products = [p for p in products if p.get("status") == "Активен"]
+    # Сознательно НЕ дёргаем sync_merchant_assortment: полная синхронизация
+    # каталога — минуты и запись в БД, это не то, что должен молча запускать
+    # вопрос в чате.
+    products = await _annotated_catalog(ctx.store_id, only_active)
+    if products is None:
+        return _CATALOG_NOT_SYNCED
 
     if query:
         fields = ("name", "sku", "merchantSku", "kaspiSku", "brand")
@@ -338,20 +409,28 @@ async def search_products(args: dict, ctx: ToolContext) -> dict:
             if any(query in str(p.get(f)).lower() for f in fields if p.get(f) is not None)
         ]
 
-    configs = await asyncio.to_thread(_load_dumping_configs, ctx.store_id)
+    # Счётчики срезов — по всей найденной выборке, ДО фильтра по демпингу.
+    # Именно это делает ответ на «сколько у меня товаров без демпинга»
+    # точным: раньше модель видела только показанные 25 из 1022 и честно
+    # оговаривалась, что полной картины у неё нет.
+    facets = dumping_filters.facet_counts(products)
+
+    if wanted_state:
+        products = dumping_filters.apply_dumping_filters(products, dumping_state=wanted_state)
 
     return {
         "запрос": args.get("query") or "",
+        "фильтр_демпинга": wanted_state or "нет",
         "найдено": len(products),
         "показано": min(len(products), limit),
-        "товары": [
-            # Матч конфига через dumping_config_for_product, а не по одному
-            # ключу: конфиги пишутся по merchantSku, а часть кода знает товар
-            # по Kaspi sku. Наивный матч по sku уже стоил проду 374 из 377
-            # «невидимых» конфигов (см. routers/products.py).
-            _product_projection(p, dumping_config_for_product(p, configs))
-            for p in products[:limit]
-        ],
+        "сводка_по_демпингу": {
+            "всего_товаров": facets.get("TOTAL"),
+            "демпинг_включён": facets.get("ON"),
+            "настроен_но_выключен": facets.get("OFF"),
+            "не_настроен": facets.get("NO_CONFIG"),
+            "не_работает_хотя_конкуренты_есть": facets.get("OFF_WITH_RIVALS"),
+        },
+        "товары": [_product_projection(p) for p in products[:limit]],
     }
 
 
@@ -379,13 +458,79 @@ def get_sales_stats(args: dict, ctx: ToolContext) -> dict:
 
 @tool(
     name="get_dumping_status",
-    description="Подробности демпинга: кто из конкурентов перебивает цену и по каким товарам.",
-    parameters={"type": "object", "properties": {}, "additionalProperties": False},
+    description=(
+        "Состояние демпинга по всему каталогу: сколько товаров демпингуется, где мы "
+        "не лидируем и кто перебивает цену. Учитывает Мастер-Группы. "
+        "Расклад конкурентов известен ТОЛЬКО по товарам, попадавшим в скан радара — "
+        "для остальных это «нет данных», а не «конкурентов нет»."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "description": f"Сколько проблемных товаров перечислить, максимум {_MAX_PRODUCTS}",
+                "default": 10,
+            }
+        },
+        "additionalProperties": False,
+    },
     section="dumping",
 )
-def get_dumping_status(args: dict, ctx: ToolContext) -> dict:
-    # Подключать к backend/routers/dumping.py + _load_price_war_snapshot
-    return _stub("backend/routers/dumping.py", store_id=ctx.store_id)
+async def get_dumping_status(args: dict, ctx: ToolContext) -> dict:
+    from backend import feature_flags
+    from backend.services import dumping_filters
+
+    limit = max(1, min(int(args.get("limit") or 10), _MAX_PRODUCTS))
+
+    products = await _annotated_catalog(ctx.store_id, only_active=True)
+    if products is None:
+        return _CATALOG_NOT_SYNCED
+
+    facets = dumping_filters.facet_counts(products)
+    flags = await asyncio.to_thread(feature_flags.get_flags, ctx.store_id)
+
+    # Где нас перебивают: демпинг работает, радар товар видел, а первое место
+    # не наше. Именно это продавец имеет в виду под «кто перебивает цену».
+    losing = [
+        p
+        for p in products
+        if p.get("dumping_state") == dumping_filters.DUMPING_STATE_ON
+        and p.get("rank_state") == dumping_filters.RANK_STATE_NOT_LEADER
+    ]
+    losing.sort(key=lambda p: (p.get("price_war") or {}).get("our_rank") or 0, reverse=True)
+
+    return {
+        "включён_по_магазину": bool(flags.get("dumping_enabled", True)),
+        "сводка": {
+            "всего_активных_товаров": facets.get("TOTAL"),
+            "демпинг_включён": facets.get("ON"),
+            "настроен_но_выключен": facets.get("OFF"),
+            "не_настроен": facets.get("NO_CONFIG"),
+            "не_работает_хотя_конкуренты_есть": facets.get("OFF_WITH_RIVALS"),
+            "мы_первые": facets.get("LEADER"),
+            "мы_не_первые": facets.get("NOT_LEADER"),
+            "радар_не_сканировал": facets.get("NO_DATA"),
+        },
+        "нас_перебивают_всего": len(losing),
+        "нас_перебивают": [
+            {
+                "название": p.get("name"),
+                "артикул": p.get("merchantSku"),
+                "наша_цена": p.get("price_num"),
+                "наша_позиция": (p.get("price_war") or {}).get("our_rank"),
+                "конкурентов": (p.get("price_war") or {}).get("competitors_count"),
+                "лучшая_цена_конкурента": (p.get("price_war") or {}).get("best_competitor_price"),
+                "конкурент": (p.get("price_war") or {}).get("best_competitor_name"),
+                "данные_на": (p.get("price_war") or {}).get("checked_at"),
+            }
+            for p in losing[:limit]
+        ],
+        "оговорка": (
+            "Позиции и конкуренты — снимок последнего скана радара, а не онлайн-истина. "
+            "Товары, у которых демпинг никогда не включали, радар не сканировал вообще."
+        ),
+    }
 
 
 @tool(

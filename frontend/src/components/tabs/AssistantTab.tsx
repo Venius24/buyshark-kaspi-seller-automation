@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Sparkles, Send, Plus, Trash2, Wrench, AlertTriangle } from 'lucide-react';
+import { MarkdownLite } from '../MarkdownLite';
 import {
   useAssistantActions,
   useAssistantConversations,
@@ -179,7 +180,11 @@ function MessageBubble({ message, toolsLabel }: { message: AssistantMessage; too
   return (
     <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
       <div style={{ ...bubbleStyle, background: isUser ? 'rgba(52,211,153,0.12)' : 'rgba(255,255,255,0.05)' }}>
-        <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
+        {/* Свой вопрос показываем как есть: пользователь не пишет markdown, а
+            вот сломать ему звёздочками собственный текст — легко. */}
+        {isUser
+          ? <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
+          : <MarkdownLite text={message.content} />}
         {message.tool_trace.length > 0 && (
           <div style={traceStyle}>
             <div style={{ marginBottom: 4 }}>{toolsLabel}</div>
