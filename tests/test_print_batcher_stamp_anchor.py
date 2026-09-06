@@ -20,11 +20,18 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _waybill_with_store_name(store_name: str = "BARKHAN") -> fitz.Document:
+def _waybill_with_store_name(store_name: str = "BARKHAN", with_barcode: bool = False) -> fitz.Document:
     """
     Накладная с полем названия магазина в том же месте, что и на реальных
     накладных Kaspi (см. temp/-замеры в докстринге draw_group_stamp):
     короткая строка заглавными в верхней трети листа, дальше — адрес.
+
+    with_barcode=True — картинка справа от названия магазина, на реальном
+    расстоянии от левого края (x0=175.4pt, замер на 236 накладных живой
+    партии). Компактный бокс ищет свободное место КАК ИЗОБРАЖЕНИЕ, а не
+    текст — синтетика без него однажды пропустила реальную коллизию
+    (2026-09-07): бокс фиксированной ширины упирался в штрихкод на каждой
+    из 236 накладных и штамп молча улетал на старый обход всей страницы.
     """
     doc = fitz.open()
     page = doc.new_page(width=595.275, height=841.875)
@@ -32,6 +39,10 @@ def _waybill_with_store_name(store_name: str = "BARKHAN") -> fitz.Document:
     page.insert_text((22, 140), "Товар для теста . . . . . . . . . . .  1 шт.", fontsize=7,
                      fontname="cyr", fontfile=_CYR_FONT)
     page.insert_text((11, 192), store_name, fontsize=10, fontname="cyr", fontfile=_CYR_FONT)
+    if with_barcode:
+        pix = fitz.Pixmap(fitz.csGRAY, fitz.IRect(0, 0, 2, 2), False)
+        pix.clear_with(0)
+        page.insert_image(fitz.Rect(175.4, 210.0, 285.6, 239.0), pixmap=pix)
     page.insert_text((11, 250), "Алматы, мкр. Кулагер, д. 10", fontsize=8,
                      fontname="cyr", fontfile=_CYR_FONT)
     return doc
@@ -67,6 +78,33 @@ def test_compact_stamp_has_no_header_text():
     assert "Хрупкое" in text
     assert "ГРУППА" not in text
     assert "МЕТКИ" not in text
+
+
+def test_compact_stamp_avoids_barcode_next_to_store_name():
+    """
+    Регрессия: фиксированная ширина бокса (32% страницы) упиралась в
+    штрихкод справа от названия магазина на КАЖДОЙ из 236 реальных
+    накладных живой партии и штамп молча падал на старый обход — с
+    заголовком и совсем в другом месте страницы. Ширина бокса должна
+    подстраиваться под то, что реально свободно, а не собьётся с якоря при
+    первом же соседнем изображении.
+    """
+    doc = _waybill_with_store_name(with_barcode=True)
+    page = doc[0]
+    anchor = pb._find_store_name_anchor(page, page.rect)
+    assert anchor is not None
+
+    pb.draw_group_stamp(page, page.rect, page, page.rect, "Органайзеры", ["Хрупкое"])
+    text = pb.normalize_waybill_text(page.get_text())
+    drawings = [d["rect"] for d in page.get_drawings() if d.get("type") == "s"]
+    doc.close()
+
+    assert "ГРУППА" not in text, "штамп не должен был свалиться на старый обход со штрихкодом рядом"
+    assert "Органайзеры" in text and "Хрупкое" in text
+    assert drawings, "штамп должен нарисовать рамку"
+    box = drawings[0]
+    assert box.x1 <= 175.4, "бокс должен остановиться до штрихкода, а не наехать на него"
+    assert box.y0 - anchor.y1 < 15, "штамп должен остаться прямо под названием магазина"
 
 
 def test_falls_back_to_free_space_search_without_store_name():

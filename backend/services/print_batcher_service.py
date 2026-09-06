@@ -1353,13 +1353,27 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
     band = None
     anchor = _find_store_name_anchor(src_page, src_clip)
     if anchor is not None:
-        box_w = src_clip.width * 0.32
         box_h = 32.0
-        candidate = fitz.Rect(anchor.x0, anchor.y1 + 3.0, anchor.x0 + box_w, anchor.y1 + 3.0 + box_h)
-        if (candidate.x1 <= src_clip.x1 and candidate.y1 <= src_clip.y1
-                and not any(r.intersects(candidate) for r in blockers if r != anchor)):
-            band = candidate
-            compact = True
+        top = anchor.y1 + 3.0
+        bottom = top + box_h
+        # Ширина бокса не берётся фиксированной долей страницы — сразу под
+        # названием магазина (правее и чуть ниже) на накладной Kaspi лежит
+        # штрихкод, и фиксированная доля в него упиралась на 100% реальной
+        # партии (штрихкод стабильно стартует на x=175.4, temp/-замер на 236
+        # накладных). Вместо этого берём максимум доступного вправо до
+        # ближайшего блокера в этой же горизонтальной полосе.
+        right_limit = src_clip.x1
+        for r in blockers:
+            if r == anchor:
+                continue
+            if r.y1 > top and r.y0 < bottom and r.x0 >= anchor.x0:
+                right_limit = min(right_limit, r.x0)
+        box_w = min(src_clip.width * 0.32, right_limit - anchor.x0 - 4.0)
+        if box_w >= 60.0:
+            candidate = fitz.Rect(anchor.x0, top, anchor.x0 + box_w, bottom)
+            if candidate.y1 <= src_clip.y1 and not any(r.intersects(candidate) for r in blockers if r != anchor):
+                band = candidate
+                compact = True
 
     if band is None:
         box_w = src_clip.width * 0.54
