@@ -206,23 +206,94 @@ def test_get_orders_without_token_says_so():
     assert res["result"]["status"] == "unavailable"
 
 
-def test_get_orders_counts_all_but_returns_slice(monkeypatch):
-    """На вопрос «сколько заказов» ответ — число по всей выборке, а не длина
-    укороченного списка."""
+def test_get_orders_counts_from_tab_cache_not_from_slice(monkeypatch):
+    """На вопрос «сколько заказов на сборке» ответ — точный счёт вкладки
+    «Упаковка», а не длина укороченного списка.
+
+    Регрессия с прода 2026-09-06: счёт брался как len(выборки), а выборка
+    обрывается по limit внутри get_orders_with_products. Обзор говорил 462,
+    get_orders — «всего 200» (ровно потолок), и модель уверенно назвала
+    пользователю потолок обхода реальным количеством заказов."""
     monkeypatch.setattr(
-        KaspiAPI, "get_orders_with_products", staticmethod(lambda *a, **kw: [dict(_FAKE_ORDER)] * 7)
+        KaspiAPI,
+        "get_all_packaging_tabs_cached",
+        staticmethod(lambda token, **kw: {"counts": {"cargo_assembly": 462, "wait_for_courier": 1}}),
+    )
+    monkeypatch.setattr(
+        KaspiAPI, "get_orders_with_products", staticmethod(lambda *a, **kw: [dict(_FAKE_ORDER)] * 2)
     )
     res = asyncio.run(tool_registry.execute("get_orders", {"state": "ASSEMBLY", "limit": 2}, _ctx(token="t")))
     result = res["result"]
-    assert result["всего"] == 7
+    assert result["всего"] == 462
+    assert result["счёт_точный"] is True
     assert result["показано"] == 2
     assert len(result["заказы"]) == 2
+
+
+def test_get_orders_asks_kaspi_only_for_the_slice_when_count_is_cached(monkeypatch):
+    """Раз точный счёт уже есть в кэше, тянуть из Kaspi сотни заказов ради
+    показа десяти незачем — обход платный (до 185с на проде)."""
+    seen = {}
+
+    monkeypatch.setattr(
+        KaspiAPI,
+        "get_all_packaging_tabs_cached",
+        staticmethod(lambda token, **kw: {"counts": {"cargo_assembly": 462}}),
+    )
+
+    def fake(token, state=None, status=None, limit=None, assembled=None):
+        seen["limit"] = limit
+        return []
+
+    monkeypatch.setattr(KaspiAPI, "get_orders_with_products", staticmethod(fake))
+    asyncio.run(tool_registry.execute("get_orders", {"state": "ASSEMBLY", "limit": 3}, _ctx(token="t")))
+    assert seen["limit"] == 3
+
+
+def test_get_orders_marks_count_inexact_when_capped(monkeypatch):
+    """У NEW/PICKUP кэша счётчиков нет: считаем сами, но упёршись в потолок —
+    честно говорим, что число неточное."""
+    monkeypatch.setattr(
+        KaspiAPI, "get_orders_with_products", staticmethod(lambda *a, **kw: [dict(_FAKE_ORDER)] * 300)
+    )
+    res = asyncio.run(tool_registry.execute("get_orders", {"state": "NEW", "limit": 5}, _ctx(token="t")))
+    result = res["result"]
+    assert result["всего"] == 300
+    assert result["счёт_точный"] is False
+    assert "не менее" in result["примечание"]
+
+
+def test_get_orders_count_is_exact_when_below_cap(monkeypatch):
+    monkeypatch.setattr(
+        KaspiAPI, "get_orders_with_products", staticmethod(lambda *a, **kw: [dict(_FAKE_ORDER)] * 7)
+    )
+    res = asyncio.run(tool_registry.execute("get_orders", {"state": "PICKUP", "limit": 2}, _ctx(token="t")))
+    result = res["result"]
+    assert result["всего"] == 7
+    assert result["счёт_точный"] is True
+    assert result["показано"] == 2
+
+
+def test_get_orders_survives_tab_cache_outage(monkeypatch):
+    """Кэш вкладок недоступен — инструмент обязан ответить хоть чем-то, а не
+    упасть: считаем сами и помечаем счёт как возможно неточный."""
+    def boom(token, **kw):
+        raise RuntimeError("Kaspi 503")
+
+    monkeypatch.setattr(KaspiAPI, "get_all_packaging_tabs_cached", staticmethod(boom))
+    monkeypatch.setattr(
+        KaspiAPI, "get_orders_with_products", staticmethod(lambda *a, **kw: [dict(_FAKE_ORDER)] * 4)
+    )
+    res = asyncio.run(tool_registry.execute("get_orders", {"state": "ASSEMBLY", "limit": 10}, _ctx(token="t")))
+    assert res["ok"] is True
+    assert res["result"]["всего"] == 4
 
 
 def test_get_orders_does_not_leak_customer_data(monkeypatch):
     """Ответ инструмента уезжает во внешний LLM-API — персональных данных
     покупателя там быть не должно."""
     monkeypatch.setattr(KaspiAPI, "get_orders_with_products", staticmethod(lambda *a, **kw: [dict(_FAKE_ORDER)]))
+    monkeypatch.setattr(KaspiAPI, "get_all_packaging_tabs_cached", staticmethod(lambda token, **kw: {"counts": {}}))
     res = asyncio.run(tool_registry.execute("get_orders", {"state": "PICKUP"}, _ctx(token="t")))
     dumped = tool_registry.serialize_result(res)
     assert "Иван" not in dumped
@@ -241,6 +312,11 @@ def test_get_orders_pickup_maps_to_kaspi_state(monkeypatch):
         return []
 
     monkeypatch.setattr(KaspiAPI, "get_orders_with_products", staticmethod(fake))
+    monkeypatch.setattr(
+        KaspiAPI,
+        "get_all_packaging_tabs_cached",
+        staticmethod(lambda token, **kw: {"counts": {"wait_for_courier": 1}}),
+    )
     asyncio.run(tool_registry.execute("get_orders", {"state": "PICKUP"}, _ctx(token="t")))
     assert seen["state"] == "PICKUP"
 

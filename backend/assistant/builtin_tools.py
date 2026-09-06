@@ -120,6 +120,16 @@ _ORDER_STATES: dict[str, tuple[str, str, Optional[bool]]] = {
     "PICKUP": ("PICKUP", "APPROVED_BY_BANK", None),
 }
 
+# Для этих состояний точный счёт уже посчитан кэшем вкладки «Упаковка» —
+# берём его оттуда, а не из длины собственной выборки.
+_TAB_FOR_STATE = {"ASSEMBLY": "cargo_assembly", "WAIT_COURIER": "wait_for_courier"}
+
+# Потолок собственного обхода для состояний без кэша (NEW/PICKUP). Не «сколько
+# показать», а «сколько вытащить, чтобы посчитать»: get_orders_with_products
+# обрывает пагинацию по limit, поэтому len(результата) на потолке — это НЕ
+# общее число заказов, и выдавать его за «всего» нельзя.
+_COUNT_FETCH_CAP = 300
+
 
 def _order_projection(order: dict) -> dict:
     """Заказ Kaspi -> компактная запись для модели.
@@ -147,7 +157,9 @@ def _order_projection(order: dict) -> dict:
         "ASSEMBLY — на сборке (приняты, но не упакованы); "
         "WAIT_COURIER — упакованы и ждут курьера; "
         "PICKUP — самовывоз клиентом из точки продавца. "
-        "Возвращает и точное количество, и список заказов. "
+        "Возвращает количество и список заказов. Поле «всего» — это всё количество "
+        "заказов в этом состоянии, а не длина показанного списка; если «счёт_точный» "
+        "равно false, называй число как нижнюю границу («не менее N»). "
         "Данные покупателей (имя, телефон, адрес) инструмент не отдаёт."
     ),
     parameters={
@@ -186,13 +198,29 @@ async def get_orders(args: dict, ctx: ToolContext) -> dict:
     kaspi_state, kaspi_status, assembled = mapping
     limit = max(1, min(int(args.get("limit") or 10), _MAX_ORDERS))
 
+    # Точный счёт. Для «на сборке»/«ждут курьера» он уже есть в кэше вкладки
+    # «Упаковка» (TTL 120с) — берём оттуда: это и бесплатно, и гарантирует,
+    # что помощник и кабинет называют пользователю ОДНО И ТО ЖЕ число.
+    exact_total: Optional[int] = None
+    tab = _TAB_FOR_STATE.get(state_key)
+    if tab:
+        try:
+            tabs = await asyncio.to_thread(KaspiAPI.get_all_packaging_tabs_cached, ctx.token)
+            exact_total = ((tabs or {}).get("counts") or {}).get(tab)
+        except Exception as e:
+            logger.warning(f"Ассистент: счётчик вкладок недоступен для {ctx.store_id}: {e}")
+
+    # Сколько тянуть из Kaspi. Если точный счёт уже есть — ровно столько,
+    # сколько показываем (одна страница вместо обхода на сотни заказов).
+    fetch_limit = limit if exact_total is not None else _COUNT_FETCH_CAP
+
     try:
         orders = await asyncio.to_thread(
             KaspiAPI.get_orders_with_products,
             ctx.token,
             state=kaspi_state,
             status=kaspi_status,
-            limit=200,
+            limit=fetch_limit,
             assembled=assembled,
         )
     except Exception as e:
@@ -200,16 +228,27 @@ async def get_orders(args: dict, ctx: ToolContext) -> dict:
         return {"status": "error", "message": f"Kaspi не ответил: {e}"}
 
     orders = orders or []
-    return {
+
+    capped = exact_total is None and len(orders) >= _COUNT_FETCH_CAP
+    total = exact_total if exact_total is not None else len(orders)
+
+    result = {
         "state": state_key,
         "окно": "последние 13 дней",
-        # Считаем по всей выборке, а показываем срез: на вопрос «сколько у меня
-        # заказов на сборке» правильный ответ — число, а не длина списка,
-        # который модель попросила укоротить.
-        "всего": len(orders),
+        "всего": total,
+        # Честность про счёт важнее красоты ответа: модель обязана знать,
+        # что число — нижняя граница, иначе она уверенно назовёт потолок
+        # обхода реальным количеством заказов.
+        "счёт_точный": not capped,
         "показано": min(len(orders), limit),
         "заказы": [_order_projection(o) for o in orders[:limit]],
     }
+    if capped:
+        result["примечание"] = (
+            f"Заказов больше {_COUNT_FETCH_CAP} — точное количество не считали. "
+            f"Говори «не менее {_COUNT_FETCH_CAP}», а не «ровно»."
+        )
+    return result
 
 
 # ─────────────────────────────── Товары ───────────────────────────────
