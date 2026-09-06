@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { RefreshCw, CalendarDays, Truck, Printer } from 'lucide-react';
 import { HelpHint } from '../shared/HelpHint';
+import { ParcelLoader } from '../shared/ParcelLoader';
 import type { Transfer } from '../../types';
 
 interface TransferTabProps {
@@ -50,7 +51,7 @@ export function TransferTab({ transfers, fetchingTransfers, transferFilter, onTr
               onClick={onRefresh}
               disabled={fetchingTransfers}
             >
-              {fetchingTransfers ? <RefreshCw size={14} /> : t('btn_refresh')}
+              {fetchingTransfers ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : t('btn_refresh')}
             </button>
           </div>
         </div>
@@ -60,7 +61,9 @@ export function TransferTab({ transfers, fetchingTransfers, transferFilter, onTr
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flexGrow: 1 }}>
         {fetchingTransfers && transfers.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-            <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+            <div style={{ marginBottom: '16px' }}>
+              <ParcelLoader />
+            </div>
             <p>{t('loading_message')}</p>
           </div>
         ) : transfers.length === 0 && !fetchingTransfers ? (

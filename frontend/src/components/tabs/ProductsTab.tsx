@@ -122,7 +122,7 @@ export function ProductsTab({
             onClick={onRefresh}
             disabled={fetchingProducts}
           >
-            {fetchingProducts ? <RefreshCw size={14} /> : t('btn_refresh')}
+            {fetchingProducts ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : t('btn_refresh')}
           </button>
         </form>
       </div>

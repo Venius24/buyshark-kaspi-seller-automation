@@ -3,6 +3,7 @@ import { RefreshCw, Package } from 'lucide-react';
 import type { Order } from '../../types';
 import { openImageLightbox } from '../shared/ImageLightbox';
 import { HelpHint } from '../shared/HelpHint';
+import { ParcelLoader } from '../shared/ParcelLoader';
 
 interface PackagingTabProps {
   filteredOrders: Order[];
@@ -158,7 +159,7 @@ export function PackagingTab({
               onClick={onRefresh}
               disabled={fetchingOrders}
             >
-              {fetchingOrders ? <RefreshCw size={14} /> : t('btn_refresh')}
+              {fetchingOrders ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : t('btn_refresh')}
             </button>
           </div>
         </div>
@@ -168,7 +169,9 @@ export function PackagingTab({
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flexGrow: 1 }}>
         {fetchingOrders && filteredOrders.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 0', flexGrow: 1 }}>
-            <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+            <div style={{ marginBottom: '16px' }}>
+              <ParcelLoader />
+            </div>
             <p>{t('loading_message')}</p>
           </div>
         ) : filteredOrders.length === 0 && !fetchingOrders ? (
