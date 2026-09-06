@@ -1368,7 +1368,12 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
                 continue
             if r.y1 > top and r.y0 < bottom and r.x0 >= anchor.x0:
                 right_limit = min(right_limit, r.x0)
-        box_w = min(src_clip.width * 0.32, right_limit - anchor.x0 - 4.0)
+        # Тянем почти вплотную до блокера (штрихкод обычно и есть этот
+        # блокер) — 0.32 был потолком доли ПОЛНОЙ страницы, а не обрезанного
+        # по содержимому src_clip (get_content_rect), который в разы уже;
+        # на реальных накладных этот потолок срабатывал раньше упора в
+        # штрихкод и оставлял зазор ~74pt вместо фактически свободных ~160pt.
+        box_w = min(src_clip.width * 0.85, right_limit - anchor.x0 - 2.0)
         if box_w >= 60.0:
             candidate = fitz.Rect(anchor.x0, top, anchor.x0 + box_w, bottom)
             if candidate.y1 <= src_clip.y1 and not any(r.intersects(candidate) for r in blockers if r != anchor):
