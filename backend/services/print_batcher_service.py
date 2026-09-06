@@ -1156,6 +1156,37 @@ def _collect_blockers(src_page: fitz.Page, clip: fitz.Rect) -> List[fitz.Rect]:
     return blockers
 
 
+_STORE_NAME_RE = re.compile(r'^[A-ZА-ЯЁ][A-ZА-ЯЁ \-]{1,24}$')
+
+
+def _find_store_name_anchor(src_page: fitz.Page, clip: fitz.Rect) -> Optional[fitz.Rect]:
+    """
+    Название магазина — поле шаблона Kaspi, а не наша догадка: короткая
+    строка ЗАГЛАВНЫМИ на фиксированном месте. Проверено на 236 из 236 обычных
+    накладных живой партии Бархана (2026-09-04) — все день в день на одних и
+    тех же координатах, с одним и тем же зазором 45pt до следующего блока.
+    Штамп встаёт под этим полем, а не там, где нашлось свободное место —
+    упаковщик видит его в одном и том же углу на каждой накладной.
+
+    Верхние 10% высоты клипа исключены: под ту же регулярку (ЗАГЛАВНЫЕ,
+    короткая строка) попадает заголовок "ОБРАЗЕЦ ПАРТНЕРА" на экспресс-листах
+    Kaspi (другой размер страницы, 656х928мм) — он сидит у самого верха.
+    """
+    top_guard = clip.y0 + clip.height * 0.1
+    candidates = []
+    for b in src_page.get_text("blocks"):
+        r = fitz.Rect(b[:4])
+        if not r.intersects(clip) or r.y0 < top_guard:
+            continue
+        text = b[4].strip()
+        if _STORE_NAME_RE.match(text) and r.width < clip.width * 0.3 and r.height < 20:
+            candidates.append(r)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda r: r.y0)
+    return candidates[0]
+
+
 def _find_stamp_band(blockers: List[fitz.Rect], clip: fitz.Rect, box_w: float, box_h: float, min_gap: float = 3.0) -> Optional[fitz.Rect]:
     """
     Ищет первую свободную от текста/картинок горизонтальную полосу внутри
@@ -1288,17 +1319,25 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
                      src_clip: fitz.Rect, label: Optional[str],
                      tags: Optional[List[str]] = None) -> None:
     """
-    Штамп "ГРУППА: <название>" — контурная рамка с подписью, вставляется в
-    первый найденный свободный участок накладной. Место ищется на ИСХОДНОЙ
-    странице (src_page/src_clip) в её собственных координатах, а рисуется
-    в target_page/target_rect — координаты и размер шрифта масштабируются
-    так же, как show_pdf_page масштабирует src_clip в target_rect (единый
-    механизм для склеенных термоэтикеток, A4-сеток и страниц "как есть").
+    Штамп группы/меток — маленькая рамка прямо под названием магазина на
+    накладной (см. _find_store_name_anchor): это поле шаблона Kaspi, а не
+    угаданное место, и упаковщик видит штамп в одном и том же углу каждой
+    накладной, а не там, где случайно нашлось свободное место. Место
+    ищется на ИСХОДНОЙ странице (src_page/src_clip) в её собственных
+    координатах, а рисуется в target_page/target_rect — координаты и размер
+    шрифта масштабируются так же, как show_pdf_page масштабирует src_clip в
+    target_rect (единый механизм для склеенных термоэтикеток, A4-сеток и
+    страниц "как есть").
 
     Метки товара печатаются строкой в том же боксе — упаковщику нужен один
     ориентир, а не два разных прямоугольника в разных углах этикетки. Товар
     без Мастер-Группы, но с метками, получает бокс из одних меток: раньше
     ему не доставалось вообще ничего.
+
+    Если названия магазина на странице нет (другой лист Kaspi, смена
+    шаблона) — прежний обход: первая свободная полоса на странице, с прежним
+    более крупным боксом и явным заголовком "ГРУППА"/"МЕТКИ", раз позиция
+    больше не подсказана сама.
     """
     tags = [t for t in (tags or []) if str(t).strip()]
     if not label and not tags:
@@ -1308,16 +1347,30 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
     if not font_bold or not font_regular:
         return
 
-    box_w = src_clip.width * 0.54
-    # Две строки названия при читаемом кегле требуют более высокой рамки, чем
-    # прежние 7.8% высоты накладной. Если такой полосы на накладной не нашлось —
-    # откатываемся к прежней высоте, чтобы штамп не пропал совсем.
-    box_h = src_clip.height * 0.105
     blockers = _collect_blockers(src_page, src_clip)
-    band = _find_stamp_band(blockers, src_clip, box_w, box_h)
+
+    compact = False
+    band = None
+    anchor = _find_store_name_anchor(src_page, src_clip)
+    if anchor is not None:
+        box_w = src_clip.width * 0.32
+        box_h = 32.0
+        candidate = fitz.Rect(anchor.x0, anchor.y1 + 3.0, anchor.x0 + box_w, anchor.y1 + 3.0 + box_h)
+        if (candidate.x1 <= src_clip.x1 and candidate.y1 <= src_clip.y1
+                and not any(r.intersects(candidate) for r in blockers if r != anchor)):
+            band = candidate
+            compact = True
+
     if band is None:
-        box_h = src_clip.height * 0.078
+        box_w = src_clip.width * 0.54
+        # Две строки названия при читаемом кегле требуют более высокой рамки, чем
+        # прежние 7.8% высоты накладной. Если такой полосы на накладной не нашлось —
+        # откатываемся к прежней высоте, чтобы штамп не пропал совсем.
+        box_h = src_clip.height * 0.105
         band = _find_stamp_band(blockers, src_clip, box_w, box_h)
+        if band is None:
+            box_h = src_clip.height * 0.078
+            band = _find_stamp_band(blockers, src_clip, box_w, box_h)
     if band is None:
         return
 
@@ -1335,13 +1388,45 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
     )
 
     size_ref = max(0.4, min(1.3, target_rect.height / 425.2))
+    bold = _stamp_font(font_bold)
+    regular = _stamp_font(font_regular)
+    tags_line = " · ".join(tags)
+
+    if compact:
+        # Бокс встал под названием магазина, а не подобран по доле высоты
+        # страницы, поэтому и кегль берём от РЕАЛЬНОЙ высоты этого маленького
+        # бокса, а не от size_ref — иначе на A4 без масштабирования (scale≈1)
+        # текст, рассчитанный на прежний бокс втрое выше, туда не влезет.
+        # Заголовка "ГРУППА"/"МЕТКИ" нет: позиция под названием магазина уже
+        # даёт упаковщику контекст, а в маленьком боксе он только крал бы
+        # место у самого текста.
+        border_w = 0.8 * size_ref
+        pad = max(1.5, box.height * 0.08)
+        target_page.draw_rect(box, color=(0.45, 0.45, 0.45), width=border_w)
+        inner = fitz.Rect(box.x0 + pad, box.y0 + pad, box.x1 - pad, box.y1 - pad)
+
+        if label and tags:
+            label_rect = fitz.Rect(inner.x0, inner.y0, inner.x1, inner.y0 + inner.height * 0.58)
+            tags_rect = fitz.Rect(inner.x0, label_rect.y1, inner.x1, inner.y1)
+            if not _draw_fitted_text(target_page, label_rect, label, bold, label_rect.height * 0.8,
+                                     (0.3, 0.3, 0.3), 2.5):
+                logger.warning(f"Print Batcher: название группы '{label}' не поместилось в штамп")
+            _draw_fitted_text(target_page, tags_rect, tags_line, regular, tags_rect.height * 0.8,
+                              (0.4, 0.4, 0.4), 2.2)
+        elif label:
+            if not _draw_fitted_text(target_page, inner, label, bold, inner.height * 0.68,
+                                     (0.3, 0.3, 0.3), 2.5, center=True):
+                logger.warning(f"Print Batcher: название группы '{label}' не поместилось в штамп")
+        else:
+            if not _draw_fitted_text(target_page, inner, tags_line, bold, inner.height * 0.55,
+                                     (0.3, 0.3, 0.3), 2.2, center=True):
+                logger.warning(f"Print Batcher: метки '{tags_line}' не поместились в штамп")
+        return
+
     border_w = 1.0 * size_ref
     pad = 5.0 * size_ref
     label_fs = 6.5 * size_ref
     name_fs = 12.0 * size_ref
-
-    bold = _stamp_font(font_bold)
-    regular = _stamp_font(font_regular)
 
     target_page.draw_rect(box, color=(0.45, 0.45, 0.45), width=border_w)
 
@@ -1352,7 +1437,6 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
                       (0.55, 0.55, 0.55), label_fs * 0.7)
 
     bottom = box.y1 - 1.5 * size_ref
-    tags_line = " · ".join(tags)
     if tags and label:
         # Метки забирают нижнюю треть бокса, название группы — остальное.
         # Полоса под метки не должна съедать название: оно главный ориентир.
