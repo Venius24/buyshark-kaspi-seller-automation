@@ -6,6 +6,7 @@ import { formatTenge } from '../../utils/money';
 import type { BillingPlan } from '../../types';
 import { fetchBillingPlans } from '../../queries';
 import { HelpHint } from '../shared/HelpHint';
+import { ParcelLoader } from '../shared/ParcelLoader';
 
 interface AdminStoreRow {
   store_id: string;
@@ -80,7 +81,14 @@ export const AdminPanel: React.FC = () => {
 
       {subTab === 'stores' && (
         <div className="glass-card" style={styles.card}>
-          {isLoading ? <div>{t('loading')}</div> : (
+          {isLoading ? (
+            <div style={{ textAlign: 'center', padding: '32px 0' }}>
+              <div style={{ marginBottom: '12px' }}>
+                <ParcelLoader />
+              </div>
+              <p>{t('loading')}</p>
+            </div>
+          ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={styles.table}>
                 <thead>

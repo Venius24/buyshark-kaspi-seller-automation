@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { X, Check } from 'lucide-react';
+import { ParcelLoader } from './shared/ParcelLoader';
 
 interface McAuthModalProps {
   mcAuthStep: 'idle' | 'credentials' | 'loading' | 'success';
@@ -82,7 +83,9 @@ export function McAuthModal({
 
         {mcAuthStep === 'loading' && (
           <div style={{ textAlign: 'center', padding: '20px 0' }}>
-            <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+            <div style={{ marginBottom: '16px' }}>
+              <ParcelLoader />
+            </div>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{t('loading_message')}</p>
           </div>
         )}

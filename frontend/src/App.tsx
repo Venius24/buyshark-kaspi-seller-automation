@@ -41,6 +41,7 @@ import { AdminPanel } from './components/admin/AdminPanel';
 import { ReferralTab } from './components/tabs/ReferralTab';
 import { fetchProfile, fetchBillingSummary, completeOnboarding, fetchFeatureFlagsWithDefault } from './queries';
 import { OnboardingTour } from './components/OnboardingTour';
+import { ParcelLoader } from './components/shared/ParcelLoader';
 import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig, DumpingFacets, DumpingFilters, KaspiQuotaStatus } from './types';
 import { EMPTY_DUMPING_FILTERS } from './types';
 
@@ -790,7 +791,7 @@ export default function App() {
   if (!isLoaded) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
-        <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+        <ParcelLoader size={40} />
       </div>
     );
   }

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Image, Video, Mic } from 'lucide-react';
+import { Image, Video, Mic, Loader2 } from 'lucide-react';
 import { apiFetch, API_URL } from '../../api';
 import { useActiveStoreId } from '../../storeContext';
 
@@ -194,7 +194,9 @@ export function ChatsTab() {
         </div>
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {chatsLoading && chats.length === 0 ? (
-            <div style={{ padding: '20px', color: 'var(--text-muted)', fontSize: '13px' }}>{t('chats_loading')}</div>
+            <div style={{ padding: '20px', color: 'var(--text-muted)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> {t('chats_loading')}
+            </div>
           ) : chats.length === 0 ? (
             <div style={{ padding: '20px', color: 'var(--text-muted)', fontSize: '13px' }}>
               {t('empty_message')}
@@ -279,7 +281,9 @@ export function ChatsTab() {
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {messagesLoading && messages.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>{t('messages_loading')}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> {t('messages_loading')}
+                </div>
               ) : (
                 messages.map((m) => {
                   const isOurs = m.sender === 'client'; // см. предупреждение в типе выше

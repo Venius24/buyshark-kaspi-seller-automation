@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { apiFetch, API_URL } from '../../api';
 import { HelpHint } from '../shared/HelpHint';
+import { ParcelLoader } from '../shared/ParcelLoader';
 import type { AutolistDraft } from '../../types';
 
 const STATUS_COLOR: Record<string, string> = {
@@ -467,7 +468,12 @@ export function AutolistTab() {
       </div>
 
       {isLoading ? (
-        <p style={{ color: 'var(--text-muted)' }}>{t('loading')}</p>
+        <div style={{ textAlign: 'center', padding: '32px 0' }}>
+          <div style={{ marginBottom: '12px' }}>
+            <ParcelLoader />
+          </div>
+          <p style={{ color: 'var(--text-muted)' }}>{t('loading')}</p>
+        </div>
       ) : drafts.length === 0 ? (
         <p style={{ color: 'var(--text-muted)' }}>{t('no_drafts')}</p>
       ) : (

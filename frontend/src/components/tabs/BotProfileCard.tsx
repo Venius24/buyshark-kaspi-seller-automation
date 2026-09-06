@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { UserCog, MessageSquare, X, Save } from 'lucide-react';
+import { UserCog, MessageSquare, X, Save, Loader2 } from 'lucide-react';
 import { fetchBotProfile, fetchBotUsage, saveBotProfile } from '../../queries';
 import { useActiveStoreId } from '../../storeContext';
 import type { BotProfile, PickupPoint } from '../../types';
@@ -38,7 +38,9 @@ export function BotProfileCard() {
   if (!draft) {
     return (
       <div className="glass-card">
-        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Загрузка профиля...</p>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Загрузка профиля...
+        </p>
       </div>
     );
   }

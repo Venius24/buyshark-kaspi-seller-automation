@@ -615,7 +615,7 @@
   "tab_chats": {
     "list_title": "💬 Чаты Kaspi",
     "empty_message": "Нет диалогов. Если это неожиданно — проверьте статус сессии чата во вкладке «ИИ-Автоответчик».",
-    "chats_loading": "⏳ Загрузка диалогов...",
+    "chats_loading": "Загрузка диалогов...",
     "unnamed_chat": "Без имени",
     "select_placeholder": "Выберите диалог слева",
     "dialog_title": "Диалог",
@@ -627,7 +627,7 @@
     "link_pay": "📱 Через Pay-ссылку",
     "takeover_button": "🙋 Вмешаться",
     "takeover_button_done": "✅ Уже под контролем",
-    "messages_loading": "⏳ Загрузка переписки...",
+    "messages_loading": "Загрузка переписки...",
     "quick_replies_label": "Быстрые ответы:",
     "input_placeholder": "Сообщение...",
     "send_button": "Отправить",

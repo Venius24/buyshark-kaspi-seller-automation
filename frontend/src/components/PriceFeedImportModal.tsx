@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { X, AlertTriangle, RefreshCw, Check } from 'lucide-react';
 import type { PriceFeedImportStep } from '../hooks/usePriceFeedImport';
 import type { PriceFeedMerchant, PriceFeedPreviewResult, PriceFeedApplyResult } from '../types';
+import { ParcelLoader } from './shared/ParcelLoader';
 
 interface PriceFeedImportModalProps {
   step: PriceFeedImportStep;
@@ -120,7 +121,9 @@ export function PriceFeedImportModal({
 
         {step === 'loading' && (
           <div style={{ textAlign: 'center', padding: '20px 0' }}>
-            <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+            <div style={{ marginBottom: '16px' }}>
+              <ParcelLoader />
+            </div>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
               {t('loading_message')}
             </p>
@@ -268,7 +271,9 @@ export function PriceFeedImportModal({
 
         {step === 'applying' && (
           <div style={{ textAlign: 'center', padding: '20px 0' }}>
-            <div style={{ width: '32px', height: '32px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px auto' }} />
+            <div style={{ marginBottom: '16px' }}>
+              <ParcelLoader />
+            </div>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{t('applying_message')}</p>
           </div>
         )}

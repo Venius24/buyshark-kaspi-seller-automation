@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Smartphone, Link2, Mail, Unplug } from 'lucide-react';
+import { Smartphone, Link2, Mail, Unplug, Loader2 } from 'lucide-react';
 import { apiFetch, API_URL } from '../api';
 
 interface TelegramMember {
@@ -137,7 +137,11 @@ export function TelegramLinkPanel() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <h3 style={{ fontSize: '15px', fontWeight: 600 }}>Привязанные аккаунты</h3>
-        {loading && <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Загрузка...</p>}
+        {loading && (
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Загрузка...
+          </p>
+        )}
         {!loading && members.length === 0 && (
           <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Пока никто не привязан.</p>
         )}

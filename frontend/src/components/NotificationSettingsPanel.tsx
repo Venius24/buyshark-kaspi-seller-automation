@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MessageCircle, AlertTriangle, Wallet, Save, type LucideIcon } from 'lucide-react';
+import { MessageCircle, AlertTriangle, Wallet, Save, Loader2, type LucideIcon } from 'lucide-react';
 import { apiFetch, API_URL } from '../api';
 
 interface Prefs {
@@ -93,7 +93,11 @@ export function NotificationSettingsPanel() {
       </div>
 
       {error && <div className="badge badge-warning" style={{ width: 'fit-content' }}>{error}</div>}
-      {loading && <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Загрузка...</p>}
+      {loading && (
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Загрузка...
+        </p>
+      )}
 
       {!loading && prefs && !prefs.linked && (
         <div className="status-widget">

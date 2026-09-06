@@ -22,6 +22,7 @@ import {
 import { apiFetch, API_URL } from '../../api';
 import { useActiveStoreId } from '../../storeContext';
 import { HelpHint } from '../shared/HelpHint';
+import { ParcelLoader } from '../shared/ParcelLoader';
 import type { AutoAssemblyLogEntry, AutoAssemblyRule, AutoAssemblySpoolItem } from '../../types';
 
 const DELIVERY_TYPE_META: Record<string, { label: string; icon: LucideIcon }> = {
@@ -382,7 +383,12 @@ export function AutoAssemblyTab() {
       </div>
 
       {rulesLoading ? (
-        <div style={{ textAlign: 'center', padding: '40px 0' }}>Загрузка правил...</div>
+        <div style={{ textAlign: 'center', padding: '40px 0' }}>
+          <div style={{ marginBottom: '16px' }}>
+            <ParcelLoader />
+          </div>
+          <p>Загрузка правил...</p>
+        </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
           {rules.map((rule) => (

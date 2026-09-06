@@ -24,7 +24,6 @@ import { useActiveStoreId, setActiveStoreId as setSharedActiveStoreId } from '..
 import { formatTenge } from '../utils/money';
 import { waLink } from '../data/contacts';
 import emptyStateIllustration from '../assets/sprites/storehub_empty_illustration.png';
-import { ParcelLoader } from './shared/ParcelLoader';
 
 export interface StoreItem {
   id: string;
@@ -390,7 +389,7 @@ export const StoreHub: React.FC = () => {
 
         {loading ? (
           <div style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ParcelLoader size={16} /> Загрузка списка магазинов...
+            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Загрузка списка магазинов...
           </div>
         ) : stores.length === 0 ? (
           <div className="glass-card" style={styles.emptyState}>

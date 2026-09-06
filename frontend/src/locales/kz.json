@@ -615,7 +615,7 @@
   "tab_chats": {
     "list_title": "💬 Kaspi чаттары",
     "empty_message": "Чаттар жоқ. Егер бұл күтпеген болса — «ИИ-Автожауап» вкладкасында чат сессиясының күйін тексеріңіз.",
-    "chats_loading": "⏳ Чаттар жүктелуде...",
+    "chats_loading": "Чаттар жүктелуде...",
     "unnamed_chat": "Атысыз",
     "select_placeholder": "Сол жақтан чатты таңдаңыз",
     "dialog_title": "Диалог",
@@ -627,7 +627,7 @@
     "link_pay": "📱 Pay сілтемесі арқылы",
     "takeover_button": "🙋 Араласу",
     "takeover_button_done": "✅ Қазірдің өзінде бақылау астында",
-    "messages_loading": "⏳ Диалог жүктелуде...",
+    "messages_loading": "Диалог жүктелуде...",
     "quick_replies_label": "Жылдам жауаптар:",
     "input_placeholder": "Хабар...",
     "send_button": "Жіберу",
