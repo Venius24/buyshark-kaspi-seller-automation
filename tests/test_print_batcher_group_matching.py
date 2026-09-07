@@ -206,3 +206,64 @@ def test_article_shared_by_two_groups_is_not_guessed():
     ]
     m = MasterGroupMatcher(groups, products)
     assert m.match("Фонарь Barkhan S517-0030 налобный") is None
+
+
+# --- Реальные случаи Бархана 2026-09-07: конфликт по размеру/объёму/
+# количеству/цвету «размывался» на полном каталоге (1588 товаров), т.к.
+# сами числа частые и почти теряют вес по IDF, а общая словесная часть
+# названия — редкая и продавливает счёт выше порога. См. докстринг
+# MasterGroupMatcher._similarity.
+
+
+def test_differing_volume_is_rejected_despite_matching_wording():
+    """Флакон 100мл X179-0013 не должен получать штамп флакона 30мл X179-0007."""
+    products = [
+        _product("1", "Флакон дорожный наливным путем, 30 мл, 6 шт", "X179-0007"),
+        _product("2", "Флакон дорожный наливным путем, 100 мл, 5 шт", "X179-0013"),
+    ]
+    groups = [
+        _group("g-30", "X179-0007 Флакон дорожный наливным путем", ["1", "X179-0007"]),
+    ]
+    m = MasterGroupMatcher(groups, products)
+    assert m.match("Флакон дорожный наливным путем, 100 мл, 5 шт") is None
+
+
+def test_differing_decimal_dimension_is_rejected():
+    """
+    "22х9.5см" не должно распадаться на токены, которые случайно совпадут с
+    "21х9.5см" — иначе два разных размера вазы делят фиктивный общий кусок.
+    """
+    products = [_product("1", "Ваза для цветов 21х9.5см", "D675-0011")]
+    groups = [_group("g", "D675-0011 Ваза для цветов 21х9.5см", ["1", "D675-0011"])]
+    m = MasterGroupMatcher(groups, products)
+    assert m.match("Ваза для цветов 22х9.5см") is None
+
+
+def test_shared_dimension_but_conflicting_quantity_is_rejected():
+    """
+    Делят габарит "8х7.5см", но расходятся по количеству (20шт против 10шт) —
+    простого isdisjoint() по измерительным токенам для этого мало.
+    """
+    products = [_product("1", "Barkhan Горшки для рассады 10шт, 8х7.5см, РS", "D675-0002")]
+    groups = [_group("g", "D675-0002 Горшки для рассады 10шт", ["1", "D675-0002"])]
+    m = MasterGroupMatcher(groups, products)
+    assert m.match("Горшки для рассады 20шт, 8х7.5см") is None
+
+
+def test_conflicting_color_word_is_rejected():
+    """Явно розовая мочалка не должна вставать под штамп явно синей."""
+    products = [_product("1", "Barkhan Мочалка для душа, розовый, PE", "X174-0002")]
+    groups = [_group("g", "X174-0002 Мочалка для душа розовый", ["1", "X174-0002"])]
+    m = MasterGroupMatcher(groups, products)
+    assert m.match("Мочалка для душа, синяя, PE") is None
+
+
+def test_missing_measure_or_color_is_incompleteness_not_conflict():
+    """
+    Название накладной короче зарегистрированного (нет размера/цвета) — это
+    неполное описание, а не расхождение, штамп ставить можно.
+    """
+    products = [_product("1", "Barkhan Мочалка для душа, 11см, розовый, PE", "X174-0002")]
+    groups = [_group("g", "X174-0002 Мочалка для душа", ["1", "X174-0002"])]
+    m = MasterGroupMatcher(groups, products)
+    assert m.match("Мочалка для душа")["group_id"] == "g"
