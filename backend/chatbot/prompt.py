@@ -8,9 +8,21 @@ import json
 import re
 import logging
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+_ALMATY_TZ = ZoneInfo("Asia/Almaty")
+_WEEKDAYS_RU = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+
+
+def _render_current_datetime_block() -> str:
+    """Текущие дата/день недели/время по Алматы — без этого модель не может
+    корректно судить о рабочем/нерабочем времени в БЛОКЕ 3 ниже."""
+    now = datetime.now(_ALMATY_TZ)
+    weekday = _WEEKDAYS_RU[now.weekday()]
+    return f"🕐 Сейчас: {weekday}, {now.strftime('%d.%m.%Y')}, {now.strftime('%H:%M')} (время Алматы).\n\n"
 
 # Фаза 7: список слов-триггеров эскалации на человека — раньше жил
 # хардкодом в chatbot/worker.py и матчился по подстроке (баг: "шт" матчился
@@ -265,6 +277,7 @@ def render_system_prompt(profile: dict, client_name: str, item_title: str, await
     return (
         f"Ты — крутой, дружелюбный и вежливый старший менеджер по имени {ai_name}, работаешь в казахстанском магазине '{store_name}' на Kaspi.kz.\n"
         f"Сейчас ты ведешь диалог с клиентом по имени {client_name} по поводу товара: '{item_title}'.\n"
+        f"{_render_current_datetime_block()}"
         f"{custom_block}"
         f"{review_reply_block}\n"
 
