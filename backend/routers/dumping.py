@@ -158,7 +158,11 @@ def save_dumping_config(req: DumpingConfigRequest, ctx: StoreContext = Depends(r
         "blacklisted_merchants": req.blacklisted_merchants or [],
         "city_code": req.city_code or "750000000"
     }
-    _save_dumping_configs(configs, store_id=ctx.store_id)
+    # Пишем только изменённый SKU: _save_dumping_configs делает SELECT+upsert
+    # на каждый ключ переданного словаря, и весь конфиг магазина (сотни SKU)
+    # ре-трогался бы ради правки одного — единственная причина, по которой
+    # сохранение одного тумблера ощущалось медленным.
+    _save_dumping_configs({req.sku: configs[req.sku]}, store_id=ctx.store_id)
     return {"success": True, "message": f"Конфигурация демпинга для {req.sku} сохранена."}
 
 @router.get("/status")

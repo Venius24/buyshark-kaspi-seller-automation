@@ -136,7 +136,10 @@ async def create_stock_group(
     async with get_stock_lock(ctx.store_id):
         groups = _load_master_stock_groups(store_id=ctx.store_id)
         groups[group_id] = new_group
-        _save_master_stock_groups(groups, store_id=ctx.store_id)
+        # Пишем только новую группу: _save_master_stock_groups делает
+        # session.get()+upsert на каждый ключ переданного словаря, и все
+        # группы магазина ре-трогались бы ради создания одной.
+        _save_master_stock_groups({group_id: new_group}, store_id=ctx.store_id)
 
     # Запускаем фоновую асинхронную веерную синхронизацию
     background_tasks.add_task(execute_broadcast_sync, group_id, token, ctx.store_id)
@@ -198,7 +201,8 @@ async def update_stock_group(
 
         group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         group["status"] = "updating"
-        _save_master_stock_groups(groups, store_id=ctx.store_id)
+        # Только изменённая группа — см. комментарий в create_stock_group выше.
+        _save_master_stock_groups({group_id: group}, store_id=ctx.store_id)
 
     background_tasks.add_task(execute_broadcast_sync, group_id, token, ctx.store_id)
 
@@ -251,7 +255,8 @@ async def update_stock_qty(
             f"Ручной ввод остатка: {req.shared_stock} шт."
             + (f" (долг {debt} шт. списан)" if debt else "")
         )
-        _save_master_stock_groups(groups, store_id=ctx.store_id)
+        # Только изменённая группа — см. комментарий в create_stock_group выше.
+        _save_master_stock_groups({group_id: group}, store_id=ctx.store_id)
 
     background_tasks.add_task(execute_broadcast_sync, group_id, token, ctx.store_id)
 

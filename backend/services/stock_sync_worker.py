@@ -175,7 +175,7 @@ async def _release_stuck_broadcast_status(group_id: str, store_id: Optional[str]
             msg = f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ⚠️ Рассылка остатка не завершилась ({reason})"
             g["last_sync_log"] = msg
             g["sync_logs"] = ([msg] + list(g.get("sync_logs") or []))[:30]
-            _save_master_stock_groups(groups, store_id=store_id)
+            _save_master_stock_groups({group_id: g}, store_id=store_id)
         await broadcast_ws_event("stock_group_updated", g, store_id=store_id)
     except Exception:
         logger.exception("[Broadcast Sync] Не удалось снять залипший статус группы %s", group_id)
@@ -245,7 +245,7 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
         # Метка времени, по которой сторож отличает идущую рассылку от
         # оборванной (например, сервис перезапустили в середине).
         group["status_since"] = datetime.datetime.now().isoformat()
-        _save_master_stock_groups(groups, store_id=store_id)
+        _save_master_stock_groups({group_id: group}, store_id=store_id)
 
     await broadcast_ws_event("stock_group_updated", group, store_id=store_id)
 
@@ -295,7 +295,7 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
                 groups[group_id]["status"] = "error"
                 groups[group_id]["last_sync_log"] = msg
                 groups[group_id]["status_since"] = datetime.datetime.now().isoformat()
-                _save_master_stock_groups(groups, store_id=store_id)
+                _save_master_stock_groups({group_id: groups[group_id]}, store_id=store_id)
         await broadcast_ws_event("log", msg, store_id=store_id)
         return
 
@@ -443,7 +443,7 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
             # затираем: раньше здесь стояло присваивание, и журнал группы терял
             # ровно то событие, ради которого рассылка и запускалась.
             g["sync_logs"] = (logs + list(g.get("sync_logs") or []))[:30]
-            _save_master_stock_groups(groups, store_id=store_id)
+            _save_master_stock_groups({group_id: g}, store_id=store_id)
             await broadcast_ws_event("stock_group_updated", g, store_id=store_id)
 
     # Обработка Stop Qty Protection: остаток просел до/ниже кастомного "Стоп кол-ва" группы.

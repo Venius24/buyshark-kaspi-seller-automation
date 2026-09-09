@@ -24,7 +24,7 @@ from backend.services.auto_assembly_worker import (
 )
 from backend.routers.auto_assembly import DELIVERY_TYPES, _default_rule_dict, _row_to_dict
 from backend.security.store_context import get_store_by_id
-from backend.state_helpers import _get_sync_db_session
+from backend.state_helpers import _get_sync_db_session, _save_chat_cookies_for_store
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,12 @@ PENDING_FILES: Dict[int, Dict[str, Any]] = {}
 # как команда/кнопка. In-memory, теряется при рестарте — тот же компромисс,
 # что и PENDING_FILES (см. HANDOFF).
 PENDING_REPLY: Dict[int, Dict[str, str]] = {}
+
+# Обновление куки чата Kaspi через ТГ (кнопка на /status): tg_user_id ->
+# {"store_id", "step": "phone"|"code"}. Тот же in-memory компромисс, что и
+# PENDING_REPLY — теряется при рестарте бота, пользователь просто начинает
+# заново нажатием кнопки.
+PENDING_CHAT_LOGIN: Dict[int, Dict[str, str]] = {}
 
 NOT_LINKED_TEXT = (
     "⛔ Этот Telegram не привязан ни к одному магазину.\n\n"
@@ -607,6 +613,9 @@ def register_handlers():
         if not access:
             return
         store_id = access["store_id"]
+        # /status — это и способ отменить незавершённое обновление куки
+        # чата (см. подсказку в process_chatcookie_start).
+        PENDING_CHAT_LOGIN.pop(message.from_user.id, None)
 
         store_cfg = await asyncio.to_thread(config.load_chatbot_config, store_id)
         blocked = len(await asyncio.to_thread(config.list_blocked_chat_ids, store_id))
@@ -614,13 +623,81 @@ def register_handlers():
         store_line = f"🏪 **Магазин:** {_esc_md(config.get_store_name(store_id))}\n" if store_id else ""
         role_line = f"👤 **Ваша роль:** {access['role']}\n" if access["role"] else ""
 
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🔄 Обновить куки чата (SMS)", callback_data="chatcookie_start")
+        ]])
         await message.reply(
             f"🤖 **Статус автоответчика:** {'🟢 Работает' if store_cfg.get('enabled', True) else '⏸️ Приостановлен'}\n"
             f"{store_line}"
             f"{role_line}"
             f"🔒 **Заблокировано чатов (Human Override):** {blocked}\n"
-            f"🔑 **Cookie статус:** {'🚨 Требуется обновление' if cookie_bad else '✅ Валидны'}"
+            f"🔑 **Cookie статус:** {'🚨 Требуется обновление' if cookie_bad else '✅ Валидны'}",
+            reply_markup=kb,
         )
+
+    @dp.callback_query(F.data == "chatcookie_start")
+    async def process_chatcookie_start(callback_query: types.CallbackQuery):
+        """Запускает шаг 1 из 2 повторного входа в Kaspi-чат (см.
+        /api/chatbot/mobile-login/*) прямо из Telegram — раньше это было
+        только в вебе, и протухшую SMS-сессию чата приходилось идти
+        обновлять через кабинет, даже если владелец уже в Telegram."""
+        access = await asyncio.to_thread(ti.resolve_bot_access, callback_query.from_user.id)
+        if not access["authorized"] or access["needs_store_selection"]:
+            await callback_query.answer("Откройте /start заново.", show_alert=True)
+            return
+        if access["role"] == "VIEWER":
+            await callback_query.answer("Обновлять сессию чата может только владелец или менеджер магазина.", show_alert=True)
+            return
+        PENDING_CHAT_LOGIN[callback_query.from_user.id] = {"store_id": access["store_id"], "step": "phone"}
+        await callback_query.answer()
+        await callback_query.message.reply(
+            "📱 Пришлите номер телефона для входа в Kaspi-чат (формат: +7XXXXXXXXXX).\n"
+            "Kaspi пришлёт код по SMS на этот номер.\n\n"
+            "Отмена — команда /status."
+        )
+
+    @dp.message(lambda m: bool(m.text) and not m.text.startswith("/") and m.from_user and m.from_user.id in PENDING_CHAT_LOGIN)
+    async def handle_chat_cookie_login(message: types.Message):
+        pending = PENDING_CHAT_LOGIN.get(message.from_user.id)
+        if not pending:
+            return
+        if message.text in i18n.all_menu_labels():
+            PENDING_CHAT_LOGIN.pop(message.from_user.id, None)
+            await message.reply("❌ Это похоже на кнопку меню — обновление куки чата отменено.")
+            return
+
+        from backend.services.playwright_worker import worker, Command
+
+        store_id = pending["store_id"]
+        text = message.text.strip()
+
+        if pending["step"] == "phone":
+            await message.reply("⏳ Отправляю телефон, жду код из SMS от Kaspi...")
+            success, msg, _cookies = await asyncio.to_thread(
+                worker.send_cmd, Command.START_SMS_LOGIN, text, store_id=store_id
+            )
+            if not success:
+                PENDING_CHAT_LOGIN.pop(message.from_user.id, None)
+                await message.reply(f"❌ Не удалось отправить код: {msg}")
+                return
+            PENDING_CHAT_LOGIN[message.from_user.id] = {"store_id": store_id, "step": "code"}
+            await message.reply("✅ Код отправлен. Пришлите его следующим сообщением.")
+            return
+
+        # step == "code"
+        PENDING_CHAT_LOGIN.pop(message.from_user.id, None)
+        success, msg, fresh_cookies = await asyncio.to_thread(
+            worker.send_cmd, Command.SUBMIT_SMS_LOGIN, text, store_id=store_id
+        )
+        if not success:
+            await message.reply(f"❌ Не удалось войти: {msg}")
+            return
+        if not await asyncio.to_thread(_save_chat_cookies_for_store, store_id, fresh_cookies):
+            await message.reply("⚠️ Вход выполнен, но не удалось сохранить куки чата.")
+            return
+        await asyncio.to_thread(config.set_cookie_alert_sent, store_id, False)
+        await asyncio.to_thread(audit.log_action, store_id, message.from_user.id, "chat_cookie_refresh", "telegram")
+        await message.reply("✅ Вход в чат Kaspi выполнен, сессия обновлена.")
 
     @dp.message(F.text.in_({"/settings"} | i18n.all_variants("settings")))
     async def cmd_settings(message: types.Message):

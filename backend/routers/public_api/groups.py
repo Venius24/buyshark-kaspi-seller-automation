@@ -118,7 +118,10 @@ async def update_public_stock(
         )
 
         groups[matched_gid] = target_group
-        _save_master_stock_groups(groups, store_id=store_id)
+        # Только изменённая группа: полный словарь заставил бы
+        # _save_master_stock_groups ре-трогать все группы магазина ради
+        # одного обновления остатка (частый путь — вызов из внешней 1С).
+        _save_master_stock_groups({matched_gid: target_group}, store_id=store_id)
 
     # Запускаем веерное обновление на Kaspi
     background_tasks.add_task(execute_broadcast_sync, matched_gid, token, store_id)
