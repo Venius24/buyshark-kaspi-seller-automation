@@ -1,14 +1,27 @@
 """
-Экспорт статистики продаж за период в Excel (§ запрос пользователя 2026-08-29).
+Экспорт статистики продаж за период в Excel (§ запрос пользователя 2026-08-29,
+настройки группировки/режима — 2026-09-10).
 
-Одна строка = один ПЕРИОД активных продаж товара внутри выбранного диапазона
-дат, а не одна строка на товар — если товар продавался, потом встал (нет ни
-одной продажи ≥ _GAP_DAYS дней подряд), потом снова начал продаваться, это
-два разных периода с разными "Период с/по" и своими цифрами. Так видно
-именно момент возобновления продаж, а не смазанное "было N штук когда-то
-за весь диапазон". Фото/артикул/название повторяются на каждой строке
-намеренно (не merge cells) — смёрженные ячейки ломают сортировку/фильтры
-в Excel, а этот файл explicitly для анализа, не для чтения глазами сверху вниз.
+По умолчанию (`periods_mode=False`) одна строка = один товар (или одна
+мастер-группа, см. ниже) за ВЕСЬ выбранный диапазон дат целиком, без
+разбивки на периоды — так несколько экспортов за непересекающиеся диапазоны
+можно склеить копипастом в одну таблицу и не получить дублей/шумных
+полу-совпадающих периодов. Опционально (`periods_mode=True`, старое
+поведение) одна строка = один ПЕРИОД активных продаж товара внутри
+диапазона — если товар продавался, потом встал (нет ни одной продажи
+≥ _GAP_DAYS дней подряд), потом снова начал продаваться, это два разных
+периода с разными "Период с/по" и своими цифрами; так видно именно момент
+возобновления продаж, а не смазанное "было N штук когда-то за весь
+диапазон". Фото/артикул/название повторяются на каждой строке намеренно
+(не merge cells) — смёрженные ячейки ломают сортировку/фильтры в Excel, а
+этот файл explicitly для анализа, не для чтения глазами сверху вниз.
+
+`group_by`: "card" (по умолчанию, как раньше — строка на карточку/SKU) или
+"master_group" — товары, состоящие в активной Мастер-Группе остатка
+(`master_stock_groups`, см. backend/services/stock_sync_worker.py), схлопы-
+ваются в одну строку с суммарными цифрами по всем участникам; товары вне
+групп остаются обычными карточками. Тот же матчинг артикул->группа, что
+использует stock_forecast.py и списание остатка.
 
 Колонки: Фото | Артикул | Наименование | Код товара Kaspi | Период с |
 Период по | Дней с продажами в периоде | Продано, шт. | Средняя цена продажи.
@@ -60,6 +73,7 @@ HEADERS = [
     "Дней с продажами в периоде",
     "Продано, шт.",
     "Средняя цена продажи",
+    "Тип строки",
 ]
 
 
@@ -115,7 +129,13 @@ def _download_thumbnail(url: str, session: requests.Session) -> Optional[bytes]:
         return None
 
 
-def build_sales_export_xlsx(store_id: str, date_from: dt.date, date_to: dt.date) -> bytes:
+def build_sales_export_xlsx(
+    store_id: str,
+    date_from: dt.date,
+    date_to: dt.date,
+    group_by: str = "card",
+    periods_mode: bool = False,
+) -> bytes:
     since = dt.datetime.combine(date_from, dt.time.min)
     until = dt.datetime.combine(date_to, dt.time.max)
 
@@ -186,25 +206,81 @@ def build_sales_export_xlsx(store_id: str, date_from: dt.date, date_to: dt.date)
                 meta["sku"] = str(p["sku"])
             image_url_by_key[key] = p.get("image") or ""
         meta["name"] = meta["name"] or meta["merchant_sku"] or key
+        meta["row_type"] = "Карточка"
 
-    # Группы: одна на SKU, с суммарной выручкой (для сортировки самых
-    # продаваемых товаров наверх) и списком периодов внутри диапазона.
+    # group_by="master_group": товары из одной активной Мастер-Группы остатка
+    # схлопываются в одну строку с суммарными цифрами — тот же матчинг
+    # артикул->группа, что использует stock_forecast.py и списание остатка
+    # (build_group_index/match_group_for_sku_indexed). Товар вне групп (или
+    # если у магазина групп вовсе нет) остаётся обычной карточкой.
+    if group_by == "master_group":
+        from backend.state_helpers import _load_master_stock_groups
+        from backend.services.stock_sync_worker import build_group_index, match_group_for_sku_indexed
+
+        groups_cfg = _load_master_stock_groups(store_id)
+        active_groups = {gid: g for gid, g in groups_cfg.items() if g.get("is_active")}
+        if active_groups:
+            index = build_group_index(active_groups)
+            merged_daily: dict = {}
+            merged_meta: dict = {}
+            merged_image: dict = {}
+            merged_members: dict = {}
+            for key, daily in sku_daily.items():
+                meta = sku_meta[key]
+                gid, g = match_group_for_sku_indexed(meta.get("merchant_sku") or "", index)
+                target_key = f"group:{gid}" if gid else key
+                if gid:
+                    merged_meta.setdefault(target_key, {
+                        "sku": g.get("external_code") or "",
+                        "merchant_sku": "",
+                        "name": g.get("group_name") or gid,
+                        "row_type": "Мастер-группа",
+                    })
+                    merged_members.setdefault(target_key, set()).add(meta.get("merchant_sku") or "")
+                else:
+                    merged_meta[target_key] = meta
+                if image_url_by_key.get(key) and not merged_image.get(target_key):
+                    merged_image[target_key] = image_url_by_key[key]
+                gdaily = merged_daily.setdefault(target_key, {})
+                for day, bucket in daily.items():
+                    gb = gdaily.setdefault(day, {"qty": 0, "revenue": 0.0})
+                    gb["qty"] += bucket["qty"]
+                    gb["revenue"] += bucket["revenue"]
+            for target_key, members in merged_members.items():
+                merged_meta[target_key]["merchant_sku"] = ", ".join(sorted(m for m in members if m))
+            sku_daily = merged_daily
+            sku_meta = merged_meta
+            image_url_by_key = merged_image
+
+    # Группы: одна на ключ (карточка либо мастер-группа), с суммарной
+    # выручкой (для сортировки самых продаваемых товаров наверх) и списком
+    # строк внутри диапазона — либо периодами продаж (periods_mode=True),
+    # либо одной строкой на весь диапазон (по умолчанию, без дублей).
     groups = []
     for key, daily in sku_daily.items():
         days_sorted = sorted(daily.keys())
         group_revenue = sum(v["revenue"] for v in daily.values())
-        period_rows = []
-        for p_start, p_end in _split_into_periods(days_sorted):
-            days_in_period = [d for d in days_sorted if p_start <= d <= p_end]
-            qty = sum(daily[d]["qty"] for d in days_in_period)
-            revenue = sum(daily[d]["revenue"] for d in days_in_period)
-            period_rows.append({
-                "start": p_start,
-                "end": p_end,
-                "active_days": len(days_in_period),
-                "quantity": qty,
-                "revenue": revenue,
-            })
+        if periods_mode:
+            period_rows = []
+            for p_start, p_end in _split_into_periods(days_sorted):
+                days_in_period = [d for d in days_sorted if p_start <= d <= p_end]
+                qty = sum(daily[d]["qty"] for d in days_in_period)
+                revenue = sum(daily[d]["revenue"] for d in days_in_period)
+                period_rows.append({
+                    "start": p_start,
+                    "end": p_end,
+                    "active_days": len(days_in_period),
+                    "quantity": qty,
+                    "revenue": revenue,
+                })
+        else:
+            period_rows = [{
+                "start": days_sorted[0],
+                "end": days_sorted[-1],
+                "active_days": len(days_sorted),
+                "quantity": sum(daily[d]["qty"] for d in days_sorted),
+                "revenue": group_revenue,
+            }]
         groups.append({"key": key, "meta": sku_meta[key], "revenue": group_revenue, "periods": period_rows})
 
     groups.sort(key=lambda g: g["revenue"], reverse=True)
@@ -242,7 +318,7 @@ def build_sales_export_xlsx(store_id: str, date_from: dt.date, date_to: dt.date)
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    widths = {"A": 12, "B": 16, "C": 45, "D": 18, "E": 14, "F": 14, "G": 16, "H": 14, "I": 20}
+    widths = {"A": 12, "B": 16, "C": 45, "D": 18, "E": 14, "F": 14, "G": 16, "H": 14, "I": 20, "J": 14}
     for col, width in widths.items():
         ws.column_dimensions[col].width = width
 
@@ -261,6 +337,7 @@ def build_sales_export_xlsx(store_id: str, date_from: dt.date, date_to: dt.date)
             ws.cell(row=row_idx, column=7, value=period["active_days"])
             ws.cell(row=row_idx, column=8, value=period["quantity"])
             ws.cell(row=row_idx, column=9, value=avg_price)
+            ws.cell(row=row_idx, column=10, value=meta.get("row_type", "Карточка"))
 
             if thumb_bytes:
                 img = XLImage(io.BytesIO(thumb_bytes))

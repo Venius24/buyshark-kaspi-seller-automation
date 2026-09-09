@@ -37,6 +37,8 @@ export const SalesStatsWidget: React.FC<SalesStatsWidgetProps> = ({ period = 30,
 
   const [exportFrom, setExportFrom] = useState(() => daysAgo(period));
   const [exportTo, setExportTo] = useState(() => isoDate(new Date()));
+  const [exportGroupBy, setExportGroupBy] = useState<'card' | 'master_group'>('card');
+  const [exportPeriodsMode, setExportPeriodsMode] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
@@ -45,7 +47,7 @@ export const SalesStatsWidget: React.FC<SalesStatsWidgetProps> = ({ period = 30,
     setExportError(null);
     try {
       const res = await apiFetch(
-        `${API_URL}/api/analytics/sales-export?date_from=${exportFrom}&date_to=${exportTo}`
+        `${API_URL}/api/analytics/sales-export?date_from=${exportFrom}&date_to=${exportTo}&group_by=${exportGroupBy}&periods_mode=${exportPeriodsMode}`
       );
       if (!res.ok) {
         const body = await res.json().catch(() => null);
@@ -106,37 +108,61 @@ export const SalesStatsWidget: React.FC<SalesStatsWidgetProps> = ({ period = 30,
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px' }}>
-        <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>ЭКСПОРТ В EXCEL</span>
-        <input
-          type="date"
-          value={exportFrom}
-          max={exportTo}
-          onChange={(e) => setExportFrom(e.target.value)}
-          className="input"
-          style={{ fontSize: '12px', padding: '4px 8px', width: '140px' }}
-        />
-        <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>
-        <input
-          type="date"
-          value={exportTo}
-          min={exportFrom}
-          max={isoDate(new Date())}
-          onChange={(e) => setExportTo(e.target.value)}
-          className="input"
-          style={{ fontSize: '12px', padding: '4px 8px', width: '140px' }}
-        />
-        <button
-          className="btn btn-secondary"
-          style={{ padding: '5px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
-          onClick={handleExport}
-          disabled={exporting}
-        >
-          <Download size={13} /> {exporting ? 'Формируем…' : 'Скачать .xlsx'}
-        </button>
-        {exportError && (
-          <span style={{ fontSize: '11px', color: '#e87f5f' }}>{exportError}</span>
-        )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>ЭКСПОРТ В EXCEL</span>
+          <input
+            type="date"
+            value={exportFrom}
+            max={exportTo}
+            onChange={(e) => setExportFrom(e.target.value)}
+            className="input"
+            style={{ fontSize: '12px', padding: '4px 8px', width: '140px' }}
+          />
+          <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>
+          <input
+            type="date"
+            value={exportTo}
+            min={exportFrom}
+            max={isoDate(new Date())}
+            onChange={(e) => setExportTo(e.target.value)}
+            className="input"
+            style={{ fontSize: '12px', padding: '4px 8px', width: '140px' }}
+          />
+          <button
+            className="btn btn-secondary"
+            style={{ padding: '5px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            onClick={handleExport}
+            disabled={exporting}
+          >
+            <Download size={13} /> {exporting ? 'Формируем…' : 'Скачать .xlsx'}
+          </button>
+          {exportError && (
+            <span style={{ fontSize: '11px', color: '#e87f5f' }}>{exportError}</span>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>
+            Группировка:
+            <select
+              value={exportGroupBy}
+              onChange={(e) => setExportGroupBy(e.target.value as 'card' | 'master_group')}
+              className="input"
+              style={{ fontSize: '12px', padding: '3px 6px' }}
+            >
+              <option value="card">По карточкам</option>
+              <option value="master_group">По мастер-группам</option>
+            </select>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-muted)', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={exportPeriodsMode}
+              onChange={(e) => setExportPeriodsMode(e.target.checked)}
+            />
+            Разбивать на периоды продаж (старый режим, со строками-дублями по каждому возобновлению продаж)
+          </label>
+        </div>
       </div>
 
       {!hasData ? (

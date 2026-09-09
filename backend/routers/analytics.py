@@ -210,13 +210,22 @@ def get_sales_stats(days: int = 30, ctx: StoreContext = Depends(get_store_contex
 
 
 @router.get("/sales-export")
-def export_sales_stats(date_from: str, date_to: str, ctx: StoreContext = Depends(get_store_context)):
+def export_sales_stats(
+    date_from: str,
+    date_to: str,
+    group_by: str = "card",
+    periods_mode: bool = False,
+    ctx: StoreContext = Depends(get_store_context),
+):
     """
     Экспорт продаж за выбранный период в Excel — Фото | Артикул | Наименование |
     Код товара Kaspi | Продано, шт. | Средняя цена продажи | Дней с продажами
     (период) | Дней с первой продажи. См. backend/services/sales_export.py —
     там же объяснение, почему «дней с первой продажи» это прокси, а не
-    настоящая дата добавления в каталог (её никто не хранит).
+    настоящая дата добавления в каталог (её никто не хранит), а также что
+    значат `group_by` (card/master_group) и `periods_mode` (по умолчанию
+    False — одна строка на товар за весь диапазон без дублей; True —
+    старое поведение с разбивкой на периоды продаж).
     """
     try:
         d_from = _date.fromisoformat(date_from)
@@ -227,8 +236,10 @@ def export_sales_stats(date_from: str, date_to: str, ctx: StoreContext = Depends
         raise HTTPException(status_code=400, detail="date_from не может быть позже date_to")
     if (d_to - d_from).days > 366:
         raise HTTPException(status_code=400, detail="Период не может быть длиннее 366 дней")
+    if group_by not in ("card", "master_group"):
+        raise HTTPException(status_code=400, detail="group_by должен быть card или master_group")
 
-    xlsx_bytes = build_sales_export_xlsx(ctx.store_id, d_from, d_to)
+    xlsx_bytes = build_sales_export_xlsx(ctx.store_id, d_from, d_to, group_by=group_by, periods_mode=periods_mode)
     filename = f"sales_{d_from.isoformat()}_{d_to.isoformat()}.xlsx"
     return StreamingResponse(
         io.BytesIO(xlsx_bytes),
