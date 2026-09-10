@@ -176,11 +176,20 @@ export const PrintBatcher: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const prefsStoreRef = useRef<string | null | undefined>(activeStoreId);
+  // sort_preset и express_mode — это ещё и настройка бота (общая с сервером,
+  // см. Автопросмотр StorePrintSettingsDB): если на ЭТОМ устройстве их ещё
+  // никто не менял, сервер должен победить дефолт "filename", иначе штамп
+  // Мастер-Группы, включённый через бота, в кабинете молча пропадает —
+  // ровно так это и случилось на проде Бархана 2026-09-10 (владелец включил
+  // master_group в боте, а браузер кабинета тихо клеил по "filename" без
+  // единого штампа и без разделителей категорий).
+  const hasLocalPrefsRef = useRef<boolean>(localStorage.getItem(prefsKey(activeStoreId)) !== null);
 
   // При смене магазина подтягиваем его собственный набор настроек.
   useEffect(() => {
     if (prefsStoreRef.current === activeStoreId) return;
     const prefs = loadPrefs(activeStoreId);
+    hasLocalPrefsRef.current = localStorage.getItem(prefsKey(activeStoreId)) !== null;
     setSortPreset(prefs.sortPreset);
     setAutoRotate(prefs.autoRotate);
     setExpressMode(prefs.expressMode);
@@ -217,6 +226,13 @@ export const PrintBatcher: React.FC = () => {
         if (settingsRes.ok) {
           const data = await settingsRes.json();
           setCategories({ ...EMPTY_CATEGORIES, ...(data.store_categories || {}) });
+          // Устройство ещё не переопределяло эти поля локально — берём то,
+          // что настроено в боте, а не молчаливый дефолт "filename"/"separate".
+          if (!hasLocalPrefsRef.current) {
+            if (data.sort_preset) setSortPreset(data.sort_preset);
+            if (data.express_mode) setExpressMode(data.express_mode);
+            hasLocalPrefsRef.current = true;
+          }
         }
         if (prefixesRes.ok) {
           const data = await prefixesRes.json();
