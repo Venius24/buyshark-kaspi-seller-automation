@@ -1247,15 +1247,9 @@ def _find_store_name_anchor(src_page: fitz.Page, clip: fitz.Rect) -> Optional[fi
     return candidates[0]
 
 
-def _find_stamp_band(blockers: List[fitz.Rect], clip: fitz.Rect, box_w: float, box_h: float, min_gap: float = 3.0) -> Optional[fitz.Rect]:
-    """
-    Ищет первую свободную от текста/картинок горизонтальную полосу внутри
-    clip (по левому краю, шириной box_w) — туда впишется штамп группы, не
-    перекрывая существующее содержимое накладной. Возвращает None, если
-    подходящего места не нашлось (штамп в этом случае просто не рисуется).
-    """
-    x0 = clip.x0
-    x1 = min(clip.x1, x0 + box_w)
+def _scan_column_for_band(blockers: List[fitz.Rect], clip: fitz.Rect, x0: float, x1: float,
+                          box_h: float, min_gap: float) -> Optional[fitz.Rect]:
+    """Первая свободная от текста/картинок горизонтальная полоса в колонке [x0, x1)."""
     column_blockers = sorted(
         (r for r in blockers if r.x0 < x1 and r.x1 > x0),
         key=lambda r: r.y0
@@ -1271,6 +1265,30 @@ def _find_stamp_band(blockers: List[fitz.Rect], clip: fitz.Rect, box_w: float, b
         return fitz.Rect(x0, cursor + min_gap, x1, cursor + min_gap + box_h)
 
     return None
+
+
+def _find_stamp_band(blockers: List[fitz.Rect], clip: fitz.Rect, box_w: float, box_h: float, min_gap: float = 3.0) -> Optional[fitz.Rect]:
+    """
+    Ищет свободную от текста/картинок горизонтальную полосу внутри clip,
+    куда впишется штамп группы, не перекрывая существующее содержимое
+    накладной. Возвращает None, если подходящего места не нашлось (штамп в
+    этом случае просто не рисуется).
+
+    Сначала пробуется левая колонка (исходное поведение, место штампа на
+    обычной накладной должно оставаться предсказуемым). Если она занята по
+    всей высоте — вторая попытка правой колонкой: на трёхпанельном
+    экспресс-листе Kaspi (656x928мм, см. _EXPRESS_SHEET_MM) панель «Образец
+    партнёра» занимает только левую половину страницы, а вся правая
+    остаётся пустой — левая колонка на такой странице никогда не находит
+    место, хотя свободного места на странице более чем достаточно. Найдено
+    аудитом реальной партии Бархана (2026-09-10): все экспресс-листы партии
+    молча оставались без штампа группы.
+    """
+    left = _scan_column_for_band(blockers, clip, clip.x0, min(clip.x1, clip.x0 + box_w), box_h, min_gap)
+    if left is not None:
+        return left
+    right_x0 = max(clip.x0, clip.x1 - box_w)
+    return _scan_column_for_band(blockers, clip, right_x0, clip.x1, box_h, min_gap)
 
 
 _STAMP_FONT_OBJECTS: Dict[str, "fitz.Font"] = {}
@@ -1451,6 +1469,12 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
             box_h = src_clip.height * 0.078
             band = _find_stamp_band(blockers, src_clip, box_w, box_h)
     if band is None:
+        # Раньше падало сюда молча — накладная печаталась без единого следа
+        # в логах, что штамп вообще искался. Дальше по коду делать нечего
+        # (см. докстринг класса), но хотя бы видно, что это произошло и с
+        # каким лейблом — до сих пор такие случаи всплывали только как
+        # жалоба "напечаталось без штампа" без единой зацепки в журнале.
+        logger.warning(f"Print Batcher: не нашлось места под штамп '{label}' — страница слишком плотная, штамп пропущен")
         return
 
     scale = min(target_rect.width / src_clip.width, target_rect.height / src_clip.height)

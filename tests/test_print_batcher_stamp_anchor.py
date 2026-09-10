@@ -132,3 +132,33 @@ def test_express_sample_header_does_not_trigger_anchor():
     anchor = pb._find_store_name_anchor(page, page.rect)
     doc.close()
     assert anchor is None
+
+
+def test_stamp_falls_back_to_right_column_on_express_sheet():
+    """
+    Регрессия (2026-09-10, живая партия Бархана): трёхпанельный экспресс-лист
+    Kaspi (656x928мм) без поля названия магазина в ожидаемом месте. Панель
+    "Образец партнёра" занимает только левую половину страницы плотным
+    текстом сверху донизу — старый _find_stamp_band смотрел только в левую
+    колонку, никогда её не находил свободной и штамп пропадал молча (без
+    исключения, без строки в логах) на КАЖДОМ экспресс-листе партии. Правая
+    половина страницы при этом пустует целиком.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=1860, height=2631)
+    y = 60.0
+    while y < page.rect.height - 40:
+        page.insert_text((42, y), "Поле накладной: значение", fontsize=9,
+                         fontname="cyr", fontfile=_CYR_FONT)
+        y += 38.0
+    c_rect = fitz.Rect(0, 0, page.rect.width * 0.55, page.rect.height)
+
+    blockers = pb._collect_blockers(page, c_rect)
+    band = pb._find_stamp_band(blockers, c_rect, c_rect.width * 0.54, c_rect.height * 0.105)
+    assert band is not None, "штамп должен найти место в свободной правой колонке"
+    assert band.x0 >= c_rect.width * 0.4, "найденная полоса должна быть в правой части страницы, а не в занятой левой"
+
+    pb.draw_group_stamp(page, page.rect, page, c_rect, "Органайзеры", ["Хрупкое"])
+    drawings = [d["rect"] for d in page.get_drawings() if d.get("type") == "s"]
+    doc.close()
+    assert drawings, "штамп должен быть нарисован, а не пропущен молча"
