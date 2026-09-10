@@ -61,3 +61,4 @@ ds-bundle/
 
 .env.lead
 lead_service/data/*.db*
+offer_service/data/*.db*

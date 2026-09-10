@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BuyShark × {{ offer.client_name }}</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap">
+<style>
+  :root {
+    --abyss: #030712;
+    --surface: #0a1120;
+    --surface-raised: #101c34;
+    --hairline: rgba(244,251,255,0.09);
+    --hairline-strong: rgba(244,251,255,0.16);
+    --cyan: #22c9d6;
+    --cyan-dim: #0f8a96;
+    --gold: #ffcf40;
+    --gold-dim: #b8912b;
+    --ink: #f4fbff;
+    --fog: #8fa0b3;
+    --fog-dim: #5c6c80;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--abyss);
+    color: var(--ink);
+    font-family: 'Manrope', system-ui, -apple-system, sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3 {
+    font-family: 'Unbounded', 'Manrope', sans-serif;
+    font-weight: 700;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  .mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: clamp(28px, 6vw, 64px) clamp(20px, 5vw, 40px) 80px;
+  }
+
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--cyan);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .eyebrow::before {
+    content: '';
+    width: 22px;
+    height: 1px;
+    background: var(--cyan-dim);
+  }
+
+  .masthead {
+    padding-bottom: 36px;
+    border-bottom: 1px solid var(--hairline);
+    margin-bottom: 40px;
+  }
+
+  .masthead-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 24px;
+    margin-bottom: 26px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Unbounded', sans-serif;
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--ink);
+  }
+
+  .brand-mark {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    background: linear-gradient(135deg, var(--cyan), var(--cyan-dim));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex: none;
+  }
+
+  .doc-date {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--fog-dim);
+    text-align: right;
+    white-space: nowrap;
+    padding-top: 4px;
+  }
+
+  h1.title {
+    font-size: clamp(30px, 4.6vw, 44px);
+    line-height: 1.12;
+    margin: 14px 0 10px;
+  }
+
+  h1.title em {
+    font-style: normal;
+    color: var(--cyan);
+  }
+
+  .lede {
+    color: var(--fog);
+    font-size: 17px;
+    max-width: 56ch;
+  }
+
+  .snapshot {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--hairline);
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    overflow: hidden;
+    margin-bottom: 44px;
+  }
+
+  .snapshot.cols-1 { grid-template-columns: 1fr; }
+  .snapshot.cols-2 { grid-template-columns: repeat(2, 1fr); }
+
+  .snap-cell {
+    background: var(--surface);
+    padding: 20px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .snap-num {
+    font-family: 'Unbounded', sans-serif;
+    font-size: clamp(22px, 3.4vw, 30px);
+    color: var(--ink);
+  }
+
+  .snap-label {
+    font-size: 13px;
+    color: var(--fog);
+  }
+
+  section { margin-bottom: 52px; }
+
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+
+  .sec-num {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--fog-dim);
+    font-size: 14px;
+  }
+
+  h2.sec-title {
+    font-size: clamp(19px, 2.6vw, 23px);
+  }
+
+  p { color: var(--fog); margin: 0 0 12px; max-width: 66ch; }
+  p:last-child { margin-bottom: 0; }
+  strong { color: var(--ink); font-weight: 700; }
+
+  .catalog-note {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--fog);
+    border: 1px solid var(--hairline-strong);
+    border-radius: 999px;
+    padding: 5px 12px;
+    white-space: nowrap;
+  }
+
+  .chip b { color: var(--ink); font-weight: 600; }
+
+  .rec-card {
+    position: relative;
+    background: linear-gradient(165deg, var(--surface-raised), var(--surface) 70%);
+    border: 1px solid rgba(34, 201, 214, 0.35);
+    border-radius: 18px;
+    padding: clamp(22px, 4vw, 34px);
+    box-shadow: 0 0 0 1px rgba(34,201,214,0.05), 0 30px 60px -30px rgba(34,201,214,0.25);
+  }
+
+  .rec-ribbon {
+    position: absolute;
+    top: -13px;
+    left: clamp(22px, 4vw, 34px);
+    background: var(--gold);
+    color: #241a02;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    padding: 4px 12px;
+    border-radius: 999px;
+  }
+
+  .rec-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 18px;
+    margin-bottom: 22px;
+    padding-top: 6px;
+  }
+
+  .rec-name {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 26px;
+  }
+
+  .rec-limit {
+    color: var(--fog);
+    font-size: 14.5px;
+    margin-top: 4px;
+  }
+
+  .rec-price {
+    text-align: right;
+  }
+
+  .rec-price .num {
+    font-family: 'Unbounded', sans-serif;
+    font-size: clamp(26px, 4vw, 34px);
+    color: var(--cyan);
+  }
+
+  .rec-price .per {
+    font-size: 13px;
+    color: var(--fog-dim);
+  }
+
+  .rec-price .old {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    color: var(--fog-dim);
+    text-decoration: line-through;
+    margin-right: 8px;
+  }
+
+  .discount-badge {
+    position: absolute;
+    top: -13px;
+    right: clamp(22px, 4vw, 34px);
+    background: var(--ink);
+    color: var(--abyss);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    padding: 4px 12px;
+    border-radius: 999px;
+  }
+
+  .rec-features {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 22px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 20px;
+  }
+
+  .rec-features li {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-left: 17px;
+    position: relative;
+  }
+
+  .rec-features li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 7px;
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
+    background: var(--cyan);
+  }
+
+  .feat-name {
+    font-weight: 700;
+    font-size: 14.5px;
+    color: var(--ink);
+  }
+
+  .feat-desc {
+    font-size: 13.5px;
+    color: var(--fog);
+    line-height: 1.45;
+  }
+
+  .rec-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-top: 18px;
+    border-top: 1px dashed var(--hairline-strong);
+    font-size: 13.5px;
+    color: var(--fog);
+  }
+
+  .rec-foot b { color: var(--gold); font-weight: 600; }
+
+  .lineup {
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  .lineup-row {
+    display: grid;
+    grid-template-columns: 1.3fr 1fr 1.7fr;
+    gap: 16px;
+    padding: 15px 18px;
+    align-items: center;
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .lineup-row:last-child { border-bottom: none; }
+
+  .lineup-row.head {
+    background: var(--surface);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fog-dim);
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .lineup-row.active {
+    background: rgba(34, 201, 214, 0.06);
+  }
+
+  .li-name {
+    font-weight: 700;
+    font-size: 14.5px;
+  }
+
+  .li-name .mark {
+    color: var(--cyan);
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    margin-left: 6px;
+  }
+
+  .li-limit {
+    color: var(--fog);
+    font-size: 13.5px;
+  }
+
+  .li-price {
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14.5px;
+  }
+
+  @media (max-width: 620px) {
+    .lineup-row { grid-template-columns: 1fr; gap: 4px; text-align: left; }
+    .lineup-row.head { display: none; }
+    .li-price { text-align: left; }
+    .snapshot { grid-template-columns: 1fr; }
+    .rec-features { grid-template-columns: 1fr; }
+  }
+
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border-left: 1px solid var(--hairline-strong);
+    margin-left: 10px;
+  }
+
+  .step {
+    position: relative;
+    padding: 0 0 26px 26px;
+  }
+
+  .step:last-child { padding-bottom: 0; }
+
+  .step::before {
+    content: attr(data-n);
+    position: absolute;
+    left: -11px;
+    top: 0;
+    width: 21px;
+    height: 21px;
+    border-radius: 50%;
+    background: var(--abyss);
+    border: 1px solid var(--cyan-dim);
+    color: var(--cyan);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .step h3 {
+    font-family: 'Manrope', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    margin-bottom: 4px;
+  }
+
+  .step p { font-size: 14.5px; }
+
+  .cta {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 18px;
+    padding: clamp(24px, 4vw, 34px);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 20px;
+  }
+
+  .cta-copy h2 { font-size: 21px; margin-bottom: 6px; }
+  .cta-copy p { font-size: 14.5px; margin: 0; }
+
+  .cta-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  .btn {
+    font-family: 'Manrope', sans-serif;
+    font-weight: 700;
+    font-size: 14.5px;
+    padding: 12px 20px;
+    border-radius: 10px;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+
+  .btn-primary {
+    background: var(--cyan);
+    color: #00252a;
+  }
+
+  a:focus-visible, .btn:focus-visible {
+    outline: 2px solid var(--cyan);
+    outline-offset: 2px;
+  }
+
+  footer {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid var(--hairline);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 12.5px;
+    color: var(--fog-dim);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  @media print {
+    * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+    @page { size: A4; margin: 14mm 12mm; }
+    body { background: var(--abyss) !important; }
+    .rec-card, .snapshot, .cta { animation: none !important; opacity: 1 !important; transform: none !important; }
+    section, .rec-card { break-inside: avoid; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .rec-card, .snapshot, .cta { animation: rise 0.5s ease both; }
+    .snapshot { animation-delay: 0.05s; }
+    .rec-card { animation-delay: 0.1s; }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <div class="masthead">
+    <div class="masthead-top">
+      <div class="brand"><span class="brand-mark">🦈</span> BuyShark</div>
+      <div class="doc-date">{{ doc_number }}<br>{{ doc_date }}</div>
+    </div>
+    <div class="eyebrow">Коммерческое предложение</div>
+    <h1 class="title">Автоматизация Kaspi Магазина<br>для <em>{{ offer.client_name }}</em></h1>
+    <p class="lede">Мы посмотрели ваш магазин на Kaspi.kz и подобрали тариф под ваш реальный каталог — без переплаты за лимиты, которые вы не используете, и с запасом на рост.</p>
+  </div>
+
+  {% if snapshot_items %}
+  <section>
+    <div class="sec-head"><span class="sec-num">01</span><h2 class="sec-title">Ваш магазин сегодня</h2></div>
+    <div class="snapshot cols-{{ snapshot_items|length if snapshot_items|length <= 3 else 3 }}">
+      {% for value, label in snapshot_items %}
+      <div class="snap-cell">
+        <div class="snap-num mono">{{ value }}</div>
+        <div class="snap-label">{{ label }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% if offer.categories %}
+    <p>Каталог сосредоточен в нескольких крупных нишах — это видно по структуре:
+      {% for c in offer.categories %}<strong>{{ c.name }} ({{ c.count }})</strong>{% if not loop.last %}, {% endif %}{% endfor %}.
+      Такой каталог живёт и умирает конкуренцией по цене на карточке — именно там решается, увидит ли покупатель вас или соседний магазин с тем же товаром.</p>
+    <div class="catalog-note">
+      {% for c in offer.categories %}
+      <span class="chip">{{ c.name }} <b>{{ c.count }}</b></span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <section>
+    <div class="sec-head"><span class="sec-num">{{ "02" if snapshot_items else "01" }}</span><h2 class="sec-title">Рекомендуемый тариф</h2></div>
+    <p>{{ recommendation_text }}</p>
+    <div class="rec-card" style="margin-top:18px;">
+      {% if tier.ribbon %}<span class="rec-ribbon">{{ tier.ribbon }} · РЕКОМЕНДУЕМ</span>{% endif %}
+      {% if discounted_price %}<span class="discount-badge">−{{ discount_pct }}% на первый месяц</span>{% endif %}
+      <div class="rec-top">
+        <div>
+          <div class="rec-name">{{ tier.name }}</div>
+          <div class="rec-limit">
+            {{ "до " ~ "{:,}".format(tier.limit).replace(",", " ") ~ " товаров" if tier.limit else "безлимит товаров" }}
+            {% if offer.product_count %} · сейчас у вас {{ offer.product_count }}{% endif %}
+          </div>
+        </div>
+        <div class="rec-price">
+          {% if discounted_price %}
+          <div class="num mono"><span class="old">{{ tier.price | tg }}</span>{{ discounted_price | tg }}</div>
+          <div class="per">первый месяц, дальше {{ tier.price | tg }}/мес</div>
+          {% elif tier.price %}
+          <div class="num mono">{{ tier.price | tg }}</div>
+          <div class="per">в месяц</div>
+          {% else %}
+          <div class="num mono">по договору</div>
+          <div class="per">под ваш объём</div>
+          {% endif %}
+        </div>
+      </div>
+      <ul class="rec-features">
+        {% for name, desc in tier.features %}
+        <li>
+          <span class="feat-name">{{ name }}</span>
+          <span class="feat-desc">{{ desc }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      <div class="rec-foot">
+        {% if tier.price %}
+        <span>Первые 7 дней — вообще бесплатно, без карты{% if discounted_price %}. Дальше месяц со скидкой{% endif %}</span>
+        <span><b>{{ (discounted_price or tier.price) | tg }}</b> за 1-й {% if discounted_price %}оплаченный {% endif %}месяц</span>
+        {% else %}
+        <span>Обсудим объём, SLA и цену на созвоне</span>
+        <span><b>По договору</b></span>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">{{ "03" if snapshot_items else "02" }}</span><h2 class="sec-title">Полная линейка — для сравнения</h2></div>
+    <div class="lineup">
+      <div class="lineup-row head">
+        <div>Тариф</div><div>Лимит</div><div style="text-align:right">Цена / мес</div>
+      </div>
+      {% for t in all_tiers %}
+      <div class="lineup-row{% if t.key == tier.key %} active{% endif %}">
+        <div class="li-name">{{ t.name }}{% if t.key == tier.key %}<span class="mark">← вам</span>{% endif %}</div>
+        <div class="li-limit">{{ ("до " ~ "{:,}".format(t.limit).replace(",", " ") ~ " товаров") if t.limit else "безлимит, свой SLA" }}</div>
+        <div class="li-price mono">{{ t.price | tg }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">{{ "04" if snapshot_items else "03" }}</span><h2 class="sec-title">Как запускаемся</h2></div>
+    <div class="steps">
+      <div class="step" data-n="1">
+        <h3>Подключаете магазин</h3>
+        <p>Через кабинет продавца — авторизация по email, без передачи паролей нам. Занимает 5–10 минут.</p>
+      </div>
+      <div class="step" data-n="2">
+        <h3>7 дней бесплатно на тарифе «{{ tier.name }}»</h3>
+        <p>Всё включено с первого дня. Смотрите на своих реальных товарах и заказах, не на демо.</p>
+      </div>
+      <div class="step" data-n="3">
+        {% if discounted_price %}
+        <h3>Первый оплаченный месяц — со скидкой {{ discount_pct }}%</h3>
+        <p>{{ discounted_price | tg }} вместо {{ tier.price | tg }}. Дальше — обычная цена тарифа, и его в любой момент можно поменять из кабинета вверх или вниз без штрафов.</p>
+        {% else %}
+        <h3>Решаете, оставаться ли на «{{ tier.name }}»</h3>
+        <p>Тариф меняется в любой момент из кабинета — вверх или вниз, без штрафов и потери истории.</p>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section style="margin-bottom:0;">
+    <div class="cta">
+      <div class="cta-copy">
+        <h2>Готовы подключить {{ offer.client_name }}?</h2>
+        <p>Ответим в WhatsApp обычно за пару минут, будни 10:00–23:00.</p>
+      </div>
+      <div class="cta-actions">
+        <a class="btn btn-primary" href="{{ wa_link }}" target="_blank" rel="noopener">Написать в WhatsApp →</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>BuyShark · buyshark.kz · автоматизация продаж на Kaspi</span>
+    <span>Действительно 30 дней с даты выпуска</span>
+  </footer>
+
+</div>
+</body>
+</html>
