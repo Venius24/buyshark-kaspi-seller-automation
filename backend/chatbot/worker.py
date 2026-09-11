@@ -44,21 +44,35 @@ def _notify_credits_exhausted_once_daily(store_id: str) -> None:
         logger.debug(f"[Chatbot] notify_credits_exhausted skipped: {e}")
 
 async def start_telegram_bot_polling():
-    """Фоновый запуск Telegram бота (Aiogram polling)."""
+    """
+    Фоновый запуск Telegram бота (Aiogram polling).
+
+    dp.start_polling() падает целиком при любом сетевом сбое (например,
+    обрыв TG_BOT_PROXY) и раньше на этом всё заканчивалось — процесс
+    оставался жив, но бот молча переставал получать апдейты насовсем
+    (подтверждено вживую 2026-09-10: прокси упал на 1 минуту, polling
+    умер и не поднимался почти сутки, пока прокси не проверили руками).
+    Поэтому здесь цикл с перезапуском и паузой, чтобы временный сбой не
+    убивал приём сообщений до следующего деплоя.
+    """
     bot, dp = bot_instance.init_bot()
-    if bot and dp:
-        register_handlers()
-        await register_bot_commands()
-        await notify_startup()
+    if not (bot and dp):
+        return
+    register_handlers()
+    await register_bot_commands()
+    await notify_startup()
+    while True:
         logger.info("🤖 [Telegram Bot] Polling запущен...")
         try:
             await dp.start_polling(bot, handle_signals=False)
+            return
         except Exception as e:
             err_msg = str(e)
             if "Conflict" in err_msg or "TelegramConflictError" in err_msg:
                 logger.warning("⚠️ [Telegram Bot] Бот уже запущен в параллельном процессе. Polling пропущен.")
-            else:
-                logger.error(f"💥 [Telegram Bot] Ошибка polling: {e}")
+                return
+            logger.error(f"💥 [Telegram Bot] Ошибка polling: {e}. Перезапуск через 15с...")
+            await asyncio.sleep(15)
 
 async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
     """
