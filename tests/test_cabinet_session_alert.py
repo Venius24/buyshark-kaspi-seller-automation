@@ -6,6 +6,7 @@
 import asyncio
 from unittest.mock import AsyncMock, patch
 
+from backend.chatbot import worker  # noqa: F401 — разрывает цикл импорта notifications↔worker
 from backend.chatbot import notifications
 
 
