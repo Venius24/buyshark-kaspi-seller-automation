@@ -53,31 +53,12 @@ export const PRICING_TIERS: PricingTier[] = [
     ribbon: 'ХИТ ПРОДАЖ',
     variant: 'popular',
   },
-  {
-    name: 'Хищник+',
-    limit: 'до 2000 товаров',
-    priceMinor: 2_980_000,
-    features: [
-      'Всё из «Хищник»',
-      'Автодобавление товаров (AI, бета)',
-      'Мультистор на аккаунт',
-      'WebSocket realtime + приоритетная поддержка',
-    ],
-  },
-  {
-    name: 'ГигаПредприятие',
-    limit: 'безлимит товаров',
-    priceMinor: null,
-    features: [
-      'Всё включено',
-      'Персональный SLA и выделенная инфраструктура',
-      'Кастомные интеграции',
-      'Выделенный менеджер',
-    ],
-    ribbon: 'ENTERPRISE',
-    variant: 'premium',
-  },
 ];
+
+// Хищник+ (PREDATOR_PLUS) и ГигаПредприятие (GIGA) скрыты из публичной
+// витрины лендинга 2026-09-12 по решению владельца — сами тарифы в
+// backend/billing/catalog.py не тронуты, существующие подписчики на них
+// продолжают работать как есть, просто новых через сайт не продаём.
 
 export function formatTenge(minor: number): string {
   const whole = Math.round(minor / 100);
