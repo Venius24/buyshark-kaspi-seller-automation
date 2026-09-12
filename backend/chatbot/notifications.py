@@ -61,6 +61,28 @@ async def notify_cookie_expired(reason: str, store_id: Optional[str] = None):
 
     config.set_cookie_alert_sent(store_id, True)
 
+async def notify_cabinet_session_expired(store_id: str, store_name: Optional[str] = None):
+    """
+    Алерт о слетевшем входе в КАБИНЕТ (email+пароль) — не путать с чатом выше.
+    Раньше health-check звал notify_cookie_expired без store_id: текст был про
+    чат и SMS, а сам алерт уходил в «некому отправлять» — владелец не узнавал,
+    что демпинг и заказы встали. Флаг антиспама не нужен: health-check берёт
+    только ACTIVE-сторы и сам переводит стор в COOKIE_EXPIRED, так что на одно
+    падение — одно сообщение; повторный вход вернёт ACTIVE.
+    """
+    store_line = f"🏪 *Магазин:* {_esc_md(store_name)}\n" if store_name else ""
+    alert_text = (
+        f"🚨 *ВНИМАНИЕ: ВХОД В КАБИНЕТ KASPI СЛЕТЕЛ!*\n"
+        f"----------------------------------------\n"
+        f"{store_line}"
+        f"⏰ *Время:* {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
+        f"----------------------------------------\n"
+        f"⚠️ Пока вход не восстановлен, не работают демпинг, заказы и остатки.\n"
+        f"🛠 *Действие:* Зайдите в дашборд → Настройки и заново подключите магазин (email и пароль кабинета)."
+    )
+    logger.warning(f"🚨 [CABINET ALERT] Вход в кабинет слетел: {store_name} ({store_id}).")
+    await notify_dispatch.dispatch(store_id, "problems", alert_text, urgent=True, card="cookie_expired")
+
 async def notify_startup():
     """Логирует запуск бота. Раньше слала Telegram-алерт на легаси admin_ids
     (см. HANDOFF, вырезано 2026-08-09) — старт бота не привязан к
