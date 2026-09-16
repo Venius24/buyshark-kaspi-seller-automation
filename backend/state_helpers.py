@@ -2033,6 +2033,33 @@ def _load_chat_activity(store_id: str, days: int = 180) -> list:
         session.close()
 
 
+def _load_sales_daily(store_id: str, days: int = 30) -> list:
+    """Выручка и число заказов по дням (UTC-дата, как в _load_sales_summary)
+    за последние N дней — без разбора entries_payload. Для виджетов, которым
+    нужен только дневной ряд (score/heatmap): полная сводка на 180 днях
+    стоила ~3.5с CPU на каждый опрос дашборда."""
+    import datetime as _dt
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import SalesOrderDB
+        since = _dt.datetime.utcnow() - _dt.timedelta(days=days)
+        rows = session.execute(
+            select(SalesOrderDB.created_at, SalesOrderDB.total_price)
+            .where(SalesOrderDB.store_id == store_id, SalesOrderDB.created_at >= since)
+        ).all()
+        daily: dict = {}
+        for created_at, total_price in rows:
+            day_key = created_at.strftime("%Y-%m-%d")
+            bucket = daily.setdefault(day_key, {"date": day_key, "revenue": 0.0, "orders": 0})
+            bucket["revenue"] += total_price
+            bucket["orders"] += 1
+        return sorted(daily.values(), key=lambda x: x["date"])
+    finally:
+        session.close()
+
+
 def _load_sales_summary(store_id: str, days: int = 30) -> dict:
     """Реальная агрегация выручки/продаж из sales_orders за последние N дней:
     выручка и число заказов по дням, топ-SKU по выручке, средний чек."""
@@ -2043,8 +2070,10 @@ def _load_sales_summary(store_id: str, days: int = 30) -> dict:
     try:
         from backend.db.models import SalesOrderDB
         since = _dt.datetime.utcnow() - _dt.timedelta(days=days)
-        rows = session.scalars(
-            select(SalesOrderDB)
+        # Только нужные столбцы, без ORM-объектов: у Бархана ~48k заказов за
+        # 180 дней, и гидратация SalesOrderDB занимала больше половины из ~3.5с.
+        rows = session.execute(
+            select(SalesOrderDB.created_at, SalesOrderDB.total_price, SalesOrderDB.entries_payload)
             .where(SalesOrderDB.store_id == store_id, SalesOrderDB.created_at >= since)
             .order_by(SalesOrderDB.created_at.asc())
         ).all()

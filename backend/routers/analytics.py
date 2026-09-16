@@ -13,7 +13,7 @@ import logging
 from backend.state_helpers import (
     _load_dumping_configs, dumping_config_for_product,
     _load_products, _load_analytics_snapshot, _load_dumper_logs,
-    _load_sales_summary, _load_analytics_history, _load_price_war_snapshot,
+    _load_sales_summary, _load_sales_daily, _load_analytics_history, _load_price_war_snapshot,
     _load_competitor_leaderboard, _load_chat_activity, _get_sync_db_session,
     _load_quality_metrics_latest, _load_quality_metrics_history,
 )
@@ -310,12 +310,12 @@ def get_insights(ctx: StoreContext = Depends(get_store_context)):
         try:
             from backend.db.models import SalesOrderDB
             since = _dt.datetime.utcnow() - _dt.timedelta(days=90)
-            rows = session.scalars(
-                select(SalesOrderDB)
+            created = session.scalars(
+                select(SalesOrderDB.created_at)
                 .where(SalesOrderDB.store_id == ctx.store_id, SalesOrderDB.created_at >= since)
             ).all()
-            for r in rows:
-                local = r.created_at + _dt.timedelta(hours=ALMATY_UTC_OFFSET_HOURS)
+            for created_at in created:
+                local = created_at + _dt.timedelta(hours=ALMATY_UTC_OFFSET_HOURS)
                 hourly_grid[local.weekday()][local.hour] += 1
         finally:
             session.close()
@@ -355,8 +355,9 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
     try:
         from backend.db.models import SalesOrderDB
         since = datetime.utcnow() - timedelta(days=days)
-        rows = session.scalars(
-            select(SalesOrderDB).where(SalesOrderDB.store_id == ctx.store_id, SalesOrderDB.created_at >= since)
+        rows = session.execute(
+            select(SalesOrderDB.created_at, SalesOrderDB.entries_payload)
+            .where(SalesOrderDB.store_id == ctx.store_id, SalesOrderDB.created_at >= since)
         ).all()
 
         # Kaspi иногда не отдаёт offer.name/title в entries — kaspi_wrapper.py
@@ -490,8 +491,8 @@ def get_score_stats(ctx: StoreContext = Depends(get_store_context)):
     best_price_share = float(snapshot.get("best_price_share", 0.0))
 
     history = _load_analytics_history(ctx.store_id, days=180)
-    sales_180 = _load_sales_summary(ctx.store_id, days=180)
-    daily_revenue = {d["date"]: d for d in sales_180.get("daily", [])}
+    daily_180 = _load_sales_daily(ctx.store_id, days=180)
+    daily_revenue = {d["date"]: d for d in daily_180}
 
     # --- Компонент 2: динамика продаж (последние 7 дней vs предыдущие 7) ---
     today = _dt.datetime.utcnow().date()
@@ -549,7 +550,7 @@ def get_score_stats(ctx: StoreContext = Depends(get_store_context)):
             "price_leadership_days": price_leadership_streak,
             "sales_days": sales_streak,
         },
-        "heatmap": sales_180.get("daily", []),
+        "heatmap": daily_180,
         "history_points": len(history),
     }
 
