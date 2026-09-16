@@ -3,6 +3,7 @@ FastAPI backend — token-first architecture (Модульная сборка + 
 """
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
 
@@ -74,8 +75,32 @@ from backend.perf.collector import is_enabled as _perf_enabled
 app = FastAPI(title="Kaspi SaaS Wrapper API")
 
 
+# Дефолтный executor лупа — тот самый пул, в который попадает КАЖДЫЙ
+# asyncio.to_thread во всём процессе: чтения/записи Мастер-Групп, отметки
+# списаний, конфиги чатбота, биллинг. Python выдаёт ему min(32, cpu_count+4)
+# потоков, а на этой VPS два ядра — то есть шесть слотов на всё приложение.
+#
+# Шести хватало, пока никто не приходил залпом. Радар приходил: gather по 316
+# товарам, каждый — сетевой поход в kaspi.kz. Замер на проде 2026-09-16: PUT
+# /api/stock-groups 54.07с, пришёл через 5с после старта скана и ответил за
+# секунду до его конца, при том что сама ручка вне скана отвечает за 0.35с.
+# Радару выдан свой пул (backend/dumper/radar.py), а здесь снимается сам
+# потолок в шесть слотов — работа тут не считающая, а ожидающая (round-trip в
+# Postgres), упирать её в число ядер незачем.
+#
+# Верхняя граница не произвольная: каждый такой поток берёт соединение из
+# синхронного пула в backend/state_helpers.py (10 + 14 overflow = 24). Пул
+# должен быть НЕ МЕНЬШЕ числа потоков, иначе очередь просто переезжает на
+# checkout соединения.
+APP_THREAD_WORKERS = 24
+
+
 @app.on_event("startup")
 async def startup_event():
+    asyncio.get_running_loop().set_default_executor(
+        ThreadPoolExecutor(max_workers=APP_THREAD_WORKERS, thread_name_prefix="app")
+    )
+
     # Инициализация схемы БД и админ-аккаунта
     await init_db()
     await seed_default_admin()

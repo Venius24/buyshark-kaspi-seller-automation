@@ -73,7 +73,15 @@ def _get_sync_db_session():
 
         with _sync_engine_lock:
             if _sync_engine_cache["engine"] is None or _sync_engine_cache["url"] != sync_url:
-                sync_engine = create_engine(sync_url, pool_pre_ping=True)
+                # Пул задан явно и согласован с размером дефолтного
+                # executor'а лупа (APP_THREAD_WORKERS в backend/main.py):
+                # каждый поток, работающий через asyncio.to_thread, берёт
+                # отсюда по соединению, и пул меньше числа потоков превращает
+                # ускорение в новую очередь — уже на checkout'е, с дефолтным
+                # ожиданием 30с. Дефолт SQLAlchemy — 5+10.
+                sync_engine = create_engine(
+                    sync_url, pool_pre_ping=True, pool_size=10, max_overflow=14
+                )
                 Base.metadata.create_all(sync_engine)
                 _sync_engine_cache["engine"] = sync_engine
                 _sync_engine_cache["url"] = sync_url
