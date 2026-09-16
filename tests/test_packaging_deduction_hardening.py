@@ -158,7 +158,7 @@ class TestClaimKeySeparatesAnnotatedSku(unittest.TestCase):
     def test_legacy_key_is_still_recognized(self):
         """Старые брони писались по артикулу без приписки — не списываем заново."""
         claims = {worker._legacy_claim_key("123", "H422-0007-9 2шт"): {"claimed_by": "old"}}
-        with patch("backend.state_helpers._load_processed_orders_by_kind", side_effect=lambda sid, kind: dict(claims)), \
+        with patch("backend.state_helpers._load_processed_orders_by_kind", side_effect=lambda sid, kind, keys=None: dict(claims)), \
              patch("backend.state_helpers._save_processed_orders_by_kind", side_effect=lambda d, sid, kind: None):
             granted = worker.claim_stock_deduction(STORE, "123", "test", {}, sku="H422-0007-9 2шт")
         self.assertFalse(granted)
@@ -193,9 +193,9 @@ class DeductionTestCase(unittest.TestCase):
         p = [
             patch.object(worker, "_load_master_stock_groups", side_effect=lambda store_id=None: self.groups),
             patch.object(worker, "_save_master_stock_groups", side_effect=lambda g, store_id=None: self.saved.append(g)),
-            patch("backend.state_helpers._load_processed_packaging_orders", side_effect=lambda sid: self.processed),
-            patch("backend.state_helpers._save_processed_packaging_orders", side_effect=lambda d, sid: None),
-            patch("backend.state_helpers._load_processed_orders_by_kind", side_effect=lambda sid, kind: dict(self.claims)),
+            patch("backend.state_helpers._load_processed_packaging_orders", side_effect=lambda sid, keys=None: dict(self.processed)),
+            patch("backend.state_helpers._save_processed_packaging_orders", side_effect=lambda d, sid: self.processed.update(d)),
+            patch("backend.state_helpers._load_processed_orders_by_kind", side_effect=lambda sid, kind, keys=None: dict(self.claims)),
             patch("backend.state_helpers._save_processed_orders_by_kind", side_effect=lambda d, sid, kind: self.claims.update(d)),
             patch.object(worker, "execute_broadcast_sync", side_effect=self._record_broadcast),
         ]
@@ -560,3 +560,118 @@ class TestIndexedMatcherEquivalence(unittest.TestCase):
         """Дубль привязки — по-прежнему отказ, а не угадывание."""
         index = build_group_index(self.GROUPS)
         self.assertIsNone(match_group_for_sku_indexed("X470-0010", index)[0])
+
+
+class TestTickWritesOnlyDeltas(DeductionTestCase):
+    """Тик сохраняет только изменённое — и группы, и отметки.
+
+    Раньше он передавал в сохранение ВЕСЬ словарь: все 305 групп Бархана и все
+    10 343 отметки, каждую отдельным SELECT+UPDATE, и всё это внутри
+    store-лока. Пока сохранение шло (минутами), кабинет не мог ни поменять
+    остаток, ни сохранить группу — PUT p95 = 48с, PATCH остатка = 24с.
+    """
+
+    def _three_groups(self):
+        return {
+            "a": group("a", "A", ["S517-0085"], stock=10),
+            "b": group("b", "B", ["S517-0054"], stock=20),
+            "c": group("c", "C", ["S517-0099"], stock=30),
+        }
+
+    def _sell_one(self):
+        self.groups = self._three_groups()
+        return self.run_cycle({"cargo_assembly": [{
+            "code": "900",
+            "items": [{"merchant_sku": "S517-0085", "title": "x", "quantity": 1}],
+        }], "wait_for_courier": []})
+
+    def test_only_the_touched_group_is_saved(self):
+        self._sell_one()
+        self.assertEqual(len(self.saved), 1)
+        self.assertEqual(set(self.saved[0]), {"a"})
+
+    def test_untouched_groups_never_reach_the_writer(self):
+        self._sell_one()
+        written = set().union(*[set(batch) for batch in self.saved])
+        self.assertNotIn("b", written)
+        self.assertNotIn("c", written)
+
+    def test_nothing_is_saved_when_nothing_changed(self):
+        """Заказ уже отмечен — тик не должен трогать БД вообще."""
+        self.groups = self._three_groups()
+        order = {"code": "901", "items": [{"merchant_sku": "S517-0085", "title": "x", "quantity": 1}]}
+        self.run_cycle({"cargo_assembly": [order], "wait_for_courier": []})
+        self.saved.clear()
+        self.run_cycle({"cargo_assembly": [order], "wait_for_courier": []})
+        self.assertEqual(self.saved, [])
+
+    def test_marks_are_written_as_a_delta_not_the_whole_dict(self):
+        """Второй заказ дописывает свою отметку, а не переписывает обе."""
+        self.groups = self._three_groups()
+        self.run_cycle({"cargo_assembly": [{
+            "code": "910",
+            "items": [{"merchant_sku": "S517-0085", "title": "x", "quantity": 1}],
+        }], "wait_for_courier": []})
+
+        seen = []
+        with patch(
+            "backend.state_helpers._save_processed_packaging_orders",
+            side_effect=lambda d, sid: (seen.append(dict(d)), self.processed.update(d)),
+        ):
+            self.run_cycle({"cargo_assembly": [{
+                "code": "911",
+                "items": [{"merchant_sku": "S517-0054", "title": "y", "quantity": 1}],
+            }], "wait_for_courier": []})
+
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(len(seen[0]), 1)
+        self.assertTrue(next(iter(seen[0])).startswith("911"))
+        # Отметка первого заказа при этом никуда не делась.
+        self.assertTrue(any(k.startswith("910") for k in self.processed))
+
+    def test_marks_are_read_by_key_not_by_full_scan(self):
+        """Спрашиваем только ключи текущей выборки, а не всю таблицу."""
+        asked = []
+
+        def _load(sid, keys=None):
+            asked.append(keys)
+            return dict(self.processed)
+
+        self.groups = self._three_groups()
+        with patch("backend.state_helpers._load_processed_packaging_orders", side_effect=_load):
+            self.run_cycle({"cargo_assembly": [{
+                "code": "920",
+                "items": [{"merchant_sku": "S517-0085", "title": "x", "quantity": 1}],
+            }], "wait_for_courier": []})
+
+        self.assertEqual(len(asked), 1)
+        self.assertIsNotNone(asked[0])
+        self.assertIn("920", asked[0])
+        self.assertIn(worker._claim_key("920", "S517-0085"), asked[0])
+
+    def test_claim_lookup_asks_for_three_keys_not_the_table(self):
+        """claim_stock_deduction читал всю таблицу броней на каждую позицию."""
+        asked = []
+        with patch(
+            "backend.state_helpers._load_processed_orders_by_kind",
+            side_effect=lambda sid, kind, keys=None: (asked.append(keys), {})[1],
+        ), patch("backend.state_helpers._save_processed_orders_by_kind", side_effect=lambda d, s, k: None):
+            worker.claim_stock_deduction(STORE, "930", "test", {}, sku="S517-0085 2шт")
+
+        self.assertEqual(len(asked), 1)
+        self.assertIsNotNone(asked[0])
+        self.assertIn(worker._claim_key("930", "S517-0085 2шт"), asked[0])
+        self.assertIn(worker._legacy_claim_key("930", "S517-0085 2шт"), asked[0])
+        self.assertIn("930", asked[0])
+
+
+class TestSweepReportsWhichGroups(unittest.TestCase):
+    """Сторож возвращает ID поправленных групп, а не голый флаг."""
+
+    def test_returns_the_ids_it_touched(self):
+        g = {"status": "deducting", "group_name": "A"}
+        self.assertEqual(worker._sweep_stuck_statuses({"a": g}), ["a"])
+
+    def test_returns_empty_when_there_is_nothing_to_fix(self):
+        g = {"status": "synced", "group_name": "A"}
+        self.assertEqual(worker._sweep_stuck_statuses({"a": g}), [])

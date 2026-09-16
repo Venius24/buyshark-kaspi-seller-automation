@@ -114,7 +114,12 @@ async def create_stock_group(
     group_id = f"grp_{uuid.uuid4().hex[:8]}"
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    expanded_skus = _expand_linked_skus(req.linked_skus, ctx.store_id)
+    # Все helper'ы состояния — синхронный psycopg2 поверх event loop'а.
+    # _load_master_stock_groups на живом магазине (305 групп) стоит 606мс, и
+    # вызванный напрямую из async-роутера он замораживает ВЕСЬ сервис на это
+    # время. Отсюда же max_ms=14804 в мониторе лага лупа. Везде в этом файле
+    # они уходят в asyncio.to_thread.
+    expanded_skus = await asyncio.to_thread(_expand_linked_skus, req.linked_skus, ctx.store_id)
     new_group = {
         "group_id": group_id,
         "group_name": req.group_name.strip(),
@@ -134,12 +139,12 @@ async def create_stock_group(
     }
 
     async with get_stock_lock(ctx.store_id):
-        groups = _load_master_stock_groups(store_id=ctx.store_id)
-        groups[group_id] = new_group
         # Пишем только новую группу: _save_master_stock_groups делает
         # session.get()+upsert на каждый ключ переданного словаря, и все
         # группы магазина ре-трогались бы ради создания одной.
-        _save_master_stock_groups({group_id: new_group}, store_id=ctx.store_id)
+        await asyncio.to_thread(
+            _save_master_stock_groups, {group_id: new_group}, store_id=ctx.store_id
+        )
 
     # Запускаем фоновую асинхронную веерную синхронизацию
     background_tasks.add_task(execute_broadcast_sync, group_id, token, ctx.store_id)
@@ -166,7 +171,7 @@ async def update_stock_group(
         raise HTTPException(status_code=400, detail="Списание за единицу не может быть меньше 1 шт.")
 
     async with get_stock_lock(ctx.store_id):
-        groups = _load_master_stock_groups(store_id=ctx.store_id)
+        groups = await asyncio.to_thread(_load_master_stock_groups, store_id=ctx.store_id)
         if group_id not in groups:
             raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
 
@@ -185,7 +190,9 @@ async def update_stock_group(
             group["shared_stock"] = int(req.shared_stock)
             group["oversold"] = 0  # пересчёт по факту склада закрывает долг
         if req.linked_skus is not None and req.linked_skus:
-            group["linked_skus"] = _expand_linked_skus(req.linked_skus, ctx.store_id)
+            group["linked_skus"] = await asyncio.to_thread(
+                _expand_linked_skus, req.linked_skus, ctx.store_id
+            )
         if "external_code" in provided:
             group["external_code"] = (req.external_code or "").strip() or None
         if req.is_active is not None:
@@ -202,27 +209,19 @@ async def update_stock_group(
         group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         group["status"] = "updating"
         # Только изменённая группа — см. комментарий в create_stock_group выше.
-        _save_master_stock_groups({group_id: group}, store_id=ctx.store_id)
+        await asyncio.to_thread(_save_master_stock_groups, {group_id: group}, store_id=ctx.store_id)
 
     background_tasks.add_task(execute_broadcast_sync, group_id, token, ctx.store_id)
 
-    # Счётчик "на сборке" — только здесь, в ответ на РУЧНОЕ редактирование
-    # группы в UI. Специально не переносим это в execute_broadcast_sync: та же
-    # функция запускается на КАЖДЫЙ заказ (trigger_order_info), а
-    # get_packaging_orders_for_skus тянет из Kaspi весь список заказов на
-    # сборке по магазину (limit=1000) — именно такой запрос на каждую продажу
-    # уже давал p95=27.6с на ручке списка групп (см. комментарий в
-    # get_stock_groups выше).
-    packaging_note = ""
-    try:
-        packaging = KaspiAPI.get_packaging_orders_for_skus(token, group["linked_skus"])
-        packaging_note = f" На сборке: {packaging['count']} зак. ({packaging['total_quantity']} шт.)."
-    except Exception as e:
-        logger.warning("Не удалось посчитать заказы на сборке для группы %s: %s", group_id, e)
-
+    # Счётчика "на сборке" здесь больше нет. Он считался синхронным походом в
+    # Kaspi (get_packaging_orders_for_skus тянет весь список заказов на сборке
+    # по магазину, limit=1000) прямо в теле ответа — по замеру на проде это
+    # 16.6с в среднем, то есть кнопка "Сохранить" столько и крутилась. То же
+    # число модалка уже получила при открытии через GET /{group_id}/packaging
+    # и дописывает его в тост сама.
     return {
         "success": True,
-        "message": f"Мастер-Группа '{group['group_name']}' обновлена.{packaging_note}",
+        "message": f"Мастер-Группа '{group['group_name']}' обновлена.",
         "group": group
     }
 
@@ -239,7 +238,7 @@ async def update_stock_qty(
         raise HTTPException(status_code=400, detail="Остаток не может быть отрицательным.")
 
     async with get_stock_lock(ctx.store_id):
-        groups = _load_master_stock_groups(store_id=ctx.store_id)
+        groups = await asyncio.to_thread(_load_master_stock_groups, store_id=ctx.store_id)
         if group_id not in groups:
             raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
 
@@ -256,7 +255,7 @@ async def update_stock_qty(
             + (f" (долг {debt} шт. списан)" if debt else "")
         )
         # Только изменённая группа — см. комментарий в create_stock_group выше.
-        _save_master_stock_groups({group_id: group}, store_id=ctx.store_id)
+        await asyncio.to_thread(_save_master_stock_groups, {group_id: group}, store_id=ctx.store_id)
 
     background_tasks.add_task(execute_broadcast_sync, group_id, token, ctx.store_id)
 
@@ -270,7 +269,7 @@ async def update_stock_qty(
 async def delete_stock_group(group_id: str, ctx: StoreContext = Depends(require_store_manager)):
     """Удалить Мастер-Группу."""
     async with get_stock_lock(ctx.store_id):
-        groups = _load_master_stock_groups(store_id=ctx.store_id)
+        groups = await asyncio.to_thread(_load_master_stock_groups, store_id=ctx.store_id)
         if group_id not in groups:
             raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
 
@@ -278,7 +277,7 @@ async def delete_stock_group(group_id: str, ctx: StoreContext = Depends(require_
         # Именно _delete_master_stock_group: _save_master_stock_groups делает
         # только upsert и строку из БД не убирает — раньше группа "удалялась"
         # с зелёным тостом и возвращалась при следующем обновлении списка.
-        if not _delete_master_stock_group(group_id, ctx.store_id):
+        if not await asyncio.to_thread(_delete_master_stock_group, group_id, ctx.store_id):
             raise HTTPException(
                 status_code=500,
                 detail=f"Не удалось удалить Мастер-Группу '{deleted_group.get('group_name')}'.",
@@ -297,7 +296,7 @@ async def manual_sync_stock_group(
 ):
     """Принудительный запуск синхронизации группы."""
     token = ctx.token
-    groups = _load_master_stock_groups(store_id=ctx.store_id)
+    groups = await asyncio.to_thread(_load_master_stock_groups, store_id=ctx.store_id)
     if group_id not in groups:
         raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
 

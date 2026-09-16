@@ -434,7 +434,14 @@ export const MasterStockGroups: React.FC = () => {
 
       const data = await res.json();
       if (data.success) {
-        showToast('success', data.message || 'Мастер-Группа сохранена.');
+        // Счётчик "на сборке" раньше досчитывал бэкенд прямо в ответе на PUT —
+        // это был синхронный поход в Kaspi за всем списком заказов магазина,
+        // 16.6с в среднем по замеру на проде, и ровно столько крутилась кнопка
+        // "Сохранить". То же число модалка получила при открытии, берём его.
+        const packagingNote = isEdit && modalPackaging
+          ? ` На сборке: ${modalPackaging.count} зак. (${modalPackaging.total_quantity} шт.).`
+          : '';
+        showToast('success', (data.message || 'Мастер-Группа сохранена.') + packagingNote);
         setIsModalOpen(false);
         refetchGroups();
       } else {

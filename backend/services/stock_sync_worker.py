@@ -166,7 +166,7 @@ async def _release_stuck_broadcast_status(group_id: str, store_id: Optional[str]
     """
     try:
         async with get_stock_lock(store_id):
-            groups = _load_master_stock_groups(store_id=store_id)
+            groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
             g = groups.get(group_id)
             if not g or g.get("status") not in ("deducting", "updating"):
                 return
@@ -175,7 +175,7 @@ async def _release_stuck_broadcast_status(group_id: str, store_id: Optional[str]
             msg = f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ⚠️ Рассылка остатка не завершилась ({reason})"
             g["last_sync_log"] = msg
             g["sync_logs"] = ([msg] + list(g.get("sync_logs") or []))[:30]
-            _save_master_stock_groups({group_id: g}, store_id=store_id)
+            await asyncio.to_thread(_save_master_stock_groups, {group_id: g}, store_id=store_id)
         await broadcast_ws_event("stock_group_updated", g, store_id=store_id)
     except Exception:
         logger.exception("[Broadcast Sync] Не удалось снять залипший статус группы %s", group_id)
@@ -225,7 +225,7 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
     store_id задан (Phase 7) — группа читается/сохраняется в рамках конкретного стора.
     """
     async with get_stock_lock(store_id):
-        groups = _load_master_stock_groups(store_id=store_id)
+        groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
         group = groups.get(group_id)
         if not group or not group.get("is_active", True):
             return
@@ -245,7 +245,7 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
         # Метка времени, по которой сторож отличает идущую рассылку от
         # оборванной (например, сервис перезапустили в середине).
         group["status_since"] = datetime.datetime.now().isoformat()
-        _save_master_stock_groups({group_id: group}, store_id=store_id)
+        await asyncio.to_thread(_save_master_stock_groups, {group_id: group}, store_id=store_id)
 
     await broadcast_ws_event("stock_group_updated", group, store_id=store_id)
 
@@ -257,7 +257,9 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
     logger.info(f"🔄 [Broadcast Sync] Начало обхода {len(linked_skus)} SKU для группы '{group_name}' (Остаток: {shared_stock})")
 
     # Загружаем товары из кэша (per-store, см. state_helpers._load_products)
-    all_products = _load_products(store_id)
+    # Синхронные helper'ы состояния — в поток: рассылка живёт на event loop'е,
+    # а тут и чтение каталога (0.67МБ JSON), и запись оверрайда на каждый SKU.
+    all_products = await asyncio.to_thread(_load_products, store_id)
 
     # Куки здесь больше не проверяем: намерения ставятся независимо от
     # состояния сессии, а отправкой (и автообновлением сессии при 401)
@@ -290,12 +292,14 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
         )
         logger.error("🔄 [Broadcast Sync] %s", msg)
         async with get_stock_lock(store_id):
-            groups = _load_master_stock_groups(store_id=store_id)
+            groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
             if group_id in groups:
                 groups[group_id]["status"] = "error"
                 groups[group_id]["last_sync_log"] = msg
                 groups[group_id]["status_since"] = datetime.datetime.now().isoformat()
-                _save_master_stock_groups({group_id: groups[group_id]}, store_id=store_id)
+                await asyncio.to_thread(
+                    _save_master_stock_groups, {group_id: groups[group_id]}, store_id=store_id
+                )
         await broadcast_ws_event("log", msg, store_id=store_id)
         return
 
@@ -344,7 +348,10 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
         kaspi_push_stock = shared_stock if shared_stock > stop_qty else 0
 
         # Сохраняем локальный оверрайд
-        _save_override(sku, price, shared_stock, target_p.get("brand"), status_text, store_id=store_id)
+        await asyncio.to_thread(
+            _save_override, sku, price, shared_stock, target_p.get("brand"), status_text,
+            store_id=store_id,
+        )
 
         # Обновляем в кэше товаров
         for p in all_products:
@@ -395,14 +402,14 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
     # Сохраняем обновлённый кэш товаров
     if all_products:
         try:
-            _save_products(all_products, store_id)
+            await asyncio.to_thread(_save_products, all_products, store_id)
         except Exception:
             logger.exception("Failed to persist updated products cache for store %s", store_id)
 
     # Итоговое обновление статуса группы
     need_notify = False
     async with get_stock_lock(store_id):
-        groups = _load_master_stock_groups(store_id=store_id)
+        groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
         if group_id in groups:
             g = groups[group_id]
             g["last_synced_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -443,7 +450,7 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
             # затираем: раньше здесь стояло присваивание, и журнал группы терял
             # ровно то событие, ради которого рассылка и запускалась.
             g["sync_logs"] = (logs + list(g.get("sync_logs") or []))[:30]
-            _save_master_stock_groups({group_id: g}, store_id=store_id)
+            await asyncio.to_thread(_save_master_stock_groups, {group_id: g}, store_id=store_id)
             await broadcast_ws_event("stock_group_updated", g, store_id=store_id)
 
     # Обработка Stop Qty Protection: остаток просел до/ниже кастомного "Стоп кол-ва" группы.
@@ -460,7 +467,7 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
             "message": f"Группа [{group_name}] снята с продажи на Kaspi (остаток {shared_stock} <= стоп кол-во {stop_qty})!"
         }, store_id=store_id)
 
-def _sweep_stuck_statuses(active_groups: dict) -> bool:
+def _sweep_stuck_statuses(active_groups: dict) -> list:
     """Снять индикатор списания с групп, чья рассылка оборвалась вместе с процессом.
 
     Обёртка `execute_broadcast_sync` ловит исключения сама, но от `kill -9` и
@@ -469,11 +476,13 @@ def _sweep_stuck_statuses(active_groups: dict) -> bool:
     снять. Проверка стоит на горячем тике упаковки — она чисто локальная, ни
     одного запроса наружу.
 
-    Возвращает True, если что-то поправили (значит, группы надо сохранить).
+    Возвращает ID групп, которые поправили — их и только их надо сохранить.
+    Раньше возвращался голый bool, и тик сохранял ВСЕ группы магазина (у
+    Бархана 305) ради одной поправленной: 1.2с походов в БД под store-локом.
     """
     now = datetime.datetime.now()
-    touched = False
-    for g in active_groups.values():
+    touched = []
+    for gid, g in active_groups.items():
         if g.get("status") not in ("deducting", "updating"):
             continue
         since_raw = g.get("status_since")
@@ -481,13 +490,13 @@ def _sweep_stuck_statuses(active_groups: dict) -> bool:
             # Метки нет — это группа, зависшая ещё до появления сторожа.
             # Ставим метку сейчас, снимем на следующем тике после таймаута.
             g["status_since"] = now.isoformat()
-            touched = True
+            touched.append(gid)
             continue
         try:
             since = datetime.datetime.fromisoformat(str(since_raw))
         except ValueError:
             g["status_since"] = now.isoformat()
-            touched = True
+            touched.append(gid)
             continue
         if (now - since).total_seconds() < STUCK_STATUS_AFTER_SECONDS:
             continue
@@ -500,7 +509,7 @@ def _sweep_stuck_statuses(active_groups: dict) -> bool:
         )
         g["last_sync_log"] = msg
         g["sync_logs"] = ([msg] + list(g.get("sync_logs") or []))[:30]
-        touched = True
+        touched.append(gid)
         logger.warning(
             "🧹 [StockSweep] Группа '%s' висела в состоянии списания — статус снят.",
             g.get("group_name"),
@@ -797,8 +806,14 @@ def claim_stock_deduction(
         return True
     from backend.state_helpers import _load_processed_orders_by_kind, _save_processed_orders_by_kind
 
-    claimed = _load_processed_orders_by_kind(store_id, "stock")
     key = _claim_key(order_id, sku) if sku else order_id
+    # Раньше здесь читалась ВСЯ таблица броней магазина (10 265 строк, ~2с) —
+    # на каждую позицию каждого заказа, внутри store-лока. Нужны ровно три
+    # ключа: новый и два исторических формата.
+    candidates = [key]
+    if key != order_id:
+        candidates += [_legacy_claim_key(order_id, sku), order_id]
+    claimed = _load_processed_orders_by_kind(store_id, "stock", keys=candidates)
     prev = claimed.get(key)
     if prev is None and key != order_id:
         # старые форматы: артикул без приписки, затем право на заказ целиком
@@ -848,6 +863,38 @@ def _calculate_physical_units(merchant_sku: str, quantity: int = 1, per_unit: in
     return int(quantity) * max(1, int(per_unit or 1))
 
 
+# Когда в последний раз чистили отметки этого магазина (time.monotonic()).
+_last_prune_at: dict = {}
+PROCESSED_ORDERS_PRUNE_INTERVAL_SECONDS = 24 * 60 * 60
+
+
+async def _maybe_prune_processed_orders(store_id: Optional[str]):
+    """Раз в сутки на магазин удаляет отметки старше срока хранения.
+
+    Зовётся с горячего тика, но реально работает раз в сутки, и всегда ВНЕ
+    store-лока: сама чистка читает таблицу целиком, и держать под ней лок
+    значило бы вернуть ровно ту проблему, ради которой всё это делалось.
+    """
+    if not store_id:
+        return
+    now = time.monotonic()
+    last = _last_prune_at.get(store_id)
+    if last is not None and (now - last) < PROCESSED_ORDERS_PRUNE_INTERVAL_SECONDS:
+        return
+    _last_prune_at[store_id] = now
+    try:
+        from backend.state_helpers import _prune_processed_orders
+        for kind in ("packaging", "stock", "radar"):
+            removed = await asyncio.to_thread(_prune_processed_orders, store_id, kind)
+            if removed:
+                logger.info(
+                    "🧹 [ProcessedOrders] Магазин %s: удалено %d отметок '%s' старше срока хранения.",
+                    store_id, removed, kind,
+                )
+    except Exception:
+        logger.exception("[ProcessedOrders] Уборка отметок для стора %s не удалась", store_id)
+
+
 async def process_packaging_auto_deduction(token: str, store_id: Optional[str] = None) -> dict:
     """
     Обнаружение продаж по вкладкам упаковки и списание остатка Мастер-Групп.
@@ -891,7 +938,22 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
     if not orders:
         return {"success": True, "deducted_orders_count": 0, "deductions": []}
 
-    processed_orders = await asyncio.to_thread(_load_processed_packaging_orders, store_id)
+    # Отметки нужны только по заказам текущей выборки. Полный словарь — это
+    # 10 343 строки и ~2с на тик; ключи считаем заранее, одним IN-запросом.
+    mark_keys = []
+    for order in orders:
+        code = str(order.get("code") or order.get("id") or "").strip()
+        if not code:
+            continue
+        mark_keys.append(code)  # отметка старого формата — на заказ целиком
+        for item in order.get("items", []) or []:
+            m_sku = str(item.get("merchant_sku", "")).strip()
+            if m_sku:
+                mark_keys.append(_claim_key(code, m_sku))
+
+    processed_orders = await asyncio.to_thread(
+        _load_processed_packaging_orders, store_id, mark_keys
+    )
     new_deductions = []
     # Одна веерная рассылка на группу, даже если заказ задел её дважды.
     to_broadcast: dict = {}
@@ -899,8 +961,18 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
     async with get_stock_lock(store_id):
         groups = await asyncio.to_thread(_load_master_stock_groups, store_id=store_id)
         active_groups = {gid: g for gid, g in groups.items() if g.get("is_active", True)}
-        groups_modified = _sweep_stuck_statuses(active_groups)
-        orders_marked = False
+        # Только изменённое: и группы, и отметки пишутся дельтой. Пока эти два
+        # словаря были «всё подряд», сохранение держало store-лок минутами, и
+        # правки Мастер-Групп из кабинета стояли в очереди за ним.
+        changed_groups: dict = {}
+        new_marks: dict = {}
+        for gid in _sweep_stuck_statuses(active_groups):
+            changed_groups[gid] = active_groups[gid]
+        # Индекс строим ОДИН раз на тик, а не на каждую позицию заказа:
+        # match_group_for_sku пересобирал его внутри себя — 39мс × 290 групп ×
+        # каждая позиция, тоже под локом. Статусы групп индекс не меняют,
+        # linked_skus внутри тика не трогаются — индекс остаётся валидным.
+        group_index = build_group_index(active_groups)
 
         for order in orders:
             order_code = str(order.get("code") or order.get("id") or "").strip()
@@ -919,7 +991,7 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                 if pkey in processed_orders or order_code in processed_orders:
                     continue
 
-                gid, matched_group = match_group_for_sku(m_sku, active_groups)
+                gid, matched_group = match_group_for_sku_indexed(m_sku, group_index)
                 if not matched_group:
                     continue
 
@@ -931,14 +1003,13 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                     claim_stock_deduction, store_id, order_code, "packaging",
                     {"stage": "packaging", "sku": m_sku, "units": units}, m_sku,
                 ):
-                    processed_orders[pkey] = {
+                    new_marks[pkey] = processed_orders[pkey] = {
                         "deducted_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "group_id": matched_group.get("group_id"),
                         "sku": m_sku,
                         "units": 0,
                         "skipped_reason": "already_claimed",
                     }
-                    orders_marked = True
                     continue
 
                 old_stock = int(matched_group.get("shared_stock", 0))
@@ -980,10 +1051,9 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                 matched_group["sync_logs"] = logs[:30]
                 matched_group["last_sync_log"] = log_entry
 
-                groups_modified = True
-                orders_marked = True
+                changed_groups[gid] = matched_group
 
-                processed_orders[pkey] = {
+                new_marks[pkey] = processed_orders[pkey] = {
                     "deducted_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "group_id": matched_group.get("group_id"),
                     "sku": m_sku,
@@ -1029,17 +1099,21 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                     "customer": order.get("customer") or "Покупатель",
                 }
 
-        if groups_modified:
-            await asyncio.to_thread(_save_master_stock_groups, groups, store_id=store_id)
-        if groups_modified or orders_marked:
+        if changed_groups:
+            await asyncio.to_thread(_save_master_stock_groups, changed_groups, store_id=store_id)
+        if new_marks:
             # Отметку сохраняем и когда списания не было (право уже занято) —
             # иначе та же позиция переспрашивалась бы каждые 30 секунд.
-            await asyncio.to_thread(_save_processed_packaging_orders, processed_orders, store_id)
+            await asyncio.to_thread(_save_processed_packaging_orders, new_marks, store_id)
 
     for gid, trigger_info in to_broadcast.items():
         asyncio.create_task(
             execute_broadcast_sync(gid, token, store_id=store_id, trigger_order_info=trigger_info)
         )
+
+    # Уборка старых отметок — раз в сутки на магазин и СТРОГО вне store-лока:
+    # таблица растёт вечно, а нужна только чтобы не списать заказ дважды.
+    await _maybe_prune_processed_orders(store_id)
 
     return {
         "success": True,

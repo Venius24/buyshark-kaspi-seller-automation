@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Optional
 from fastapi import HTTPException
-from sqlalchemy import create_engine, select, func
+from sqlalchemy import create_engine, select, func, delete
 from sqlalchemy.orm import Session
 from backend.product_name_overrides import resolve_product_name, is_placeholder_name
 
@@ -584,46 +584,196 @@ def _delete_master_stock_group(group_id: str, store_id: str) -> bool:
     finally:
         session.close()
 
-def _load_processed_orders_by_kind(store_id: str, kind: str) -> dict:
-    """{order_id: payload} из ProcessedOrderDB этого магазина+kind ('radar'
-    или 'packaging' — держит их независимыми)."""
+# Размер пачки для IN-выборок и bulk-upsert'а отметок. Postgres держит максимум
+# 65535 связанных параметров на запрос, у строки отметки их четыре — 500 строк
+# на пачку оставляют запас на порядок.
+_PROCESSED_ORDERS_CHUNK = 500
+
+
+def _chunks(seq: list, size: int):
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
+def _load_processed_orders_by_kind(store_id: str, kind: str, keys=None) -> dict:
+    """{order_id: payload} из ProcessedOrderDB этого магазина+kind ('radar',
+    'packaging' или 'stock' — держит их независимыми).
+
+    `keys` задан — выбираются ТОЛЬКО эти ключи (IN-запрос пачками). Отметок у
+    живого магазина десятки тысяч (10 343 'packaging' + 10 265 'stock' у
+    Бархана на 16.09), а вызывающему коду почти всегда нужны отметки по
+    заказам одной текущей выборки. Полный скан таблицы стоил ~2с и делался на
+    каждый тик авто-списания, а в claim_stock_deduction — на КАЖДУЮ позицию
+    заказа, и всё это внутри store-лока.
+
+    `keys=None` — прежнее поведение, весь kind целиком.
+    """
     session = _get_sync_db_session()
     if not session:
         return {}
     try:
         from backend.db.models import ProcessedOrderDB
-        rows = session.scalars(
-            select(ProcessedOrderDB).where(
-                ProcessedOrderDB.store_id == store_id, ProcessedOrderDB.kind == kind
-            )
-        ).all()
         result = {}
-        for r in rows:
-            try:
-                result[r.order_id] = json.loads(r.payload)
-            except Exception:
-                result[r.order_id] = {}
+
+        def _collect(rows):
+            for r in rows:
+                try:
+                    result[r.order_id] = json.loads(r.payload)
+                except Exception:
+                    result[r.order_id] = {}
+
+        base = select(ProcessedOrderDB).where(
+            ProcessedOrderDB.store_id == store_id, ProcessedOrderDB.kind == kind
+        )
+        if keys is None:
+            _collect(session.scalars(base).all())
+        else:
+            wanted = [k for k in dict.fromkeys(str(k) for k in keys) if k]
+            for chunk in _chunks(wanted, _PROCESSED_ORDERS_CHUNK):
+                _collect(session.scalars(base.where(ProcessedOrderDB.order_id.in_(chunk))).all())
         return result
     finally:
         session.close()
 
+
+def _processed_orders_upsert(session):
+    """Диалектный INSERT ... ON CONFLICT DO UPDATE, либо None для остальных БД."""
+    try:
+        dialect = session.get_bind().dialect.name
+    except Exception:
+        return None
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as _insert
+        return _insert
+    if dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as _insert
+        return _insert
+    return None
+
+
 def _save_processed_orders_by_kind(orders: dict, store_id: str, kind: str):
+    """Записывает ТОЛЬКО переданные отметки, одним bulk-upsert'ом на пачку.
+
+    Здесь был цикл session.get() по каждому ключу словаря, а вызывающий код
+    передавал весь накопленный словарь отметок целиком. У Бархана это 10 343
+    строки, то есть 10 343 отдельных SELECT+UPDATE за один тик авто-списания —
+    и всё внутри store-лока: py-spy на живом проде показал 68 секунд из 70 в
+    этой функции. Пока она работала, лок не отпускался, и любая правка
+    Мастер-Группы из кабинета стояла в очереди за ним (PUT p95 = 48с, PATCH
+    остатка — 24с, хотя сам PATCH в Kaspi не ходит вообще), а веерная рассылка
+    остатка после продажи стартовала через две минуты после самого списания.
+
+    Функция по-прежнему НЕ авторитетна: ключи, которых нет в `orders`, не
+    трогаются. Вызывающий код обязан передавать дельту, а не весь словарь.
+    """
+    if not orders:
+        return
     session = _get_sync_db_session()
     if not session:
         return
     try:
         from backend.db.models import ProcessedOrderDB
-        for order_id, payload in orders.items():
-            row = session.get(ProcessedOrderDB, (store_id, kind, order_id))
-            payload_json = json.dumps(payload, ensure_ascii=False)
-            if not row:
-                session.add(ProcessedOrderDB(store_id=store_id, kind=kind, order_id=order_id, payload=payload_json))
-            else:
-                row.payload = payload_json
+        rows = [
+            {
+                "store_id": store_id,
+                "kind": kind,
+                "order_id": str(order_id),
+                "payload": json.dumps(payload, ensure_ascii=False),
+            }
+            for order_id, payload in orders.items()
+        ]
+        insert = _processed_orders_upsert(session)
+        if insert is not None:
+            for chunk in _chunks(rows, _PROCESSED_ORDERS_CHUNK):
+                stmt = insert(ProcessedOrderDB).values(chunk)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["store_id", "kind", "order_id"],
+                    set_={"payload": stmt.excluded.payload},
+                )
+                session.execute(stmt)
+        else:
+            # Экзотический диалект (в проде не встречается) — старый путь.
+            for row in rows:
+                existing = session.get(ProcessedOrderDB, (store_id, kind, row["order_id"]))
+                if not existing:
+                    session.add(ProcessedOrderDB(**row))
+                else:
+                    existing.payload = row["payload"]
         session.commit()
     except Exception as e:
         logger.error(f"Error persisting processed orders ({kind}) to DB: {e}")
         session.rollback()
+    finally:
+        session.close()
+
+
+# Отметки старше этого срока не нужны никому: самая широкая выборка заказов —
+# полный свип авто-списания на 13 дней (FULL_SWEEP_WINDOW_DAYS), так что запас
+# тут больше чем трёхкратный. Срок НЕЛЬЗЯ опускать ниже окна свипа: удалить
+# отметку по заказу, который ещё попадает в выборку, значит списать его
+# остаток второй раз.
+PROCESSED_ORDERS_RETENTION_DAYS = 45
+
+# Поля с временем в payload — у каждого kind своё (см. stock_sync_worker).
+_PROCESSED_ORDERS_TIME_FIELDS = ("deducted_at", "claimed_at", "processed_at")
+
+
+def _prune_processed_orders(
+    store_id: str, kind: str, older_than_days: int = PROCESSED_ORDERS_RETENTION_DAYS
+) -> int:
+    """Удаляет отметки старше `older_than_days`. Возвращает число удалённых.
+
+    Таблица растёт вечно (у Бархана 20 608 строк за время жизни), а нужна она
+    только чтобы не списать один и тот же заказ дважды. Строка без разбираемой
+    метки времени НЕ удаляется — молча потерять бронь хуже, чем хранить лишнее.
+    """
+    import datetime as _dt
+    session = _get_sync_db_session()
+    if not session:
+        return 0
+    try:
+        from backend.db.models import ProcessedOrderDB
+        cutoff = _dt.datetime.now() - _dt.timedelta(days=older_than_days)
+        rows = session.scalars(
+            select(ProcessedOrderDB).where(
+                ProcessedOrderDB.store_id == store_id, ProcessedOrderDB.kind == kind
+            )
+        ).all()
+        stale = []
+        for r in rows:
+            try:
+                payload = json.loads(r.payload)
+            except Exception:
+                continue
+            raw = next(
+                (payload.get(f) for f in _PROCESSED_ORDERS_TIME_FIELDS if payload.get(f)), None
+            )
+            if not raw:
+                continue
+            try:
+                # Оба формата, которые пишет воркер: ISO и "%Y-%m-%d %H:%M:%S"
+                # (fromisoformat разбирает и его).
+                stamp = _dt.datetime.fromisoformat(str(raw))
+            except ValueError:
+                continue
+            if stamp < cutoff:
+                stale.append(r.order_id)
+        if not stale:
+            return 0
+        for chunk in _chunks(stale, _PROCESSED_ORDERS_CHUNK):
+            session.execute(
+                delete(ProcessedOrderDB).where(
+                    ProcessedOrderDB.store_id == store_id,
+                    ProcessedOrderDB.kind == kind,
+                    ProcessedOrderDB.order_id.in_(chunk),
+                )
+            )
+        session.commit()
+        return len(stale)
+    except Exception as e:
+        logger.error(f"Error pruning processed orders ({kind}) for store {store_id}: {e}")
+        session.rollback()
+        return 0
     finally:
         session.close()
 
@@ -1133,8 +1283,8 @@ def _save_webhook_config(cfg: dict, store_id: str):
     finally:
         session.close()
 
-def _load_processed_packaging_orders(store_id: str) -> dict:
-    return _load_processed_orders_by_kind(store_id, "packaging")
+def _load_processed_packaging_orders(store_id: str, keys=None) -> dict:
+    return _load_processed_orders_by_kind(store_id, "packaging", keys=keys)
 
 def _save_processed_packaging_orders(data: dict, store_id: str):
     _save_processed_orders_by_kind(data, store_id, "packaging")
