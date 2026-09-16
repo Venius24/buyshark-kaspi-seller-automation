@@ -154,9 +154,14 @@ async def _run_job(job_id: str, user_id: str, owner_cookies: dict, merchant_id: 
         step("saving")
         async with AsyncSessionLocal() as db:
             user = await db.get(User, user_id)
+            name = cabinet["name"]
+            if not name:
+                # Имя из кабинета не прочиталось — у уже подключённого магазина
+                # оставляем прежнее, а не затираем заглушкой.
+                name = (await db.execute(select(Store.name).where(Store.merchant_id == merchant_id))).scalars().first()
             store = await persist_connected_store(
                 user=user,
-                name=cabinet["name"] or f"Магазин {merchant_id}",
+                name=name or f"Магазин {merchant_id}",
                 api_token=cabinet["api_token"],
                 merchant_id=merchant_id,
                 cookies_str="; ".join(f"{k}={v}" for k, v in cookies.items()),
