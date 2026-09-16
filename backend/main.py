@@ -166,8 +166,10 @@ app.mount("/ping-pong", StaticFiles(directory="api-ping-pong", html=True), name=
 
 # Подключение роутеров v1 и стандартных
 app.include_router(auth_v1.router)
-app.include_router(stores_v1.router)
+# auto-connect раньше stores_v1: иначе POST /api/v1/stores/auto-connect/verify
+# ловит маршрут /api/v1/stores/{store_id}/verify с store_id='auto-connect'.
 app.include_router(stores_auto_connect.router)
+app.include_router(stores_v1.router)
 
 app.include_router(auth.router)
 app.include_router(products.router)

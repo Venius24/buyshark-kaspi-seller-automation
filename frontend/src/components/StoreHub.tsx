@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
@@ -15,13 +15,11 @@ import {
   KeyRound,
   Trash2,
   X,
-  Wrench,
   Send,
 } from 'lucide-react';
 import { apiFetch, API_URL } from '../api';
-import { fetchProfile, fetchStores, fetchBillingPlans } from '../queries';
+import { fetchProfile, fetchStores } from '../queries';
 import { useActiveStoreId, setActiveStoreId as setSharedActiveStoreId } from '../storeContext';
-import { formatTenge } from '../utils/money';
 import { waLink } from '../data/contacts';
 import emptyStateIllustration from '../assets/sprites/storehub_empty_illustration.png';
 
@@ -69,32 +67,26 @@ export const StoreHub: React.FC = () => {
   // Modal State
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
 
-  // Unified Single Form States
-  const [storeName, setStoreName] = useState<string>('');
-  const [apiToken, setApiToken] = useState<string>('');
-  const [mcEmail, setMcEmail] = useState<string>('');
-  const [mcPassword, setMcPassword] = useState<string>('');
-  const [selectedPlanCode, setSelectedPlanCode] = useState<string>('');
-
-  const [submitting, setSubmitting] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
   const showToast = (type: 'success' | 'error' | 'warning', text: string) => {
     setToastMessage({ type, text });
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // "Сделайте всё за меня" — авто-подключение через SMS владельца.
-  // Каркас: см. AUTOCONNECT_PLAN.md — бэкенд пока отдаёт 503, т.к. Фаза 1
-  // (реальные селекторы кабинета "Сотрудники"/"Интеграция") не сделана.
-  const [connectMode, setConnectMode] = useState<'manual' | 'auto'>('manual');
-  const [autoStoreName, setAutoStoreName] = useState<string>('');
+  // Подключение магазина — только "Сделайте всё за меня": SMS владельца, дальше
+  // сервис сам заводит себе сотрудника на @buyshark.kz (HANDOFF §3.94). Ручной
+  // ввод токена/email/пароля убран 16.09.2026: код подтверждения Kaspi на чужую
+  // почту мы забрать не можем. Бэкенд пока отдаёт 503 (AUTO_CONNECT_ENABLED).
   const [ownerPhone, setOwnerPhone] = useState<string>('');
-  const [smsStep, setSmsStep] = useState<'phone' | 'code'>('phone');
+  const [smsStep, setSmsStep] = useState<'phone' | 'code' | 'merchant' | 'progress'>('phone');
   const [smsCode, setSmsCode] = useState<string>('');
+  const [merchants, setMerchants] = useState<string[]>([]);
+  const [jobStep, setJobStep] = useState<string>('prepare');
   const [autoSubmitting, setAutoSubmitting] = useState<boolean>(false);
   const [autoErrorMsg, setAutoErrorMsg] = useState<string | null>(null);
+  // Опрос фоновой задачи подключения обрывается, если модалку закрыли или
+  // начали заново — иначе старый цикл продолжил бы писать в новое состояние.
+  const pollGeneration = useRef(0);
 
   const { data: profile } = useQuery({
     queryKey: ['auth', 'me'],
@@ -120,12 +112,6 @@ export const StoreHub: React.FC = () => {
     setSharedActiveStoreId(stores[0].id);
   }, [loading, stores, activeStoreId]);
 
-  const { data: plans = [] } = useQuery({
-    queryKey: ['billing', 'plans'],
-    queryFn: fetchBillingPlans,
-    staleTime: Infinity,
-  });
-
   const refetchStoresAndProfile = () => {
     queryClient.invalidateQueries({ queryKey: ['stores'] });
     queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
@@ -149,73 +135,65 @@ export const StoreHub: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stores]);
 
-  // Unified Form Submit: API Token (Public REST) + Email/Password (Kaspi MC login)
-  const handleConnectFullStore = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!storeName.trim()) {
-      setErrorMsg(t('error_store_name'));
-      return;
-    }
-    if (!apiToken.trim()) {
-      setErrorMsg(t('error_api_token'));
-      return;
-    }
-
-    setSubmitting(true);
-    setErrorMsg(null);
-
-    try {
-      const res = await apiFetch(`${API_URL}/api/v1/stores/connect-full-store`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: storeName.trim(),
-          api_token: apiToken.trim(),
-          email: mcEmail.trim() || undefined,
-          password: mcPassword || undefined,
-          plan_code: selectedPlanCode || undefined,
-        }),
-      });
-
-      if (!res.ok) {
-        const errJson = await res.json();
-        throw new Error(errJson.detail || t('error_connection'));
-      }
-
-      setShowAddModal(false);
-      resetModalState();
-      refetchStoresAndProfile();
-    } catch (err: any) {
-      setErrorMsg(err.message || t('error_connection'));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const resetModalState = () => {
-    setStoreName('');
-    setApiToken('');
-    setMcEmail('');
-    setMcPassword('');
-    setSelectedPlanCode('');
-    setErrorMsg(null);
-    setConnectMode('manual');
-    setAutoStoreName('');
+    pollGeneration.current += 1;
     setOwnerPhone('');
     setSmsStep('phone');
     setSmsCode('');
+    setMerchants([]);
+    setJobStep('prepare');
     setAutoErrorMsg(null);
   };
 
-  // "Сделайте всё за меня" — каркас (см. AUTOCONNECT_PLAN.md). Бэкенд
-  // сейчас всегда отдаёт 503, пока не сделана Фаза 1 (реальные селекторы
-  // кабинета "Сотрудники"/"Интеграция" под владельческой сессией).
+  const readError = async (res: Response, fallback: string) => {
+    const errJson = await res.json().catch(() => ({}));
+    return typeof errJson.detail === 'string' ? errJson.detail : fallback;
+  };
+
+  const pollConnectJob = async (jobId: string) => {
+    const generation = ++pollGeneration.current;
+    setJobStep('prepare');
+    setSmsStep('progress');
+    while (generation === pollGeneration.current) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      if (generation !== pollGeneration.current) return;
+      try {
+        const res = await apiFetch(`${API_URL}/api/v1/stores/auto-connect/jobs/${jobId}`);
+        if (!res.ok) throw new Error(await readError(res, 'Не удалось узнать статус подключения'));
+        const job = await res.json();
+        setJobStep(job.step);
+        if (job.status === 'done') {
+          setShowAddModal(false);
+          resetModalState();
+          refetchStoresAndProfile();
+          if (job.store?.id) setSharedActiveStoreId(job.store.id);
+          showToast('success', `Магазин ${job.store?.name ?? ''} подключён`);
+          return;
+        }
+        if (job.status === 'error') {
+          setAutoErrorMsg(job.error || 'Не удалось подключить магазин');
+          setSmsStep('phone');
+          return;
+        }
+      } catch (err: any) {
+        setAutoErrorMsg(err.message || 'Не удалось узнать статус подключения');
+        setSmsStep('phone');
+        return;
+      }
+    }
+  };
+
+  const handleStarted = (data: { status: string; job_id?: string; merchants?: string[] }) => {
+    if (data.status === 'choose_merchant' && data.merchants) {
+      setMerchants(data.merchants);
+      setSmsStep('merchant');
+    } else if (data.job_id) {
+      pollConnectJob(data.job_id);
+    }
+  };
+
   const handleSendOwnerSms = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!autoStoreName.trim()) {
-      setAutoErrorMsg('Укажите название магазина');
-      return;
-    }
     if (!ownerPhone.trim()) {
       setAutoErrorMsg('Введите номер телефона владельца кабинета Kaspi');
       return;
@@ -228,10 +206,8 @@ export const StoreHub: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: ownerPhone.trim() }),
       });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.detail || 'Не удалось отправить SMS');
-      }
+      if (!res.ok) throw new Error(await readError(res, 'Не удалось отправить SMS'));
+      setSmsCode('');
       setSmsStep('code');
     } catch (err: any) {
       setAutoErrorMsg(err.message || 'Не удалось отправить SMS');
@@ -252,17 +228,31 @@ export const StoreHub: React.FC = () => {
       const res = await apiFetch(`${API_URL}/api/v1/stores/auto-connect/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: ownerPhone.trim(), code: smsCode.trim(), store_name: autoStoreName.trim() }),
+        body: JSON.stringify({ phone: ownerPhone.trim(), code: smsCode.trim() }),
       });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.detail || 'Не удалось завершить авто-подключение');
-      }
-      setShowAddModal(false);
-      resetModalState();
-      refetchStoresAndProfile();
+      if (!res.ok) throw new Error(await readError(res, 'Не удалось войти по коду из SMS'));
+      handleStarted(await res.json());
     } catch (err: any) {
-      setAutoErrorMsg(err.message || 'Не удалось завершить авто-подключение');
+      setAutoErrorMsg(err.message || 'Не удалось войти по коду из SMS');
+    } finally {
+      setAutoSubmitting(false);
+    }
+  };
+
+  const handleChooseMerchant = async (merchantId: string) => {
+    setAutoSubmitting(true);
+    setAutoErrorMsg(null);
+    try {
+      const res = await apiFetch(`${API_URL}/api/v1/stores/auto-connect/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ merchant_id: merchantId }),
+      });
+      if (!res.ok) throw new Error(await readError(res, 'Не удалось выбрать магазин'));
+      handleStarted(await res.json());
+    } catch (err: any) {
+      setAutoErrorMsg(err.message || 'Не удалось выбрать магазин');
+      setSmsStep('phone');
     } finally {
       setAutoSubmitting(false);
     }
@@ -452,114 +442,30 @@ export const StoreHub: React.FC = () => {
 
       {/* Onboarding Wizard Modal — Single Unified Form */}
       {showAddModal && (
-        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
+        <div className="modal-overlay" onClick={() => { if (smsStep !== 'progress') { resetModalState(); setShowAddModal(false); } }}>
           <div className="glass-card modal-content" style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHeader}>
               <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Sparkles size={18} color="var(--secondary)" />
                 Подключение магазина Kaspi
               </span>
-              <button onClick={() => setShowAddModal(false)} style={styles.closeBtn}>
+              <button onClick={() => { resetModalState(); setShowAddModal(false); }} disabled={smsStep === 'progress'} style={styles.closeBtn}>
                 <X size={18} />
               </button>
             </div>
 
-            {/* Переключатель "Ручной" / "Сделайте всё за меня" — см. AUTOCONNECT_PLAN.md */}
-            <div style={{ display: 'flex', gap: '8px', padding: '16px 20px 0 20px' }}>
-              <button
-                type="button"
-                onClick={() => setConnectMode('manual')}
-                className={`btn ${connectMode === 'manual' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ flex: 1, padding: '10px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-              >
-                <Wrench size={14} /> Ручное подключение
-              </button>
-              <button
-                type="button"
-                onClick={() => setConnectMode('auto')}
-                className={`btn ${connectMode === 'auto' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ flex: 1, padding: '10px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-              >
-                <Sparkles size={14} /> Сделайте всё за меня
-              </button>
-            </div>
-
-            {connectMode === 'auto' ? (
-              <div style={{ padding: '20px' }}>
-                <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 16px 0' }}>
-                  Введите номер телефона <strong>владельца</strong> кабинета Kaspi Merchant — мы пришлём SMS-код и
-                  подключим магазин сами, без ручного ввода токена и пароля.
-                </p>
-                {autoErrorMsg && (
-                  <div style={styles.errorBox}>
-                    <AlertTriangle size={16} style={{ flexShrink: 0 }} /> {autoErrorMsg}
-                  </div>
-                )}
-
-                {smsStep === 'phone' ? (
-                  <form onSubmit={handleSendOwnerSms}>
-                    <div style={styles.formGroup}>
-                      <label style={styles.label}>Название магазина:</label>
-                      <input
-                        type="text"
-                        placeholder="Barkhan"
-                        value={autoStoreName}
-                        onChange={(e) => setAutoStoreName(e.target.value)}
-                        className="form-input"
-                        required
-                      />
-                    </div>
-                    <div style={styles.formGroup}>
-                      <label style={styles.label}>Телефон владельца кабинета:</label>
-                      <input
-                        type="tel"
-                        placeholder="+7 700 123 45 67"
-                        value={ownerPhone}
-                        onChange={(e) => setOwnerPhone(e.target.value)}
-                        className="form-input"
-                        required
-                      />
-                    </div>
-                    <div style={{ marginTop: '24px' }}>
-                      <button type="submit" disabled={autoSubmitting} className="btn btn-primary" style={{ width: '100%', padding: '14px 24px', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                        {autoSubmitting
-                          ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Отправляем SMS...</>
-                          : <><Send size={16} /> Отправить SMS-код</>}
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <form onSubmit={handleVerifyOwnerSms}>
-                    <div style={styles.formGroup}>
-                      <label style={styles.label}>Код из SMS:</label>
-                      <input
-                        type="text"
-                        placeholder="1234"
-                        value={smsCode}
-                        onChange={(e) => setSmsCode(e.target.value)}
-                        className="form-input"
-                        required
-                      />
-                    </div>
-                    <div style={{ marginTop: '24px' }}>
-                      <button type="submit" disabled={autoSubmitting} className="btn btn-primary" style={{ width: '100%', padding: '14px 24px', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                        {autoSubmitting
-                          ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Подключаем магазин...</>
-                          : <><CheckCircle2 size={16} /> Подтвердить и подключить</>}
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-            ) : (
-            <form onSubmit={handleConnectFullStore} style={{ padding: '20px' }}>
-              {errorMsg && (
+            <div style={{ padding: '20px' }}>
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 16px 0' }}>
+                Введите номер телефона <strong>владельца</strong> кабинета Kaspi Merchant — мы пришлём SMS-код и
+                подключим магазин сами, без ручного ввода токена и пароля.
+              </p>
+              {autoErrorMsg && (
                 <div style={styles.errorBox}>
                   <AlertTriangle size={16} style={{ flexShrink: 0 }} />
                   <span>
-                    {errorMsg}{' '}
+                    {autoErrorMsg}{' '}
                     <a
-                      href={waLink('storehub-error', `Здравствуйте! Не получается подключить магазин к BuyShark. Ошибка: ${errorMsg}`)}
+                      href={waLink('storehub-error', `Здравствуйте! Не получается подключить магазин к BuyShark. Ошибка: ${autoErrorMsg}`)}
                       target="_blank"
                       rel="noopener noreferrer"
                       style={styles.errorLink}
@@ -570,112 +476,91 @@ export const StoreHub: React.FC = () => {
                 </div>
               )}
 
-              {/* Field 1: Store Name */}
-              <div style={styles.formGroup}>
-                <label style={styles.label}>1. Название магазина (например: Barkhan):</label>
-                <input
-                  type="text"
-                  placeholder="Barkhan"
-                  value={storeName}
-                  onChange={(e) => setStoreName(e.target.value)}
-                  className="form-input"
-                  required
-                />
-              </div>
-
-              {/* Field 2: Kaspi Public API Token */}
-              <div style={styles.formGroup}>
-                <label style={styles.label}>2. API Токен Kaspi (X-Auth-Token из Кабинета Kaspi ➔ Настройки ➔ API):</label>
-                <input
-                  type="text"
-                  placeholder="Вставьте ваш токен из кабинета Kaspi"
-                  value={apiToken}
-                  onChange={(e) => setApiToken(e.target.value)}
-                  className="form-input"
-                  required
-                />
-              </div>
-
-              {/* Field 3: Kaspi MC Email (optional — needed for pricing/stock/orders/chat) */}
-              <div style={styles.formGroup}>
-                <label style={styles.label}>3. Email от личного кабинета Kaspi Merchant (для демпинга, остатков и заказов):</label>
-                <input
-                  type="email"
-                  placeholder="you@example.com"
-                  value={mcEmail}
-                  onChange={(e) => setMcEmail(e.target.value)}
-                  className="form-input"
-                />
-              </div>
-
-              {/* Field 4: Kaspi MC Password */}
-              <div style={styles.formGroup}>
-                <label style={styles.label}>4. Пароль от личного кабинета Kaspi Merchant:</label>
-                <input
-                  type="password"
-                  placeholder="••••••••"
-                  value={mcPassword}
-                  onChange={(e) => setMcPassword(e.target.value)}
-                  className="form-input"
-                />
-                <p style={styles.trustLine}>
-                  {t('storehub_connect_help')}{' '}
-                  <a
-                    href={waLink('storehub-connect', 'Здравствуйте! Не уверен(а), как подключить магазин к BuyShark, поможете?')}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: 'var(--accent, #6366f1)', fontWeight: 600 }}
-                  >
-                    {t('storehub_connect_link')}
-                  </a>
-                </p>
-              </div>
-
-              {/* Field 5: тариф — выбор даёт 7 дней бесплатно на выбранный тариф; без
-                  выбора магазин остаётся на DEV (владелец назначит тариф вручную позже). */}
-              <div style={styles.formGroup}>
-                <label style={styles.label}>5. Тариф (необязательно — 7 дней бесплатно):</label>
-                <div style={styles.planGrid}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedPlanCode('')}
-                    className={`btn ${selectedPlanCode === '' ? 'btn-primary' : 'btn-secondary'}`}
-                    style={styles.planOption}
-                  >
-                    Без тарифа (DEV)
-                  </button>
-                  {plans.map((p) => (
-                    <button
-                      key={p.code}
-                      type="button"
-                      onClick={() => setSelectedPlanCode(p.code)}
-                      className={`btn ${selectedPlanCode === p.code ? 'btn-primary' : 'btn-secondary'}`}
-                      style={styles.planOption}
-                    >
-                      <span style={{ fontWeight: 700 }}>{p.name}</span>
-                      <span style={{ fontSize: '11px', opacity: 0.85 }}>
-                        {p.monthly_price_minor != null ? `${formatTenge(p.monthly_price_minor)}/мес` : 'договорная'}
-                        {p.max_products ? ` · до ${p.max_products} тов.` : ' · безлимит'}
-                      </span>
+              {smsStep === 'phone' && (
+                <form onSubmit={handleSendOwnerSms}>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Телефон владельца кабинета:</label>
+                    <input
+                      type="tel"
+                      placeholder="+7 700 123 45 67"
+                      value={ownerPhone}
+                      onChange={(e) => setOwnerPhone(e.target.value)}
+                      className="form-input"
+                      required
+                    />
+                  </div>
+                  <div style={{ marginTop: '24px' }}>
+                    <button type="submit" disabled={autoSubmitting} className="btn btn-primary" style={styles.submitBtn}>
+                      {autoSubmitting
+                        ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Отправляем SMS...</>
+                        : <><Send size={16} /> Отправить SMS-код</>}
                     </button>
-                  ))}
-                </div>
-                {selectedPlanCode && (
-                  <p style={{ fontSize: '12px', color: 'var(--secondary)', margin: '8px 0 0 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Sparkles size={13} /> Первые 7 дней — бесплатно. Дальше тариф продлевается автоматически по цене выше.
-                  </p>
-                )}
-              </div>
+                  </div>
+                </form>
+              )}
 
-              <div style={{ marginTop: '24px' }}>
-                <button type="submit" disabled={submitting} className="btn btn-primary" style={{ width: '100%', padding: '14px 24px', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                  {submitting
-                    ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Подключение магазина и проверка данных...</>
-                    : <><Rocket size={16} /> Подключить магазин Kaspi</>}
-                </button>
-              </div>
-            </form>
-            )}
+              {smsStep === 'code' && (
+                <form onSubmit={handleVerifyOwnerSms}>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Код из SMS:</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      placeholder="1234"
+                      value={smsCode}
+                      onChange={(e) => setSmsCode(e.target.value)}
+                      className="form-input"
+                      required
+                    />
+                  </div>
+                  <div style={{ marginTop: '24px' }}>
+                    <button type="submit" disabled={autoSubmitting} className="btn btn-primary" style={styles.submitBtn}>
+                      {autoSubmitting
+                        ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Входим в кабинет Kaspi...</>
+                        : <><CheckCircle2 size={16} /> Подтвердить и подключить</>}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {smsStep === 'merchant' && (
+                <div>
+                  <p style={{ fontSize: '13px', margin: '0 0 12px 0' }}>У владельца несколько магазинов. Какой подключаем?</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {merchants.map((mid) => (
+                      <button
+                        key={mid}
+                        type="button"
+                        disabled={autoSubmitting}
+                        onClick={() => handleChooseMerchant(mid)}
+                        className="btn btn-secondary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 14px', justifyContent: 'flex-start' }}
+                      >
+                        <Store size={15} /> Магазин ID {mid}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {smsStep === 'progress' && (
+                <ol style={styles.progressList}>
+                  {CONNECT_STEPS.map((stepItem, index) => {
+                    const current = CONNECT_STEPS.findIndex((x) => x.key === jobStep);
+                    const state = index < current ? 'done' : index === current ? 'active' : 'pending';
+                    return (
+                      <li key={stepItem.key} style={{ ...styles.progressItem, opacity: state === 'pending' ? 0.45 : 1 }}>
+                        {state === 'done' && <CheckCircle2 size={16} color="var(--success)" />}
+                        {state === 'active' && <Loader2 size={16} color="var(--secondary)" style={{ animation: 'spin 1s linear infinite' }} />}
+                        {state === 'pending' && <span style={styles.progressDot} />}
+                        {stepItem.label}
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -683,7 +568,48 @@ export const StoreHub: React.FC = () => {
   );
 };
 
+// Ключи — шаги фоновой задачи в backend/routers/stores_auto_connect.py.
+const CONNECT_STEPS = [
+  { key: 'prepare', label: 'Готовим подключение' },
+  { key: 'token', label: 'Получаем API-токен' },
+  { key: 'employee', label: 'Добавляем сотрудника BuyShark' },
+  { key: 'email', label: 'Ждём письмо от Kaspi' },
+  { key: 'login', label: 'Входим в кабинет' },
+  { key: 'saving', label: 'Сохраняем магазин' },
+];
+
 const styles: Record<string, React.CSSProperties> = {
+  submitBtn: {
+    width: '100%',
+    padding: '14px 24px',
+    fontSize: '15px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+  },
+  progressList: {
+    listStyle: 'none',
+    margin: 0,
+    padding: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  progressItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    fontSize: '14px',
+  },
+  progressDot: {
+    width: '16px',
+    height: '16px',
+    borderRadius: '50%',
+    border: '1.5px solid var(--card-border)',
+    boxSizing: 'border-box',
+    flexShrink: 0,
+  },
   hubContainer: {
     color: 'var(--text-color)',
     fontFamily: 'var(--font-sans)',
@@ -802,20 +728,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     color: '#cbd5e1',
   },
-  planGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '8px',
-  },
-  planOption: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: '4px',
-    padding: '10px 12px',
-    fontSize: '13px',
-    textAlign: 'left',
-  },
   errorBox: {
     background: 'rgba(226, 84, 95, 0.12)',
     border: '1px solid rgba(226, 84, 95, 0.35)',
@@ -832,12 +744,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#f3a2a8',
     fontWeight: 700,
     textDecoration: 'underline',
-  },
-  trustLine: {
-    marginTop: '6px',
-    marginBottom: 0,
-    fontSize: '12px',
-    color: '#9ca3af',
   },
   emptyStateIllustration: {
     width: '200px',

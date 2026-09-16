@@ -118,92 +118,26 @@ async def create_store(
     return await connect_full_store(req, user)
 
 
-@router.post("/connect-full-store", response_model=StoreResponse)
-async def connect_full_store(
-    req: ConnectFullStoreRequest,
-    user: User = Depends(get_current_user)
-):
-    """
-    Единая форма подключения магазина Kaspi:
-    - Проверка API-Токена (X-Auth-Token)
-    - Вход по email+паролю (авто-извлечение mc-session / mc-sid куков)
-    - Encryption at Rest (шифрование AES-256)
-    - Автоматическая привязка UserStore к текущему аккаунту
+async def persist_connected_store(
+    user: User,
+    name: str,
+    api_token: str,
+    merchant_id: str,
+    cookies_str: str,
+    email: Optional[str],
+    password: Optional[str],
+    trial_plan=None,
+) -> StoreResponse:
+    """Фаза C подключения: запись Store/UserStore/тарифа/кредов в БД.
 
-    Пул Postgres: сессия НЕ держится открытой во время сетевых фаз
-    (verify_token / get_merchant_id / Playwright-логин — минуты на медленном
-    Kaspi). DB-фазы обёрнуты в короткие scoped-сессии, как в get_store_context
-    после фикса исчерпания пула (HANDOFF 3.52).
-    """
-    # Фаза A (БД): квота тарифа.
-    async with AsyncSessionLocal() as db:
-        await check_quota_guard(user.id, db)
-
-    name_clean = req.name.strip()
-    api_token_clean = req.api_token.strip()
-
-    if not name_clean:
-        raise HTTPException(status_code=400, detail="Название магазина не может быть пустым")
-
-    if not api_token_clean:
-        raise HTTPException(status_code=400, detail="API токен (X-Auth-Token) обязателен для подключения")
-
-    trial_plan = None
-    if req.plan_code:
-        candidate = billing_catalog.get_plan(req.plan_code)
-        if candidate.code != req.plan_code or candidate.is_free or not candidate.is_public:
-            raise HTTPException(status_code=400, detail="Неизвестный или недоступный тариф")
-        trial_plan = candidate
-
-    # Фаза B (сеть): вся работа с Kaspi и браузером — БЕЗ открытой сессии пула.
-    # 1. Верификация API Токена через Kaspi Public API
-    try:
-        valid = KaspiAPI.verify_token(api_token_clean)
-        if not valid:
-            raise HTTPException(status_code=400, detail="Kaspi API отклонил ваш токен (X-Auth-Token). Проверьте правильность.")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.warning(f"Ошибка проверки API токена: {e}")
-
-    # 2. Определение Merchant ID без хардкода
-    merchant_id = None
-    try:
-        merchant_id = KaspiAPI.get_merchant_id(api_token_clean)
-    except Exception as e:
-        logger.warning(f"Определение merchant_id из токена: {e}")
-
-    if not merchant_id or merchant_id.startswith("m_20186986"):
-        token_hash = hashlib.md5(api_token_clean.encode('utf-8')).hexdigest()[:8]
-        merchant_id = f"m_{token_hash}"
-
-    # 3. Если переданы email+пароль — выполняем вход и вытягиваем куки
-    cookies_str = req.cookies_raw or ""
-    email_clean = None
-    password_plain = None
-    if req.email and req.password:
-        email_clean = req.email.strip()
-        password_plain = req.password
-        success, msg, login_cookies = await asyncio.to_thread(
-            worker.send_cmd, Command.LOGIN, {"email": email_clean, "password": password_plain}
-        )
-        if not success:
-            raise HTTPException(status_code=400, detail=f"Ошибка входа в Kaspi MC: {msg}")
-
-        # Креды сохраняем НИЖЕ, когда известен store_id — либо существующего,
-        # либо только что созданного магазина. Никакого сохранения в общий
-        # session.json: иначе автообновление одного магазина будет читать
-        # креды другого.
-
-        # Куки приходят от worker.send_cmd напрямую (де-глобализация
-        # Playwright — каждый логин стейтлесс, без общего state.json,
-        # который при параллельном логине двух разных магазинов мог бы
-        # достаться не тому стору).
-        if login_cookies:
-            parts = [f"{name}={value}" for name, value in login_cookies.items()]
-            cookies_str = "; ".join(parts)
-
-    # Фаза C (БД): существующий магазин или создание нового.
+    Общая для ручного connect_full_store и «Сделайте всё за меня»
+    (routers/stores_auto_connect.py) — второй путь приходит с уже известным
+    merchant_id, токеном и кредами сотрудника, а сохранять их надо по тем же
+    правилам."""
+    name_clean = name
+    api_token_clean = api_token
+    email_clean = email
+    password_plain = password
     encrypted_cookies = encrypt_data(cookies_str) if cookies_str else None
 
     async with AsyncSessionLocal() as db:
@@ -368,6 +302,104 @@ async def connect_full_store(
             last_sync_at=new_store.last_sync_at.isoformat() if new_store.last_sync_at else None,
             created_at=new_store.created_at.isoformat()
         )
+
+
+@router.post("/connect-full-store", response_model=StoreResponse)
+async def connect_full_store(
+    req: ConnectFullStoreRequest,
+    user: User = Depends(get_current_user)
+):
+    """
+    Единая форма подключения магазина Kaspi:
+    - Проверка API-Токена (X-Auth-Token)
+    - Вход по email+паролю (авто-извлечение mc-session / mc-sid куков)
+    - Encryption at Rest (шифрование AES-256)
+    - Автоматическая привязка UserStore к текущему аккаунту
+
+    Пул Postgres: сессия НЕ держится открытой во время сетевых фаз
+    (verify_token / get_merchant_id / Playwright-логин — минуты на медленном
+    Kaspi). DB-фазы обёрнуты в короткие scoped-сессии, как в get_store_context
+    после фикса исчерпания пула (HANDOFF 3.52).
+    """
+    # Фаза A (БД): квота тарифа.
+    async with AsyncSessionLocal() as db:
+        await check_quota_guard(user.id, db)
+
+    name_clean = req.name.strip()
+    api_token_clean = req.api_token.strip()
+
+    if not name_clean:
+        raise HTTPException(status_code=400, detail="Название магазина не может быть пустым")
+
+    if not api_token_clean:
+        raise HTTPException(status_code=400, detail="API токен (X-Auth-Token) обязателен для подключения")
+
+    trial_plan = None
+    if req.plan_code:
+        candidate = billing_catalog.get_plan(req.plan_code)
+        if candidate.code != req.plan_code or candidate.is_free or not candidate.is_public:
+            raise HTTPException(status_code=400, detail="Неизвестный или недоступный тариф")
+        trial_plan = candidate
+
+    # Фаза B (сеть): вся работа с Kaspi и браузером — БЕЗ открытой сессии пула.
+    # 1. Верификация API Токена через Kaspi Public API
+    try:
+        valid = KaspiAPI.verify_token(api_token_clean)
+        if not valid:
+            raise HTTPException(status_code=400, detail="Kaspi API отклонил ваш токен (X-Auth-Token). Проверьте правильность.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Ошибка проверки API токена: {e}")
+
+    # 2. Определение Merchant ID без хардкода
+    merchant_id = None
+    try:
+        merchant_id = KaspiAPI.get_merchant_id(api_token_clean)
+    except Exception as e:
+        logger.warning(f"Определение merchant_id из токена: {e}")
+
+    if not merchant_id or merchant_id.startswith("m_20186986"):
+        token_hash = hashlib.md5(api_token_clean.encode('utf-8')).hexdigest()[:8]
+        merchant_id = f"m_{token_hash}"
+
+    # 3. Если переданы email+пароль — выполняем вход и вытягиваем куки
+    cookies_str = req.cookies_raw or ""
+    email_clean = None
+    password_plain = None
+    if req.email and req.password:
+        email_clean = req.email.strip()
+        password_plain = req.password
+        success, msg, login_cookies = await asyncio.to_thread(
+            worker.send_cmd, Command.LOGIN, {"email": email_clean, "password": password_plain}
+        )
+        if not success:
+            raise HTTPException(status_code=400, detail=f"Ошибка входа в Kaspi MC: {msg}")
+
+        # Креды сохраняем НИЖЕ, когда известен store_id — либо существующего,
+        # либо только что созданного магазина. Никакого сохранения в общий
+        # session.json: иначе автообновление одного магазина будет читать
+        # креды другого.
+
+        # Куки приходят от worker.send_cmd напрямую (де-глобализация
+        # Playwright — каждый логин стейтлесс, без общего state.json,
+        # который при параллельном логине двух разных магазинов мог бы
+        # достаться не тому стору).
+        if login_cookies:
+            parts = [f"{name}={value}" for name, value in login_cookies.items()]
+            cookies_str = "; ".join(parts)
+
+    # Фаза C (БД): существующий магазин или создание нового.
+    return await persist_connected_store(
+        user=user,
+        name=name_clean,
+        api_token=api_token_clean,
+        merchant_id=merchant_id,
+        cookies_str=cookies_str,
+        email=email_clean,
+        password=password_plain,
+        trial_plan=trial_plan,
+    )
 
 
 @router.post("/{store_id}/verify", response_model=StoreResponse)
