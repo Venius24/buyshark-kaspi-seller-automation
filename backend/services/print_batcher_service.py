@@ -2031,6 +2031,7 @@ def _process_zip_or_pdfs_locked(
     grouped_pages_count = 0
     ungrouped_pages_count = 0
     sku_matched_pages_count = 0
+    mixed_group_pages_count = 0
     new_keys_to_save: Set[str] = set()
 
     category_resolver = StoreCategoryResolver(store_categories)
@@ -2091,17 +2092,47 @@ def _process_zip_or_pdfs_locked(
                 matched_group = None
                 if sort_preset in ("product_name", "master_group"):
                     product_name = extract_product_name(text, basename)
-                    # Артикул из состава заказа, если Kaspi его отдал. Это
+                    # Артикулы из состава заказа, если Kaspi его отдал. Это
                     # данные, а не результат распознавания картинки, поэтому
-                    # он главнее всего, что удалось вычитать с накладной.
-                    order_sku = None
+                    # они главнее всего, что удалось вычитать с накладной.
+                    #
+                    # Берём ВСЕ артикулы заказа, а не первый: заказ бывает
+                    # сборным. Раньше брался только первый, и на заказе из
+                    # трёх товаров он не попадал ни в одну группу, после чего
+                    # штамп уезжал на группу, угаданную по названию ДРУГОГО
+                    # товара накладной (extract_product_name читает лишь
+                    # первую строчку состава).
+                    order_sku_list: List[str] = []
                     if order_skus and order_id:
-                        order_sku = next(iter(order_skus.get(order_id) or []), None)
+                        order_sku_list = [
+                            s for s in (str(x).strip() for x in (order_skus.get(order_id) or [])) if s
+                        ]
+                    # Состав заказа на руках — значит про товары накладной
+                    # известно всё, и догадываться по названию больше не о чем.
+                    composition_known = bool(order_sku_list)
 
                     if sort_preset == "master_group":
-                        matched_group = group_matcher.match_by_sku(order_sku) if group_matcher else None
-                        matched_by_sku = matched_group is not None
-                        if matched_group is None and group_matcher:
+                        matched_by_sku = False
+                        if group_matcher and order_sku_list:
+                            by_sku: List[Dict[str, Any]] = []
+                            for candidate in order_sku_list:
+                                g = group_matcher.match_by_sku(candidate)
+                                if g is not None and not any(g is seen for seen in by_sku):
+                                    by_sku.append(g)
+                            if len(by_sku) == 1:
+                                matched_group = by_sku[0]
+                                matched_by_sku = True
+                            elif len(by_sku) > 1:
+                                # Товары заказа лежат в разных группах: любой
+                                # штамп описывал бы лишь часть посылки, а
+                                # сборщик прочитал бы его как всю.
+                                mixed_group_pages_count += 1
+                        if matched_group is None and group_matcher and not composition_known:
+                            # Название — последний источник, и только пока
+                            # состав заказа неизвестен (окно Order API — 13
+                            # дней). Когда артикулы есть и ни один не в
+                            # группе, товар просто не сгруппирован, а похожее
+                            # название — это чужая карточка.
                             matched_group = group_matcher.match(product_name)
                         if matched_group:
                             stamp_label = matched_group.get("group_name") or product_name
@@ -2115,10 +2146,13 @@ def _process_zip_or_pdfs_locked(
                             group_sort_key = f"1_{product_name or basename}"
 
                     if product_tags:
-                        # Метки ищем по артикулу из заказа, а если его нет —
-                        # по привязкам найденной группы: у товара в группе тег
-                        # может висеть на любом из её артикулов.
-                        tag_skus = [order_sku] if order_sku else []
+                        # Метки ищем по артикулам заказа, а если их нет — по
+                        # привязкам найденной группы: у товара в группе тег
+                        # может висеть на любом из её артикулов. Обратный
+                        # порядок был бы хуже: метка вешается на артикул, и
+                        # раздать её всей группе — значит напечатать на посылке
+                        # указание, относящееся к другому товару.
+                        tag_skus = list(order_sku_list)
                         if not tag_skus and matched_group:
                             tag_skus = [str(s) for s in (matched_group.get("linked_skus") or [])]
                         seen_tags: Set[str] = set()
@@ -2135,7 +2169,7 @@ def _process_zip_or_pdfs_locked(
                         # затем в названии товара — по убыванию надёжности.
                         linked = " ".join(str(x) for x in ((matched_group or {}).get("linked_skus") or []))
                         cat_key, cat_title, cat_order = category_resolver.resolve(
-                            order_sku,
+                            *order_sku_list,
                             linked or None,
                             (matched_group or {}).get("group_name"),
                             product_name,
@@ -2474,6 +2508,9 @@ def _process_zip_or_pdfs_locked(
         # Сколько групп проставлено по артикулу из состава заказа, а не
         # угадано по названию: видно, работает ли связь с Order API вообще.
         "sku_matched_pages": sku_matched_pages_count,
+        # Сборные заказы, товары которых лежат в разных Мастер-Группах: штамп
+        # там намеренно не ставится, и это видно, а не выглядит как промах.
+        "mixed_group_pages": mixed_group_pages_count,
         "tagged_pages": sum(1 for p in all_pages if p.tags),
         # Что реально попало в каждую крупную категорию — чтобы владелец видел,
         # не уехала ли треть партии в «Прочее» из-за неназванного префикса.
