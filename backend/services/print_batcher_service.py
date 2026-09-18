@@ -1395,7 +1395,7 @@ def _draw_fitted_text(target_page: fitz.Page, rect: fitz.Rect, text: str, font: 
 
 def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: fitz.Page,
                      src_clip: fitz.Rect, label: Optional[str],
-                     tags: Optional[List[str]] = None) -> None:
+                     tags: Optional[List[str]] = None, guessed: bool = False) -> None:
     """
     Штамп группы/меток — маленькая рамка прямо под названием магазина на
     накладной (см. _find_store_name_anchor): это поле шаблона Kaspi, а не
@@ -1416,8 +1416,15 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
     шаблона) — прежний обход: первая свободная полоса на странице, с прежним
     более крупным боксом и явным заголовком "ГРУППА"/"МЕТКИ", раз позиция
     больше не подсказана сама.
+
+    guessed — группа подобрана по НАЗВАНИЮ товара, а не по артикулу из
+    состава заказа (состав Kaspi не отдал). Такой штамп — подсказка, а не
+    факт, и сборщик должен видеть это сразу: рамка пунктиром, перед
+    названием «?», в большом боксе заголовок «ГРУППА? (по названию)».
     """
     tags = [t for t in (tags or []) if str(t).strip()]
+    guessed = bool(guessed and label)
+    border_dashes = "[2 1.5] 0" if guessed else None
     if not label and not tags:
         return
 
@@ -1505,7 +1512,11 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
         # место у самого текста.
         border_w = 0.8 * size_ref
         pad = max(1.5, box.height * 0.08)
-        target_page.draw_rect(box, color=(0.45, 0.45, 0.45), width=border_w)
+        target_page.draw_rect(box, color=(0.45, 0.45, 0.45), width=border_w, dashes=border_dashes)
+        if guessed:
+            # Заголовка в маленьком боксе нет, поэтому признак догадки
+            # встаёт прямо в текст — его видно и на мятой этикетке.
+            label = f"? {label}"
         inner = fitz.Rect(box.x0 + pad, box.y0 + pad, box.x1 - pad, box.y1 - pad)
 
         if label and tags:
@@ -1531,12 +1542,13 @@ def draw_group_stamp(target_page: fitz.Page, target_rect: fitz.Rect, src_page: f
     label_fs = 6.5 * size_ref
     name_fs = 12.0 * size_ref
 
-    target_page.draw_rect(box, color=(0.45, 0.45, 0.45), width=border_w)
+    target_page.draw_rect(box, color=(0.45, 0.45, 0.45), width=border_w, dashes=border_dashes)
 
     top_pad = 2.0 * size_ref
     label_h = label_fs * 1.5
     label_rect = fitz.Rect(box.x0 + pad, box.y0 + top_pad, box.x1 - pad, box.y0 + top_pad + label_h)
-    _draw_fitted_text(target_page, label_rect, "ГРУППА" if label else "МЕТКИ", regular, label_fs,
+    header = ("ГРУППА? (по названию)" if guessed else "ГРУППА") if label else "МЕТКИ"
+    _draw_fitted_text(target_page, label_rect, header, regular, label_fs,
                       (0.55, 0.55, 0.55), label_fs * 0.7)
 
     bottom = box.y1 - 1.5 * size_ref
@@ -1612,7 +1624,9 @@ class PageItem:
                  store_category_key: Optional[str] = None,
                  store_category_title: Optional[str] = None,
                  store_category_order: int = 0,
-                 tags: Optional[List[str]] = None):
+                 tags: Optional[List[str]] = None,
+                 stamp_guessed: bool = False,
+                 composition_known: bool = True):
         self.pdf_path = pdf_path
         self.page_num = page_num
         self.source_filename = source_filename
@@ -1627,6 +1641,11 @@ class PageItem:
         self.product_name = product_name
         self.stamp_label = stamp_label
         self.tags = tags or []
+        # Штамп группы угадан по названию, а не взят по артикулу заказа.
+        self.stamp_guessed = stamp_guessed
+        # Знаем ли состав заказа из Kaspi — считается только там, где он
+        # вообще нужен (сортировка по Мастер-Группам).
+        self.composition_known = composition_known
         self.group_sort_key = group_sort_key
         # Крупная категория магазина (S/T/K/D/... у Бархана) — см.
         # StoreCategoryResolver. У магазина без настроенных категорий пусто.
@@ -1838,7 +1857,8 @@ def generate_nup_a4_pdf(
             current_a4_page.show_pdf_page(target_rect, src_doc, item.page_num, clip=c_rect, keep_proportion=True)
             if item.stamp_label or item.tags:
                 try:
-                    draw_group_stamp(current_a4_page, target_rect, src_page, c_rect, item.stamp_label, item.tags)
+                    draw_group_stamp(current_a4_page, target_rect, src_page, c_rect, item.stamp_label, item.tags,
+                                     guessed=item.stamp_guessed)
                 except Exception as e:
                     logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
             item_count_on_page += 1
@@ -1883,7 +1903,8 @@ def generate_thermal_pdf(
             new_p.show_pdf_page(target_rect, src_doc, item.page_num, clip=c_rect, keep_proportion=True)
             if item.stamp_label or item.tags:
                 try:
-                    draw_group_stamp(new_p, target_rect, src_page, c_rect, item.stamp_label, item.tags)
+                    draw_group_stamp(new_p, target_rect, src_page, c_rect, item.stamp_label, item.tags,
+                                     guessed=item.stamp_guessed)
                 except Exception as e:
                     logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
             _report(progress_cb, "Компоновка страниц", idx + 1, len(items))
@@ -2085,6 +2106,8 @@ def _process_zip_or_pdfs_locked(
 
                 product_name = None
                 stamp_label = None
+                stamp_guessed = False
+                page_composition_known = True
                 page_tags: List[str] = []
                 group_sort_key = None
                 cat_key = cat_title = None
@@ -2112,6 +2135,7 @@ def _process_zip_or_pdfs_locked(
                     composition_known = bool(order_sku_list)
 
                     if sort_preset == "master_group":
+                        page_composition_known = composition_known
                         matched_by_sku = False
                         if group_matcher and order_sku_list:
                             by_sku: List[Dict[str, Any]] = []
@@ -2134,6 +2158,7 @@ def _process_zip_or_pdfs_locked(
                             # группе, товар просто не сгруппирован, а похожее
                             # название — это чужая карточка.
                             matched_group = group_matcher.match(product_name)
+                            stamp_guessed = matched_group is not None
                         if matched_group:
                             stamp_label = matched_group.get("group_name") or product_name
                             group_sort_key = f"0_{stamp_label}"
@@ -2208,6 +2233,8 @@ def _process_zip_or_pdfs_locked(
                     product_name=product_name,
                     stamp_label=stamp_label,
                     tags=page_tags,
+                    stamp_guessed=stamp_guessed,
+                    composition_known=page_composition_known,
                     group_sort_key=group_sort_key,
                     store_category_key=cat_key,
                     store_category_title=cat_title,
@@ -2360,7 +2387,8 @@ def _process_zip_or_pdfs_locked(
                         try:
                             last_page = out_doc[-1]
                             c_rect = get_content_rect(src_doc[item.page_num])
-                            draw_group_stamp(last_page, last_page.rect, src_doc[item.page_num], c_rect, item.stamp_label, item.tags)
+                            draw_group_stamp(last_page, last_page.rect, src_doc[item.page_num], c_rect, item.stamp_label, item.tags,
+                                             guessed=item.stamp_guessed)
                         except Exception as e:
                             logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
 
@@ -2420,7 +2448,8 @@ def _process_zip_or_pdfs_locked(
                     if item.stamp_label or item.tags:
                         try:
                             c_rect = get_content_rect(src_doc[item.page_num])
-                            draw_group_stamp(last_page, last_page.rect, src_doc[item.page_num], c_rect, item.stamp_label, item.tags)
+                            draw_group_stamp(last_page, last_page.rect, src_doc[item.page_num], c_rect, item.stamp_label, item.tags,
+                                             guessed=item.stamp_guessed)
                         except Exception as e:
                             logger.warning(f"Print Batcher: не удалось нарисовать штамп группы: {e}")
 
@@ -2512,6 +2541,12 @@ def _process_zip_or_pdfs_locked(
         # там намеренно не ставится, и это видно, а не выглядит как промах.
         "mixed_group_pages": mixed_group_pages_count,
         "tagged_pages": sum(1 for p in all_pages if p.tags),
+        # Штампы, подобранные по названию (помечены «?» на этикетке), и
+        # накладные, для которых Kaspi не отдал состав заказа вовсе. Второе —
+        # причина первого; кабинет показывает это предупреждением, иначе
+        # сбой Order API молча превращал всю партию в догадки.
+        "guessed_group_pages": sum(1 for p in all_pages if p.stamp_guessed),
+        "no_composition_pages": sum(1 for p in all_pages if not p.composition_known),
         # Что реально попало в каждую крупную категорию — чтобы владелец видел,
         # не уехала ли треть партии в «Прочее» из-за неназванного префикса.
         "store_categories": _summarize_categories(all_pages) if use_categories else [],

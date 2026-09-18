@@ -140,6 +140,16 @@ def test_tags_do_not_replace_group_stamp():
     assert "Хрупкое" in text
 
 
+def test_guessed_stamp_has_question_header():
+    """Большой бокс (без якоря под названием магазина): заголовок говорит, что это догадка."""
+    doc = fitz.open()
+    page = doc.new_page(width=290, height=417)
+    pb.draw_group_stamp(page, page.rect, page, page.rect, "X179-0013 Флакон", [], guessed=True)
+    text = pb.normalize_waybill_text(page.get_text())
+    doc.close()
+    assert "ГРУППА?" in text and "по названию" in text
+
+
 def test_stamp_is_skipped_when_nothing_to_show():
     doc = fitz.open()
     page = doc.new_page(width=290, height=417)

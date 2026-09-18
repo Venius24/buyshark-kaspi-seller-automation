@@ -55,6 +55,9 @@ interface ManifestResponse {
   grouped_pages?: number;
   ungrouped_pages?: number;
   sku_matched_pages?: number;
+  mixed_group_pages?: number;
+  guessed_group_pages?: number;
+  no_composition_pages?: number;
   store_categories?: { key: string; title: string; pages: number }[];
   separator_pages?: boolean;
   new_pages: number;
@@ -862,6 +865,23 @@ export const PrintBatcher: React.FC = () => {
                       · из них <strong style={{ color: 'var(--secondary)' }}>{resultManifest.sku_matched_pages}</strong> по артикулу из заказа
                     </span>
                   )}
+                </div>
+              )}
+              {!!resultManifest.guessed_group_pages && (
+                <div style={{ fontSize: '13px', color: '#cbd5e1', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <AlertTriangle size={13} style={{ color: 'var(--warning)' }} />
+                  <span>
+                    <strong style={{ color: 'var(--warning)' }}>{resultManifest.guessed_group_pages}</strong> штамп(ов) подобрано по названию, а не по артикулу —
+                    на этикетке они с «?» и пунктирной рамкой, проверьте товар глазами.
+                    {!!resultManifest.no_composition_pages && (
+                      <> Kaspi не отдал состав заказа для {resultManifest.no_composition_pages} накладн. (заказ уже не «На сборке»/«Ожидает курьера» или Kaspi не ответил).</>
+                    )}
+                  </span>
+                </div>
+              )}
+              {!!resultManifest.mixed_group_pages && (
+                <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Tag size={13} /> {resultManifest.mixed_group_pages} сборн. заказ(ов) с товарами из разных групп — штамп группы не ставился.
                 </div>
               )}
             </div>

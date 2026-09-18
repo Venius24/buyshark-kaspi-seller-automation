@@ -157,11 +157,37 @@ def test_name_guess_does_not_override_known_composition(prod_store):
 
 
 def test_name_guess_still_works_without_composition(prod_store):
-    """Без состава заказа (окно Order API — 13 дней) прежний путь остаётся."""
+    """
+    Без состава заказа (окно Order API — 13 дней) прежний путь остаётся, но
+    штамп помечен как догадка: «?» перед названием и счётчик в манифесте,
+    по которому кабинет показывает предупреждение.
+    """
     prod_store([PALOCHKI_GROUP], PALOCHKI_PRODUCTS)
     manifest = _run(order_skus=None)
     assert manifest["grouped_pages"] == 1
-    assert "палочки" in _batch_text(manifest)
+    assert manifest["guessed_group_pages"] == 1
+    assert manifest["no_composition_pages"] == 1
+    text = _batch_text(manifest)
+    assert "палочки" in text
+    # Какой бокс встанет — компактный под названием магазина или большой с
+    # заголовком — зависит от накладной; догадка помечена в обоих.
+    assert "? H422-0002" in text or "ГРУППА? (по названию)" in text
+
+
+def test_sku_stamp_is_not_marked_as_guess(prod_store):
+    prod_store([STOJKA_GROUP, PALOCHKI_GROUP], PALOCHKI_PRODUCTS)
+    manifest = _run()
+    assert manifest["guessed_group_pages"] == 0
+    assert manifest["no_composition_pages"] == 0
+    assert "?" not in _batch_text(manifest)
+
+
+def test_order_missing_from_composition_map_is_counted(prod_store):
+    """Kaspi отдал состав, но не этого заказа (перепечатка ушедшего заказа)."""
+    prod_store([PALOCHKI_GROUP], PALOCHKI_PRODUCTS)
+    manifest = _run(order_skus={"999": ["X1"]})
+    assert manifest["no_composition_pages"] == 1
+    assert manifest["guessed_group_pages"] == 1
 
 
 def test_mixed_order_gets_no_group_stamp(prod_store):
