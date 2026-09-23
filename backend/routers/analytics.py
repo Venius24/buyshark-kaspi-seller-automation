@@ -429,13 +429,16 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
         items = []
         for it in items_sorted:
             share = (it["revenue"] / total_revenue * 100.0) if total_revenue > 0 else 0.0
-            cumulative += share
-            if cumulative <= 80.0:
+            # Класс по накопленной доле ДО текущего товара: иначе доминирующий
+            # SKU (скажем, 85% выручки) сам перешагивает порог и получает B,
+            # а класс A остаётся пустым.
+            if cumulative < 80.0:
                 abc_class = "A"
-            elif cumulative <= 95.0:
+            elif cumulative < 95.0:
                 abc_class = "B"
             else:
                 abc_class = "C"
+            cumulative += share
 
             xyz_class = None
             cv_pct = cv_by_sku.get(it["sku"])

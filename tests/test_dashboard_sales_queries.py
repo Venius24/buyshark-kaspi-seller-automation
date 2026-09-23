@@ -108,6 +108,32 @@ class DashboardSalesQueriesTest(unittest.TestCase):
         self.assertEqual(by_sku["A"]["quantity"], 3)
         self.assertEqual(result["total_revenue"], 3800.0)
 
+    def test_abc_dominant_sku_is_class_a(self):
+        """Один SKU с 85% выручки — класс A, а не B."""
+        from sqlalchemy.orm import Session
+        from backend.db.models import SalesOrderDB
+        session = Session(self._engine)
+        for i, (sku, price) in enumerate([("X", 8500.0), ("Y", 1000.0), ("Z", 500.0)]):
+            session.add(SalesOrderDB(
+                store_id="store-dom",
+                order_internal_id=f"dom-{i}",
+                order_code=f"dom-code-{i}",
+                created_at=self.now,
+                total_price=price,
+                status="COMPLETED",
+                state="ARCHIVE",
+                entries_payload=json.dumps([{"sku": sku, "name": sku, "quantity": 1, "totalPrice": price}]),
+            ))
+        session.commit()
+        session.close()
+
+        class Ctx:
+            store_id = "store-dom"
+        with patch.object(self.analytics, "_load_products", return_value=[]):
+            result = self.analytics.get_abc_xyz_analysis(90, Ctx())
+        classes = {it["sku"]: it["abc_class"] for it in result["items"]}
+        self.assertEqual(classes, {"X": "A", "Y": "B", "Z": "C"})
+
 
 if __name__ == "__main__":
     unittest.main()
