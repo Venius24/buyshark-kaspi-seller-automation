@@ -1,15 +1,21 @@
 import os
+import time
 import uuid
+import hashlib
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Request, Cookie
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Response, Request, Cookie
+from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from backend.db.database import get_db
 from backend.db.models import User, Subscription, UserSession, ReferralProfileDB
+from backend.services import mailer
 from backend.security.auth import (
+    SECRET_KEY,
+    ALGORITHM,
     hash_password,
     verify_password,
     create_access_token,
@@ -38,6 +44,15 @@ class LoginRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
+    new_password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
     new_password: str
 
 
@@ -346,3 +361,112 @@ async def complete_onboarding(
         user.onboarding_completed_at = datetime.utcnow()
         await db.commit()
     return {"onboarding_completed": True}
+
+
+# --- Восстановление пароля по email ---------------------------------------
+#
+# Токен сброса — JWT без отдельной таблицы: в нём отпечаток текущего
+# password_hash, поэтому после смены пароля (любым путём) все ранее выданные
+# ссылки гаснут сами — одноразовость без хранения состояния.
+
+PASSWORD_RESET_EXPIRE_MINUTES = 60
+_FORGOT_EMAIL_COOLDOWN_SEC = 60
+_FORGOT_IP_LIMIT = 10
+_FORGOT_IP_WINDOW_SEC = 3600
+_forgot_last_by_email: dict[str, float] = {}
+_forgot_hits_by_ip: dict[str, list[float]] = {}
+
+
+def _password_fingerprint(password_hash: str) -> str:
+    return hashlib.sha256((password_hash or "").encode()).hexdigest()[:16]
+
+
+def create_password_reset_token(user: User) -> str:
+    return jwt.encode(
+        {
+            "sub": user.id,
+            "type": "pwd_reset",
+            "pf": _password_fingerprint(user.password_hash),
+            "exp": datetime.utcnow() + timedelta(minutes=PASSWORD_RESET_EXPIRE_MINUTES),
+        },
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+
+def _forgot_rate_limited(email: str, ip: str) -> bool:
+    now = time.monotonic()
+    last = _forgot_last_by_email.get(email)
+    if last is not None and now - last < _FORGOT_EMAIL_COOLDOWN_SEC:
+        return True
+    hits = [t for t in _forgot_hits_by_ip.get(ip, []) if now - t < _FORGOT_IP_WINDOW_SEC]
+    if len(hits) >= _FORGOT_IP_LIMIT:
+        _forgot_hits_by_ip[ip] = hits
+        return True
+    hits.append(now)
+    _forgot_hits_by_ip[ip] = hits
+    _forgot_last_by_email[email] = now
+    return False
+
+
+def _reset_url(token: str) -> str:
+    base = os.getenv("APP_PUBLIC_URL", "https://app.buyshark.kz").rstrip("/")
+    return f"{base}/?reset_token={token}"
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    req: ForgotPasswordRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """Шлёт ссылку сброса пароля. Ответ всегда одинаковый — по нему нельзя
+    узнать, зарегистрирован ли email; письмо уходит в фоне, чтобы и время
+    ответа этого не выдавало."""
+    email = req.email.lower()
+    ip = request.client.host if request.client else "?"
+    if _forgot_rate_limited(email, ip):
+        logger.info("forgot-password: лимит для %s / %s", email, ip)
+        return {"success": True}
+
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if user and user.is_active and not user.is_telegram_only:
+        subject, html, text = mailer.render_password_reset(_reset_url(create_password_reset_token(user)))
+        background_tasks.add_task(mailer.send_email, user.email, subject, html, text)
+        logger.info("forgot-password: ссылка сброса поставлена в отправку для %s", email)
+    else:
+        logger.info("forgot-password: запрос для неизвестного/неактивного %s", email)
+    return {"success": True}
+
+
+@router.post("/reset-password")
+async def reset_password(
+    req: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Задаёт новый пароль по токену из письма."""
+    invalid = HTTPException(status_code=400, detail="Ссылка недействительна или устарела. Запросите восстановление ещё раз.")
+    try:
+        payload = jwt.decode(req.token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        raise invalid
+    if payload.get("type") != "pwd_reset" or not payload.get("sub"):
+        raise invalid
+
+    user = (await db.execute(select(User).where(User.id == payload["sub"]))).scalar_one_or_none()
+    if not user or not user.is_active or user.is_telegram_only:
+        raise invalid
+    if payload.get("pf") != _password_fingerprint(user.password_hash):
+        raise invalid  # пароль уже меняли после выдачи ссылки — ссылка одноразовая
+
+    if len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Новый пароль должен быть не короче 8 символов")
+
+    user.password_hash = hash_password(req.new_password)
+    user.must_change_password = False
+    # Человек доказал владение ящиком — email подтверждён.
+    user.is_verified = True
+    await db.commit()
+    logger.info("Пользователь %s сбросил пароль по ссылке из письма", user.email)
+    return {"success": True}
