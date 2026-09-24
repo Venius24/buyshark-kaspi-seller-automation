@@ -111,6 +111,79 @@ class PasswordResetTests(unittest.TestCase):
         self.assertTrue(verify_password("oldpass123", self.user.password_hash))
 
 
+class SessionRevocationTests(unittest.TestCase):
+    """Сброс пароля выкидывает уже открытые сессии, но только его — пока
+    sessions_revoked_at = NULL, любые (в т.ч. старые, без iat) токены живут."""
+
+    def setUp(self):
+        self.user = make_user(sessions_revoked_at=None)
+        self.db = MagicMock()
+        self.db.execute = AsyncMock(side_effect=lambda *a, **k: scalar_result(self.user))
+        self.db.commit = AsyncMock()
+
+        async def override_db():
+            yield self.db
+
+        app.dependency_overrides[get_db] = override_db
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        app.dependency_overrides.pop(get_db, None)
+
+    def legacy_refresh(self, issued_ago: timedelta):
+        # Так выдавались refresh-токены до 2026-09-25: без iat.
+        exp = datetime.utcnow() - issued_ago + timedelta(days=30)
+        return jwt.encode({"sub": "u1", "email": "owner@shop.kz", "type": "refresh", "jti": "x", "exp": exp},
+                          SECRET_KEY, algorithm=ALGORITHM)
+
+    def refresh(self, token):
+        return self.client.post("/api/v1/auth/refresh", headers={"X-Refresh-Token": token})
+
+    def test_existing_sessions_untouched_without_reset(self):
+        from backend.security.auth import create_refresh_token
+        self.assertEqual(self.refresh(self.legacy_refresh(timedelta(days=20))).status_code, 200)
+        self.assertEqual(self.refresh(create_refresh_token({"sub": "u1"})).status_code, 200)
+
+    def test_reset_revokes_old_refresh_tokens_but_not_new_ones(self):
+        from backend.security.auth import create_refresh_token
+        old_legacy = self.legacy_refresh(timedelta(days=1))
+        old_new_style = jwt.encode(
+            {"sub": "u1", "type": "refresh", "jti": "y", "iat": datetime.utcnow() - timedelta(seconds=5),
+             "exp": datetime.utcnow() + timedelta(days=30)},
+            SECRET_KEY, algorithm=ALGORITHM,
+        )
+        token = auth_v1.create_password_reset_token(self.user)
+        resp = self.client.post("/api/v1/auth/reset-password", json={"token": token, "new_password": "newpass456"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNotNone(self.user.sessions_revoked_at)
+
+        self.assertEqual(self.refresh(old_legacy).status_code, 401)
+        self.assertEqual(self.refresh(old_new_style).status_code, 401)
+        # Вход после сброса (в ту же секунду тоже) — работает.
+        self.assertEqual(self.refresh(create_refresh_token({"sub": "u1"})).status_code, 200)
+
+    def test_old_access_token_rejected_after_reset(self):
+        import asyncio
+        from fastapi import HTTPException
+        from backend.security.auth import create_access_token
+        old_access = jwt.encode(
+            {"sub": "u1", "type": "access", "exp": datetime.utcnow() + timedelta(minutes=10)},
+            SECRET_KEY, algorithm=ALGORITHM,
+        )  # старый формат, выдан ~5 мин назад
+
+        def call(tok):
+            req = MagicMock()
+            req.headers = {"Authorization": f"Bearer {tok}"}
+            return asyncio.run(auth_v1.get_current_user(req, self.db))
+
+        self.assertIs(call(old_access), self.user)
+        self.user.sessions_revoked_at = datetime.utcnow()
+        with self.assertRaises(HTTPException) as cm:
+            call(old_access)
+        self.assertEqual(cm.exception.status_code, 401)
+        self.assertIs(call(create_access_token({"sub": "u1"})), self.user)
+
+
 class MailerTests(unittest.IsolatedAsyncioTestCase):
     async def test_without_api_key_logs_and_returns_false(self):
         from backend.services import mailer

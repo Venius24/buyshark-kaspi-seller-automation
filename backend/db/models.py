@@ -41,6 +41,11 @@ class User(Base):
     # timestamp — когда завершил или явно пропустил. Per-user, не per-store —
     # тур про интерфейс кабинета в целом, а не про конкретный магазин.
     onboarding_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Сброс пароля по email (2026-09-25): все access/refresh-токены, выданные
+    # раньше этой отметки, отклоняются (security/auth.py::is_token_revoked).
+    # NULL — ничего не отзывалось. Не password_hash-отпечаток, чтобы обычная
+    # смена пароля из кабинета не выкидывала текущую сессию.
+    sessions_revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

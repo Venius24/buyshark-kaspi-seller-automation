@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from backend.db.database import AsyncSessionLocal
 from backend.db.models import User, Store, UserStore
-from backend.security.auth import decode_token
+from backend.security.auth import decode_token, is_token_revoked
 from backend.security.crypto import decrypt_data
 
 logger = logging.getLogger(__name__)
@@ -107,7 +107,7 @@ async def get_store_context(request: Request) -> StoreContext:
                     stmt = select(User).where(User.id == user_id)
                     res = await db.execute(stmt)
                     user = res.scalar_one_or_none()
-                    if user and user.is_active:
+                    if user and user.is_active and not is_token_revoked(payload, user.sessions_revoked_at):
                         resolved = await _resolve_store_for_user(request, db, user.id)
                         if resolved and resolved[0].encrypted_api_key:
                             store, role, raw_sections = resolved
@@ -230,7 +230,7 @@ async def resolve_ws_store_id(websocket: WebSocket, db: AsyncSession) -> Optiona
     stmt = select(User).where(User.id == user_id)
     res = await db.execute(stmt)
     user = res.scalar_one_or_none()
-    if not user or not user.is_active:
+    if not user or not user.is_active or is_token_revoked(payload, user.sessions_revoked_at):
         return None
 
     # Слайс 6: ?store_id= — явный выбор магазина из UI (StoreHub/storeContext.ts).

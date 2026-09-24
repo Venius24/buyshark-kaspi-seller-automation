@@ -1,5 +1,6 @@
 import os
 import uuid
+import calendar
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
@@ -28,7 +29,7 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     """Генерация короткоживущего AccessToken (15 минут)"""
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire, "type": "access"})
+    to_encode.update({"exp": expire, "iat": datetime.utcnow(), "type": "access"})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def create_refresh_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
@@ -36,7 +37,7 @@ def create_refresh_token(data: Dict[str, Any], expires_delta: Optional[timedelta
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta or timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     jti = str(uuid.uuid4())
-    to_encode.update({"exp": expire, "type": "refresh", "jti": jti})
+    to_encode.update({"exp": expire, "iat": datetime.utcnow(), "type": "refresh", "jti": jti})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def decode_token(token: str) -> Optional[Dict[str, Any]]:
@@ -47,3 +48,30 @@ def decode_token(token: str) -> Optional[Dict[str, Any]]:
     except JWTError as e:
         logger.warning(f"Ошибка валидации JWT: {e}")
         return None
+
+
+_TOKEN_LIFETIME_SEC = {
+    "access": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    "refresh": REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600,
+}
+
+
+def is_token_revoked(payload: Dict[str, Any], sessions_revoked_at: Optional[datetime]) -> bool:
+    """Выдан ли токен раньше, чем пользователю отозвали сессии (сброс пароля).
+
+    sessions_revoked_at = NULL — ничего не отзывалось, токен живёт как жил.
+    Токены до 2026-09-25 выдавались без iat — время выдачи восстанавливаем
+    как exp минус стандартный срок жизни (других сроков в коде нет).
+    Сравнение по целым секундам: токен, выданный в ту же секунду, что и
+    отзыв, считается новым — иначе вход сразу после сброса мог бы погаснуть.
+    """
+    if sessions_revoked_at is None:
+        return False
+    iat = payload.get("iat")
+    if iat is None:
+        exp = payload.get("exp")
+        lifetime = _TOKEN_LIFETIME_SEC.get(payload.get("type"))
+        if exp is None or lifetime is None:
+            return True
+        iat = exp - lifetime
+    return int(iat) < calendar.timegm(sessions_revoked_at.utctimetuple())

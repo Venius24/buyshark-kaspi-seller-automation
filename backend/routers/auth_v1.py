@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, 
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from backend.db.database import get_db
 from backend.db.models import User, Subscription, UserSession, ReferralProfileDB
 from backend.services import mailer
@@ -21,6 +21,7 @@ from backend.security.auth import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    is_token_revoked,
     REFRESH_TOKEN_EXPIRE_DAYS
 )
 
@@ -96,6 +97,9 @@ async def get_current_user(
 
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Пользователь не найден или заблокирован")
+
+    if is_token_revoked(payload, user.sessions_revoked_at):
+        raise HTTPException(status_code=401, detail="Сессия завершена после смены пароля. Войдите заново.")
 
     return user
 
@@ -286,6 +290,9 @@ async def refresh_tokens(
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Пользователь не найден")
 
+    if is_token_revoked(payload, user.sessions_revoked_at):
+        raise HTTPException(status_code=401, detail="Сессия завершена после смены пароля. Войдите заново.")
+
     new_access_token = create_access_token({"sub": user.id, "email": user.email})
     return {"access_token": new_access_token, "token_type": "bearer"}
 
@@ -467,6 +474,10 @@ async def reset_password(
     user.must_change_password = False
     # Человек доказал владение ящиком — email подтверждён.
     user.is_verified = True
+    # Если пароль сбрасывают из-за угона — выкидываем все уже открытые
+    # сессии: токены, выданные до этой отметки, больше не принимаются.
+    user.sessions_revoked_at = datetime.utcnow()
+    await db.execute(delete(UserSession).where(UserSession.user_id == user.id))
     await db.commit()
     logger.info("Пользователь %s сбросил пароль по ссылке из письма", user.email)
     return {"success": True}
