@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import type { TFunction } from 'i18next';
 import { RefreshCw } from 'lucide-react';
 import { apiFetch, API_URL } from '../api';
@@ -6,7 +6,6 @@ import { ScoreRing } from '../components/ScoreRing';
 import { SavedMarginCard } from '../components/SavedMarginCard';
 import { PriceLeadGauge } from '../components/PriceLeadGauge';
 import { RevenueHeatmap } from '../components/RevenueHeatmap';
-import { SalesStatsWidget } from '../components/SalesStatsWidget';
 import { PriceRadarWidget } from '../components/PriceRadarWidget';
 import { AbcXyzWidget } from '../components/AbcXyzWidget';
 import { StockForecastWidget } from '../components/StockForecastWidget';
@@ -14,8 +13,20 @@ import { CompetitorLeaderboard } from '../components/CompetitorLeaderboard';
 import { CatalogCoverageGauge } from '../components/CatalogCoverageGauge';
 import { HourlyHeatmap } from '../components/HourlyHeatmap';
 import { ChatActivityHeatmap } from '../components/ChatActivityHeatmap';
-import { ReviewCampaignWidget } from '../components/ReviewCampaignWidget';
 import { HelpHint } from '../components/shared/HelpHint';
+
+// Оба виджета тянут recharts (~380 КБ, почти треть сборки) — грузим их отдельным
+// куском, только когда «Обзор» реально отрисован.
+const SalesStatsWidget = lazy(() =>
+  import('../components/SalesStatsWidget').then((m) => ({ default: m.SalesStatsWidget })),
+);
+const ReviewCampaignWidget = lazy(() =>
+  import('../components/ReviewCampaignWidget').then((m) => ({ default: m.ReviewCampaignWidget })),
+);
+
+const ChartWidgetFallback: React.FC = () => (
+  <div className="glass-card" style={{ minHeight: '180px' }} aria-busy="true" />
+);
 
 export type ChartType = 'bar' | 'line' | 'area' | 'pie' | 'donut';
 export const PERIOD_OPTIONS = [7, 14, 30, 90] as const;
@@ -106,12 +117,13 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
     ],
     supportsPeriod: true,
     render: (_ctx, config) => (
-      <SalesStatsWidget
-        key="sales_stats"
-        period={config.period || 30}
-        chartType={config.chartType || 'bar'}
-        metric={((config.metrics && config.metrics[0]) || 'revenue') as 'revenue' | 'orders'}
-      />
+      <Suspense key="sales_stats" fallback={<ChartWidgetFallback />}>
+        <SalesStatsWidget
+          period={config.period || 30}
+          chartType={config.chartType || 'bar'}
+          metric={((config.metrics && config.metrics[0]) || 'revenue') as 'revenue' | 'orders'}
+        />
+      </Suspense>
     ),
   },
   {
@@ -177,7 +189,11 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
     title: 'Рассылка «Отзыв»: воронка и рейтинг',
     defaultVisible: true,
     defaultOrder: 8,
-    render: () => <ReviewCampaignWidget key="review_campaign" />,
+    render: () => (
+      <Suspense key="review_campaign" fallback={<ChartWidgetFallback />}>
+        <ReviewCampaignWidget />
+      </Suspense>
+    ),
   },
   {
     id: 'system_status',

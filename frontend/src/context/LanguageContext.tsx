@@ -1,5 +1,6 @@
 import { createContext, useContext, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ensureLanguageLoaded } from '../i18n'
 
 type Language = 'ru' | 'kz'
 
@@ -15,7 +16,10 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const { i18n, t } = useTranslation()
 
   const setLanguage = useCallback((lang: Language) => {
-    i18n.changeLanguage(lang)
+    // Сначала догружаем словарь, иначе на миг мелькнёт ru-fallback.
+    ensureLanguageLoaded(lang)
+      .catch(() => {})
+      .then(() => i18n.changeLanguage(lang))
   }, [i18n])
 
   return (

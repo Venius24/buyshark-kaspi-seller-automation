@@ -9,7 +9,22 @@ import App from './App.tsx'
 import { LanguageProvider } from './context/LanguageContext'
 import { queryClient, queryPersister, CACHE_BUSTER } from './queryClient'
 
-const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN
+// После деплоя у давно открытой вкладки старых кусков (lazy-виджеты, kz-словарь)
+// на сервере уже нет — перезагружаемся на свежий index.html. Гард в sessionStorage
+// не даёт уйти в цикл, если кусок недоступен по другой причине.
+window.addEventListener('vite:preloadError', (event) => {
+  try {
+    const last = Number(sessionStorage.getItem('chunk_reload_at') || 0)
+    if (Date.now() - last < 60_000) return
+    sessionStorage.setItem('chunk_reload_at', String(Date.now()))
+  } catch {
+    return
+  }
+  event.preventDefault()
+  window.location.reload()
+})
+
+const SENTRY_DSN =import.meta.env.VITE_SENTRY_DSN
 if (SENTRY_DSN) {
   Sentry.init({
     dsn: SENTRY_DSN,
