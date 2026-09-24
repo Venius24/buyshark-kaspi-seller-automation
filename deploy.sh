@@ -27,7 +27,7 @@ LANDING_TECH_RELEASES_DIR="/var/www/buyshark-landing-tech-releases"
 LANDING_TECH_WEB_ROOT="/var/www/buyshark-landing-tech"
 HEALTH_URL="http://127.0.0.1:5000/"
 LAST_GOOD_FILE="$APP_DIR/.last_good_sha"
-HEALTH_RETRIES=45  # старт uvicorn (Playwright init и т.д.) занимает до ~30s
+HEALTH_RETRIES=120  # старт uvicorn с 23.09 — 50–57s (импорт backend.main); при 45 каждый деплой откатывался
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "🚀 [$(date '+%Y-%m-%d %H:%M:%S')] Начало деплоя Kaspi SaaS"
