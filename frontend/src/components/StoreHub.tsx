@@ -21,7 +21,7 @@ import { apiFetch, API_URL } from '../api';
 import { fetchProfile, fetchStores } from '../queries';
 import { useActiveStoreId, setActiveStoreId as setSharedActiveStoreId } from '../storeContext';
 import { waLink } from '../data/contacts';
-import emptyStateIllustration from '../assets/sprites/storehub_empty_illustration.png';
+import emptyStateIllustration from '../assets/sprites/storehub_empty_illustration.webp';
 
 export interface StoreItem {
   id: string;
