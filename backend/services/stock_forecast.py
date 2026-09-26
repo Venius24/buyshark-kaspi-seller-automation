@@ -26,8 +26,9 @@
 прогнозировать по отдельности: у каждого в каталоге Kaspi лежит одно и то же
 число, и сумма «дней до нуля» по пяти карточкам одной группы завысила бы
 запас впятеро. Такие артикулы схлопываются в одну строку: остаток — общий,
-скорость — сумма скоростей участников, умноженная на размер комплекта
-(`deduct_per_unit`, то же правило, по которому списывает воркер).
+скорость — сумма скоростей участников, каждая умножена на множитель артикула
+из его рецепта, плюс наборы из других групп, куда группа входит составляющей
+(`sku_recipes`, то же правило, по которому списывает воркер).
 
 День берётся АЛМАТИНСКИЙ (UTC+5, см. ALMATY_UTC_OFFSET_HOURS в
 routers/analytics.py): продавец думает в своих сутках. Текущий, ещё не
@@ -295,10 +296,25 @@ def build_forecast(
         row["velocity_long"] = round(row["velocity_long"], 3)
         return row
 
+    # Сколько штук группы съедает продажа каждого артикула — по его рецепту
+    # (backend/services/sku_recipes.py), то же правило, что у воркера
+    # списания. Своим артикулам — их ×N, плюс наборы из ДРУГИХ групп, куда
+    # эта входит составляющей: набор S517-0046-48 расходует и ключи S517-0048.
+    from backend.services import sku_recipes
+
+    group_draws: dict = {}  # group_id -> [(merchant_sku, штук за продажу)]
+    for gid, members in group_members.items():
+        for m in members:
+            for cg, qty in sku_recipes.components_for(gid, active_groups, m):
+                if cg in active_groups:
+                    group_draws.setdefault(cg, []).append((m, qty))
+
+    def _draw(gid: str, field: str) -> float:
+        return sum(per_sku.get(m, {}).get(field, 0) * qty for m, qty in group_draws.get(gid, []))
+
     # Строки мастер-групп
     for gid, members in group_members.items():
         g = active_groups[gid]
-        per_unit = max(1, int(g.get("deduct_per_unit", 1) or 1))
         stats = [per_sku.get(m, {}) for m in members]
         sold_members = sorted(m for m in members if per_sku.get(m, {}).get("sold"))
         items.append(_finish({
@@ -312,13 +328,12 @@ def build_forecast(
             "status": "Активен",
             "in_catalog": True,
             "members_count": len(members),
-            "deduct_per_unit": per_unit,
             "stock": int(g.get("shared_stock", 0) or 0),
             "sold": sum(s.get("sold", 0) for s in stats),
             "sold_recent": sum(s.get("sold_recent", 0) for s in stats),
-            "velocity": sum(s.get("velocity", 0.0) for s in stats) * per_unit,
-            "velocity_recent": sum(s.get("velocity_recent", 0.0) for s in stats) * per_unit,
-            "velocity_long": sum(s.get("velocity_long", 0.0) for s in stats) * per_unit,
+            "velocity": _draw(gid, "velocity"),
+            "velocity_recent": _draw(gid, "velocity_recent"),
+            "velocity_long": _draw(gid, "velocity_long"),
             "price": _group_price(members, catalog_by_msku),
         }))
 
@@ -365,7 +380,6 @@ def build_forecast(
             "status": p.get("status") or "",
             "in_catalog": True,
             "members_count": 1,
-            "deduct_per_unit": 1,
             "stock": int(p.get("stock") or 0),
             "sold": sold,
             "sold_recent": stats.get("sold_recent", 0),

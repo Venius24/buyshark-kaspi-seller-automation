@@ -147,13 +147,13 @@ def test_master_group_is_one_row_on_shared_stock():
     assert grp["external_code"] == "1C-778"
 
 
-def test_master_group_deduct_per_unit_multiplies_velocity():
+def test_master_group_sku_pack_multiplies_velocity():
     """Комплект из 4 штук: одна продажа съедает 4 единицы общего остатка —
     то же правило, по которому списывает stock_sync_worker."""
     groups = {
         "grp_1": {
             "group_id": "grp_1", "group_name": "Палочки", "shared_stock": 80,
-            "linked_skus": ["K-1"], "is_active": True, "deduct_per_unit": 4,
+            "linked_skus": ["K-1"], "is_active": True, "sku_recipes": {"K-1": {"qty": 4}},
         }
     }
     res = build_forecast(

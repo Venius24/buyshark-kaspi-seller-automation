@@ -21,6 +21,7 @@ from backend.state_helpers import (
 from backend.security.store_context import StoreContext, get_store_context
 from backend.security.store_roles import require_store_manager, store_section_guard
 from backend.services.stock_sync_worker import execute_broadcast_sync, get_stock_lock
+from backend.services import sku_recipes as recipes_lib
 
 router = APIRouter(prefix="/api/stock-groups", tags=["stock-groups"], dependencies=[Depends(store_section_guard("stock-groups"))])
 
@@ -51,6 +52,18 @@ def _expand_linked_skus(skus: List[str], store_id: Optional[str]) -> List[str]:
                 expanded.add(str(matched_p["kaspiSku"]).strip())
 
     return list(expanded)
+
+def _clean_recipes_or_400(group_id: str, raw, groups: dict, linked_skus: List[str],
+                          strict: bool = True) -> dict:
+    """Рецепты из запроса (pydantic или dict) -> проверенный словарь, иначе 400."""
+    plain = {
+        sku: (r.model_dump() if hasattr(r, "model_dump") else r)
+        for sku, r in (raw or {}).items()
+    }
+    try:
+        return recipes_lib.clean_recipes(group_id, plain, groups, linked_skus, strict=strict)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 from backend.kaspi_wrapper import KaspiAPI
 
@@ -108,8 +121,6 @@ async def create_stock_group(
         raise HTTPException(status_code=400, detail="Выберите хотя бы один товар (SKU) для связывания.")
     if req.stop_qty is not None and req.stop_qty < 0:
         raise HTTPException(status_code=400, detail="Стоп кол-во не может быть отрицательным.")
-    if req.deduct_per_unit is not None and req.deduct_per_unit < 1:
-        raise HTTPException(status_code=400, detail="Списание за единицу не может быть меньше 1 шт.")
 
     group_id = f"grp_{uuid.uuid4().hex[:8]}"
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -128,7 +139,7 @@ async def create_stock_group(
         "external_code": (req.external_code or "").strip() or None,
         "is_active": req.is_active if req.is_active is not None else True,
         "stop_qty": int(req.stop_qty) if req.stop_qty is not None else 5,
-        "deduct_per_unit": int(req.deduct_per_unit) if req.deduct_per_unit else 1,
+        "sku_recipes": {},
         "dumping_config": req.dumping_config.dict() if req.dumping_config else None,
         "dumping_excluded_skus": [s for s in (req.dumping_excluded_skus or []) if s in expanded_skus],
         "status": "updating",
@@ -139,6 +150,11 @@ async def create_stock_group(
     }
 
     async with get_stock_lock(ctx.store_id):
+        if req.sku_recipes:
+            groups = await asyncio.to_thread(_load_master_stock_groups, store_id=ctx.store_id)
+            new_group["sku_recipes"] = _clean_recipes_or_400(
+                group_id, req.sku_recipes, groups, expanded_skus
+            )
         # Пишем только новую группу: _save_master_stock_groups делает
         # session.get()+upsert на каждый ключ переданного словаря, и все
         # группы магазина ре-трогались бы ради создания одной.
@@ -167,8 +183,6 @@ async def update_stock_group(
 
     if req.stop_qty is not None and req.stop_qty < 0:
         raise HTTPException(status_code=400, detail="Стоп кол-во не может быть отрицательным.")
-    if req.deduct_per_unit is not None and req.deduct_per_unit < 1:
-        raise HTTPException(status_code=400, detail="Списание за единицу не может быть меньше 1 шт.")
 
     async with get_stock_lock(ctx.store_id):
         groups = await asyncio.to_thread(_load_master_stock_groups, store_id=ctx.store_id)
@@ -199,8 +213,16 @@ async def update_stock_group(
             group["is_active"] = req.is_active
         if req.stop_qty is not None:
             group["stop_qty"] = int(req.stop_qty)
-        if req.deduct_per_unit is not None:
-            group["deduct_per_unit"] = int(req.deduct_per_unit)
+        # Рецепты чистятся и когда их не прислали: артикул, отвязанный от
+        # группы, не должен оставлять за собой набор.
+        if "sku_recipes" in provided:
+            group["sku_recipes"] = _clean_recipes_or_400(
+                group_id, req.sku_recipes, groups, group["linked_skus"]
+            )
+        else:
+            group["sku_recipes"] = _clean_recipes_or_400(
+                group_id, group.get("sku_recipes"), groups, group["linked_skus"], strict=False
+            )
         if "dumping_config" in provided:
             group["dumping_config"] = req.dumping_config.model_dump() if req.dumping_config else None
         if req.dumping_excluded_skus is not None:
@@ -274,6 +296,8 @@ async def delete_stock_group(group_id: str, ctx: StoreContext = Depends(require_
             raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
 
         deleted_group = groups.pop(group_id)
+        # Наборы других групп, куда входила удалённая, иначе ссылались бы в пустоту.
+        touched = recipes_lib.drop_group_refs(groups, group_id)
         # Именно _delete_master_stock_group: _save_master_stock_groups делает
         # только upsert и строку из БД не убирает — раньше группа "удалялась"
         # с зелёным тостом и возвращалась при следующем обновлении списка.
@@ -282,6 +306,8 @@ async def delete_stock_group(group_id: str, ctx: StoreContext = Depends(require_
                 status_code=500,
                 detail=f"Не удалось удалить Мастер-Группу '{deleted_group.get('group_name')}'.",
             )
+        if touched:
+            await asyncio.to_thread(_save_master_stock_groups, touched, store_id=ctx.store_id)
 
     return {
         "success": True,

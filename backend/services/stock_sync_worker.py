@@ -17,7 +17,7 @@ from backend.state_helpers import (
     _save_products,
 )
 from backend.kaspi_wrapper import KaspiAPI
-from backend.services import offer_sync
+from backend.services import offer_sync, sku_recipes
 from backend.dumper.config import discover_merchant_id, _decode_base64_if_needed
 from backend.dumper.telemetry import telemetry_manager
 from backend.services.webhook_dispatcher import dispatch_webhook_event
@@ -303,9 +303,17 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
         await broadcast_ws_event("log", msg, store_id=store_id)
         return
 
+    # Кроме своих артикулов — наборы из ДРУГИХ групп, куда эта входит
+    # составляющей: у S517-0048 кончились ключи — снять надо и набор
+    # S517-0046-48, хотя он лежит в группе 46 (backend/services/sku_recipes.py).
+    targets = [(sku, group_id) for sku in linked_skus] + [
+        (sku, home_gid) for home_gid, sku in sku_recipes.bundles_touching(group_id, groups)
+    ]
+
     processed_physical_skus = set()
-    for idx, sku in enumerate(linked_skus):
+    for idx, (sku, home_gid) in enumerate(targets):
         t_now = datetime.datetime.now().strftime("%H:%M:%S")
+        foreign = home_gid != group_id
         # Находим товар в ассортименте
         target_p = next((p for p in all_products if p.get("sku") == sku or p.get("merchantSku") == sku or p.get("kaspiSku") == sku), None)
         if not target_p:
@@ -341,22 +349,30 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
 
         store_full_id = target_p.get("storeId") or f"{merchant_id}_001"
         store_suffix = store_full_id.split("_")[1] if "_" in store_full_id else "001"
-        status_text = "Активен" if shared_stock > stop_qty else "Архив"
-        # При просаде до/ниже "Стоп кол-ва" на Kaspi уходит именно 0 —
-        # иначе карточка так и останется доступной для покупки с реальным
-        # (ещё ненулевым) остатком, хотя мы считаем её "снятой с продажи".
-        kaspi_push_stock = shared_stock if shared_stock > stop_qty else 0
+        # Остаток артикула считается по его рецепту: ×2 показывает половину
+        # остатка группы, набор — самую бедную составляющую. Для обычного
+        # артикула (своя группа × 1) это прежнее правило: при просаде до/ниже
+        # "Стоп кол-ва" на Kaspi уходит именно 0 — иначе карточка так и
+        # останется доступной для покупки с реальным (ещё ненулевым)
+        # остатком, хотя мы считаем её "снятой с продажи".
+        components = sku_recipes.components_for(
+            home_gid, groups, target_p.get("merchantSku") or sku
+        )
+        plain = sku_recipes.is_plain(components)
+        sku_stock, kaspi_push_stock = sku_recipes.sellable(components, groups)
+        status_text = "Активен" if kaspi_push_stock > 0 else "Архив"
+        label = f"{sku} (набор)" if foreign else sku
 
         # Сохраняем локальный оверрайд
         await asyncio.to_thread(
-            _save_override, sku, price, shared_stock, target_p.get("brand"), status_text,
+            _save_override, sku, price, sku_stock, target_p.get("brand"), status_text,
             store_id=store_id,
         )
 
         # Обновляем в кэше товаров
         for p in all_products:
             if p.get("sku") == sku or p.get("merchantSku") == sku or p.get("kaspiSku") == sku:
-                p["stock"] = shared_stock
+                p["stock"] = sku_stock
                 p["status"] = status_text
                 break
 
@@ -370,10 +386,12 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
         # Лестница шагов: сравниваем с тем, что Kaspi уже знает (ещё не
         # отправленное намерение, иначе последняя отправка, иначе факт).
         last_pushed = await asyncio.to_thread(offer_sync.last_known_stock, store_id, physical_sku)
-        if not offer_sync.should_push_stock(last_pushed, kaspi_push_stock, stop_qty=stop_qty):
+        # Стоп-кол-во группы описывает остаток группы, а не витрину набора или
+        # ×N — у них ноль при просадке уже заложен в kaspi_push_stock.
+        if not offer_sync.should_push_stock(last_pushed, kaspi_push_stock, stop_qty=stop_qty if plain else 0):
             skipped_count += 1
             msg = (
-                f"[{t_now}] ⏭ Группа '{group_name}' -> SKU {sku}: остаток "
+                f"[{t_now}] ⏭ Группа '{group_name}' -> SKU {label}: остаток "
                 f"{last_pushed} -> {kaspi_push_stock}, разница меньше шага "
                 f"{offer_sync.stock_step(min(last_pushed, kaspi_push_stock))} — запись отложена (экономия квоты)"
             )
@@ -395,7 +413,7 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
             city_id="750000000",
         )
         success_count += 1
-        msg = f"[{t_now}] ✓ Группа '{group_name}' -> SKU {sku}: остаток {kaspi_push_stock} поставлен в очередь на отправку"
+        msg = f"[{t_now}] ✓ Группа '{group_name}' -> SKU {label}: остаток {kaspi_push_stock} поставлен в очередь на отправку"
         logs.append(msg)
         await broadcast_ws_event("log", msg, store_id=store_id)
 
@@ -835,10 +853,11 @@ def claim_stock_deduction(
 def _calculate_physical_units(merchant_sku: str, quantity: int = 1, per_unit: int = 1) -> int:
     """
     Физическое количество штук по позиции заказа: заказанное количество,
-    умноженное на размер комплекта группы (`deduct_per_unit`, по умолчанию 1).
+    умноженное на множитель артикула из его рецепта (`sku_recipes`, по
+    умолчанию 1; до 27.09 — `deduct_per_unit` на всю группу).
 
-    `per_unit` задаётся руками в карточке Мастер-Группы — это единственный
-    источник размера комплекта. Из артикула он больше не выводится:
+    `per_unit` задаётся руками у артикула в карточке Мастер-Группы — это
+    единственный источник размера комплекта. Из артикула он не выводится:
 
     До 14.08 хвост артикула после последнего дефиса считался размером
     упаковки: "T219-0005-4" -> множитель 4. Правило описано в
@@ -861,6 +880,62 @@ def _calculate_physical_units(merchant_sku: str, quantity: int = 1, per_unit: in
     задаваться явно, а не выводиться из артикула.
     """
     return int(quantity) * max(1, int(per_unit or 1))
+
+
+
+def _deduct_from_group(group: dict, units: int, *, ordered: int, per_unit: int,
+                       order_code: str, m_sku: str, bundle_label: Optional[str] = None) -> dict:
+    """Вычитает units из остатка группы (на месте) и пишет строку в её журнал.
+
+    Возвращает {old_stock, new_stock, shortfall, debt}. Сохранение группы,
+    отметка заказа и рассылка — на вызывающем.
+    """
+    old_stock = int(group.get("shared_stock", 0))
+    new_stock = max(0, old_stock - units)
+    # Сколько штук заказали сверх того, что числилось. max(0, ...)
+    # обрезает остаток по нулю — иначе отрицательное число утечёт
+    # в оверрайд каталога и в Kaspi. Но сам факт нехватки терялся
+    # прямо здесь: журнал показывал "было 4 → стало 0" и ни слова
+    # о том, что трёх штук нет. Копим долг отдельным полем.
+    shortfall = max(0, units - old_stock)
+    debt = int(group.get("oversold", 0)) + shortfall
+    group["shared_stock"] = new_stock
+    group["oversold"] = debt
+    group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # Статус, который видно на карточке группы, пока идёт списание
+    # и следующая за ним веерная рассылка.
+    group["status"] = "deducting"
+    group["status_since"] = datetime.datetime.now().isoformat()
+
+    now_time = datetime.datetime.now().strftime("%H:%M:%S")
+    tail = ""
+    if shortfall:
+        tail = f", не хватило {shortfall} шт. — продано больше, чем числилось"
+        logger.warning(
+            "🚨 [AutoDeduction] Перепродажа: заказ #%s списал %d шт. у группы '%s' "
+            "при остатке %d. Не хватает %d шт. (всего долг %d).",
+            order_code, units, group.get("group_name"), old_stock, shortfall, debt,
+        )
+    # Комплект и набор показываем прямо в журнале: иначе "заказали 1 —
+    # списали 7" или списание ключей по заказу съёмника снова выглядит
+    # как поломка, а не как настройка.
+    pack = f" [заказано {ordered} × комплект {per_unit}]" if per_unit > 1 else ""
+    what = f"{m_sku}, набор: {bundle_label}" if bundle_label else m_sku
+    log_entry = (
+        f"[{now_time}] 🛒 Списание по заказу #{order_code} ({what}): "
+        f"-{units} шт.{pack} (было {old_stock} → стало {new_stock}{tail})"
+    )
+    logs = group.setdefault("sync_logs", [])
+    logs.insert(0, log_entry)
+    group["sync_logs"] = logs[:30]
+    group["last_sync_log"] = log_entry
+
+    logger.info(
+        f"⚡ [AutoDeduction] Заказ #{order_code} списал {units} шт. "
+        f"у группы '{group.get('group_name')}'. Остаток: {new_stock}"
+        + (f" (долг {debt} шт.)" if debt else "")
+    )
+    return {"old_stock": old_stock, "new_stock": new_stock, "shortfall": shortfall, "debt": debt}
 
 
 # Когда в последний раз чистили отметки этого магазина (time.monotonic()).
@@ -996,12 +1071,27 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                     continue
 
                 ordered = int(item.get("quantity", 1) or 1)
-                per_unit = max(1, int(matched_group.get("deduct_per_unit", 1) or 1))
-                units = _calculate_physical_units(m_sku, ordered, per_unit)
+                # Рецепт артикула: своя группа × qty плюс другие группы набора
+                # (backend/services/sku_recipes.py). Нет рецепта — своя × 1.
+                components = sku_recipes.components_for(gid, active_groups, m_sku)
+                is_bundle = len(components) > 1
+                live = [(cg, q) for cg, q in components if cg in active_groups]
+                home_units = _calculate_physical_units(m_sku, ordered, components[0][1])
+                bundle_label = None
+                if is_bundle:
+                    bundle_label = " + ".join(
+                        f"{(groups.get(cg) or {}).get('group_name') or cg} ×{q}" for cg, q in components
+                    )
 
+                claim_payload = {"stage": "packaging", "sku": m_sku, "units": home_units}
+                if is_bundle:
+                    claim_payload["components"] = [
+                        {"group_id": cg, "units": _calculate_physical_units(m_sku, ordered, q)}
+                        for cg, q in live
+                    ]
                 if not await asyncio.to_thread(
                     claim_stock_deduction, store_id, order_code, "packaging",
-                    {"stage": "packaging", "sku": m_sku, "units": units}, m_sku,
+                    claim_payload, m_sku,
                 ):
                     new_marks[pkey] = processed_orders[pkey] = {
                         "deducted_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1012,92 +1102,89 @@ async def process_packaging_auto_deduction(token: str, store_id: Optional[str] =
                     }
                     continue
 
-                old_stock = int(matched_group.get("shared_stock", 0))
-                new_stock = max(0, old_stock - units)
-                # Сколько штук заказали сверх того, что числилось. max(0, ...)
-                # обрезает остаток по нулю — иначе отрицательное число утечёт
-                # в оверрайд каталога и в Kaspi. Но сам факт нехватки терялся
-                # прямо здесь: журнал показывал "было 4 → стало 0" и ни слова
-                # о том, что трёх штук нет. Копим долг отдельным полем.
-                shortfall = max(0, units - old_stock)
-                debt = int(matched_group.get("oversold", 0)) + shortfall
-                matched_group["shared_stock"] = new_stock
-                matched_group["oversold"] = debt
-                matched_group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                # Статус, который видно на карточке группы, пока идёт списание
-                # и следующая за ним веерная рассылка.
-                matched_group["status"] = "deducting"
-                matched_group["status_since"] = datetime.datetime.now().isoformat()
-
-                now_time = datetime.datetime.now().strftime("%H:%M:%S")
-                tail = ""
-                if shortfall:
-                    tail = f", не хватило {shortfall} шт. — продано больше, чем числилось"
-                    logger.warning(
-                        "🚨 [AutoDeduction] Перепродажа: заказ #%s списал %d шт. у группы '%s' "
-                        "при остатке %d. Не хватает %d шт. (всего долг %d).",
-                        order_code, units, matched_group.get("group_name"),
-                        old_stock, shortfall, debt,
+                # Составляющая набора, чья группа выключена или удалена, остатком
+                # не управляется: не списываем, но пишем об этом в журнал набора.
+                for cg, _q in components:
+                    if cg in active_groups:
+                        continue
+                    warn = (
+                        f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ⚠ Набор {m_sku}, заказ "
+                        f"#{order_code}: группа '{(groups.get(cg) or {}).get('group_name') or cg}' "
+                        f"выключена или удалена — из неё не списано"
                     )
-                # Комплект показываем прямо в журнале: иначе "заказали 1 —
-                # списали 7" снова выглядит как поломка, а не как настройка.
-                pack = f" [заказано {ordered} × комплект {per_unit}]" if per_unit > 1 else ""
-                log_entry = (
-                    f"[{now_time}] 🛒 Списание по заказу #{order_code} ({m_sku}): "
-                    f"-{units} шт.{pack} (было {old_stock} → стало {new_stock}{tail})"
-                )
-                logs = matched_group.setdefault("sync_logs", [])
-                logs.insert(0, log_entry)
-                matched_group["sync_logs"] = logs[:30]
-                matched_group["last_sync_log"] = log_entry
+                    logger.warning("[AutoDeduction] %s", warn)
+                    logs = matched_group.setdefault("sync_logs", [])
+                    logs.insert(0, warn)
+                    matched_group["sync_logs"] = logs[:30]
+                    changed_groups[gid] = matched_group
 
-                changed_groups[gid] = matched_group
+                parts = []
+                for cg, qty in live:
+                    g = active_groups[cg]
+                    units = _calculate_physical_units(m_sku, ordered, qty)
+                    res = _deduct_from_group(
+                        g, units, ordered=ordered, per_unit=qty,
+                        order_code=order_code, m_sku=m_sku, bundle_label=bundle_label,
+                    )
+                    changed_groups[cg] = g
+                    parts.append({"group_id": cg, "units": units, **res})
 
-                new_marks[pkey] = processed_orders[pkey] = {
+                    if res["shortfall"]:
+                        asyncio.create_task(notify_oversold_telegram(
+                            group_name=g.get("group_name") or "Без названия",
+                            group_id=g.get("group_id") or cg,
+                            store_id=store_id,
+                            order_code=order_code,
+                            sku=m_sku,
+                            units=units,
+                            old_stock=res["old_stock"],
+                            debt=res["debt"],
+                        ))
+
+                    to_broadcast[g.get("group_id") or cg] = {
+                        "order_code": order_code,
+                        "sku": m_sku,
+                        "units": units,
+                        "title": resolve_product_name(m_sku, title) or "Товар",
+                        "customer": order.get("customer") or "Покупатель",
+                    }
+
+                # Своя группа всегда первая в рецепте; её цифры — в корне
+                # отметки, как было до наборов (на них опирается разбор §3.50).
+                home = parts[0]
+                mark = {
                     "deducted_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "group_id": matched_group.get("group_id"),
                     "sku": m_sku,
-                    "units": units,
-                    "old_stock": old_stock,
-                    "new_stock": new_stock,
-                    "shortfall": shortfall,
+                    "units": home["units"],
+                    "old_stock": home["old_stock"],
+                    "new_stock": home["new_stock"],
+                    "shortfall": home["shortfall"],
                 }
+                if is_bundle:
+                    mark["components"] = [
+                        {k: p[k] for k in ("group_id", "units", "old_stock", "new_stock", "shortfall")}
+                        for p in parts
+                    ]
+                new_marks[pkey] = processed_orders[pkey] = mark
 
-                new_deductions.append({
+                deduction = {
                     "order_code": order_code,
                     "group_id": matched_group.get("group_id"),
                     "group_name": matched_group.get("group_name"),
                     "sku": m_sku,
-                    "units": units,
-                    "new_stock": new_stock,
-                    "shortfall": shortfall,
-                })
-
-                logger.info(
-                    f"⚡ [AutoDeduction] Заказ #{order_code} списал {units} шт. "
-                    f"у группы '{matched_group.get('group_name')}'. Остаток: {new_stock}"
-                    + (f" (долг {debt} шт.)" if debt else "")
-                )
-
-                if shortfall:
-                    asyncio.create_task(notify_oversold_telegram(
-                        group_name=matched_group.get("group_name") or "Без названия",
-                        group_id=matched_group.get("group_id") or gid,
-                        store_id=store_id,
-                        order_code=order_code,
-                        sku=m_sku,
-                        units=units,
-                        old_stock=old_stock,
-                        debt=debt,
-                    ))
-
-                to_broadcast[matched_group.get("group_id") or gid] = {
-                    "order_code": order_code,
-                    "sku": m_sku,
-                    "units": units,
-                    "title": resolve_product_name(m_sku, title) or "Товар",
-                    "customer": order.get("customer") or "Покупатель",
+                    "units": home["units"],
+                    "new_stock": home["new_stock"],
+                    "shortfall": home["shortfall"],
                 }
+                if is_bundle:
+                    deduction["components"] = [
+                        {"group_id": p["group_id"],
+                         "group_name": active_groups[p["group_id"]].get("group_name"),
+                         "units": p["units"], "new_stock": p["new_stock"], "shortfall": p["shortfall"]}
+                        for p in parts
+                    ]
+                new_deductions.append(deduction)
 
         if changed_groups:
             await asyncio.to_thread(_save_master_stock_groups, changed_groups, store_id=store_id)

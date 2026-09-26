@@ -27,6 +27,14 @@ import { fetchGroupsQuery, fetchProductsQuery } from '../queries';
 import { useActiveStoreId } from '../storeContext';
 import { openImageLightbox } from './shared/ImageLightbox';
 import { HelpHint } from './shared/HelpHint';
+import { SkuRecipeEditor } from './SkuRecipeEditor';
+import {
+  type SkuRecipes,
+  cleanRecipesForSubmit,
+  findRecipe,
+  foreignBundles,
+  hasPacksOrBundles,
+} from './skuRecipes';
 
 interface GroupDumpingConfig {
   enabled: boolean;
@@ -48,8 +56,8 @@ export interface MasterStockGroup {
   shared_stock: number;
   /** Долг: продано сверх остатка. Остаток при этом обрезан нулём. */
   oversold?: number;
-  /** Сколько штук остатка съедает одна проданная единица (комплект). */
-  deduct_per_unit?: number;
+  /** Рецепты списания по артикулам: ×N и наборы (см. skuRecipes.ts). */
+  sku_recipes?: SkuRecipes;
   linked_skus: string[];
   external_code?: string;
   is_active: boolean;
@@ -179,7 +187,7 @@ export const MasterStockGroups: React.FC = () => {
   const [formGroupName, setFormGroupName] = useState<string>('');
   const [formSharedStock, setFormSharedStock] = useState<number>(10);
   const [formStopQty, setFormStopQty] = useState<number>(5);
-  const [formDeductPerUnit, setFormDeductPerUnit] = useState<number>(1);
+  const [formRecipes, setFormRecipes] = useState<SkuRecipes>({});
   const [formSelectedSkus, setFormSelectedSkus] = useState<string[]>([]);
   const [formExternalCode, setFormExternalCode] = useState<string>('');
   const [formIsActive, setFormIsActive] = useState<boolean>(true);
@@ -245,7 +253,7 @@ export const MasterStockGroups: React.FC = () => {
       case 'low': return g.shared_stock > stop && g.shared_stock <= stop * 2;
       case 'ok': return g.shared_stock > stop * 2;
       case 'debt': return (g.oversold ?? 0) > 0;
-      case 'pack': return (g.deduct_per_unit ?? 1) > 1;
+      case 'pack': return hasPacksOrBundles(g, groups);
       case 'paused': return !g.is_active;
       default: return true;
     }
@@ -288,7 +296,7 @@ export const MasterStockGroups: React.FC = () => {
     { id: 'low', label: 'Мало остатка', color: 'var(--warning)' },
     { id: 'ok', label: 'Запас в норме', color: 'var(--success)' },
     { id: 'debt', label: 'С долгом', color: 'var(--error)' },
-    { id: 'pack', label: 'Комплект > 1', color: '#c084fc' },
+    { id: 'pack', label: 'Комплекты и наборы', color: '#c084fc' },
     { id: 'paused', label: 'На паузе', color: 'var(--text-muted)' },
   ];
 
@@ -309,7 +317,7 @@ export const MasterStockGroups: React.FC = () => {
     setFormGroupName('');
     setFormSharedStock(10);
     setFormStopQty(5);
-    setFormDeductPerUnit(1);
+    setFormRecipes({});
     setFormSelectedSkus([]);
     setFormExternalCode('');
     setFormIsActive(true);
@@ -329,7 +337,7 @@ export const MasterStockGroups: React.FC = () => {
     setFormGroupName(group.group_name);
     setFormSharedStock(group.shared_stock);
     setFormStopQty(group.stop_qty ?? 5);
-    setFormDeductPerUnit(group.deduct_per_unit ?? 1);
+    setFormRecipes(JSON.parse(JSON.stringify(group.sku_recipes || {})));
     setFormSelectedSkus([...group.linked_skus]);
     setFormExternalCode(group.external_code || '');
     setFormIsActive(group.is_active);
@@ -415,7 +423,7 @@ export const MasterStockGroups: React.FC = () => {
           group_name: formGroupName.trim(),
           shared_stock: formSharedStock,
           stop_qty: formStopQty,
-          deduct_per_unit: formDeductPerUnit,
+          sku_recipes: cleanRecipesForSubmit(formRecipes, buildLinkedCards(formSelectedSkus, products)),
           linked_skus: formSelectedSkus,
           external_code: formExternalCode.trim() || undefined,
           is_active: formIsActive,
@@ -802,7 +810,7 @@ export const MasterStockGroups: React.FC = () => {
                   chip.id === 'critical' ? 'Остаток ниже или равен стоп-количеству — карточки сняты с продажи'
                   : chip.id === 'low' ? 'Остаток не более двух стоп-количеств — скоро снимется'
                   : chip.id === 'debt' ? 'Продано больше, чем числилось на остатке'
-                  : chip.id === 'pack' ? 'За одну продажу списывается несколько штук'
+                  : chip.id === 'pack' ? 'Есть карточки ×N или наборы из нескольких групп'
                   : undefined
                 }
                 style={{
@@ -1014,24 +1022,6 @@ export const MasterStockGroups: React.FC = () => {
                               }}>
                               {group.shared_stock} шт
                             </span>
-                            {(group.deduct_per_unit ?? 1) > 1 && (
-                              // Иначе «заказали 1 — списали 7» снова читается
-                              // как поломка движка, а не как настройка группы.
-                              <span
-                                title={`За одну проданную единицу списывается ${group.deduct_per_unit} шт. остатка`}
-                                style={{
-                                  fontSize: '12px',
-                                  fontWeight: 700,
-                                  color: '#c084fc',
-                                  padding: '4px 10px',
-                                  borderRadius: '8px',
-                                  background: 'rgba(168, 85, 247, 0.12)',
-                                  border: '1px solid rgba(168, 85, 247, 0.35)',
-                                  whiteSpace: 'nowrap'
-                                }}>
-                                ×{group.deduct_per_unit} за продажу
-                              </span>
-                            )}
                             {(group.oversold ?? 0) > 0 && (
                               // Остаток обрезан нулём (в Kaspi отрицательное не
                               // уходит), поэтому нехватку показываем отдельно —
@@ -1080,6 +1070,22 @@ export const MasterStockGroups: React.FC = () => {
                           {(() => {
                             const cards = buildLinkedCards(group.linked_skus, products);
                             const visible = expandedSkusGroupId === group.group_id ? cards : cards.slice(0, 6);
+                            const nameOf = (gid: string) => groups.find(x => x.group_id === gid)?.group_name || gid;
+                            const recipeBadge = (card: LinkedCard) => {
+                              const r = findRecipe(group.sku_recipes, [card.label, ...card.aliases])?.[1];
+                              if (!r) return null;
+                              const extra = r.extra || [];
+                              const hint = [
+                                `За 1 продажу: ${r.qty} шт. этой группы`,
+                                ...extra.map(x => `+ ${x.qty} шт. из «${nameOf(x.group_id)}»`),
+                              ].join('\n');
+                              return (
+                                <span title={hint} style={{ color: '#c084fc', fontWeight: 700, fontFamily: 'inherit' }}>
+                                  {r.qty > 1 ? `×${r.qty}` : ''}{extra.length > 0 ? ` +набор` : ''}
+                                </span>
+                              );
+                            };
+                            const foreign = foreignBundles(group.group_id, groups);
                             return (
                               <>
                                 {visible.map(card => {
@@ -1117,15 +1123,41 @@ export const MasterStockGroups: React.FC = () => {
                                     >
                                       <Package size={12} color={card.archived ? '#f59e0b' : 'var(--primary-hover)'} />
                                       {card.label}
+                                      {recipeBadge(card)}
                                       <ExternalLink size={11} />
                                     </a>
                                   ) : (
                                     <span key={card.key} title={hint || card.label} style={chipStyle}>
                                       <Package size={12} color="var(--text-muted)" />
                                       {card.label}
+                                      {recipeBadge(card)}
                                     </span>
                                   );
                                 })}
+
+                                {/* Наборы из других групп, куда эта входит составляющей:
+                                    иначе списание «по чужому» заказу выглядит как утечка. */}
+                                {foreign.map(fb => (
+                                  <span
+                                    key={`${fb.homeGroupId}:${fb.sku}`}
+                                    title={`Входит в набор группы «${fb.homeGroupName}»: продажа набора ${fb.sku} списывает ${fb.qtyHere} шт. отсюда`}
+                                    style={{
+                                      padding: '4px 10px',
+                                      borderRadius: '20px',
+                                      background: 'rgba(168, 85, 247, 0.06)',
+                                      border: '1px dashed rgba(168, 85, 247, 0.45)',
+                                      color: '#c084fc',
+                                      fontSize: '12px',
+                                      fontFamily: 'monospace',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                    }}
+                                  >
+                                    <Layers size={12} />
+                                    {fb.sku}{fb.qtyHere > 1 ? ` ×${fb.qtyHere}` : ''} · набор
+                                  </span>
+                                ))}
 
                                 {cards.length > 6 && (
                                   <button
@@ -1413,36 +1445,6 @@ export const MasterStockGroups: React.FC = () => {
                       boxSizing: 'border-box'
                     }}
                   />
-                </div>
-
-                {/* Deduct Per Unit Input */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' }}>
-                    Списывать за 1 продажу
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={formDeductPerUnit}
-                    onChange={e => setFormDeductPerUnit(Math.max(1, parseInt(e.target.value) || 1))}
-                    title="Сколько штук общего остатка съедает ОДНА проданная единица. Обычный товар — 1. Комплект (продаётся набором, а остаток считается поштучно) — размер набора."
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      borderRadius: '10px',
-                      background: 'var(--card-bg)',
-                      border: formDeductPerUnit > 1 ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid var(--card-border)',
-                      color: formDeductPerUnit > 1 ? '#c084fc' : 'var(--text-color)',
-                      fontSize: '14px',
-                      fontWeight: formDeductPerUnit > 1 ? 700 : 400,
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '5px', lineHeight: 1.4 }}>
-                    {formDeductPerUnit > 1
-                      ? `Заказ на 1 шт. уменьшит остаток на ${formDeductPerUnit} шт.`
-                      : 'Обычный товар: сколько заказали, столько и спишется.'}
-                  </div>
                 </div>
 
                 {/* 1C External Code Input */}
@@ -1793,6 +1795,16 @@ export const MasterStockGroups: React.FC = () => {
                   )}
                 </div>
               </div>
+
+              <SkuRecipeEditor
+                cards={buildLinkedCards(formSelectedSkus, products)}
+                recipes={formRecipes}
+                onChange={setFormRecipes}
+                groupId={editingGroupId}
+                sharedStock={formSharedStock}
+                stopQty={formStopQty}
+                groups={groups}
+              />
 
               {/* Submit Buttons */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '12px' }}>

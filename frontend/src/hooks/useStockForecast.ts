@@ -15,7 +15,6 @@ export interface StockForecastItem {
   status: string;
   in_catalog: boolean;
   members_count: number;
-  deduct_per_unit: number;
   stock: number;
   sold: number;
   sold_recent: number;

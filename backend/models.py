@@ -70,6 +70,18 @@ class GroupDumpingConfig(BaseModel):
     blacklisted_merchants: Optional[List[str]] = []
     city_code: Optional[str] = "750000000"
 
+class SkuRecipeComponent(BaseModel):
+    group_id: str
+    qty: int = 1
+
+
+class SkuRecipe(BaseModel):
+    """Рецепт списания артикула: qty своей группы + другие группы набора.
+    См. backend/services/sku_recipes.py."""
+    qty: int = 1
+    extra: Optional[List[SkuRecipeComponent]] = None
+
+
 class MasterStockGroupCreateRequest(BaseModel):
     group_name: str
     shared_stock: int
@@ -77,8 +89,10 @@ class MasterStockGroupCreateRequest(BaseModel):
     external_code: Optional[str] = None
     is_active: Optional[bool] = True
     stop_qty: Optional[int] = 5
-    # Сколько штук остатка списывать за одну проданную единицу (комплект).
-    deduct_per_unit: Optional[int] = 1
+    # {артикул: рецепт}. Групповой deduct_per_unit убран (27.09): множитель
+    # теперь у каждого артикула свой. Старый клиент, приславший
+    # deduct_per_unit, просто игнорируется.
+    sku_recipes: Optional[Dict[str, SkuRecipe]] = None
     dumping_config: Optional[GroupDumpingConfig] = None
     dumping_excluded_skus: Optional[List[str]] = None
 
@@ -89,7 +103,7 @@ class MasterStockGroupUpdateRequest(BaseModel):
     external_code: Optional[str] = None
     is_active: Optional[bool] = None
     stop_qty: Optional[int] = None
-    deduct_per_unit: Optional[int] = None
+    sku_recipes: Optional[Dict[str, SkuRecipe]] = None
     dumping_config: Optional[GroupDumpingConfig] = None
     dumping_excluded_skus: Optional[List[str]] = None
 

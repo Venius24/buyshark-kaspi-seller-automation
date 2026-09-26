@@ -472,12 +472,13 @@ def _load_master_stock_groups(store_id: str) -> dict:
                 dumping_cfg = json.loads(r.dumping_config) if r.dumping_config else None
                 dumping_excluded_skus = json.loads(r.dumping_excluded_skus) if r.dumping_excluded_skus else []
                 sync_logs = json.loads(r.sync_logs) if r.sync_logs else []
+                sku_recipes = json.loads(r.sku_recipes) if r.sku_recipes else {}
                 groups[r.group_id] = {
                     "group_id": r.group_id,
                     "group_name": r.group_name,
                     "shared_stock": r.shared_stock,
                     "oversold": r.oversold or 0,
-                    "deduct_per_unit": r.deduct_per_unit or 1,
+                    "sku_recipes": sku_recipes,
                     "linked_skus": linked_skus,
                     "external_code": r.external_code,
                     "is_active": r.is_active,
@@ -510,6 +511,7 @@ def _save_master_stock_groups(groups: dict, store_id: str):
             dump_cfg_str = json.dumps(g.get("dumping_config"), ensure_ascii=False) if g.get("dumping_config") else None
             dump_excl_str = json.dumps(g.get("dumping_excluded_skus") or [], ensure_ascii=False)
             logs_str = json.dumps(g.get("sync_logs") or [], ensure_ascii=False)
+            recipes_str = json.dumps(g["sku_recipes"], ensure_ascii=False) if g.get("sku_recipes") else None
             if not db_obj:
                 db_obj = MasterStockGroupDB(
                     group_id=gid,
@@ -517,7 +519,7 @@ def _save_master_stock_groups(groups: dict, store_id: str):
                     group_name=g.get("group_name", "Группа"),
                     shared_stock=int(g.get("shared_stock", 0)),
                     oversold=int(g.get("oversold", 0)),
-                    deduct_per_unit=max(1, int(g.get("deduct_per_unit", 1) or 1)),
+                    sku_recipes=recipes_str,
                     linked_skus=linked_str,
                     external_code=g.get("external_code"),
                     is_active=bool(g.get("is_active", True)),
@@ -537,7 +539,10 @@ def _save_master_stock_groups(groups: dict, store_id: str):
                 db_obj.group_name = g.get("group_name", "Группа")
                 db_obj.shared_stock = int(g.get("shared_stock", 0))
                 db_obj.oversold = int(g.get("oversold", 0))
-                db_obj.deduct_per_unit = max(1, int(g.get("deduct_per_unit", 1) or 1))
+                # Словарь без ключа (собран не из _load_master_stock_groups) не
+                # должен молча стирать наборы группы.
+                if "sku_recipes" in g:
+                    db_obj.sku_recipes = recipes_str
                 db_obj.linked_skus = linked_str
                 db_obj.external_code = g.get("external_code")
                 db_obj.is_active = bool(g.get("is_active", True))

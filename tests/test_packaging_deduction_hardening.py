@@ -165,19 +165,24 @@ class TestClaimKeySeparatesAnnotatedSku(unittest.TestCase):
 
 
 class TestPackSizeSetting(unittest.TestCase):
-    """`deduct_per_unit` — единственный источник размера комплекта."""
+    """Рецепт артикула (`sku_recipes`) — единственный источник размера комплекта."""
 
     def test_default_group_deducts_one_for_one(self):
-        g = group("a", "A", ["T219-0005"])
-        self.assertEqual(
-            _calculate_physical_units("T219-0005", 1, g.get("deduct_per_unit", 1)), 1
-        )
+        from backend.services.sku_recipes import components_for
+        groups = {"a": group("a", "A", ["T219-0005"])}
+        self.assertEqual(components_for("a", groups, "T219-0005"), [("a", 1)])
 
-    def test_group_with_pack_deducts_the_pack(self):
-        g = {**group("a", "Палочки", ["H422-0002-4"]), "deduct_per_unit": 7}
-        self.assertEqual(
-            _calculate_physical_units("H422-0002-4", 2, g["deduct_per_unit"]), 14
-        )
+    def test_sku_with_pack_deducts_the_pack(self):
+        from backend.services.sku_recipes import components_for
+        g = {**group("a", "Палочки", ["H422-0002-4"]), "sku_recipes": {"H422-0002-4": {"qty": 7}}}
+        (_, per_unit), = components_for("a", {"a": g}, "H422-0002-4")
+        self.assertEqual(_calculate_physical_units("H422-0002-4", 2, per_unit), 14)
+
+    def test_legacy_group_field_is_ignored(self):
+        """deduct_per_unit перенесён миграцией 044 в рецепты и больше не читается."""
+        from backend.services.sku_recipes import components_for
+        g = {**group("a", "A", ["T219-0005"]), "deduct_per_unit": 7}
+        self.assertEqual(components_for("a", {"a": g}, "T219-0005"), [("a", 1)])
 
 
 class DeductionTestCase(unittest.TestCase):
@@ -219,7 +224,7 @@ class TestPackSizeInDeductionCycle(DeductionTestCase):
 
     def _sell(self, qty, per_unit, stock=100):
         g = group("a", "Палочки NG", ["H422-0002-4"], stock=stock)
-        g["deduct_per_unit"] = per_unit
+        g["sku_recipes"] = {"H422-0002-4": {"qty": per_unit}}
         self.groups = {"a": g}
         return self.run_cycle({"cargo_assembly": [
             {"code": "777", "items": [{"merchant_sku": "H422-0002-4", "title": "t", "quantity": qty}]}
