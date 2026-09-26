@@ -787,6 +787,12 @@ class MasterGroupMatcher:
         self._by_linked_sku: Dict[str, Dict[str, Any]] = {}
         self._ambiguous_linked_skus: Set[str] = set()
 
+        # Все группы по id, включая выключенные: составляющая набора физически
+        # лежит в коробке, даже если её остатком сейчас никто не управляет.
+        self._by_id: Dict[str, Dict[str, Any]] = {
+            g["group_id"]: g for g in master_groups if g.get("group_id")
+        }
+
         for group in master_groups:
             if not group.get("is_active", True):
                 continue
@@ -930,6 +936,47 @@ class MasterGroupMatcher:
             return None
         return self._by_linked_sku.get(low)
 
+    def stamp_label(self, group: Dict[str, Any], order_skus: List[str]) -> str:
+        """
+        Текст штампа с учётом рецепта артикула (sku_recipes): «H422-0007 ×2»
+        для двойной упаковки, «НАБОР: S517-0046 + 48» для набора из разных
+        групп. Без рецепта — просто название группы, как было.
+
+        Рецепт берётся только если он у всех артикулов заказа из этой группы
+        один и тот же: «H422-0007-9» и «H422-0007-9 2шт» в одном заказе дали
+        бы на одной накладной и ×1, и ×2, а один штамп на двоих соврал бы.
+        """
+        from backend.services import sku_recipes
+
+        name = group.get("group_name") or ""
+        gid = group.get("group_id")
+        if not gid:
+            return name
+        recipes = set()
+        for sku in order_skus:
+            if self.match_by_sku(sku) is group:
+                comps = sku_recipes.components_for(gid, self._by_id, sku)
+                recipes.add(tuple(c for c in comps if c[0] in self._by_id))
+        if len(recipes) != 1:
+            return name
+        comps = next(iter(recipes))
+        if sku_recipes.is_plain(list(comps)):
+            return name
+        if len(comps) == 1:
+            return f"{name} ×{comps[0][1]}"
+
+        parts: List[str] = []
+        first_code = None
+        for cgid, qty in comps:
+            code = _group_code(self._by_id[cgid].get("group_name") or cgid)
+            if first_code is None:
+                first_code = code
+                shown = code
+            else:
+                shown = _shorten_code(first_code, code)
+            parts.append(f"{shown} ×{qty}" if qty > 1 else shown)
+        return "НАБОР: " + " + ".join(parts)
+
     def match(self, product_name: Optional[str]) -> Optional[Dict[str, Any]]:
         if not product_name:
             return None
@@ -992,6 +1039,33 @@ class MasterGroupMatcher:
                 return group
 
         return None
+
+
+def _group_code(group_name: str) -> str:
+    """Артикул из начала названия группы («S517-0048 Ключ» → «S517-0048»).
+
+    В штампе набора места на несколько полных названий нет, а упаковщику
+    нужен ориентир на полке — артикул. Название без артикула в начале
+    отдаётся целиком.
+    """
+    name = " ".join(str(group_name or "").split())
+    head = name.split(" ", 1)[0] if name else ""
+    low = head.lower()
+    if head and _CODE_TOKEN_RE.match(low) and not _is_measure_token(low):
+        return head.upper()
+    return name
+
+
+def _shorten_code(first: str, code: str) -> str:
+    """«S517-0048» после «S517-0046» → «48», как владелец пишет сам
+    (артикул набора S517-0046-48). Общая часть до последнего дефиса
+    выбрасывается, ведущие нули последнего сегмента — тоже.
+    """
+    a, b = first.split("-"), code.split("-")
+    if len(a) < 2 or len(a) != len(b) or a[:-1] != b[:-1]:
+        return code
+    tail = b[-1]
+    return (tail.lstrip("0") or "0") if tail.isdigit() else tail
 
 
 # ---------------------------------------------------------------------------
@@ -2160,8 +2234,15 @@ def _process_zip_or_pdfs_locked(
                             matched_group = group_matcher.match(product_name)
                             stamp_guessed = matched_group is not None
                         if matched_group:
-                            stamp_label = matched_group.get("group_name") or product_name
-                            group_sort_key = f"0_{stamp_label}"
+                            group_name = matched_group.get("group_name") or product_name
+                            stamp_label = group_name
+                            if matched_by_sku:
+                                # ×N и состав набора — только когда артикул
+                                # известен точно; по названию рецепт не узнать.
+                                stamp_label = group_matcher.stamp_label(matched_group, order_sku_list) or group_name
+                            # Сортируем по группе, а не по штампу: ×2 и ×1 одной
+                            # полки должны лежать в стопке рядом.
+                            group_sort_key = f"0_{group_name}"
                             grouped_pages_count += 1
                             if matched_by_sku:
                                 sku_matched_pages_count += 1
