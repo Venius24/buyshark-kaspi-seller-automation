@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from passlib.context import CryptContext
-from jose import JWTError, jwt
+from jose import ExpiredSignatureError, JWTError, jwt
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,11 @@ def decode_token(token: str) -> Optional[Dict[str, Any]]:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
+    except ExpiredSignatureError:
+        # Штатная ситуация: access живёт 15 минут, фронт ловит 401 и обновляет
+        # токен. На WARNING это ~200 строк в сутки, в которых тонут настоящие ошибки.
+        logger.debug("JWT истёк")
+        return None
     except JWTError as e:
         logger.warning(f"Ошибка валидации JWT: {e}")
         return None
