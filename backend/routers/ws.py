@@ -16,7 +16,8 @@ async def websocket_endpoint(websocket: WebSocket):
     # (инцидент 2026-08-22).
     async with AsyncSessionLocal() as db:
         store_id = await resolve_ws_store_id(websocket, db)
-    await telemetry_manager.connect(websocket, store_id)
+    if not await telemetry_manager.connect(websocket, store_id):
+        return
     try:
         while True:
             # Ожидаем любые входные сообщения (например, ping/pong от клиента)

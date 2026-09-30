@@ -32,11 +32,26 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[Optional[str], List[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket, store_id: Optional[str] = None):
-        await websocket.accept()
+    async def connect(self, websocket: WebSocket, store_id: Optional[str] = None) -> bool:
+        """Принимает рукопожатие и регистрирует клиента. False — клиент ушёл раньше.
+
+        Между началом рукопожатия и accept() эндпоинт ходит в БД резолвить
+        JWT/магазин. Если браузер за это время закрыл вкладку или ушёл на
+        переподключение, uvicorn уже пометил соединение закрытым, и accept()
+        падает RuntimeError'ом «Expected ASGI message 'websocket.send' or
+        'websocket.close', but got 'websocket.accept'» (не WebSocketDisconnect).
+        Это обычный уход клиента, а не ошибка: не регистрируем сокет и не
+        пускаем исключение наверх, иначе каждый такой случай летит в Sentry.
+        """
+        try:
+            await websocket.accept()
+        except Exception as e:
+            logger.info(f"📡 [WebSocket] Клиент отключился до завершения рукопожатия (store={store_id}): {e}")
+            return False
         self.active_connections.setdefault(store_id, []).append(websocket)
         total = sum(len(v) for v in self.active_connections.values())
         logger.info(f"📡 [WebSocket] Новое подключение клиентской панели (store={store_id}). Всего клиентов: {total}")
+        return True
 
     def disconnect(self, websocket: WebSocket, store_id: Optional[str] = None):
         connections = self.active_connections.get(store_id)
@@ -61,8 +76,11 @@ class ConnectionManager:
             "data": payload
         }
 
+        # Копия: на каждом await send_json параллельный disconnect() (закрытая
+        # вкладка, другая рассылка) может убрать клиента из этого же списка,
+        # и итерация по живому списку молча перескочила бы следующего.
         dead_connections = []
-        for connection in connections:
+        for connection in list(connections):
             try:
                 await connection.send_json(message)
             except Exception as e:

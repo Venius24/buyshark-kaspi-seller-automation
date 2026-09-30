@@ -55,6 +55,35 @@ class TestConnectionManagerPerStore(unittest.IsolatedAsyncioTestCase):
         ws1.send_json.assert_awaited_once()
         ws2.send_json.assert_awaited_once()
 
+    async def test_client_gone_before_accept_is_not_registered_and_not_raised(self):
+        """Прод, 29–30.09: браузер рвёт соединение, пока эндпоинт резолвит JWT
+        в БД, и uvicorn отвечает на accept() RuntimeError'ом. Это уход клиента,
+        а не ошибка — наверх (в Sentry) не летит, в рассылку сокет не попадает."""
+        ws = make_ws()
+        ws.accept.side_effect = RuntimeError(
+            "Expected ASGI message 'websocket.send' or 'websocket.close', but got 'websocket.accept'."
+        )
+        accepted = await self.manager.connect(ws, "store-a")
+        self.assertFalse(accepted)
+        self.assertNotIn("store-a", self.manager.active_connections)
+
+    async def test_connect_returns_true_on_success(self):
+        self.assertTrue(await self.manager.connect(make_ws(), "store-a"))
+
+    async def test_disconnect_during_broadcast_does_not_skip_next_client(self):
+        """Пока рассылка ждёт send_json первому клиенту, тот отключается и
+        убирается из списка — второй клиент всё равно должен получить событие."""
+        ws1, ws2 = make_ws(), make_ws()
+        await self.manager.connect(ws1, "store-a")
+        await self.manager.connect(ws2, "store-a")
+
+        async def drop_self(_msg):
+            self.manager.disconnect(ws1, "store-a")
+        ws1.send_json.side_effect = drop_self
+
+        await self.manager.broadcast("price_update", {"sku": "X1"}, store_id="store-a")
+        ws2.send_json.assert_awaited_once()
+
     async def test_broadcast_to_store_with_no_clients_is_a_noop(self):
         # No exception, no-op — mirrors the old "if not active_connections: return" guard.
         await self.manager.broadcast("price_update", {"sku": "X1"}, store_id="store-with-nobody-watching")
