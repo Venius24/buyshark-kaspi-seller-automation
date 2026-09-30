@@ -22,6 +22,7 @@ aiohttp-socks>=0.8.4
 sentry-sdk>=2.0.0
 curl_cffi>=0.7.0
 psutil>=5.9.0
+prometheus-fastapi-instrumentator>=8.1.0,<9.0.0
 openpyxl>=3.1.0
 Pillow>=10.0.0
 

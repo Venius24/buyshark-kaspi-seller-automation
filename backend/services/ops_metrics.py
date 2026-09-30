@@ -1,10 +1,10 @@
 """Счётчики операционного здоровья системы (ночной аудит 2026-08-24).
 
-Лёгкий потокобезопасный сборщик без зависимостей: воркеры и обёртки Kaspi
+Лёгкий потокобезопасный сборщик: воркеры и обёртки Kaspi
 инкрементируют счётчики и дёргают точки интереса, а ops_digest_worker раз в
 сутки шлёт владельцу сводку и немедленно кричит при «логин-шторме».
 
-Дизайн: это ЛИСТОВОЙ модуль (импортирует только stdlib) — его можно
+Дизайн: это ЛИСТОВОЙ модуль (без импортов из приложения) — его можно
 импортить откуда угодно, включая state_helpers, не создавая циклов.
 """
 import os
@@ -13,12 +13,29 @@ import time
 from collections import deque
 from datetime import datetime
 
+from prometheus_client import Counter
+
 _lock = threading.Lock()
 
 # Именованные счётчики: kaspi_429, kaspi_429_exhausted, kaspi_http_error_5xx,
 # mc_relogin_ok, mc_relogin_failed, mc_relogin_skipped_cooldown,
 # webhook_fail. Снапшот для утренней сводки забирает с обнулением.
 _counters: dict = {}
+
+# Отдельный накопительный счётчик для Prometheus. Суточная сводка ниже
+# по-прежнему сбрасывает только _counters; Prometheus Counter не сбрасывается.
+_prom_events = Counter(
+    "kaspi_ops_events_total",
+    "Operational events grouped by fixed event name",
+    ["event"],
+)
+_prom_event_names = frozenset({
+    "kaspi_429", "kaspi_429_exhausted", "kaspi_http_error_5xx",
+    "mc_relogin_ok", "mc_relogin_failed", "mc_relogin_skipped_cooldown",
+    "webhook_fail",
+})
+for _name in _prom_event_names:
+    _prom_events.labels(event=_name)
 
 # Кольцо последних примечательных событий (не сырые логи, а «что случилось»).
 _events: deque = deque(maxlen=300)
@@ -35,6 +52,8 @@ _last_storm_alert_at = 0.0
 def inc(name: str, amount: int = 1) -> None:
     with _lock:
         _counters[name] = _counters.get(name, 0) + amount
+    if name in _prom_event_names:
+        _prom_events.labels(event=name).inc(amount)
 
 
 def record(text: str) -> None:

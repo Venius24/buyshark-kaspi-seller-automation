@@ -22,6 +22,7 @@ import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from prometheus_fastapi_instrumentator import Instrumentator
 
 # Локальный .env не подхватывается системой автоматически (на VPS это делает
 # systemd EnvironmentFile) — читаем его вручную, как в backend/chatbot/config.py
@@ -73,6 +74,13 @@ from backend.workers.health_check_worker import start_health_check_loop
 from backend.perf.collector import is_enabled as _perf_enabled
 
 app = FastAPI(title="Kaspi SaaS Wrapper API")
+
+# Uvicorn привязан к 127.0.0.1; nginx отдаёт /metrics только Prometheus
+# из Docker-сети. Метрики HTTP агрегируются по шаблону
+# маршрута, без ID магазинов и других значений из URL.
+Instrumentator(excluded_handlers=[r"^/metrics$"]).instrument(app).expose(
+    app, include_in_schema=False
+)
 
 
 # Дефолтный executor лупа — тот самый пул, в который попадает КАЖДЫЙ
