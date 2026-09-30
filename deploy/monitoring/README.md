@@ -12,7 +12,7 @@ FastAPI отдаёт `/metrics` на `127.0.0.1:5000`. Nginx проксируе�
 ## Конфигурация VPS
 
 1. Применить изменение из `deploy/nginx.conf` к активному
-   `/etc/nginx/sites-available/kaspi-saas`, затем `nginx -t` и reload.
+   `/etc/nginx/sites-enabled/kaspi-saas`, затем `nginx -t` и reload.
 2. В сервис `prometheus` файла
    `/root/job_hunter_bot/docker-compose.monitoring.yml` добавить
    `extra_hosts: ["app.buyshark.kz:host-gateway"]`.
