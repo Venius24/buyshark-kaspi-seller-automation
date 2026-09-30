@@ -119,7 +119,7 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
     if resp.status_code != 200:
         return False
 
-    reset_cookie_alert(store_id)
+    await asyncio.to_thread(reset_cookie_alert, store_id)
 
     data = resp.json().get("data", {})
     groups = data.get("groups", [])
@@ -127,22 +127,25 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
     if not groups and data.get("sts"):
         state["start_gts"] = data.get("sts")
 
-    for group in groups:
-        group_id = group.get("id")
-        if group_id == "chatGuide":
-            continue
+    eligible_groups = [
+        group for group in groups
+        if group.get("id") != "chatGuide"
+        and group.get("lastMessage", {}).get("created", 0) >= day_start_ts
+    ]
+    chat_states = await asyncio.to_thread(
+        config.get_chat_states, store_id, [group.get("id") for group in eligible_groups if group.get("id")]
+    )
 
+    for group in eligible_groups:
+        group_id = group.get("id")
         last_msg = group.get("lastMessage", {})
         msg_id = last_msg.get("id")
         msg_created = last_msg.get("created", 0)
-
-        if msg_created < day_start_ts:
+        chat_state = chat_states.setdefault(group_id, {})
+        if chat_state.get("human_override"):
             continue
 
-        if config.is_chat_human_override(store_id, group_id):
-            continue
-
-        already_replied = config.get_chat_last_replied(store_id, group_id) == msg_id
+        already_replied = chat_state.get("last_replied_msg_id") == msg_id
 
         if last_msg.get("sender") == "messenger" and not already_replied:
             client_name = group.get("subtitle") or group.get("title", "Клиент")
@@ -152,9 +155,10 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
             # Фаза 5 (кампания «Отзыв»): флаг одноразовый — снимаем сразу на
             # первом же ответе клиента, независимо от того, какой веткой
             # (human_triggers/логистика/ИИ) он в итоге обработается ниже.
-            was_awaiting_review = config.is_awaiting_review_reply(store_id, group_id)
+            was_awaiting_review = bool(chat_state.get("awaiting_review_reply"))
             if was_awaiting_review:
-                await asyncio.to_thread(config.clear_awaiting_review_reply, store_id, group_id)
+                await asyncio.to_thread(config.clear_awaiting_review_reply, store_id, group_id, known_awaiting=True)
+                chat_state["awaiting_review_reply"] = False
 
             # Фаза 6 (статистика рассылок): "клиент ответил" фиксируется тут,
             # ДО ветвления на human_triggers/логистику/ИИ — иначе негативные
@@ -182,7 +186,8 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
             logistics_reply = check_logistics_question(client_text, bot_profile)
 
             if logistics_reply:
-                config.mark_chat_replied(store_id, group_id, msg_id)
+                await asyncio.to_thread(config.mark_chat_replied, store_id, group_id, msg_id)
+                chat_state["last_replied_msg_id"] = msg_id
                 await chat_client.send_typing(group_id, logistics_reply + "\n", cookies, merchant_id)
                 await asyncio.sleep(1.5)
                 await chat_client.send_message(group_id, logistics_reply, cookies, merchant_id)
@@ -190,10 +195,11 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
                 logger.info(f"✅ [Chatbot] Логистический шаблон отправлен клиенту {client_name}.")
                 if store_id:
                     from backend.state_helpers import _append_chat_response_log
-                    _append_chat_response_log(store_id, group_id, kind="inbound_logistics_template", billed_units=0)
+                    await asyncio.to_thread(_append_chat_response_log, store_id, group_id, kind="inbound_logistics_template", billed_units=0)
                 continue
 
-            config.mark_chat_replied(store_id, group_id, msg_id)
+            await asyncio.to_thread(config.mark_chat_replied, store_id, group_id, msg_id)
+            chat_state["last_replied_msg_id"] = msg_id
 
             # Резерв дневного кредита ДО платного вызова DeepSeek (Слайс 3).
             # mark_chat_replied уже отработал выше — иначе 5с-цикл вечно
@@ -207,7 +213,7 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
                 if not consume.ok:
                     logger.warning(f"[Chatbot] Store {store_id}: дневной лимит кредитов исчерпан, ответ клиенту {client_name} пропущен.")
                     from backend.state_helpers import _append_chat_response_log
-                    _append_chat_response_log(store_id, group_id, kind="inbound_skipped_no_credits", billed_units=0)
+                    await asyncio.to_thread(_append_chat_response_log, store_id, group_id, kind="inbound_skipped_no_credits", billed_units=0)
                     await asyncio.to_thread(_notify_credits_exhausted_once_daily, store_id)
                     continue
 
@@ -238,7 +244,7 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
                 logger.info(f"✅ [Chatbot] ИИ-ответ успешно отправлен клиенту {client_name}!")
                 if store_id:
                     from backend.state_helpers import _append_chat_response_log
-                    _append_chat_response_log(
+                    await asyncio.to_thread(_append_chat_response_log,
                         store_id, group_id,
                         kind="inbound_reply",
                         prompt_tier=bot_profile.get("prompt_tier", ""),
@@ -254,7 +260,7 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None):
                     from backend.billing import credits as billing_credits
                     await asyncio.to_thread(billing_credits.release, store_id, credit_units_milli)
                     from backend.state_helpers import _append_chat_response_log
-                    _append_chat_response_log(store_id, group_id, kind="inbound_send_failed", billed_units=0)
+                    await asyncio.to_thread(_append_chat_response_log, store_id, group_id, kind="inbound_send_failed", billed_units=0)
 
     return True
 

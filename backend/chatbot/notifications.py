@@ -32,15 +32,15 @@ async def notify_cookie_expired(reason: str, store_id: Optional[str] = None):
     ТОГО магазина, где это произошло (Слайс 4). Отправка единоразовая с
     предотвращением спама — per-store.
     """
-    if config.is_cookie_alert_sent(store_id):
+    if await asyncio.to_thread(config.is_cookie_alert_sent, store_id):
         return
 
     if not bot_instance.bot:
         logger.warning(f"🚨 [COOKIE ALERT] {reason}. (Telegram-бот выключен/не настроен)")
-        config.set_cookie_alert_sent(store_id, True)
+        await asyncio.to_thread(config.set_cookie_alert_sent, store_id, True)
         return
 
-    store_name = config.get_store_name(store_id) if store_id else None
+    store_name = await asyncio.to_thread(config.get_store_name, store_id) if store_id else None
     store_line = f"🏪 *Магазин:* {_esc_md(store_name)}\n" if store_name else ""
     alert_text = (
         f"🚨 *ВНИМАНИЕ: СЕССИЯ ЧАТА KASPI ИСТЕКЛА!*\n"
@@ -59,7 +59,7 @@ async def notify_cookie_expired(reason: str, store_id: Optional[str] = None):
     else:
         logger.warning(f"🚨 [COOKIE ALERT] {reason}. (без store_id — некому отправлять, привязка per-store)")
 
-    config.set_cookie_alert_sent(store_id, True)
+    await asyncio.to_thread(config.set_cookie_alert_sent, store_id, True)
 
 async def notify_cabinet_session_expired(store_id: str, store_name: Optional[str] = None):
     """
@@ -123,7 +123,7 @@ async def notify_manager_and_block(
     web_link = f"https://msg-web.kaspi.kz/#/chats/chat/{group_id}"
     pay_link = f"https://pay.kaspi.kz/chat?threadId={group_id}&isWeb=true"
 
-    store_name = config.get_store_name(store_id) if store_id else None
+    store_name = await asyncio.to_thread(config.get_store_name, store_id) if store_id else None
     store_line = f"🏪 *Магазин:* {_esc_md(store_name)}\n" if store_name else ""
     alert_text = (
         f"🚨 *СРОЧНЫЙ ВЫЗОВ МЕНЕДЖЕРА В КАСПИ!*\n"
@@ -150,4 +150,4 @@ async def notify_manager_and_block(
         except Exception as e:
             logger.error(f"⚠️ Ошибка формирования Telegram клавиатуры: {e}")
 
-    config.set_chat_human_override(store_id, group_id, client_name=client_name)
+    await asyncio.to_thread(config.set_chat_human_override, store_id, group_id, client_name=client_name)

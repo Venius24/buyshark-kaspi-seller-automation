@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 import unittest
 from unittest.mock import patch, AsyncMock, MagicMock
 
@@ -45,6 +46,39 @@ class TestRunChatbotCycle(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         worker._chatbot_state.clear()
+
+    async def test_pass_reads_states_once_outside_event_loop(self):
+        worker._get_chatbot_state("store-a")["day_start_ts"] = 0
+        groups = [
+            {"id": "chat-1", "lastMessage": {"id": "msg-1", "created": 1, "sender": "messenger"}},
+            {"id": "chat-2", "lastMessage": {"id": "msg-2", "created": 1, "sender": "messenger"}},
+            {"id": "chatGuide", "lastMessage": {"id": "guide", "created": 1}},
+            {"id": "old-chat", "lastMessage": {"id": "old", "created": -1}},
+        ]
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"data": {"groups": groups}}
+        loop_thread = threading.get_ident()
+        read_threads = []
+
+        def read_states(store_id, group_ids):
+            read_threads.append(threading.get_ident())
+            self.assertEqual(store_id, "store-a")
+            self.assertEqual(group_ids, ["chat-1", "chat-2"])
+            return {
+                "chat-1": {"human_override": True},
+                "chat-2": {"last_replied_msg_id": "msg-2"},
+            }
+
+        with patch.object(worker.http_session, "post", return_value=response), \
+             patch.object(worker.config, "get_chat_states", side_effect=read_states) as mock_states, \
+             patch.object(worker, "reset_cookie_alert"), \
+             patch.object(worker.chat_client, "send_message", new_callable=AsyncMock) as mock_send:
+            result = await worker._run_chatbot_pass({}, "merchant", "store-a")
+
+        self.assertTrue(result)
+        mock_states.assert_called_once()
+        self.assertNotEqual(read_threads, [loop_thread])
+        mock_send.assert_not_awaited()
 
     @patch("backend.chatbot.worker.list_active_stores", new_callable=AsyncMock)
     @patch("backend.chatbot.worker.config")

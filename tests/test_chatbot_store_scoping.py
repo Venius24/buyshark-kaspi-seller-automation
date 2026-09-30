@@ -67,6 +67,42 @@ class ChatbotStoreScopingTest(unittest.TestCase):
         self.assertEqual(self.config.get_chat_last_replied("store-A", "chat-1"), "msg-100")
         self.assertIsNone(self.config.get_chat_last_replied("store-B", "chat-1"))
 
+    def test_batch_chat_states_uses_one_scoped_query(self):
+        from sqlalchemy import event
+
+        self.config.mark_chat_replied("store-A", "chat-1", "msg-100")
+        self.config.set_chat_human_override("store-A", "chat-2")
+        self.config.set_awaiting_review_reply("store-A", "chat-3")
+        self.config.mark_chat_replied("store-B", "chat-1", "foreign-msg")
+        queries = []
+
+        def count_query(_conn, _cursor, statement, _params, _context, _many):
+            if statement.lstrip().lower().startswith("select") and "chat_states" in statement:
+                queries.append(statement)
+
+        event.listen(self._sync_engine, "before_cursor_execute", count_query)
+        try:
+            states = self.config.get_chat_states(
+                "store-A", ["chat-1", "chat-2", "chat-3", "chat-missing", "chat-1"]
+            )
+        finally:
+            event.remove(self._sync_engine, "before_cursor_execute", count_query)
+
+        self.assertEqual(len(queries), 1)
+        self.assertEqual(states["chat-1"]["last_replied_msg_id"], "msg-100")
+        self.assertTrue(states["chat-2"]["human_override"])
+        self.assertTrue(states["chat-3"]["awaiting_review_reply"])
+        self.assertNotIn("chat-missing", states)
+
+    def test_batch_chat_states_legacy_awaiting_flag(self):
+        self.config._legacy_awaiting_review_reply.add("chat-review")
+        try:
+            states = self.config.get_chat_states(None, ["chat-review", "chat-missing"])
+        finally:
+            self.config._legacy_awaiting_review_reply.clear()
+        self.assertTrue(states["chat-review"]["awaiting_review_reply"])
+        self.assertNotIn("chat-missing", states)
+
     def test_enabled_flag_is_independent_per_store(self):
         self.config.save_chatbot_config({"enabled": False}, store_id="store-A")
         self.config.save_chatbot_config({"enabled": True}, store_id="store-B")

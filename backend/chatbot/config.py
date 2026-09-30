@@ -99,6 +99,50 @@ def any_cookie_alert_sent() -> bool:
 # просто in-memory dict, а не чтение с диска.
 _legacy_chat_state: dict = {}  # group_id -> msg_id или "HUMAN_OVERRIDE"
 
+def get_chat_states(store_id: Optional[str], group_ids: list[str]) -> dict[str, dict]:
+    """Снимок состояний нужных чатов за один запрос к БД."""
+    group_ids = list(dict.fromkeys(group_ids))
+    if not group_ids:
+        return {}
+    if store_id is None:
+        result = {}
+        for group_id in group_ids:
+            val = _legacy_chat_state.get(group_id)
+            if val is not None or group_id in _legacy_awaiting_review_reply:
+                result[group_id] = {
+                    "last_replied_msg_id": None if val == "HUMAN_OVERRIDE" else val,
+                    "human_override": val == "HUMAN_OVERRIDE",
+                    "awaiting_review_reply": group_id in _legacy_awaiting_review_reply,
+                }
+        return result
+
+    from backend.state_helpers import _get_sync_db_session
+    from backend.db.models import ChatStateDB
+    from sqlalchemy import select
+
+    session = _get_sync_db_session()
+    if not session:
+        return {}
+    try:
+        rows = session.scalars(
+            select(ChatStateDB).where(
+                ChatStateDB.store_id == store_id,
+                ChatStateDB.group_id.in_(group_ids),
+            )
+        ).all()
+        return {
+            row.group_id: {
+                "last_replied_msg_id": row.last_replied_msg_id,
+                "human_override": row.human_override,
+                "awaiting_review_reply": row.awaiting_review_reply,
+                "client_name": row.client_name,
+                "blocked_at": row.blocked_at,
+            }
+            for row in rows
+        }
+    finally:
+        session.close()
+
 def get_chat_state(store_id: Optional[str], group_id: str) -> Optional[dict]:
     """Возвращает {'last_replied_msg_id': str|None, 'human_override': bool} или None."""
     if store_id is None:
@@ -247,14 +291,14 @@ def set_awaiting_review_reply(store_id: Optional[str], group_id: str):
         return
     _upsert_chat_state(store_id, group_id, awaiting_review_reply=True)
 
-def clear_awaiting_review_reply(store_id: Optional[str], group_id: str) -> bool:
+def clear_awaiting_review_reply(store_id: Optional[str], group_id: str, *, known_awaiting: bool = False) -> bool:
     """Возвращает True, если флаг реально был установлен (и теперь снят)."""
     if store_id is None:
         if group_id in _legacy_awaiting_review_reply:
             _legacy_awaiting_review_reply.discard(group_id)
             return True
         return False
-    if not is_awaiting_review_reply(store_id, group_id):
+    if not known_awaiting and not is_awaiting_review_reply(store_id, group_id):
         return False
     _upsert_chat_state(store_id, group_id, awaiting_review_reply=False)
     return True
