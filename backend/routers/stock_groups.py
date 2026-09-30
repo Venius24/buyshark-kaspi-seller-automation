@@ -309,6 +309,9 @@ async def delete_stock_group(group_id: str, ctx: StoreContext = Depends(require_
         if touched:
             await asyncio.to_thread(_save_master_stock_groups, touched, store_id=ctx.store_id)
 
+    from backend.services.stock_sync_worker import broadcast_ws_event
+    await broadcast_ws_event('stock_group_updated', {'group_id': group_id}, store_id=ctx.store_id)
+
     return {
         "success": True,
         "message": f"Мастер-Группа '{deleted_group.get('group_name')}' успешно удалена."
@@ -342,4 +345,3 @@ async def trigger_packaging_deduction(ctx: StoreContext = Depends(require_store_
         return res
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-

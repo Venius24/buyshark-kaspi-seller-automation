@@ -20,9 +20,9 @@ import {
   ShoppingCart,
   ExternalLink
 } from 'lucide-react';
-import { useWebSocket } from '../hooks/useWebSocket';
+import type { TelemetryEvent } from '../hooks/useWebSocket';
 import { LiveTerminalStream } from './LiveTerminalStream';
-import { apiFetch, API_URL, getWsUrl } from '../api';
+import { apiFetch, API_URL } from '../api';
 import { fetchGroupsQuery, fetchProductsQuery } from '../queries';
 import { useActiveStoreId } from '../storeContext';
 import { openImageLightbox } from './shared/ImageLightbox';
@@ -161,13 +161,13 @@ function firstGroupImage(linkedSkus: string[], products: ProductItem[]): string 
 const isArchived = (p?: { status?: string } | null): boolean =>
   String(p?.status || '').trim() === 'Архив';
 
-export const MasterStockGroups: React.FC = () => {
+export const MasterStockGroups: React.FC<{ isWsConnected: boolean; wsEvent: TelemetryEvent | null }> = ({ isWsConnected, wsEvent }) => {
   const queryClient = useQueryClient();
   const activeStoreId = useActiveStoreId();
   const { data: groups = [] } = useQuery({
     queryKey: ['stock-groups', activeStoreId],
     queryFn: fetchGroupsQuery,
-    refetchInterval: 5_000,
+    refetchInterval: 30_000,
   });
   const { data: products = [], isLoading: loading } = useQuery({
     queryKey: ['products', 'all-for-stock-groups', activeStoreId],
@@ -215,7 +215,6 @@ export const MasterStockGroups: React.FC = () => {
   const [expandedSkusGroupId, setExpandedSkusGroupId] = useState<string | null>(null);
   const [inlineStockVal, setInlineStockVal] = useState<number>(0);
 
-  const { isConnected: isWsConnected, lastEvent: wsEvent } = useWebSocket(getWsUrl());
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   const [viewLogGroup, setViewLogGroup] = useState<MasterStockGroup | null>(null);
 
@@ -229,8 +228,6 @@ export const MasterStockGroups: React.FC = () => {
           }
           return [...prev.slice(-100), logLine];
         });
-      } else if (wsEvent.type === 'stock_group_updated') {
-        refetchGroups();
       }
     }
   }, [wsEvent]);

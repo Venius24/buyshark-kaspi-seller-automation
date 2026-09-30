@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 
 export interface TelemetryEvent {
   type: string;
@@ -8,51 +8,53 @@ export interface TelemetryEvent {
 
 export function useWebSocket(url: string) {
   const [isConnected, setIsConnected] = useState(false);
-  const [lastEvent, setLastEvent] = useState<TelemetryEvent | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<any>(null);
-
-  const connect = useCallback(() => {
-    try {
-      const ws = new WebSocket(url);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setIsConnected(true);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const parsed = JSON.parse(event.data);
-          setLastEvent(parsed);
-        } catch {
-          // Ignore text messages
-        }
-      };
-
-      ws.onclose = () => {
-        setIsConnected(false);
-        // Automatic reconnect after 3 seconds
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connect();
-        }, 3000);
-      };
-
-      ws.onerror = () => {
-        ws.close();
-      };
-    } catch {
-      setIsConnected(false);
-    }
-  }, [url]);
+  const [latest, setLatest] = useState<{ url: string; event: TelemetryEvent } | null>(null);
 
   useEffect(() => {
+    let disposed = false;
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      if (disposed) return;
+      try {
+        const socket = new WebSocket(url);
+        ws = socket;
+
+        socket.onopen = () => {
+          if (!disposed) setIsConnected(true);
+        };
+
+        socket.onmessage = (message) => {
+          if (disposed) return;
+          try {
+            setLatest({ url, event: JSON.parse(message.data) });
+          } catch {
+            // Ignore text messages
+          }
+        };
+
+        socket.onclose = () => {
+          if (disposed) return;
+          setIsConnected(false);
+          reconnectTimeout = setTimeout(connect, 3000);
+        };
+
+        socket.onerror = () => socket.close();
+      } catch {
+        setIsConnected(false);
+        reconnectTimeout = setTimeout(connect, 3000);
+      }
+    };
+
+    setIsConnected(false);
     connect();
     return () => {
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (wsRef.current) wsRef.current.close();
+      disposed = true;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      ws?.close();
     };
-  }, [connect]);
+  }, [url]);
 
-  return { isConnected, lastEvent };
+  return { isConnected, lastEvent: latest?.url === url ? latest.event : null };
 }

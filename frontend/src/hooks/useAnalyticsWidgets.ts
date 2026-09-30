@@ -30,7 +30,7 @@ const fetchWidgets = async (): Promise<any> => {
   }
 };
 
-export function useAnalyticsWidgets(wsEvent: { type: string; data?: any } | null) {
+export function useAnalyticsWidgets(wsEvent: { type: string; data?: any } | null, isOverviewActive: boolean) {
   const queryClient = useQueryClient();
   const activeStoreId = useActiveStoreId();
   const widgetsQueryKey = ['analytics-widgets', activeStoreId];
@@ -38,8 +38,14 @@ export function useAnalyticsWidgets(wsEvent: { type: string; data?: any } | null
   const { data: widgetData = null } = useQuery({
     queryKey: widgetsQueryKey,
     queryFn: fetchWidgets,
-    refetchInterval: 10_000,
+    refetchInterval: isOverviewActive ? 60_000 : 300_000,
   });
+
+  useEffect(() => {
+    if (isOverviewActive) {
+      queryClient.invalidateQueries({ queryKey: ['analytics-widgets', activeStoreId] });
+    }
+  }, [isOverviewActive, activeStoreId, queryClient]);
 
   const analytics: Analytics = useMemo(() => {
     if (widgetData?.analytics) {

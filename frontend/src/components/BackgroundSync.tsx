@@ -1,22 +1,46 @@
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchProfile, fetchStores, fetchGroupsQuery, fetchProductsQuery, fetchChatbotHasSession } from '../queries';
 import { useActiveStoreId } from '../storeContext';
+import type { ActiveTab } from '../types';
+import type { TelemetryEvent } from '../hooks/useWebSocket';
 
 /**
- * Всегда смонтирован (рендерится вне activeTab-условий в App.tsx), ничего
- * не рисует. Единственная цель — держать react-query наблюдателем на
- * запросах вкладок, которые сами по себе размонтируются при переключении
- * (StoreHub, MasterStockGroups) — иначе их refetchInterval останавливается,
- * как только уходишь с вкладки, и данные замирают на последнем значении.
+ * Всегда смонтирован вне вкладок: поддерживает редкий резервный опрос и
+ * отмечает данные групп устаревшими по WebSocket-событиям.
  */
-export function BackgroundSync() {
+export function BackgroundSync({ activeTab, wsEvent }: { activeTab: ActiveTab; wsEvent: TelemetryEvent | null }) {
   // Слайс 6: storeId в queryKey — переключение магазина в StoreHub не должно
   // держать эти фоновые запросы на данных ПРЕДЫДУЩЕГО магазина тёплыми.
   const activeStoreId = useActiveStoreId();
+  const queryClient = useQueryClient();
+  const groupRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (wsEvent?.type !== 'stock_group_updated') return;
+    if (groupRefreshTimer.current) clearTimeout(groupRefreshTimer.current);
+    // A sync can emit many group events in succession. Fetch one list after
+    // the burst, and only when the groups screen is visible.
+    groupRefreshTimer.current = setTimeout(() => {
+      queryClient.invalidateQueries({
+        queryKey: ['stock-groups', activeStoreId],
+        refetchType: activeTab === 'stock-groups' && document.visibilityState === 'visible' ? 'active' : 'none',
+      });
+      groupRefreshTimer.current = null;
+    }, 500);
+  }, [wsEvent, queryClient, activeStoreId, activeTab]);
+
+  useEffect(() => () => {
+    if (groupRefreshTimer.current) clearTimeout(groupRefreshTimer.current);
+  }, []);
 
   useQuery({ queryKey: ['auth', 'me'], queryFn: fetchProfile, refetchInterval: 30_000 });
   useQuery({ queryKey: ['stores'], queryFn: fetchStores, refetchInterval: 30_000 });
-  useQuery({ queryKey: ['stock-groups', activeStoreId], queryFn: fetchGroupsQuery, refetchInterval: 5_000 });
+  useQuery({
+    queryKey: ['stock-groups', activeStoreId],
+    queryFn: fetchGroupsQuery,
+    refetchInterval: activeTab === 'stock-groups' ? false : 300_000,
+  });
   // Full catalog (~800+ SKUs) — real changes already trigger an immediate
   // invalidateQueries(['products', 'all-for-stock-groups']) from
   // MasterStockGroups.tsx after any mutation, so this interval is only a

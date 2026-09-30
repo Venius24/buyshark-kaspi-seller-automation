@@ -41,9 +41,9 @@ router = APIRouter(prefix="/api/analytics", tags=["analytics"], dependencies=[De
 # показывается продавцу «по часам»/«по дням», надо сдвигать вручную.
 ALMATY_UTC_OFFSET_HOURS = 5
 
-# Фронтенд поллит /api/analytics/widgets каждые 10 секунд, пока открыта вкладка
-# Overview (useAnalyticsWidgets.ts). Без кэша это означало живой синхронный
-# запрос к публичному API конкурентов Kaspi на каждый poll — до 360 запросов/час
+# Фронтенд опрашивает /api/analytics/widgets раз в минуту на вкладке Overview
+# и раз в пять минут в фоне (useAnalyticsWidgets.ts). Без кэша прежний
+# 10-секундный poll означал до 360 запросов/час
 # на один и тот же SKU, что похоже и стало причиной бана/рейт-лимита IP VPS
 # Kaspi'ем (2026-07-29, подтверждено: 429 даже на kaspi.kz/shop/ с того же IP).
 # Реальный демпинг-цикл (radar.py через background_dumping_loop) и так сканирует

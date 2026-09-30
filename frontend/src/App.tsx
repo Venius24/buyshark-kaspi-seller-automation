@@ -225,7 +225,7 @@ export default function App() {
   const [competitorsRange, setCompetitorsRange] = useState<{ min: number | null; max: number | null } | null>(null);
 
   const { isConnected: isWsConnected, lastEvent: wsEvent } = useWebSocket(getWsUrl());
-  const { analytics, widgetData } = useAnalyticsWidgets(wsEvent);
+  const { analytics, widgetData } = useAnalyticsWidgets(wsEvent, activeTab === 'overview');
 
   const checkMcStatus = async (verify = false) => {
     try {
@@ -442,26 +442,26 @@ export default function App() {
     })();
   }, []);
 
-  // Poll dumping status & countdown
+  // Проверяем статус демпинга каждые 30 секунд на любой вкладке.
   useEffect(() => {
     if (!isAuthed) return;
-    
-    // Опрашиваем бэкенд каждые 10 секунд
-    const syncInterval = setInterval(loadDumpingStatus, 10000);
+
+    if (activeTab === 'dumping') loadDumpingStatus();
+    const syncInterval = setInterval(loadDumpingStatus, 30_000);
     
     // Уменьшаем таймер локально каждую секунду
-    const countdownInterval = setInterval(() => {
+    const countdownInterval = activeTab === 'dumping' ? setInterval(() => {
       setNextRunSeconds((prev) => {
         if (prev === null || prev <= 0) return prev;
         return prev - 1;
       });
-    }, 1000);
+    }, 1000) : null;
     
     return () => {
       clearInterval(syncInterval);
-      clearInterval(countdownInterval);
+      if (countdownInterval) clearInterval(countdownInterval);
     };
-  }, [isAuthed]);
+  }, [isAuthed, activeTab]);
 
   // React to WS telemetry events
   useEffect(() => {
@@ -806,7 +806,7 @@ export default function App() {
   // ── Dashboard Screen ───────────────────────────────────
   return (
     <div className="app-shell">
-      <BackgroundSync />
+      <BackgroundSync activeTab={activeTab} wsEvent={wsEvent} />
 
       {showOnboardingTour && !mobileNavOpen && (
         <OnboardingTour
@@ -1090,7 +1090,7 @@ export default function App() {
 
         {/* 🔗 TAB: MASTER STOCK GROUPS */}
         {activeTab === 'stock-groups' && (
-          <MasterStockGroups />
+          <MasterStockGroups isWsConnected={isWsConnected} wsEvent={wsEvent} />
         )}
 
         {/* ✨ TAB: AUTOLIST (AI product auto-add) */}
