@@ -10,7 +10,6 @@ import { RoleDefaultsModal } from '../dashboard/RoleDefaultsModal';
 import { useIsStoreOwner } from '../../storeContext';
 import { useScoreStats } from '../../hooks/useScoreStats';
 import { useQualityMetrics } from '../../hooks/useQualityMetrics';
-import { useAbcXyzStats } from '../../hooks/useAbcXyzStats';
 import { useInsightsStats } from '../../hooks/useInsightsStats';
 
 interface OverviewTabProps {
@@ -44,7 +43,6 @@ export function OverviewTab({
   const { t } = useTranslation('tab_overview');
   const scoreStats = useScoreStats();
   const qualityMetrics = useQualityMetrics();
-  const abcXyzStats = useAbcXyzStats();
   const insightsStats = useInsightsStats();
 
   const { widgets, setWidgetVisible, reorderWidgets, setWidgetConfig } = useDashboardLayout();
@@ -59,7 +57,6 @@ export function OverviewTab({
     widgetData,
     scoreStats,
     qualityMetrics,
-    abcXyzStats,
     insightsStats,
     addLog,
     mcHasSession,

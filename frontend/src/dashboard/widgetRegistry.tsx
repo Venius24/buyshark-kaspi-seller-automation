@@ -54,7 +54,6 @@ export interface OverviewRenderCtx {
   widgetData: any;
   scoreStats: any;
   qualityMetrics: any;
-  abcXyzStats: any;
   insightsStats: any;
   addLog: (message: string) => void;
   mcHasSession: boolean;
@@ -144,7 +143,7 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
     title: 'ABC/XYZ-анализ товаров',
     defaultVisible: true,
     defaultOrder: 4,
-    render: (ctx) => <AbcXyzWidget key="abc_xyz" data={ctx.abcXyzStats} />,
+    render: () => <AbcXyzWidget key="abc_xyz" />,
   },
   {
     id: 'stock_forecast',

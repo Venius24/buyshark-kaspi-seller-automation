@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Grid3x3 } from 'lucide-react';
 import { ExpandableCard } from './ExpandableCard';
-import type { AbcXyzStats } from '../hooks/useAbcXyzStats';
+import { useAbcXyzStats, type AbcXyzGroupBy } from '../hooks/useAbcXyzStats';
 
 const fmt = (n: number) => new Intl.NumberFormat('ru-RU').format(Math.round(n));
 
@@ -16,8 +16,31 @@ const CELL_TONE: Record<string, string> = {
   CX: '#f59e0b', CY: '#f59e0b', CZ: '#ef4444',
 };
 
-export const AbcXyzWidget: React.FC<{ data: AbcXyzStats }> = ({ data }) => {
+const GROUP_BY_STORAGE_KEY = 'abc_xyz_group_by';
+
+const readStoredGroupBy = (): AbcXyzGroupBy => {
+  try {
+    return localStorage.getItem(GROUP_BY_STORAGE_KEY) === 'group' ? 'group' : 'sku';
+  } catch {
+    return 'sku';
+  }
+};
+
+export const AbcXyzWidget: React.FC = () => {
+  const [groupBy, setGroupBy] = useState<AbcXyzGroupBy>(readStoredGroupBy);
+  const data = useAbcXyzStats(groupBy);
   const [classFilter, setClassFilter] = useState<string | null>(null);
+  const unit = groupBy === 'group' ? 'позиций' : 'товаров';
+
+  const changeGroupBy = (next: AbcXyzGroupBy) => {
+    setGroupBy(next);
+    setClassFilter(null);
+    try {
+      localStorage.setItem(GROUP_BY_STORAGE_KEY, next);
+    } catch {
+      /* без localStorage выбор просто не запомнится */
+    }
+  };
   const hasData = data.items.length > 0;
   const enoughHistory = data.weeks_covered >= 4;
 
@@ -25,6 +48,21 @@ export const AbcXyzWidget: React.FC<{ data: AbcXyzStats }> = ({ data }) => {
     if (!classFilter) return data.items;
     return data.items.filter((it) => `${it.abc_class}${it.xyz_class ?? ''}` === classFilter);
   }, [data.items, classFilter]);
+
+  const groupToggle = (
+    <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
+      {([['sku', 'По товарам'], ['group', 'По мастер-группам']] as const).map(([mode, label]) => (
+        <button
+          key={mode}
+          className={groupBy === mode ? 'btn btn-primary' : 'btn btn-secondary'}
+          style={{ padding: '4px 12px', fontSize: '12px' }}
+          onClick={() => changeGroupBy(mode)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <ExpandableCard
@@ -34,10 +72,11 @@ export const AbcXyzWidget: React.FC<{ data: AbcXyzStats }> = ({ data }) => {
         !hasData
           ? 'Пока нет продаж для анализа'
           : enoughHistory
-          ? `${data.items.length} товаров, ${data.weeks_covered} нед. истории`
+          ? `${data.items.length} ${unit}, ${data.weeks_covered} нед. истории`
           : `Копим историю для XYZ (нужно ≥4 недель, сейчас ${data.weeks_covered})`
       }
     >
+      {groupToggle}
       {!hasData ? (
         <div style={{ padding: '12px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
           Появится, когда накопятся продажи из sales_orders
@@ -126,6 +165,9 @@ export const AbcXyzWidget: React.FC<{ data: AbcXyzStats }> = ({ data }) => {
               <div key={it.sku} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', padding: '6px 4px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                 <span style={{ color: '#e5e7eb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '50%' }}>
                   {it.name}
+                  {it.kind === 'group' && (
+                    <span style={{ color: 'var(--text-muted)', marginLeft: '6px' }}>· {it.members_count} арт.</span>
+                  )}
                 </span>
                 <span style={{ display: 'flex', gap: '8px', alignItems: 'center', color: 'var(--text-muted)' }}>
                   <span>{fmt(it.revenue)} ₸ ({it.revenue_share}%)</span>

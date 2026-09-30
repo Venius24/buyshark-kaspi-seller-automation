@@ -136,6 +136,43 @@ class DashboardSalesQueriesTest(unittest.TestCase):
         classes = {it["sku"]: it["abc_class"] for it in result["items"]}
         self.assertEqual(classes, {"X": "A", "Y": "B", "Z": "C"})
 
+    def test_abc_xyz_by_master_group_merges_members(self):
+        class Ctx:
+            store_id = "store-a"
+        groups = {
+            "g1": {"group_id": "g1", "group_name": "Группа AB", "is_active": True, "linked_skus": ["A", "B"]},
+            "g2": {"group_id": "g2", "group_name": "Выключенная", "is_active": False, "linked_skus": ["C"]},
+        }
+        with patch.object(self.analytics, "_load_products", return_value=[]),              patch.object(self.analytics, "_load_master_stock_groups", return_value=groups):
+            result = self.analytics.get_abc_xyz_analysis(90, Ctx(), group_by="group")
+        by_key = {it["sku"]: it for it in result["items"]}
+        self.assertEqual(set(by_key), {"g1", "C"})  # неактивная группа артикул не забирает
+        self.assertEqual(by_key["g1"]["kind"], "group")
+        self.assertEqual(by_key["g1"]["name"], "Группа AB")
+        self.assertEqual(by_key["g1"]["members_count"], 2)
+        self.assertEqual(by_key["g1"]["revenue"], 3500.0)
+        self.assertEqual(by_key["g1"]["quantity"], 5)
+        self.assertEqual(by_key["C"]["kind"], "sku")
+        self.assertEqual(result["total_revenue"], 3800.0)
+        self.assertEqual(result["group_by"], "group")
+
+    def test_abc_xyz_group_mode_is_cached_separately_from_sku_mode(self):
+        class Ctx:
+            store_id = "store-a"
+        groups = {"g1": {"group_id": "g1", "group_name": "Г", "is_active": True, "linked_skus": ["A", "B"]}}
+        with patch.object(self.analytics, "_load_products", return_value=[]),              patch.object(self.analytics, "_load_master_stock_groups", return_value=groups):
+            by_sku = self.analytics.get_abc_xyz_analysis(90, Ctx())
+            by_group = self.analytics.get_abc_xyz_analysis(90, Ctx(), group_by="group")
+        self.assertEqual(len(by_sku["items"]), 3)
+        self.assertEqual(len(by_group["items"]), 2)
+
+    def test_abc_xyz_rejects_unknown_group_by(self):
+        from fastapi import HTTPException
+        class Ctx:
+            store_id = "store-a"
+        with self.assertRaises(HTTPException):
+            self.analytics.get_abc_xyz_analysis(90, Ctx(), group_by="brand")
+
     def test_abc_xyz_cache_is_scoped_and_expires(self):
         class Ctx:
             def __init__(self, store_id):

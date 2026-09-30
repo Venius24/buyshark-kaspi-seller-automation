@@ -2,9 +2,14 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch, API_URL } from '../api';
 import { useActiveStoreId } from '../storeContext';
 
+export type AbcXyzGroupBy = 'sku' | 'group';
+
 export interface AbcXyzItem {
   sku: string;
   name: string;
+  /** 'group' — строка Мастер-Группы (sku = group_id), 'sku' — отдельный артикул. */
+  kind: 'sku' | 'group';
+  members_count: number;
   revenue: number;
   revenue_share: number;
   quantity: number;
@@ -27,9 +32,9 @@ const EMPTY_ABC_XYZ: AbcXyzStats = {
   total_revenue: 0,
 };
 
-const fetchAbcXyz = async (): Promise<AbcXyzStats> => {
+const fetchAbcXyz = async (groupBy: AbcXyzGroupBy): Promise<AbcXyzStats> => {
   try {
-    const res = await apiFetch(`${API_URL}/api/analytics/abc-xyz?days=90`);
+    const res = await apiFetch(`${API_URL}/api/analytics/abc-xyz?days=90&group_by=${groupBy}`);
     const data = await res.json();
     return res.ok && data.success ? data : EMPTY_ABC_XYZ;
   } catch {
@@ -37,12 +42,13 @@ const fetchAbcXyz = async (): Promise<AbcXyzStats> => {
   }
 };
 
-export function useAbcXyzStats() {
+export function useAbcXyzStats(groupBy: AbcXyzGroupBy = 'sku') {
   const activeStoreId = useActiveStoreId();
   const { data } = useQuery({
-    queryKey: ['analytics-abc-xyz', activeStoreId],
-    queryFn: fetchAbcXyz,
-    refetchInterval: 120_000,
+    queryKey: ['analytics-abc-xyz', activeStoreId, groupBy],
+    queryFn: () => fetchAbcXyz(groupBy),
+    // Бэкенд кэширует ответ на 4 часа, частый опрос почти ничего не стоит.
+    refetchInterval: 300_000,
   });
   return data ?? EMPTY_ABC_XYZ;
 }

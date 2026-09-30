@@ -18,6 +18,7 @@ from backend.state_helpers import (
     _load_sales_summary, _load_sales_daily, _load_analytics_history, _load_price_war_snapshot,
     _load_competitor_leaderboard, _load_chat_activity, _get_sync_db_session,
     _load_quality_metrics_latest, _load_quality_metrics_history,
+    _load_master_stock_groups,
 )
 from backend.dumper.config import _decode_base64_if_needed
 from backend.product_name_overrides import resolve_product_name, is_placeholder_name
@@ -51,15 +52,18 @@ _WIDGET_OFFERS_CACHE_TTL_SECONDS = 120
 _widget_offers_cache: dict = {}
 
 # ABC/XYZ разбирает JSON всех заказов за период. Держим готовый ответ между
-# двухминутными опросами страницы; ключ включает магазин и нормализованный период.
-_ABC_XYZ_CACHE_TTL_SECONDS = 6 * 60 * 60
+# двухминутными опросами страницы; ключ включает магазин, нормализованный период
+# и разрез (товары / мастер-группы). Сбрасывается только по TTL или рестартом,
+# поэтому TTL короткий: продажи за день не должны «висеть» в классах до вечера.
+_ABC_XYZ_CACHE_TTL_SECONDS = 4 * 60 * 60
 _ABC_XYZ_CACHE_MAX_ENTRIES = 128
-_abc_xyz_cache: OrderedDict[tuple[str, int], tuple[float, dict]] = OrderedDict()
+_ABC_XYZ_GROUP_BY = ("sku", "group")
+_abc_xyz_cache: OrderedDict[tuple[str, int, str], tuple[float, dict]] = OrderedDict()
 _abc_xyz_cache_lock = threading.Lock()
 
 
-def _get_cached_abc_xyz(store_id: str, days: int) -> dict | None:
-    key = (store_id, days)
+def _get_cached_abc_xyz(store_id: str, days: int, group_by: str) -> dict | None:
+    key = (store_id, days, group_by)
     with _abc_xyz_cache_lock:
         cached = _abc_xyz_cache.get(key)
         if cached is None:
@@ -71,8 +75,8 @@ def _get_cached_abc_xyz(store_id: str, days: int) -> dict | None:
         return cached[1]
 
 
-def _cache_abc_xyz(store_id: str, days: int, result: dict) -> None:
-    key = (store_id, days)
+def _cache_abc_xyz(store_id: str, days: int, group_by: str, result: dict) -> None:
+    key = (store_id, days, group_by)
     with _abc_xyz_cache_lock:
         _abc_xyz_cache[key] = (time.monotonic() + _ABC_XYZ_CACHE_TTL_SECONDS, result)
         _abc_xyz_cache.move_to_end(key)
@@ -363,14 +367,69 @@ def get_insights(ctx: StoreContext = Depends(get_store_context)):
     }
 
 
+def _merge_abc_xyz_into_groups(groups: dict, sku_info: dict, sku_weekly_qty: dict) -> tuple[dict, dict]:
+    """Сворачивает по-артикульные итоги в строки активных Мастер-Групп.
+
+    Матчинг тот же, что у прогноза остатков и автосписания (индекс
+    build_group_index): неактивная группа остаток не транслирует, её артикулы
+    остаются обычными товарами. Неоднозначный артикул (подходит сразу к
+    нескольким группам) индекс отдаёт как «не найден» — он тоже остаётся
+    отдельной строкой, а не приписывается случайной группе.
+    """
+    from backend.services.stock_sync_worker import build_group_index, match_group_for_sku_indexed
+
+    active = {gid: g for gid, g in (groups or {}).items() if g.get("is_active")}
+    if not active:
+        return sku_info, sku_weekly_qty
+    index = build_group_index(active)
+
+    merged_info: dict = {}
+    merged_weekly: dict = {}
+    for sku, info in sku_info.items():
+        gid, _g = match_group_for_sku_indexed(sku, index)
+        if gid is None:
+            merged_info[sku] = info
+            merged_weekly[sku] = sku_weekly_qty.get(sku, {})
+            continue
+        target = merged_info.get(gid)
+        if target is None:
+            target = merged_info[gid] = {
+                "sku": gid,
+                "name": active[gid].get("group_name") or gid,
+                "kind": "group",
+                "members_count": 0,
+                "revenue": 0.0,
+                "quantity": 0,
+            }
+            merged_weekly[gid] = {}
+        target["revenue"] += info["revenue"]
+        target["quantity"] += info["quantity"]
+        target["members_count"] += 1
+        weekly = merged_weekly[gid]
+        for wk, qty in sku_weekly_qty.get(sku, {}).items():
+            weekly[wk] = weekly.get(wk, 0) + qty
+    return merged_info, merged_weekly
+
+
 @router.get("/abc-xyz")
-def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_context)):
+def get_abc_xyz_analysis(
+    days: int = 90,
+    ctx: StoreContext = Depends(get_store_context),
+    group_by: str = "sku",
+):
     """
     ABC (доля в выручке) / XYZ (стабильность спроса по неделям) анализ —
-    считается из sales_orders с 6-часовым TTL-кэшем по магазину и периоду.
+    считается из sales_orders с 4-часовым TTL-кэшем по (магазин, период, разрез).
     Новых таблиц не требует. XYZ-класс
     честно не проставляется (null), если в периоде меньше 4 полных недель
     истории — иначе коэффициент вариации на короткой выборке вводит в заблуждение.
+
+    `group_by="sku"` — по товарам (артикулам). `group_by="group"` — по
+    Мастер-Группам остатка: продажи всех артикулов активной группы
+    складываются в одну строку (kind="group", sku=group_id), артикулы вне
+    групп остаются отдельными строками (kind="sku"). Классы считаются уже
+    по получившимся единицам — иначе группа из десяти вариантов размазала бы
+    выручку и всегда попадала бы в C.
 
     XYZ-пороги — терцили CV внутри самого магазина, а не учебные 10%/25%.
     Проверено на живых данных (Бархан, 2026-08-29): классический CV даже
@@ -381,7 +440,9 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
     стабильности относительно остального каталога того же магазина.
     """
     days = max(28, min(days, 365))
-    cached = _get_cached_abc_xyz(ctx.store_id, days)
+    if group_by not in _ABC_XYZ_GROUP_BY:
+        raise HTTPException(status_code=400, detail="group_by: sku | group")
+    cached = _get_cached_abc_xyz(ctx.store_id, days, group_by)
     if cached is not None:
         return cached
     session = _get_sync_db_session()
@@ -420,11 +481,18 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
                 name = resolve_product_name(sku, e.get("name"), catalog_names=catalog_names) or sku
                 qty = e.get("quantity", 0) or 0
                 total_price = e.get("totalPrice", 0) or 0
-                info = sku_info.setdefault(sku, {"sku": sku, "name": name, "revenue": 0.0, "quantity": 0})
+                info = sku_info.setdefault(
+                    sku, {"sku": sku, "name": name, "kind": "sku", "members_count": 1, "revenue": 0.0, "quantity": 0}
+                )
                 info["revenue"] += total_price
                 info["quantity"] += qty
                 weekly = sku_weekly_qty.setdefault(sku, {})
                 weekly[week_key] = weekly.get(week_key, 0) + qty
+
+        if group_by == "group":
+            sku_info, sku_weekly_qty = _merge_abc_xyz_into_groups(
+                _load_master_stock_groups(store_id=ctx.store_id), sku_info, sku_weekly_qty
+            )
 
         weeks_covered = len(week_keys_seen)
         weeks_sorted = sorted(week_keys_seen)
@@ -485,6 +553,8 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
             items.append({
                 "sku": it["sku"],
                 "name": it["name"],
+                "kind": it["kind"],
+                "members_count": it["members_count"],
                 "revenue": round(it["revenue"], 2),
                 "revenue_share": round(share, 2),
                 "quantity": it["quantity"],
@@ -505,8 +575,9 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
             "matrix": matrix,
             "weeks_covered": weeks_covered,
             "total_revenue": round(total_revenue, 2),
+            "group_by": group_by,
         }
-        _cache_abc_xyz(ctx.store_id, days, result)
+        _cache_abc_xyz(ctx.store_id, days, group_by, result)
         return result
     finally:
         session.close()
