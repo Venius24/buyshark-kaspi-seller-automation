@@ -62,3 +62,14 @@ ds-bundle/
 .env.lead
 lead_service/data/*.db*
 offer_service/data/*.db*
+
+# ── Локальный мусор в корне (разовые выгрузки, логи, медиа) ──
+/scratch_*
+/temp/
+/video/
+/orchestro/
+/HIGGSFIELD*.md
+/*.log
+/*.mp3
+/autolist_editor.png
+/cooling_bags_schema.json
