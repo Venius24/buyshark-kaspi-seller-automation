@@ -5,11 +5,13 @@ FastAPI router for Dashboard Analytics and Widget stats.
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from datetime import date as _date, datetime, timedelta
+from collections import OrderedDict
 from sqlalchemy import select
 import io
 import json
 import time
 import logging
+import threading
 from backend.state_helpers import (
     _load_dumping_configs, dumping_config_for_product,
     _load_products, _load_analytics_snapshot, _load_dumper_logs,
@@ -47,6 +49,35 @@ ALMATY_UTC_OFFSET_HOURS = 5
 # рынок раз в 5 минут — виджету дашборда не нужны данные свежее этого.
 _WIDGET_OFFERS_CACHE_TTL_SECONDS = 120
 _widget_offers_cache: dict = {}
+
+# ABC/XYZ разбирает JSON всех заказов за период. Держим готовый ответ между
+# двухминутными опросами страницы; ключ включает магазин и нормализованный период.
+_ABC_XYZ_CACHE_TTL_SECONDS = 6 * 60 * 60
+_ABC_XYZ_CACHE_MAX_ENTRIES = 128
+_abc_xyz_cache: OrderedDict[tuple[str, int], tuple[float, dict]] = OrderedDict()
+_abc_xyz_cache_lock = threading.Lock()
+
+
+def _get_cached_abc_xyz(store_id: str, days: int) -> dict | None:
+    key = (store_id, days)
+    with _abc_xyz_cache_lock:
+        cached = _abc_xyz_cache.get(key)
+        if cached is None:
+            return None
+        if time.monotonic() >= cached[0]:
+            del _abc_xyz_cache[key]
+            return None
+        _abc_xyz_cache.move_to_end(key)
+        return cached[1]
+
+
+def _cache_abc_xyz(store_id: str, days: int, result: dict) -> None:
+    key = (store_id, days)
+    with _abc_xyz_cache_lock:
+        _abc_xyz_cache[key] = (time.monotonic() + _ABC_XYZ_CACHE_TTL_SECONDS, result)
+        _abc_xyz_cache.move_to_end(key)
+        if len(_abc_xyz_cache) > _ABC_XYZ_CACHE_MAX_ENTRIES:
+            _abc_xyz_cache.popitem(last=False)
 
 def _get_cached_offers(master_sku: str, city_code: str) -> list:
     cache_key = (master_sku, city_code)
@@ -336,7 +367,8 @@ def get_insights(ctx: StoreContext = Depends(get_store_context)):
 def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_context)):
     """
     ABC (доля в выручке) / XYZ (стабильность спроса по неделям) анализ —
-    считается живьём из sales_orders, новых таблиц не требует. XYZ-класс
+    считается из sales_orders с 6-часовым TTL-кэшем по магазину и периоду.
+    Новых таблиц не требует. XYZ-класс
     честно не проставляется (null), если в периоде меньше 4 полных недель
     истории — иначе коэффициент вариации на короткой выборке вводит в заблуждение.
 
@@ -349,6 +381,9 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
     стабильности относительно остального каталога того же магазина.
     """
     days = max(28, min(days, 365))
+    cached = _get_cached_abc_xyz(ctx.store_id, days)
+    if cached is not None:
+        return cached
     session = _get_sync_db_session()
     if not session:
         return {"success": True, "items": [], "matrix": {}, "weeks_covered": 0, "total_revenue": 0.0}
@@ -464,13 +499,15 @@ def get_abc_xyz_analysis(days: int = 90, ctx: StoreContext = Depends(get_store_c
                 key = f"{it['abc_class']}{it['xyz_class']}"
                 matrix[key] = matrix.get(key, 0) + 1
 
-        return {
+        result = {
             "success": True,
             "items": items,
             "matrix": matrix,
             "weeks_covered": weeks_covered,
             "total_revenue": round(total_revenue, 2),
         }
+        _cache_abc_xyz(ctx.store_id, days, result)
+        return result
     finally:
         session.close()
 

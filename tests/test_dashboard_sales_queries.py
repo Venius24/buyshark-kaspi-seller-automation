@@ -34,6 +34,7 @@ class DashboardSalesQueriesTest(unittest.TestCase):
         from backend.routers import analytics
         self.state_helpers = state_helpers
         self.analytics = analytics
+        analytics._abc_xyz_cache.clear()
         factory = lambda: Session(self._engine)  # noqa: E731
         self._patches = [
             patch.object(state_helpers, "_get_sync_db_session", side_effect=factory),
@@ -69,6 +70,7 @@ class DashboardSalesQueriesTest(unittest.TestCase):
         self.now = now
 
     def tearDown(self):
+        self.analytics._abc_xyz_cache.clear()
         for p in self._patches:
             p.stop()
         self._engine.dispose()
@@ -133,6 +135,26 @@ class DashboardSalesQueriesTest(unittest.TestCase):
             result = self.analytics.get_abc_xyz_analysis(90, Ctx())
         classes = {it["sku"]: it["abc_class"] for it in result["items"]}
         self.assertEqual(classes, {"X": "A", "Y": "B", "Z": "C"})
+
+    def test_abc_xyz_cache_is_scoped_and_expires(self):
+        class Ctx:
+            def __init__(self, store_id):
+                self.store_id = store_id
+
+        with patch.object(self.analytics, "_load_products", return_value=[]), \
+             patch.object(self.analytics.time, "monotonic", return_value=1000) as clock:
+            first = self.analytics.get_abc_xyz_analysis(90, Ctx("store-a"))
+            self.assertEqual(first["total_revenue"], 3800.0)
+            self.assertIs(first, self.analytics.get_abc_xyz_analysis(90, Ctx("store-a")))
+            self.assertEqual(self.analytics._get_sync_db_session.call_count, 1)
+
+            self.analytics.get_abc_xyz_analysis(60, Ctx("store-a"))
+            self.analytics.get_abc_xyz_analysis(90, Ctx("store-b"))
+            self.assertEqual(self.analytics._get_sync_db_session.call_count, 3)
+
+            clock.return_value = 1000 + self.analytics._ABC_XYZ_CACHE_TTL_SECONDS
+            self.analytics.get_abc_xyz_analysis(90, Ctx("store-a"))
+            self.assertEqual(self.analytics._get_sync_db_session.call_count, 4)
 
 
 if __name__ == "__main__":
