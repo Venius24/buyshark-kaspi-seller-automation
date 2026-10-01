@@ -144,7 +144,9 @@ def _build_context(request: Request, offer: dict) -> dict:
     snapshot_items = []
     if product_count is not None:
         cat_count = len(offer.get("categories") or [])
-        label = f"активных товара" + (f" в {cat_count} категориях" if cat_count else "")
+        word = _pl_tovar(product_count)
+        adj = "активный" if word == "товар" else "активных"
+        label = f"{adj} {word}" + (f" в {cat_count} категориях" if cat_count else "")
         snapshot_items.append((f"{product_count:,}".replace(",", " "), label))
     if offer.get("orders_label"):
         snapshot_items.append((offer["orders_label"], "заказов за всё время на Kaspi"))
