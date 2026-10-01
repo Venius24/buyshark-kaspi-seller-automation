@@ -34,18 +34,58 @@ DEFAULT_HUMAN_TRIGGERS = [
 ]
 
 
+# Триггеры короче этого матчатся только целым словом ("шт" не должен ловить
+# "штрих-код"), длиннее — от начала слова с любым окончанием. Раньше граница
+# стояла с обеих сторон у всех, и стемы из списка по умолчанию не работали:
+# "сломан" не ловил "сломанный", "разбит" — "разбитая", "брак" —
+# "бракованный" (2026-10-02, жалоба на брак уходила шаблоном в Kaspi Гид).
+_PREFIX_MATCH_MIN_LEN = 4
+
+
+def _trigger_pattern(word: str) -> str:
+    escaped = re.escape(word.lower())
+    if len(word) < _PREFIX_MATCH_MIN_LEN:
+        return r'(?<!\w)' + escaped + r'(?!\w)'
+    return r'(?<!\w)' + escaped
+
+
+def find_human_triggers(text: str, triggers: Optional[list] = None) -> list:
+    """Все триггеры, найденные в тексте (см. _trigger_pattern)."""
+    if not text:
+        return []
+    low = text.lower()
+    found = []
+    for word in (triggers if triggers is not None else DEFAULT_HUMAN_TRIGGERS):
+        if word and re.search(_trigger_pattern(word), low):
+            found.append(word)
+    return found
+
+
 def match_human_trigger(text: str, triggers: Optional[list] = None) -> bool:
-    """True, если хотя бы один триггер встречается в тексте как отдельное
-    слово/фраза (границы слова с обеих сторон) — НЕ как подстрока внутри
-    другого слова (напр. "шт" внутри "штрих-код")."""
+    return bool(find_human_triggers(text, triggers))
+
+
+# Триггеры про наличие. Если остаток товара известен из каталога, такой вопрос
+# бот может ответить сам — менеджер для него не нужен (worker.py). Профили
+# магазинов хранят свою копию списка, поэтому решаем по найденным словам, а не
+# правкой дефолта.
+STOCK_TRIGGERS = {'есть ли', 'в наличии', 'остаток', 'остатки', 'количество', 'штук', 'шт', 'бар ма', 'бар ма?', 'қалды'}
+
+# Признаки жалобы. Не настраиваются в профиле: это защита шаблона «логистика»,
+# чтобы «пришёл сломанный, курьер бросил» не получал ответ «пишите в Kaspi Гид».
+COMPLAINT_STEMS = [
+    'брак', 'слома', 'разбит', 'разбил', 'трещин', 'поврежд', 'повредил', 'испорч', 'царапин',
+    'не работа', 'не включа', 'не тот', 'не та ', 'не того', 'перепута', 'не хватает', 'некомплект',
+    'пустая коробк', 'возврат', 'вернуть', 'верните', 'обмен', 'жалоб',
+    'сынық', 'сынған', 'бұзылған', 'істемейді', 'қайтар', 'шағым', 'ақау',
+]
+
+
+def looks_like_complaint(text: str) -> bool:
     if not text:
         return False
-    for word in (triggers if triggers is not None else DEFAULT_HUMAN_TRIGGERS):
-        if not word:
-            continue
-        if re.search(r'\b' + re.escape(word.lower()) + r'\b', text.lower()):
-            return True
-    return False
+    low = text.lower()
+    return any(re.search(r'(?<!\w)' + re.escape(stem), low) for stem in COMPLAINT_STEMS)
 
 
 DEFAULT_PROFILE = {
@@ -233,7 +273,7 @@ def render_pickup_campaign_message(profile: dict, matched_point: Optional[dict] 
     return "\n\n".join(lines)
 
 
-def render_system_prompt(profile: dict, client_name: str, item_title: str, awaiting_review_reply: bool = False) -> str:
+def render_system_prompt(profile: dict, client_name: str, item_title: str, awaiting_review_reply: bool = False, facts_block: str = "") -> str:
     """Собирает систем-промпт из профиля магазина. custom_instructions (если
     включены) вставляются в отдельный блок ПЕРЕД неизменяемыми базовыми
     правилами — так владелец может дополнить бота, но не может им переопределить
@@ -278,6 +318,7 @@ def render_system_prompt(profile: dict, client_name: str, item_title: str, await
         f"Ты — крутой, дружелюбный и вежливый старший менеджер по имени {ai_name}, работаешь в казахстанском магазине '{store_name}' на Kaspi.kz.\n"
         f"Сейчас ты ведешь диалог с клиентом по имени {client_name} по поводу товара: '{item_title}'.\n"
         f"{_render_current_datetime_block()}"
+        f"{facts_block}"
         f"{custom_block}"
         f"{review_reply_block}\n"
 
@@ -294,6 +335,9 @@ def render_system_prompt(profile: dict, client_name: str, item_title: str, await
 
         f"8. Если присылают аудиозвонки и/или аудиосообщения/фото/видео - Проси текстом описание проблемы, якобы сломана аудиокарта или нет динамиков, чтобы клиент не понимал, что он общается с чат-ботом'\n\n"
 
+        f"9. Твои прошлые ответы в истории — это ответы Магазина. Реплики с пометкой [ответил менеджер магазина] написал живой "
+        f"сотрудник: не противоречь им и не отменяй его обещаний. Саму пометку в ответ не пиши.\n\n"
+
         f"🚨 ПРАВИЛО ВЫЗОВА МЕНЕДЖЕРА [HUMAN_OVERRIDE]:\n"
         f"- Если в запросе клиента речь идет о возврате, замене товара, докомплектации, браке, разбитом/сломанном товаре, "
         f"просьбе дать скидку, вызове человека/менеджера или любой нестандартной ситуации, требующей решения сотрудника: "
@@ -304,6 +348,7 @@ def render_system_prompt(profile: dict, client_name: str, item_title: str, await
 
         f"🕒 БЛОК 2: САМОВЫВОЗ И ЗАБРАТЬ ЗАКАЗ САМОМУ:\n"
         f"- ЕСЛИ КЛИЕНТ СПРАШИВАЕТ 'МОЖНО ЛИ ЗАБРАТЬ СЕГОДНЯ/САМОМУ/В КАКОЕ-ТО ВРЕМЯ' или где забрать:\n"
+        f"  Способ получения заказа смотри в блоке ДАННЫЕ ИЗ СИСТЕМЫ выше; если его там нет — не угадывай, уточни у клиента номер заказа.\n"
         f"  1. Если заказ оформлен с курьерской доставкой Kaspi: вежливо объясни, что изменить способ на самовывоз нельзя, так как товар уже передан в курьерскую службу Kaspi.\n"
         f"  2. Если это покупка напрямую или они хотят приехать к нам на склад:\n"
         f"{_render_pickup_block(pickup_points)}"

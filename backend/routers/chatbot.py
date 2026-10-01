@@ -12,7 +12,7 @@ from backend.chatbot.kaspi import load_chat_cookies
 from backend.dumper.config import discover_merchant_id
 from backend.security.store_context import StoreContext, get_store_context
 from backend.security.store_roles import require_store_manager, store_section_guard
-from backend.state_helpers import _save_chat_cookies_for_store, _load_bot_usage_summary, _load_outbound_stats
+from backend.state_helpers import _save_chat_cookies_for_store, _load_bot_usage_summary, _load_outbound_stats, _load_bot_journal
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chatbot", tags=["chatbot"], dependencies=[Depends(store_section_guard("chatbot"))])
@@ -173,6 +173,15 @@ def get_bot_usage(days: int = 30, ctx: StoreContext = Depends(get_store_context)
     просто цифра в кабинете — без реального инвойса/списания."""
     summary = _load_bot_usage_summary(ctx.store_id, days=days)
     return {"success": True, **summary}
+
+@router.get("/journal")
+def get_bot_journal(days: int = 7, kind: Optional[str] = None, limit: int = 100, ctx: StoreContext = Depends(get_store_context)):
+    """Журнал автоответчика: что написал клиент и что ответил бот (или почему
+    передал менеджеру), плюс доля эскалаций. kind=escalated — только переданные
+    менеджеру."""
+    days = max(1, min(days, 90))
+    limit = max(1, min(limit, 500))
+    return {"success": True, **_load_bot_journal(ctx.store_id, days=days, kind=kind, limit=limit)}
 
 @router.get("/outbound/queue")
 def list_outbound_queue(limit: int = 20, ctx: StoreContext = Depends(get_store_context)):

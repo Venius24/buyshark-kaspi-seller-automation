@@ -81,7 +81,7 @@ class ChatbotBillingIntegrationTest(unittest.TestCase):
         self._logistics_patch = patch.object(chatbot_worker, "check_logistics_question", return_value=None)
         self._logistics_patch.start()
 
-        self._match_trigger_patch = patch.object(chatbot_worker, "match_human_trigger", return_value=False)
+        self._match_trigger_patch = patch.object(chatbot_worker, "find_human_triggers", return_value=[])
         self._match_trigger_patch.start()
 
         self._chat_client_patch = patch.multiple(
@@ -92,8 +92,13 @@ class ChatbotBillingIntegrationTest(unittest.TestCase):
         )
         self._chat_client_patch.start()
 
-        self._history_patch = patch.object(chatbot_worker, "get_chat_history", AsyncMock(return_value=[]))
+        self._history_patch = patch.object(chatbot_worker.chat_client, "get_history", AsyncMock(return_value=[]))
         self._history_patch.start()
+
+        # Сообщения в тестах создаются «сейчас» — без этого их отложил бы
+        # дебаунс ответа (ждём, пока клиент допишет).
+        self._debounce_patch = patch.object(chatbot_worker, "REPLY_DEBOUNCE_SECONDS", 0)
+        self._debounce_patch.start()
 
         self._generate_patch = patch.object(
             chatbot_worker, "generate_ai_reply",
@@ -110,6 +115,7 @@ class ChatbotBillingIntegrationTest(unittest.TestCase):
         enforcement._cache.clear()
 
         self._generate_patch.stop()
+        self._debounce_patch.stop()
         self._history_patch.stop()
         self._chat_client_patch.stop()
         self._match_trigger_patch.stop()

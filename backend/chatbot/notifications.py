@@ -97,11 +97,12 @@ async def notify_manager_and_block(
     group_id: str, client_name: str, item_title: str, client_text: str,
     cookies: dict, merchant_id: str, msg_id: str, last_msg_created: int,
     store_id: Optional[str] = None
-):
+) -> str:
     """
     Отправляет успокаивающий ответ клиенту в Kaspi, затем шлет алерт в
     Telegram (админам ТОГО магазина, где пришёл этот чат — Слайс 4) и
     блокирует чат для ИИ (HUMAN_OVERRIDE), per-store.
+    Возвращает текст успокаивающего ответа — для журнала (chat_response_logs).
     """
     clean_text = client_text.lower()
     is_kz = any(word in clean_text for word in ['ката', 'кате', 'бузык', 'істемейді', 'қайтару', 'шағым', 'бар ма', 'бар ма?', 'қалды'])
@@ -151,3 +152,4 @@ async def notify_manager_and_block(
             logger.error(f"⚠️ Ошибка формирования Telegram клавиатуры: {e}")
 
     await asyncio.to_thread(config.set_chat_human_override, store_id, group_id, client_name=client_name)
+    return hold_reply

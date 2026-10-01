@@ -5,6 +5,7 @@ import { ChatSmsAuthModal } from '../ChatSmsAuthModal';
 import { BotProfileCard } from './BotProfileCard';
 import { OutboundTestCard } from './OutboundTestCard';
 import { OutboundStatsCard } from './OutboundStatsCard';
+import { BotJournalCard } from './BotJournalCard';
 import { fetchChatbotHasSession } from '../../queries';
 import { useActiveStoreId } from '../../storeContext';
 import { HelpHint } from '../shared/HelpHint';
@@ -105,6 +106,8 @@ export function ChatbotTab({ chatbotStatus, onSaveChatbotConfig, onUnblockChatbo
       </div>
 
       <BotProfileCard />
+
+      <BotJournalCard />
 
       <OutboundStatsCard />
 

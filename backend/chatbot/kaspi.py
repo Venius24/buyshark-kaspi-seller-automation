@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import asyncio
 import logging
@@ -52,12 +53,22 @@ def check_logistics_question(text: str, profile: dict | None = None) -> str | No
     магазина (backend/chatbot/prompt.py), если он передан — иначе дефолт."""
     if not text:
         return None
+    from backend.chatbot.prompt import looks_like_complaint
+    # Жалоба с упоминанием курьера/доставки — не логистика: шаблон «пишите в
+    # Kaspi Гид» на «пришёл сломанный» отправлял клиента не туда.
+    if looks_like_complaint(text):
+        return None
     clean_text = text.lower()
     reply_kk = (profile or {}).get("logistics_reply_kk") or LOGISTICS_TRIGGERS["kk"]["reply"]
     reply_ru = (profile or {}).get("logistics_reply_ru") or LOGISTICS_TRIGGERS["ru"]["reply"]
-    if any(word in clean_text for word in LOGISTICS_TRIGGERS["kk"]["keywords"]):
+
+    def _has(keywords) -> bool:
+        # От начала слова, а не подстрокой где угодно.
+        return any(re.search(r'(?<!\w)' + re.escape(word), clean_text) for word in keywords)
+
+    if _has(LOGISTICS_TRIGGERS["kk"]["keywords"]):
         return reply_kk
-    if any(word in clean_text for word in LOGISTICS_TRIGGERS["ru"]["keywords"]):
+    if _has(LOGISTICS_TRIGGERS["ru"]["keywords"]):
         return reply_ru
     return None
 

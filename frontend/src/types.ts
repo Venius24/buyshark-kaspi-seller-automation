@@ -141,6 +141,28 @@ export interface OutboundCampaignStats {
   skip_reasons: Record<string, number>;
 }
 
+export interface BotJournalItem {
+  id: number;
+  created_at: string;
+  group_id: string;
+  kind: string;
+  client_text: string | null;
+  reply_text: string | null;
+  order_code: string | null;
+  detail: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+}
+
+export interface BotJournal {
+  period_days: number;
+  items: BotJournalItem[];
+  by_kind: Record<string, number>;
+  handled: number;
+  escalated: number;
+  escalation_rate: number;
+}
+
 export interface OutboundStats {
   period_days: number;
   by_campaign: Record<string, OutboundCampaignStats>;

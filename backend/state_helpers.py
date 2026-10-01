@@ -1897,6 +1897,10 @@ def _append_chat_response_log(
     completion_tokens: int | None = None,
     billed_units: int = 1,
     credit_units_milli: int = 0,
+    client_text: str | None = None,
+    reply_text: str | None = None,
+    order_code: str | None = None,
+    detail: str | None = None,
 ):
     session = _get_sync_db_session()
     if not session:
@@ -1914,12 +1918,111 @@ def _append_chat_response_log(
             completion_tokens=completion_tokens,
             billed_units=billed_units,
             credit_units_milli=credit_units_milli,
+            client_text=client_text,
+            reply_text=reply_text,
+            order_code=(order_code or None) and str(order_code)[:30],
+            detail=(detail or None) and str(detail)[:200],
             created_at=_dt.datetime.utcnow(),
         ))
         session.commit()
     except Exception as e:
         logger.error(f"Error persisting chat response log to DB: {e}")
         session.rollback()
+    finally:
+        session.close()
+
+
+_ESCALATION_KINDS = ("inbound_escalated_trigger", "inbound_escalated_ai")
+
+
+def _load_bot_journal(store_id: str, days: int = 7, kind: str | None = None, limit: int = 100) -> dict:
+    """Журнал автоответчика: последние записи с текстами + сводка по видам.
+
+    escalation_rate — доля переданных менеджеру среди всех входящих, которые
+    бот обработал (ИИ-ответ, шаблон, эскалация). Записи до миграции 045 без
+    текстов, поэтому сводка считается по всем строкам, а список — как есть."""
+    import datetime as _dt
+    empty = {"period_days": days, "items": [], "by_kind": {}, "handled": 0, "escalated": 0, "escalation_rate": 0.0}
+    session = _get_sync_db_session()
+    if not session:
+        return empty
+    try:
+        from backend.db.models import ChatResponseLogDB
+        from sqlalchemy import func
+        since = _dt.datetime.utcnow() - _dt.timedelta(days=days)
+        base = (ChatResponseLogDB.store_id == store_id, ChatResponseLogDB.created_at >= since)
+
+        by_kind = {
+            k: c for k, c in session.execute(
+                select(ChatResponseLogDB.kind, func.count()).where(*base).group_by(ChatResponseLogDB.kind)
+            ).all()
+        }
+        handled = sum(by_kind.get(k, 0) for k in ("inbound_reply", "inbound_logistics_template", *_ESCALATION_KINDS))
+        escalated = sum(by_kind.get(k, 0) for k in _ESCALATION_KINDS)
+
+        q = select(ChatResponseLogDB).where(*base)
+        if kind == "escalated":
+            q = q.where(ChatResponseLogDB.kind.in_(_ESCALATION_KINDS))
+        elif kind:
+            q = q.where(ChatResponseLogDB.kind == kind)
+        rows = session.scalars(q.order_by(ChatResponseLogDB.created_at.desc()).limit(limit)).all()
+        items = [{
+            "id": r.id,
+            "created_at": r.created_at.isoformat() + "Z",
+            "group_id": r.group_id,
+            "kind": r.kind,
+            "client_text": r.client_text,
+            "reply_text": r.reply_text,
+            "order_code": r.order_code,
+            "detail": r.detail,
+            "prompt_tokens": r.prompt_tokens,
+            "completion_tokens": r.completion_tokens,
+        } for r in rows]
+        return {
+            "period_days": days,
+            "items": items,
+            "by_kind": by_kind,
+            "handled": handled,
+            "escalated": escalated,
+            "escalation_rate": round(escalated / handled, 3) if handled else 0.0,
+        }
+    finally:
+        session.close()
+
+
+def _load_bot_sent_texts(store_id: str, group_id: str) -> tuple[set, "object | None"]:
+    """Тексты, которые в этот чат отправил сам бот (ответы ИИ, шаблоны,
+    исходящие кампании), и момент, с которого ответы бота журналируются с
+    текстом. Нужно, чтобы в истории для модели отличить ответы менеджера от
+    своих: сообщение магазина после этого момента, которого нет среди наших
+    текстов, написал человек."""
+    session = _get_sync_db_session()
+    if not session:
+        return set(), None
+    try:
+        from backend.db.models import ChatResponseLogDB, OutboundQueueDB
+        from sqlalchemy import func
+        texts = set(session.scalars(
+            select(ChatResponseLogDB.reply_text).where(
+                ChatResponseLogDB.store_id == store_id,
+                ChatResponseLogDB.group_id == group_id,
+                ChatResponseLogDB.reply_text.isnot(None),
+            )
+        ).all())
+        texts |= set(session.scalars(
+            select(OutboundQueueDB.message_text).where(
+                OutboundQueueDB.store_id == store_id,
+                OutboundQueueDB.group_id == group_id,
+                OutboundQueueDB.status == "sent",
+            )
+        ).all())
+        tracking_since = session.scalar(
+            select(func.min(ChatResponseLogDB.created_at)).where(
+                ChatResponseLogDB.store_id == store_id,
+                ChatResponseLogDB.reply_text.isnot(None),
+            )
+        )
+        return {t.strip() for t in texts if t}, tracking_since
     finally:
         session.close()
 

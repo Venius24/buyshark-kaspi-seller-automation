@@ -610,6 +610,14 @@ class ChatResponseLogDB(Base):
     # счётчик store_daily_credits.used_milli с этим аудит-логом построчно.
     # billed_units сохраняет старый смысл (1 сообщение) — не переопределяем.
     credit_units_milli: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Журнал качества (миграция 045): что написал клиент и что ушло в ответ.
+    # Пишется и на ветках эскалации (kind=inbound_escalated_*), где раньше не
+    # оставалось следа вовсе. detail — почему так (найденные триггеры, причина
+    # пропуска); order_code — заказ чата, если он есть.
+    client_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reply_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    order_code: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    detail: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 

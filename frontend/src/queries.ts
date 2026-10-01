@@ -1,7 +1,7 @@
 import { apiFetch, API_URL } from './api';
 import type { StoreItem, UserProfile } from './components/StoreHub';
 import type { MasterStockGroup, ProductItem } from './components/MasterStockGroups';
-import type { BotProfile, BotUsageSummary, OutboundQueueItem, OutboundStats, BillingSummary, BillingPlan, BillingTransaction, FeatureFlags } from './types';
+import type { BotProfile, BotUsageSummary, OutboundQueueItem, OutboundStats, BotJournal, BillingSummary, BillingPlan, BillingTransaction, FeatureFlags } from './types';
 
 export const fetchProfile = async (): Promise<UserProfile | null> => {
   const res = await apiFetch(`${API_URL}/api/v1/auth/me`);
@@ -171,6 +171,18 @@ export const fetchOutboundStats = async (days: number = 30): Promise<OutboundSta
     const data = await res.json();
     if (!res.ok || !data.success) return null;
     return { period_days: data.period_days, by_campaign: data.by_campaign };
+  } catch {
+    return null;
+  }
+};
+
+export const fetchBotJournal = async (days: number = 7, kind: string = ''): Promise<BotJournal | null> => {
+  try {
+    const q = kind ? `&kind=${encodeURIComponent(kind)}` : '';
+    const res = await apiFetch(`${API_URL}/api/chatbot/journal?days=${days}${q}`);
+    const data = await res.json();
+    if (!res.ok || !data.success) return null;
+    return data as BotJournal;
   } catch {
     return null;
   }
