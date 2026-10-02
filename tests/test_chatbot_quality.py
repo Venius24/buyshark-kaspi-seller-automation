@@ -13,7 +13,10 @@ from unittest.mock import patch, AsyncMock, MagicMock
 sys.path.append(os.getcwd())
 
 import backend.chatbot.worker  # noqa: F401 — разрывает циклический импорт kaspi <-> chat_client
-from backend.chatbot.prompt import find_human_triggers, match_human_trigger, looks_like_complaint, DEFAULT_HUMAN_TRIGGERS
+from backend.chatbot.prompt import (
+    find_human_triggers, match_human_trigger, looks_like_complaint, find_escalation_reason, promises_manager,
+    DEFAULT_HUMAN_TRIGGERS,
+)
 from backend.chatbot.kaspi import check_logistics_question
 from backend.chatbot.ai import build_dialog
 from backend.chatbot import order_context
@@ -45,6 +48,30 @@ class TriggerMatchingTest(unittest.TestCase):
     def test_plain_logistics_question_still_gets_template(self):
         self.assertIsNotNone(check_logistics_question("Когда приедет курьер?"))
         self.assertIsNotNone(check_logistics_question("Где заказ? Курьеру звонила"))
+
+
+class EscalationStemsTest(unittest.TestCase):
+    """Вызов менеджера мимо модели (HANDOFF §3.110)."""
+
+    def test_requests_bot_cannot_solve_escalate(self):
+        for text in ["Хочу отменить заказ", "Почему отменили мой заказ??", "Курьер привёз вскрытую упаковку",
+                     "Хочу взять 20 штук оптом, сделаете скидку?", "Вы продали подделку", "Позовите оператора",
+                     "Заказ пришёл пустой", "С меня списали деньги дважды", "Басқа түсті жіберіпсіздер"]:
+            self.assertIsNotNone(find_escalation_reason(text), text)
+
+    def test_yo_is_normalized(self):
+        self.assertIsNotNone(find_escalation_reason("Пришёл с трещиной"))
+
+    def test_ordinary_questions_do_not_escalate(self):
+        for text in ["Здравствуйте, когда доставят?", "Спасибо, всё пришло, всё отлично", "Подходит ли для iPhone 15?",
+                     "Работаете в субботу?", "Рахмет", "Это оригинал?", "Какой цвет есть?"]:
+            self.assertIsNone(find_escalation_reason(text), text)
+
+    def test_manager_promise_detected(self):
+        self.assertTrue(promises_manager("Сейчас передам вопрос менеджеру, он свяжется с вами."))
+        self.assertTrue(promises_manager("Уточню и вернусь с ответом."))
+        self.assertIsNone(promises_manager("Да, есть в наличии."))
+        self.assertIsNone(promises_manager("Уточните, пожалуйста, цвет."))
 
 
 def _order_json(**attr_overrides):
@@ -277,6 +304,45 @@ class WorkerJournalTest(unittest.TestCase):
         self.generate.assert_not_awaited()
         self.escalate.assert_not_awaited()
         self.assertEqual(self._logs(), [])
+
+    def test_return_request_escalates_without_model(self):
+        self._run("Как оформить возврат?")
+        self.escalate.assert_awaited_once()
+        self.generate.assert_not_awaited()
+
+    def test_cancel_request_escalates_without_model(self):
+        self._run("Хочу отменить заказ")
+        self.generate.assert_not_awaited()
+        [row] = self._logs()
+        self.assertEqual(row.kind, "inbound_escalated_trigger")
+        self.assertIn("отмен", row.detail)
+
+    def test_client_photo_escalates(self):
+        created = int(time.time() * 1000) - 60_000
+        self.history = [
+            {"sender": "merchant", "text": "Здравствуйте!", "created": created - 5000},
+            {"sender": "messenger", "messageType": "IMAGE", "text": "", "created": created - 1000},
+            {"sender": "messenger", "text": "Вот так пришло", "created": created},
+        ]
+        group = {"id": "g-2", "subtitle": "Клиент", "title": "Пеногенератор", "analytics": {},
+                 "lastMessage": {"id": "m-2", "created": created, "sender": "messenger", "text": "Вот так пришло"}}
+        with patch.object(self.worker.http_session, "post", return_value=_fake_diff([group])):
+            asyncio.run(self.worker._run_chatbot_pass({}, "merchant-1", "store-q", token="tok"))
+        self.escalate.assert_awaited_once()
+        self.generate.assert_not_awaited()
+
+    def test_model_promising_manager_without_marker_escalates(self):
+        self.generate.return_value = ("Передам вопрос менеджеру, он свяжется с вами.", False, {"model": "deepseek-chat"})
+        self._run("Подходит ли для iPhone 15?")
+        self.escalate.assert_awaited_once()
+        self.sent.assert_not_awaited()
+        [row] = self._logs()
+        self.assertEqual(row.kind, "inbound_escalated_ai")
+
+    def test_plain_question_answered_by_model(self):
+        self._run("Подходит ли для iPhone 15?")
+        self.escalate.assert_not_awaited()
+        self.sent.assert_awaited()
 
     def test_journal_summary(self):
         self._run("Товар пришёл сломанный")

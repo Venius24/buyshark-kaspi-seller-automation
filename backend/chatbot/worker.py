@@ -7,7 +7,9 @@ from backend.chatbot import outbound as bot_outbound
 from backend.chatbot.kaspi import load_chat_cookies, format_time, check_logistics_question, http_session
 from backend.chatbot.ai import build_dialog, generate_ai_reply
 from backend.chatbot.order_context import collect_chat_facts, render_facts_block
-from backend.chatbot.prompt import get_profile as get_bot_profile, find_human_triggers, STOCK_TRIGGERS
+from backend.chatbot.prompt import (
+    get_profile as get_bot_profile, find_human_triggers, find_escalation_reason, promises_manager, STOCK_TRIGGERS,
+)
 from backend.state_helpers import _load_bot_sent_texts
 from backend.chatbot.notifications import notify_startup, notify_cookie_expired, notify_manager_and_block, reset_cookie_alert
 from backend.chatbot.handlers import register_handlers, register_bot_commands
@@ -37,6 +39,22 @@ def _pending_client_text(raw_history: list) -> str:
         if text:
             tail.append(text)
     return "\n".join(reversed(tail))
+
+
+_MEDIA_TYPES = {"IMAGE": "фото", "VIDEO": "видео", "AUDIO": "голосовое"}
+
+
+def _pending_client_media(raw_history: list) -> list:
+    """Вложения (фото/видео/голосовые) клиента после последнего ответа магазина.
+    Бот их не видит и не слышит, а клиент чаще всего так показывает брак."""
+    media = []
+    for m in reversed(raw_history or []):
+        if m.get("sender") != "messenger":
+            break
+        kind = _MEDIA_TYPES.get(str(m.get("messageType") or "").upper())
+        if kind:
+            media.append(kind)
+    return media
 
 
 # Per-store polling cursor (Phase 7) — store A and store B page through their
@@ -252,6 +270,16 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
                 await _escalate("inbound_escalated_trigger", "триггеры: " + ", ".join(triggers))
                 continue
 
+            reason = find_escalation_reason(client_text)
+            if reason:
+                await _escalate("inbound_escalated_trigger", f"жалоба/просьба: {reason}")
+                continue
+
+            media = _pending_client_media(raw_history)
+            if media:
+                await _escalate("inbound_escalated_trigger", "клиент прислал: " + ", ".join(sorted(set(media))))
+                continue
+
             logistics_reply = check_logistics_question(client_text, bot_profile)
             # Шаблон говорит «мы передали заказ, дальше везёт Kaspi». Если по
             # данным заказа это неправда (ещё на сборке, самовывоз, заказа нет) —
@@ -300,6 +328,11 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
 
             if is_human_override:
                 await _escalate("inbound_escalated_ai", "модель: " + (ai_reply or "")[:180])
+                continue
+
+            promise = promises_manager(ai_reply)
+            if promise:
+                await _escalate("inbound_escalated_ai", f"модель обещала человека без метки ({promise}): " + (ai_reply or "")[:150])
                 continue
 
             await chat_client.mark_read(group_id, [{"id": msg_id, "created": last_msg.get("created")}], cookies, merchant_id)
