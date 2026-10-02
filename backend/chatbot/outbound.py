@@ -90,6 +90,10 @@ MAX_OUTBOUND_PER_DAY = 75
 # межтиковый интервал. Поднимать вместе с ростом уверенности в стабильности
 # сценария, не заранее.
 FIRST_CONTACT_MAX_PER_TICK = 3
+# После стольких неудачных первых контактов запись уходит в 'failed'. Иначе
+# она до срезки по Гейту 5 (3 дня) занимает голову выборки _load_due_pending
+# и рассылка встаёт: так 02.10.2026 после 11:22 не ушло ни одного сообщения.
+FIRST_CONTACT_MAX_ATTEMPTS = 3
 # Гейт 5 (см. докстринг выше) — просроченные больше этого срока записи
 # срезаются в 'skipped' вместо отправки, чтобы очередь не растягивалась
 # на недели при MAX_OUTBOUND_PER_DAY меньше реального дневного притока.
@@ -158,41 +162,77 @@ def _load_cached_group_id(store_id: str, order_id: str) -> Optional[str]:
         session.close()
 
 
-async def resolve_group_id(store_id: str, order_id: str, cookies: dict, merchant_id: str) -> Optional[str]:
-    """Кэш order_chat_links -> HTTP-скан getDiffGroups по analytics.order_id.
-    Не запускает Playwright — если группы физически ещё нет (заказ без
-    переписки), возвращает None."""
-    cached = await asyncio.to_thread(_load_cached_group_id, store_id, order_id)
-    if cached:
-        return cached
-
-    groups = await chat_client.list_groups(cookies, merchant_id, since_days=30, limit=200)
-    for g in groups:
-        if str(g.get("analytics", {}).get("order_id")) == str(order_id):
-            group_id = g.get("id")
-            await asyncio.to_thread(_cache_order_chat_link, store_id, order_id, group_id)
-            return group_id
-    return None
+# Скан order_id -> group_id: getDiffGroups отдаёт диалоги от старых к новым,
+# поэтому прежний запрос «30 дней назад, limit 200» видел только диалоги
+# месячной давности, и свежий заказ с уже идущей перепиской считался «без чата»
+# (уходил в Playwright первым контактом, мимо правила «не слать в живой диалог»).
+# Теперь листаем вперёд и запоминаем курсор на стор: после первого прохода
+# каждый тик стоит один запрос.
+LINK_SCAN_DAYS = 30
+LINK_SCAN_MAX_PAGES = 25
+_link_scan_cursor: dict = {}
 
 
-def _cache_order_chat_link(store_id: str, order_id: str, group_id: str):
+def _cache_order_chat_links(store_id: str, pairs: dict):
+    if not pairs:
+        return
     session = _get_sync_db_session()
     if not session:
         return
     try:
         from backend.db.models import OrderChatLinkDB
-        existing = session.get(OrderChatLinkDB, (store_id, order_id))
-        if existing:
-            existing.group_id = group_id
-            existing.resolved_at = _dt.datetime.utcnow()
-        else:
-            session.add(OrderChatLinkDB(store_id=store_id, order_id=order_id, group_id=group_id, resolved_at=_dt.datetime.utcnow()))
+        now = _dt.datetime.utcnow()
+        for order_id, group_id in pairs.items():
+            existing = session.get(OrderChatLinkDB, (store_id, order_id))
+            if existing:
+                existing.group_id = group_id
+                existing.resolved_at = now
+            else:
+                session.add(OrderChatLinkDB(store_id=store_id, order_id=order_id, group_id=group_id, resolved_at=now))
         session.commit()
     except Exception as e:
-        logger.error(f"[Outbound] Ошибка кэширования order_chat_link ({order_id}): {e}")
+        logger.error(f"[Outbound] Ошибка кэширования order_chat_links ({len(pairs)} шт.): {e}")
         session.rollback()
     finally:
         session.close()
+
+
+async def sync_order_chat_links(store_id: str, cookies: dict, merchant_id: str):
+    """Дочитывает диалоги, изменённые с прошлого скана, и кэширует их order_id."""
+    gts = _link_scan_cursor.get(store_id) or int(_dt.datetime.utcnow().timestamp() * 1000) - LINK_SCAN_DAYS * 24 * 3600 * 1000
+    for _ in range(LINK_SCAN_MAX_PAGES):
+        data = await chat_client.diff_page(cookies, merchant_id, gts, limit=200)
+        if data is None:
+            return
+        groups = data.get("groups") or []
+        pairs = {}
+        for g in groups:
+            order_id = (g.get("analytics") or {}).get("order_id")
+            if order_id and g.get("id"):
+                pairs[str(order_id)] = g["id"]
+        await asyncio.to_thread(_cache_order_chat_links, store_id, pairs)
+        if not groups:
+            if data.get("sts"):
+                _link_scan_cursor[store_id] = max(gts, data["sts"])
+            return
+        page_max = max((g.get("gts") or 0 for g in groups), default=0)
+        if page_max <= gts:
+            return
+        gts = page_max
+        _link_scan_cursor[store_id] = gts
+        if not data.get("more"):
+            return
+
+
+async def resolve_group_id(store_id: str, order_id: str, cookies: dict, merchant_id: str) -> Optional[str]:
+    """Кэш order_chat_links (+ дочитка свежих диалогов). Не запускает
+    Playwright — если группы физически ещё нет (заказ без переписки),
+    возвращает None."""
+    cached = await asyncio.to_thread(_load_cached_group_id, store_id, order_id)
+    if cached:
+        return cached
+    await sync_order_chat_links(store_id, cookies, merchant_id)
+    return await asyncio.to_thread(_load_cached_group_id, store_id, order_id)
 
 
 def _is_within_window(item) -> bool:
@@ -362,7 +402,15 @@ async def _process_store_queue(store_id: str, cookies: dict, merchant_id: str):
 
                 ok, detail = await asyncio.to_thread(send_first_contact, cookies, item.order_id, item.message_text, status_filter)
                 if not ok:
-                    await asyncio.to_thread(_mark, item.id, "needs_first_contact", f"первый контакт не удался: {detail}")
+                    give_up = (item.attempts or 0) + 1 >= FIRST_CONTACT_MAX_ATTEMPTS
+                    await asyncio.to_thread(
+                        _mark, item.id, "failed" if give_up else "needs_first_contact",
+                        f"первый контакт не удался: {detail}",
+                    )
+                    logger.warning(
+                        f"[Outbound] Первый контакт по заказу {item.order_id} не удался"
+                        f"{' — сдаюсь' if give_up else ''} (попытка {(item.attempts or 0) + 1}): {detail}"
+                    )
                     await asyncio.sleep(random.uniform(2.5, 6.0))
                     continue
 

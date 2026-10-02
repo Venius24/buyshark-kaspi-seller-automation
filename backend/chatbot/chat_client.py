@@ -36,10 +36,10 @@ def _headers(merchant_id: str) -> dict:
     }
 
 
-async def list_groups(cookies: dict, merchant_id: str, since_days: int = 14, limit: int = 50) -> list[dict]:
-    """Список диалогов (с последним сообщением каждого) за последние since_days дней."""
-    since_ts = int(time.time() * 1000) - (since_days * 24 * 3600 * 1000)
-    payload = {"counters": [], "limit": limit, "gts": since_ts}
+async def diff_page(cookies: dict, merchant_id: str, gts: int, limit: int = 200) -> dict | None:
+    """Одна страница getDiffGroups: диалоги, изменённые после gts, ОТ СТАРЫХ К
+    НОВЫМ, плюс флаг more. None — Kaspi ответил не 200."""
+    payload = {"counters": [], "limit": limit, "gts": gts}
 
     def fetch():
         return http_session.post(f"{BASE_URL}/group/getDiffGroups/chat", headers=_headers(merchant_id), cookies=cookies, json=payload, timeout=10)
@@ -47,8 +47,43 @@ async def list_groups(cookies: dict, merchant_id: str, since_days: int = 14, lim
     resp = await asyncio.to_thread(fetch)
     if resp.status_code != 200:
         logger.warning(f"[ChatClient] getDiffGroups вернул {resp.status_code}")
-        return []
-    return resp.json().get("data", {}).get("groups", [])
+        return None
+    return resp.json().get("data") or {}
+
+
+# Окна, в которых ищем свежие диалоги для списка: сначала сутки, дальше шире,
+# пока не наберём limit. Страниц на окно — с запасом под ~200 диалогов в сутки.
+_RECENT_WINDOWS_DAYS = (1, 3, 7, 14)
+_MAX_PAGES_PER_WINDOW = 10
+
+
+async def list_groups(cookies: dict, merchant_id: str, since_days: int = 14, limit: int = 50) -> list[dict]:
+    """Последние limit диалогов (новые сверху) за since_days дней.
+
+    getDiffGroups отдаёт от старых к новым, поэтому запрос «с since_days назад,
+    limit N» возвращал N САМЫХ СТАРЫХ диалогов окна, а не свежие. Листаем
+    вперёд от узкого окна и берём хвост."""
+    now_ms = int(time.time() * 1000)
+    windows = [d for d in _RECENT_WINDOWS_DAYS if d < since_days] + [since_days]
+    groups: dict = {}
+    for days in windows:
+        groups = {}
+        gts = now_ms - days * 24 * 3600 * 1000
+        for _ in range(_MAX_PAGES_PER_WINDOW):
+            data = await diff_page(cookies, merchant_id, gts, limit=200)
+            if data is None:
+                break
+            page = data.get("groups") or []
+            for g in page:
+                groups[g.get("id")] = g
+            page_max = max((g.get("gts") or 0 for g in page), default=0)
+            if not page or not data.get("more") or page_max <= gts:
+                break
+            gts = page_max
+        if len(groups) >= limit:
+            break
+    ordered = sorted(groups.values(), key=lambda g: g.get("gts") or 0, reverse=True)
+    return ordered[:limit]
 
 
 async def get_history(group_id: str, cookies: dict, merchant_id: str, limit: int = 30) -> list[dict]:
