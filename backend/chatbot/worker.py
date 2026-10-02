@@ -8,7 +8,7 @@ from backend.chatbot.kaspi import load_chat_cookies, format_time, check_logistic
 from backend.chatbot.ai import build_dialog, generate_ai_reply
 from backend.chatbot.order_context import collect_chat_facts, render_facts_block
 from backend.chatbot.prompt import (
-    get_profile as get_bot_profile, find_human_triggers, find_escalation_reason, promises_manager, STOCK_TRIGGERS,
+    get_profile as get_bot_profile, find_human_triggers, find_escalation_reason, promises_manager, says_message_empty, STOCK_TRIGGERS,
 )
 from backend.state_helpers import _load_bot_sent_texts
 from backend.chatbot.notifications import notify_startup, notify_cookie_expired, notify_manager_and_block, reset_cookie_alert
@@ -42,18 +42,26 @@ def _pending_client_text(raw_history: list) -> str:
 
 
 _MEDIA_TYPES = {"IMAGE": "фото", "VIDEO": "видео", "AUDIO": "голосовое"}
+# Голосовые бот не эскалирует: на них отвечает модель по правилу 8 промпта
+# (решение владельца 03.10.2026). Фото и видео — сразу менеджеру.
+_MEDIA_HANDLED_BY_MODEL = {"голосовое"}
 
 
 def _pending_client_media(raw_history: list) -> list:
-    """Вложения (фото/видео/голосовые) клиента после последнего ответа магазина.
-    Бот их не видит и не слышит, а клиент чаще всего так показывает брак."""
+    """Вложения клиента после последнего ответа магазина: фото/видео/голосовое,
+    а также «вложение» (тип не распознан) и «пустое сообщение» (ни текста, ни
+    известного типа). Бот их не видит, а на пустое отвечал клиенту «ваше
+    сообщение пустое» — такие случаи тоже уходят менеджеру."""
     media = []
     for m in reversed(raw_history or []):
         if m.get("sender") != "messenger":
             break
-        kind = _MEDIA_TYPES.get(str(m.get("messageType") or "").upper())
+        msg_type = str(m.get("messageType") or "").upper()
+        kind = _MEDIA_TYPES.get(msg_type)
         if kind:
             media.append(kind)
+        elif not (m.get("text") or (m.get("ext") or {}).get("text") or "").strip():
+            media.append("пустое сообщение" if msg_type in ("", "TEXT") else "вложение")
     return media
 
 
@@ -275,7 +283,10 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
                 await _escalate("inbound_escalated_trigger", f"жалоба/просьба: {reason}")
                 continue
 
-            media = _pending_client_media(raw_history)
+            pending_media = _pending_client_media(raw_history)
+            media = [k for k in pending_media if k not in _MEDIA_HANDLED_BY_MODEL]
+            if not client_text.strip() and not pending_media:
+                media = ["пустое сообщение"]  # история не загрузилась или в ней нечего прочесть
             if media:
                 await _escalate("inbound_escalated_trigger", "клиент прислал: " + ", ".join(sorted(set(media))))
                 continue
@@ -328,6 +339,10 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
 
             if is_human_override:
                 await _escalate("inbound_escalated_ai", "модель: " + (ai_reply or "")[:180])
+                continue
+
+            if says_message_empty(ai_reply):
+                await _escalate("inbound_escalated_ai", "модель не увидела сообщение: " + (ai_reply or "")[:150])
                 continue
 
             promise = promises_manager(ai_reply)

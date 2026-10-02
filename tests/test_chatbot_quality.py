@@ -331,6 +331,40 @@ class WorkerJournalTest(unittest.TestCase):
         self.escalate.assert_awaited_once()
         self.generate.assert_not_awaited()
 
+    def _run_history(self, history):
+        created = history[-1]["created"]
+        self.history = history
+        group = {"id": "g-3", "subtitle": "Клиент", "title": "Пеногенератор", "analytics": {},
+                 "lastMessage": {"id": "m-3", "created": created, "sender": "messenger", "text": history[-1].get("text", "")}}
+        with patch.object(self.worker.http_session, "post", return_value=_fake_diff([group])):
+            asyncio.run(self.worker._run_chatbot_pass({}, "merchant-1", "store-q", token="tok"))
+
+    def test_voice_message_goes_to_model_rule_8(self):
+        created = int(time.time() * 1000) - 60_000
+        self._run_history([{"sender": "messenger", "messageType": "AUDIO", "text": "", "created": created}])
+        self.escalate.assert_not_awaited()
+        self.generate.assert_awaited_once()
+
+    def test_unrecognized_attachment_escalates(self):
+        created = int(time.time() * 1000) - 60_000
+        self._run_history([{"sender": "messenger", "messageType": "FILE", "text": "", "created": created}])
+        self.escalate.assert_awaited_once()
+        self.generate.assert_not_awaited()
+        [row] = self._logs()
+        self.assertIn("вложение", row.detail)
+
+    def test_empty_message_escalates(self):
+        created = int(time.time() * 1000) - 60_000
+        self._run_history([{"sender": "messenger", "messageType": "TEXT", "text": "", "created": created}])
+        self.escalate.assert_awaited_once()
+        self.generate.assert_not_awaited()
+
+    def test_model_saying_message_is_empty_escalates(self):
+        self.generate.return_value = ("Здравствуйте! Ваше сообщение пустое, напишите, пожалуйста, вопрос.", False, {"model": "deepseek-chat"})
+        self._run("Подходит ли для iPhone 15?")
+        self.escalate.assert_awaited_once()
+        self.sent.assert_not_awaited()
+
     def test_model_promising_manager_without_marker_escalates(self):
         self.generate.return_value = ("Передам вопрос менеджеру, он свяжется с вами.", False, {"model": "deepseek-chat"})
         self._run("Подходит ли для iPhone 15?")

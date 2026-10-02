@@ -126,6 +126,18 @@ def promises_manager(reply: str) -> Optional[str]:
     return _find_stem(reply, _MANAGER_PROMISE_STEMS)
 
 
+# Модель ответила клиенту, что сообщение пустое/не отображается: вложение
+# не распозналось, и клиенту нужен человек, а не «пришлите ещё раз».
+_EMPTY_MESSAGE_STEMS = [
+    'сообщение пуст', 'пустое сообщение', 'сообщение не отобража', 'сообщение не пришл',
+    'сообщение не загрузил', 'не вижу вашего сообщения', 'не вижу сообщени', 'хабарлама бос', 'бос хабарлама',
+]
+
+
+def says_message_empty(reply: str) -> Optional[str]:
+    return _find_stem(reply, _EMPTY_MESSAGE_STEMS)
+
+
 DEFAULT_PROFILE = {
     "ai_name": "Айгерим",
     "store_display_name": "магазин",
