@@ -26,6 +26,7 @@ from backend.dumper.radar import _fetch_offers_sync
 from backend.security.store_context import StoreContext, get_store_context
 from backend.security.store_roles import store_section_guard
 from backend.services.sales_export import build_sales_export_xlsx
+from backend.services.order_finance import compute_store_finance
 from backend.services.stock_forecast import (
     DEFAULT_COVER_DAYS, DEFAULT_HORIZON_DAYS, DEFAULT_LEAD_TIME_DAYS, DEFAULT_SLOW_DAYS,
     DEFAULT_WINDOW_DAYS,
@@ -770,3 +771,35 @@ def export_purchase_order(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ── Финансы заказов: комиссия, доставка, возвраты ───────────────────────
+# Считается вживую из Kaspi Shop API (токен магазина, без туннеля): ~35
+# страниц по 100 заказов на 13 дней у Бархана. Цифры по закрытым заказам за
+# день почти не меняются, поэтому кэш на 30 минут — продавец может дёргать
+# экран сколько угодно, Kaspi видит не больше двух прогонов в час.
+_FINANCE_CACHE_TTL_SECONDS = 30 * 60
+_FINANCE_MAX_DAYS = 31
+_finance_cache: dict[tuple[str, int], tuple[float, dict]] = {}
+_finance_cache_lock = threading.Lock()
+
+
+@router.get("/finance")
+def get_order_finance(days: int = 13, ctx: StoreContext = Depends(get_store_context)):
+    """Выручка, комиссия Kaspi (оценка по официальной таблице тарифов),
+    деньги на доставку и возвраты/отмены по закрытым заказам — см.
+    backend/services/order_finance.py, что из этого точно, а что оценка."""
+    days = max(1, min(days, _FINANCE_MAX_DAYS))
+    key = (ctx.store_id, days)
+    with _finance_cache_lock:
+        cached = _finance_cache.get(key)
+        if cached and time.monotonic() < cached[0]:
+            return {"success": True, "cached": True, **cached[1]}
+    try:
+        result = compute_store_finance(ctx.token, days)
+    except Exception as e:
+        logger.error(f"[Analytics] finance для {ctx.store_id}: {e}")
+        raise HTTPException(status_code=502, detail="Kaspi не отдал заказы, попробуйте позже")
+    with _finance_cache_lock:
+        _finance_cache[key] = (time.monotonic() + _FINANCE_CACHE_TTL_SECONDS, result)
+    return {"success": True, "cached": False, **result}

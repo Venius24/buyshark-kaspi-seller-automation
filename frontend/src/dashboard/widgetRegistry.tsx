@@ -9,6 +9,7 @@ import { RevenueHeatmap } from '../components/RevenueHeatmap';
 import { PriceRadarWidget } from '../components/PriceRadarWidget';
 import { AbcXyzWidget } from '../components/AbcXyzWidget';
 import { StockForecastWidget } from '../components/StockForecastWidget';
+import { OrderFinanceWidget } from '../components/OrderFinanceWidget';
 import { CompetitorLeaderboard } from '../components/CompetitorLeaderboard';
 import { CatalogCoverageGauge } from '../components/CatalogCoverageGauge';
 import { HourlyHeatmap } from '../components/HourlyHeatmap';
@@ -124,6 +125,15 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
         />
       </Suspense>
     ),
+  },
+  {
+    id: 'order_finance',
+    title: 'Финансы заказов: комиссия, доставка, возвраты',
+    defaultVisible: true,
+    // Дробный порядок — по той же причине, что у stock_forecast: встаёт сразу
+    // после «Реальных продаж», не перенумеровывая соседей.
+    defaultOrder: 2.5,
+    render: () => <OrderFinanceWidget key="order_finance" />,
   },
   {
     id: 'price_radar',
