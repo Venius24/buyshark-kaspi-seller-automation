@@ -38,6 +38,53 @@ class TestChatbotState(unittest.TestCase):
         self.assertIs(state1, state2)
 
 
+class TestDiffCursor(unittest.IsolatedAsyncioTestCase):
+    """getDiffGroups отдаёт диалоги от старых изменений к новым. Курсор обязан
+    сдвигаться по обработанной странице — иначе после первых N изменившихся
+    диалогов бот перестаёт видеть новые сообщения (прод 01–02.10.2026)."""
+
+    def setUp(self):
+        worker._chatbot_state.clear()
+
+    async def _pass(self, groups, more=False):
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"data": {"groups": groups, "more": more, "sts": 9_999}}
+        with patch.object(worker.http_session, "post", return_value=response) as post,              patch.object(worker.config, "get_chat_states", return_value={}),              patch.object(worker, "reset_cookie_alert"):
+            await worker._run_chatbot_pass({}, "merchant", "store-a")
+        return post.call_args.kwargs["json"]
+
+    async def test_cursor_moves_to_newest_change_on_page(self):
+        state = worker._get_chatbot_state("store-a")
+        state["start_gts"], state["day_start_ts"] = 100, 10**15
+        groups = [
+            {"id": "a", "gts": 200, "lastMessage": {"id": "1", "created": 1, "sender": "client"}},
+            {"id": "b", "gts": 300, "lastMessage": {"id": "2", "created": 1, "sender": "client"}},
+        ]
+        sent = await self._pass(groups, more=True)
+        self.assertEqual(sent["gts"], 100)
+        self.assertEqual(sent["limit"], worker.DIFF_PAGE_LIMIT)
+        self.assertEqual(state["start_gts"], 300)
+
+    async def test_cursor_stays_before_debounced_group(self):
+        import time
+        state = worker._get_chatbot_state("store-a")
+        state["start_gts"], state["day_start_ts"] = 100, 0
+        fresh = int(time.time() * 1000)
+        groups = [
+            {"id": "a", "gts": 200, "lastMessage": {"id": "1", "created": 1, "sender": "client"}},
+            {"id": "typing", "gts": 250, "lastMessage": {"id": "2", "created": fresh, "sender": "messenger"}},
+            {"id": "c", "gts": 300, "lastMessage": {"id": "3", "created": 1, "sender": "client"}},
+        ]
+        await self._pass(groups)
+        self.assertEqual(state["start_gts"], 249)
+
+    async def test_empty_page_jumps_to_server_ts(self):
+        state = worker._get_chatbot_state("store-a")
+        state["start_gts"] = 100
+        await self._pass([])
+        self.assertEqual(state["start_gts"], 9_999)
+
+
 class TestRunChatbotCycle(unittest.IsolatedAsyncioTestCase):
     """Phase 7: run_chatbot_cycle() — the testable core of
     kaspi_chatbot_loop(), extracted from the infinite while-loop. Also

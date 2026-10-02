@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 REPLY_DEBOUNCE_SECONDS = 15
 # Сколько последних сообщений чата уходит модели и в проверку триггеров.
 HISTORY_LIMIT = 20
+# Размер страницы getDiffGroups. Kaspi отдаёт диалоги, изменённые после gts,
+# от старых к новым, и флаг more, если есть ещё.
+DIFF_PAGE_LIMIT = 50
 
 
 def _pending_client_text(raw_history: list) -> str:
@@ -64,6 +67,14 @@ def _notify_credits_exhausted_once_daily(store_id: str) -> None:
             asyncio.ensure_future(dispatch(store_id, "money", "⚠️ Дневной лимит ответов ИИ исчерпан, бот молчит до завтра.", urgent=True))
     except Exception as e:
         logger.debug(f"[Chatbot] notify_credits_exhausted skipped: {e}")
+
+def _next_diff_cursor(groups: list, deferred_gts: list, current: int) -> int:
+    """Куда сдвинуть gts после обработки страницы getDiffGroups: до самого
+    свежего изменения на странице, но не дальше отложенных (debounce) групп."""
+    if deferred_gts:
+        return max(current, min(deferred_gts) - 1)
+    page_max = max((g.get("gts") or 0 for g in groups), default=0)
+    return max(current, page_max)
 
 async def start_telegram_bot_polling():
     """
@@ -128,7 +139,7 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
         "x-platform-type": "WEB"
     }
 
-    payload = {"counters": [], "limit": 15, "gts": state["start_gts"]}
+    payload = {"counters": [], "limit": DIFF_PAGE_LIMIT, "gts": state["start_gts"]}
     def fetch_diff():
         return http_session.post(groups_url, headers=headers, cookies=cookies, json=payload, timeout=8)
 
@@ -148,6 +159,10 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
 
     if not groups and data.get("sts"):
         state["start_gts"] = data.get("sts")
+
+    # Диалоги, к которым вернёмся на следующем тике (клиент ещё печатает) —
+    # курсор не должен уйти дальше них.
+    deferred_gts: list[int] = []
 
     eligible_groups = [
         group for group in groups
@@ -171,9 +186,11 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
 
         if last_msg.get("sender") == "messenger" and not already_replied:
             # Клиент часто пишет несколькими сообщениями подряд. Пока последнее
-            # совсем свежее — ждём: группа придёт в diff и на следующем тике
-            # (курсор не двигается, пока группы есть), и ответим на всё сразу.
+            # совсем свежее — ждём: курсор не уйдёт дальше этой группы (см.
+            # конец функции), она придёт и на следующем тике.
             if msg_created and time.time() * 1000 - msg_created < REPLY_DEBOUNCE_SECONDS * 1000:
+                if group.get("gts"):
+                    deferred_gts.append(group["gts"])
                 continue
 
             client_name = group.get("subtitle") or group.get("title", "Клиент")
@@ -307,6 +324,14 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
                     from backend.billing import credits as billing_credits
                     await asyncio.to_thread(billing_credits.release, store_id, credit_units_milli)
                     await _journal("inbound_send_failed", reply_text=ai_reply, detail=str(send_result.get("error") or "")[:200], billed_units=0)
+
+    # Kaspi отдаёт страницу от старых изменений к новым. Раньше курсор стоял на
+    # месте, пока группы есть, — после первых 15 изменившихся за сутки диалогов
+    # бот видел только их, а новые сообщения клиентов не видел до рестарта.
+    if groups:
+        state["start_gts"] = _next_diff_cursor(groups, deferred_gts, state["start_gts"])
+        if data.get("more"):
+            logger.info(f"[Chatbot] Store {store_id}: в diff есть ещё диалоги, дочитаю на следующем тике.")
 
     return True
 
