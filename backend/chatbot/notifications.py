@@ -26,6 +26,24 @@ def reset_cookie_alert(store_id: Optional[str] = None):
         logger.info("✅ Сессия Kaspi восстановлена. Куки снова валидны!")
         config.set_cookie_alert_sent(store_id, False)
 
+def mask_phone(phone: str) -> str:
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    return f"+{digits[0]}•••••{digits[-4:]}" if len(digits) >= 5 else phone
+
+def chat_relogin_keyboard(store_id: str):
+    """Кнопка быстрого восстановления сессии чата прямо под алертом. Есть
+    сохранённый номер — бот сразу просит у Kaspi SMS-код на него; нет —
+    спрашивает номер. store_id зашит в callback: алерт приходит всем
+    участникам магазина, а «активный» стор в боте у них может быть другой."""
+    if not bot_instance.HAS_AIOGRAM:
+        return None
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    phone = config.get_chat_login_phone(store_id)
+    text = f"🔄 Восстановить по номеру {mask_phone(phone)}" if phone else "🔄 Восстановить вход (SMS)"
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=text, callback_data=f"chatcookie_quick:{store_id}")
+    ]])
+
 async def notify_cookie_expired(reason: str, store_id: Optional[str] = None):
     """
     Отправляет алерт о невалидных/просроченных куках в Telegram админам
@@ -49,13 +67,17 @@ async def notify_cookie_expired(reason: str, store_id: Optional[str] = None):
         f"⚠️ *Причина:* {_esc_md(reason)}\n"
         f"⏰ *Время:* {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
         f"----------------------------------------\n"
-        f"🛠 *Действие:* Зайдите в дашборд → вкладка «ИИ-Автоответчик» и повторно войдите по номеру телефона (SMS-код). "
+        f"🛠 *Действие:* Нажмите кнопку ниже — бот запросит SMS-код от Kaspi, пришлите его ответным сообщением. "
+        f"Либо войдите заново в дашборде → вкладка «ИИ-Автоответчик». "
         f"Это отдельный вход от основного кабинета — email/пароль тут не поможет."
     )
 
     if store_id is not None:
         logger.warning(f"🚨 [COOKIE ALERT] {reason}.")
-        await notify_dispatch.dispatch(store_id, "problems", alert_text, urgent=True, card="cookie_expired")
+        await notify_dispatch.dispatch(
+            store_id, "problems", alert_text, urgent=True, card="cookie_expired",
+            reply_markup=await asyncio.to_thread(chat_relogin_keyboard, store_id),
+        )
     else:
         logger.warning(f"🚨 [COOKIE ALERT] {reason}. (без store_id — некому отправлять, привязка per-store)")
 

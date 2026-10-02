@@ -134,6 +134,8 @@ def start_mobile_login(req: MobileLoginStartRequest, ctx: StoreContext = Depends
     from backend.services.playwright_worker import worker, Command
     success, msg, _cookies = worker.send_cmd(Command.START_SMS_LOGIN, req.phone, store_id=ctx.store_id)
     if success:
+        # Для кнопки «Восстановить» в Telegram-алерте — чтобы не вводить номер заново.
+        config.set_chat_login_phone(ctx.store_id, req.phone.strip())
         return {"success": True, "message": "Код из SMS отправлен на указанный номер."}
     raise HTTPException(status_code=400, detail=msg)
 

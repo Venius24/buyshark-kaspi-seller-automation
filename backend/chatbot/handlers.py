@@ -656,6 +656,56 @@ def register_handlers():
             "Отмена — команда /status."
         )
 
+    @dp.callback_query(F.data.startswith("chatcookie_quick:"))
+    async def process_chatcookie_quick(callback_query: types.CallbackQuery):
+        """Кнопка под алертом «сессия чата истекла»: сразу запрашивает SMS-код
+        на последний номер, с которым проходил вход (chat_login_phone), —
+        владельцу остаётся только прислать код. Нет сохранённого номера —
+        тот же флоу, что chatcookie_start (спросить телефон). Магазин берётся
+        из callback, а не из активного стора: алерт мог прийти по магазину,
+        который у этого пользователя сейчас не выбран в /switch."""
+        store_id = callback_query.data.split(":", 1)[1]
+        link = await asyncio.to_thread(ti.get_link, callback_query.from_user.id)
+        role = await asyncio.to_thread(ti.get_role, link["user_id"], store_id) if link else None
+        if not role:
+            await callback_query.answer("Нет доступа к этому магазину. Откройте /start заново.", show_alert=True)
+            return
+        if role == "VIEWER":
+            await callback_query.answer("Обновлять сессию чата может только владелец или менеджер магазина.", show_alert=True)
+            return
+
+        phone = await asyncio.to_thread(config.get_chat_login_phone, store_id)
+        if not phone:
+            PENDING_CHAT_LOGIN[callback_query.from_user.id] = {"store_id": store_id, "step": "phone"}
+            await callback_query.answer()
+            await callback_query.message.reply(
+                "📱 Пришлите номер телефона для входа в Kaspi-чат (формат: +7XXXXXXXXXX).\n"
+                "Kaspi пришлёт код по SMS на этот номер.\n\n"
+                "Отмена — команда /status."
+            )
+            return
+
+        from backend.services.playwright_worker import worker, Command
+        from backend.chatbot.notifications import mask_phone
+
+        await callback_query.answer("Запрашиваю SMS-код…")
+        await callback_query.message.reply(f"⏳ Запрашиваю у Kaspi SMS-код на {mask_phone(phone)}...")
+        success, msg, _cookies = await asyncio.to_thread(
+            worker.send_cmd, Command.START_SMS_LOGIN, phone, store_id=store_id
+        )
+        if not success:
+            PENDING_CHAT_LOGIN.pop(callback_query.from_user.id, None)
+            await callback_query.message.reply(
+                f"❌ Не удалось отправить код: {msg}\n"
+                "Попробуйте ещё раз кнопкой или через /status → «Обновить куки чата» с другим номером."
+            )
+            return
+        PENDING_CHAT_LOGIN[callback_query.from_user.id] = {"store_id": store_id, "step": "code"}
+        await callback_query.message.reply(
+            f"✅ Код отправлен на {mask_phone(phone)}. Пришлите его следующим сообщением.\n\n"
+            "Отмена — команда /status."
+        )
+
     @dp.message(lambda m: bool(m.text) and not m.text.startswith("/") and m.from_user and m.from_user.id in PENDING_CHAT_LOGIN)
     async def handle_chat_cookie_login(message: types.Message):
         pending = PENDING_CHAT_LOGIN.get(message.from_user.id)
@@ -680,6 +730,7 @@ def register_handlers():
                 PENDING_CHAT_LOGIN.pop(message.from_user.id, None)
                 await message.reply(f"❌ Не удалось отправить код: {msg}")
                 return
+            await asyncio.to_thread(config.set_chat_login_phone, store_id, text)
             PENDING_CHAT_LOGIN[message.from_user.id] = {"store_id": store_id, "step": "code"}
             await message.reply("✅ Код отправлен. Пришлите его следующим сообщением.")
             return

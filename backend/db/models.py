@@ -369,6 +369,9 @@ class ChatbotSettingsDB(Base):
     # проблема переуведомлялась на каждый деплой. Персистим, как
     # human_override в ChatStateDB.
     chat_cookie_alert_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Последний номер, по которому прошёл SMS-вход в чат, — для кнопки
+    # быстрого восстановления в Telegram-алерте (не просить телефон заново).
+    chat_login_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
 
 class StoreFeatureFlagsDB(Base):

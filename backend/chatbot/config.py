@@ -75,6 +75,38 @@ def set_cookie_alert_sent(store_id: Optional[str], value: bool):
     finally:
         session.close()
 
+def get_chat_login_phone(store_id: str) -> Optional[str]:
+    """Последний номер, по которому прошёл SMS-вход в Kaspi-чат этого стора."""
+    from backend.state_helpers import _get_sync_db_session
+    session = _get_sync_db_session()
+    if not session:
+        return None
+    try:
+        from backend.db.models import ChatbotSettingsDB
+        row = session.get(ChatbotSettingsDB, store_id)
+        return row.chat_login_phone if row else None
+    finally:
+        session.close()
+
+def set_chat_login_phone(store_id: str, phone: str):
+    from backend.state_helpers import _get_sync_db_session
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import ChatbotSettingsDB
+        row = session.get(ChatbotSettingsDB, store_id)
+        if not row:
+            session.add(ChatbotSettingsDB(store_id=store_id, chat_login_phone=phone))
+        else:
+            row.chat_login_phone = phone
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting chat login phone to DB: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
 def any_cookie_alert_sent() -> bool:
     """Для Telegram-команды /status — бот единый процесс на все магазины
     (Phase 5 де-глобализации не было), поэтому там нет store-контекста."""
