@@ -85,6 +85,13 @@ export function DumpingFilterBar({ filters, onChange, facets, competitorsRange }
     { value: 'NO_DATA', label: t('f_rank_state_no_data'), facet: 'NO_DATA' },
   ];
 
+  const attackStateOptions: Option[] = [
+    { value: '', label: t('f_attack_state_any') },
+    { value: 'UNDER_ATTACK', label: t('f_attack_state_under_attack'), facet: 'UNDER_ATTACK' },
+    { value: 'LADDER', label: t('f_attack_state_ladder'), facet: 'LADDER' },
+    { value: 'GUARDED', label: t('f_attack_state_guarded'), facet: 'GUARDED' },
+  ];
+
   const statusOptions: Option[] = [
     { value: '', label: t('all_statuses') },
     { value: 'WINNING_1ST', label: t('option_1st_place') },
@@ -92,6 +99,7 @@ export function DumpingFilterBar({ filters, onChange, facets, competitorsRange }
     { value: 'TARGET_POS_REACHED', label: t('option_target_position') },
     { value: 'AT_MIN_PRICE', label: t('option_min_price') },
     { value: 'MAX_PRICE_SINGLE', label: t('option_max_price') },
+    { value: 'GUARD_HOLD', label: t('option_guard_hold') },
     { value: 'OFF', label: t('option_disabled') },
   ];
 
@@ -100,6 +108,7 @@ export function DumpingFilterBar({ filters, onChange, facets, competitorsRange }
     (filters.dumpingState ? 1 : 0) +
     (filters.priceState ? 1 : 0) +
     (filters.rankState ? 1 : 0) +
+    (filters.attackState ? 1 : 0) +
     (filters.minCompetitors !== null ? 1 : 0) +
     (filters.maxCompetitors !== null ? 1 : 0);
 
@@ -166,6 +175,14 @@ export function DumpingFilterBar({ filters, onChange, facets, competitorsRange }
         filters.rankState,
         rankStateOptions,
         (v) => set('rankState', v)
+      )}
+
+      {renderSelect(
+        t('f_attack_state_label'),
+        t('f_attack_state_hint'),
+        filters.attackState,
+        attackStateOptions,
+        (v) => set('attackState', v)
       )}
 
       {renderSelect(

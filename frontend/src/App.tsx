@@ -42,7 +42,7 @@ import { ReferralTab } from './components/tabs/ReferralTab';
 import { fetchProfile, fetchBillingSummary, completeOnboarding, fetchFeatureFlagsWithDefault } from './queries';
 import { OnboardingTour } from './components/OnboardingTour';
 import { ParcelLoader } from './components/shared/ParcelLoader';
-import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig, DumpingFacets, DumpingFilters, KaspiQuotaStatus } from './types';
+import type { ActiveTab, Product, Order, Transfer, ChatbotConfig, ChatbotStatus, DumpingConfig, DumpingFacets, DumpingFilters, GuardOverride, KaspiQuotaStatus } from './types';
 import { EMPTY_DUMPING_FILTERS } from './types';
 
 // Сырые фичи (Автодобавление, Для разработчиков) — доступны только этим email,
@@ -288,7 +288,10 @@ export default function App() {
     minSellerRating: number | null = null,
     sameCityOnly: boolean = false,
     blacklistedMerchants: string[] = [],
-    displaySku: string = sku
+    displaySku: string = sku,
+    // undefined — форма защиту не трогала, бэкенд оставит как было;
+    // null — «наследовать»; объект — своё переопределение.
+    guard: GuardOverride | undefined = undefined
   ) => {
     if (!canEdit) {
       addLog('Недостаточно прав: роль "Наблюдатель" может только просматривать');
@@ -310,7 +313,8 @@ export default function App() {
           max_delivery_days: maxDeliveryDays,
           min_seller_rating: minSellerRating,
           same_city_only: sameCityOnly,
-          blacklisted_merchants: blacklistedMerchants
+          blacklisted_merchants: blacklistedMerchants,
+          ...(guard !== undefined ? { guard } : {})
         })
       });
       const data = await res.json();
@@ -497,6 +501,7 @@ export default function App() {
       if (dumping.dumpingState) params.set('dumping_state', dumping.dumpingState);
       if (dumping.priceState) params.set('price_state', dumping.priceState);
       if (dumping.rankState) params.set('rank_state', dumping.rankState);
+      if (dumping.attackState) params.set('attack_state', dumping.attackState);
       if (dumping.minCompetitors !== null) params.set('min_competitors', String(dumping.minCompetitors));
       if (dumping.maxCompetitors !== null) params.set('max_competitors', String(dumping.maxCompetitors));
 
@@ -1034,6 +1039,12 @@ export default function App() {
                   setSelectedModes(prev => ({ ...prev, [sku]: mode }));
                 }}
                 onSaveDumpingConfig={saveDumpingConfig}
+                canEdit={canEdit}
+                onFocusSku={(sku) => {
+                  setSearchQuery(sku);
+                  setCurrentPage(1);
+                  loadProducts(1, statusFilter, sku, pageSize, dumpingOnlyFilter, dumpingFilters);
+                }}
                 currentPage={currentPage}
                 totalPages={totalPages}
                 onPageChange={handlePageChange}

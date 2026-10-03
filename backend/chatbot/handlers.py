@@ -656,6 +656,46 @@ def register_handlers():
             "Отмена — команда /status."
         )
 
+    @dp.callback_query(F.data.startswith("gdec:"))
+    async def process_guard_decision(callback_query: types.CallbackQuery):
+        """Кнопка под вопросом защиты демпинга «продавец без рейтинга рядом
+        с нами» (backend/dumper/guard_notify.py): I — не учитывать его на
+        этом товаре, C — учитывать. Магазин берётся из самой строки решения."""
+        from backend.state_helpers import _get_guard_decision, _set_guard_decision
+        try:
+            _, raw_id, choice = callback_query.data.split(":", 2)
+            decision_id = int(raw_id)
+        except ValueError:
+            await callback_query.answer("Кнопка устарела.", show_alert=True)
+            return
+        status = {"I": "IGNORE", "C": "CONSIDER"}.get(choice)
+        row = await asyncio.to_thread(_get_guard_decision, decision_id)
+        if not row or not status:
+            await callback_query.answer("Вопрос уже не актуален.", show_alert=True)
+            return
+        link = await asyncio.to_thread(ti.get_link, callback_query.from_user.id)
+        role = await asyncio.to_thread(ti.get_role, link["user_id"], row["store_id"]) if link else None
+        if not role:
+            await callback_query.answer("Нет доступа к этому магазину. Откройте /start заново.", show_alert=True)
+            return
+        if role == "VIEWER":
+            await callback_query.answer("Решать может только владелец или менеджер магазина.", show_alert=True)
+            return
+        who = f"tg:{callback_query.from_user.id}"
+        await asyncio.to_thread(_set_guard_decision, decision_id, status, who)
+        await asyncio.to_thread(
+            audit.log_action, row["store_id"], callback_query.from_user.id,
+            "guard_decision", f"{row['sku']} {row['merchant_id']} -> {status}",
+        )
+        verdict = ("🚫 Не учитываем на этом товаре." if status == "IGNORE"
+                   else "✅ Учитываем, больше не спрашиваем.")
+        try:
+            await callback_query.message.edit_text(
+                (callback_query.message.text or "") + "\n\n" + verdict, reply_markup=None)
+        except Exception:
+            pass
+        await callback_query.answer(verdict)
+
     @dp.callback_query(F.data.startswith("chatcookie_quick:"))
     async def process_chatcookie_quick(callback_query: types.CallbackQuery):
         """Кнопка под алертом «сессия чата истекла»: сразу запрашивает SMS-код

@@ -356,6 +356,15 @@ def _apply_overrides(products: list, store_id: str, *, fresh_from_kaspi_at=None)
                 p["status"] = ov["status"]
     return products
 
+def _json_or_none(raw):
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
 def _load_dumping_configs(store_id: str) -> dict:
     """Конфиги демпинга этого магазина. Пустой результат значит "у этого
     магазина ещё нет конфигов демпинга"."""
@@ -385,7 +394,8 @@ def _load_dumping_configs(store_id: str) -> dict:
                     "min_seller_rating": r.min_seller_rating,
                     "same_city_only": bool(r.same_city_only),
                     "blacklisted_merchants": blacklisted,
-                    "city_code": r.city_code or "750000000"
+                    "city_code": r.city_code or "750000000",
+                    "guard": _json_or_none(r.guard_config),
                 }
         except Exception as e:
             logger.debug(f"DB load dumping configs error: {e}")
@@ -434,7 +444,8 @@ def _save_dumping_configs(configs: dict, store_id: str):
                     min_seller_rating=cfg.get("min_seller_rating"),
                     same_city_only=bool(cfg.get("same_city_only", False)),
                     blacklisted_merchants=blacklisted_str,
-                    city_code=str(cfg.get("city_code", "750000000"))
+                    city_code=str(cfg.get("city_code", "750000000")),
+                    guard_config=json.dumps(cfg["guard"], ensure_ascii=False) if cfg.get("guard") else None,
                 )
                 session.add(db_obj)
             else:
@@ -449,6 +460,10 @@ def _save_dumping_configs(configs: dict, store_id: str):
                 db_obj.same_city_only = bool(cfg.get("same_city_only", False))
                 db_obj.blacklisted_merchants = blacklisted_str
                 db_obj.city_code = str(cfg.get("city_code", "750000000"))
+                # Защиту трогаем, только если её прислали: импорт PriceFeed и
+                # прочие писатели конфига про неё не знают и не должны стирать.
+                if "guard" in cfg:
+                    db_obj.guard_config = json.dumps(cfg["guard"], ensure_ascii=False) if cfg["guard"] else None
         session.commit()
         session.close()
     except Exception as e:
@@ -1800,6 +1815,8 @@ def _upsert_price_war_snapshot(items: list, store_id: str):
             row.best_competitor_price = it.get("best_competitor_price")
             row.best_competitor_name = (str(it["best_competitor_name"])[:300] if it.get("best_competitor_name") else None)
             row.url = (str(it["url"])[:500] if it.get("url") else None)
+            if "guard" in it:
+                row.guard_json = json.dumps(it["guard"], ensure_ascii=False, default=str) if it["guard"] else None
             row.updated_at = now
         session.commit()
     except Exception as e:
@@ -1829,10 +1846,280 @@ def _load_price_war_snapshot(store_id: str) -> list:
                 "best_competitor_price": r.best_competitor_price,
                 "best_competitor_name": r.best_competitor_name,
                 "url": r.url,
+                "guard": _json_or_none(r.guard_json),
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
             }
             for r in rows
         ]
+    finally:
+        session.close()
+
+
+def _load_store_guard(store_id: str) -> dict:
+    """Общие настройки защиты от оттеснения магазина (guard.GuardConfig как dict).
+    Пусто — магазин защиту не настраивал (она выключена)."""
+    session = _get_sync_db_session()
+    if not session:
+        return {}
+    try:
+        from backend.db.models import StoreDumpingGuardDB
+        row = session.get(StoreDumpingGuardDB, store_id)
+        return (_json_or_none(row.payload) or {}) if row else {}
+    except Exception as e:
+        logger.debug(f"DB load store guard error: {e}")
+        return {}
+    finally:
+        session.close()
+
+
+def _save_store_guard(store_id: str, payload: dict):
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import StoreDumpingGuardDB
+        import datetime as _dt
+        row = session.get(StoreDumpingGuardDB, store_id)
+        if not row:
+            row = StoreDumpingGuardDB(store_id=store_id)
+            session.add(row)
+        row.payload = json.dumps(payload or {}, ensure_ascii=False)
+        row.updated_at = _dt.datetime.utcnow()
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting store guard: {e}")
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+PRICE_WAR_MOVES_RETENTION_DAYS = 45
+
+
+def _record_price_war_moves(moves: list, store_id: str):
+    """moves: [{sku, our_old, our_new, action, rival: {merchant_id, name,
+    price, reviews, rating, intercity} | None}] — каждое наше изменение цены
+    демпингом. Заодно подрезает историю старше PRICE_WAR_MOVES_RETENTION_DAYS."""
+    if not moves:
+        return
+    session = _get_sync_db_session()
+    if not session:
+        return
+    try:
+        from backend.db.models import PriceWarMoveDB
+        from sqlalchemy import delete
+        import datetime as _dt
+        now = _dt.datetime.utcnow()
+        for m in moves:
+            rival = m.get("rival") or {}
+            session.add(PriceWarMoveDB(
+                store_id=store_id,
+                sku=str(m["sku"])[:100],
+                created_at=now,
+                our_old=float(m["our_old"]),
+                our_new=float(m["our_new"]),
+                rival_id=(str(rival["merchant_id"])[:64] if rival.get("merchant_id") else None),
+                rival_name=(str(rival["name"])[:300] if rival.get("name") else None),
+                rival_price=rival.get("price"),
+                rival_reviews=rival.get("reviews"),
+                rival_rating=rival.get("rating"),
+                rival_intercity=rival.get("intercity"),
+                action=(str(m.get("action") or "")[:50] or None),
+            ))
+        session.execute(delete(PriceWarMoveDB).where(
+            PriceWarMoveDB.store_id == store_id,
+            PriceWarMoveDB.created_at < now - _dt.timedelta(days=PRICE_WAR_MOVES_RETENTION_DAYS),
+        ))
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error persisting price war moves: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
+
+def _load_price_war_moves(store_id: str, hours: int = 72, sku: str = None) -> dict:
+    """История наших ходов за последние `hours` часов: {sku: [ход, ...]}
+    по возрастанию времени."""
+    import datetime as _dt
+    session = _get_sync_db_session()
+    if not session:
+        return {}
+    try:
+        from backend.db.models import PriceWarMoveDB
+        since = _dt.datetime.utcnow() - _dt.timedelta(hours=hours)
+        stmt = select(PriceWarMoveDB).where(
+            PriceWarMoveDB.store_id == store_id, PriceWarMoveDB.created_at >= since
+        )
+        if sku:
+            stmt = stmt.where(PriceWarMoveDB.sku == sku)
+        out: dict = {}
+        for r in session.scalars(stmt.order_by(PriceWarMoveDB.created_at)).all():
+            out.setdefault(r.sku, []).append({
+                "created_at": r.created_at,
+                "our_old": r.our_old,
+                "our_new": r.our_new,
+                "rival_id": r.rival_id,
+                "rival_name": r.rival_name,
+                "rival_price": r.rival_price,
+                "rival_reviews": r.rival_reviews,
+                "rival_rating": r.rival_rating,
+                "rival_intercity": r.rival_intercity,
+                "action": r.action,
+            })
+        return out
+    except Exception as e:
+        logger.debug(f"DB load price war moves error: {e}")
+        return {}
+    finally:
+        session.close()
+
+
+# Сколько дней «ждёт решения» продавец, которого радар больше не видит рядом
+# с нами, прежде чем пропасть из очереди менеджера (строка остаётся).
+GUARD_ASK_STALE_DAYS = 3
+
+
+def _decision_row_to_dict(r) -> dict:
+    return {
+        "id": r.id, "sku": r.sku, "merchant_id": r.merchant_id, "merchant_name": r.merchant_name,
+        "product_name": r.product_name, "status": r.status, "price": r.price, "our_price": r.our_price,
+        "first_seen": r.first_seen.isoformat() if r.first_seen else None,
+        "last_seen": r.last_seen.isoformat() if r.last_seen else None,
+        "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+        "decided_by": r.decided_by,
+    }
+
+
+def _load_guard_decisions(store_id: str) -> dict:
+    """Решения менеджера по продавцам без рейтинга: {sku: {merchant_id: статус}}.
+    ASK тоже возвращается — движок считает его «не решено»."""
+    session = _get_sync_db_session()
+    if not session:
+        return {}
+    try:
+        from backend.db.models import PriceWarRivalDecisionDB
+        out: dict = {}
+        rows = session.scalars(select(PriceWarRivalDecisionDB).where(
+            PriceWarRivalDecisionDB.store_id == store_id)).all()
+        for r in rows:
+            out.setdefault(r.sku, {})[r.merchant_id] = r.status
+        return out
+    except Exception as e:
+        logger.debug(f"DB load guard decisions error: {e}")
+        return {}
+    finally:
+        session.close()
+
+
+def _upsert_guard_asks(asks: list, store_id: str) -> list:
+    """asks: [{sku, product_name, merchant_id, merchant_name, price, our_price}]
+    из цикла демпинга. Новые пары «товар + продавец» создаются со статусом
+    ASK и возвращаются (их надо показать менеджеру), у существующих
+    обновляются цена и last_seen. Решённые не трогаются."""
+    if not asks:
+        return []
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import PriceWarRivalDecisionDB
+        import datetime as _dt
+        now = _dt.datetime.utcnow()
+        existing = {
+            (r.sku, r.merchant_id): r
+            for r in session.scalars(select(PriceWarRivalDecisionDB).where(
+                PriceWarRivalDecisionDB.store_id == store_id)).all()
+        }
+        created = []
+        for a in asks:
+            mid = str(a.get("merchant_id") or "")[:64]
+            sku = str(a.get("sku") or "")[:100]
+            if not mid or not sku:
+                continue
+            row = existing.get((sku, mid))
+            if row is None:
+                row = PriceWarRivalDecisionDB(
+                    store_id=store_id, sku=sku, merchant_id=mid, status="ASK",
+                    first_seen=now, last_seen=now,
+                )
+                session.add(row)
+                existing[(sku, mid)] = row
+                created.append(row)
+            row.last_seen = now
+            row.merchant_name = (str(a.get("merchant_name") or "")[:300] or row.merchant_name)
+            row.product_name = (str(a.get("product_name") or "")[:500] or row.product_name)
+            row.price = a.get("price")
+            row.our_price = a.get("our_price")
+        session.commit()
+        return [_decision_row_to_dict(r) for r in created]
+    except Exception as e:
+        logger.error(f"Error persisting guard asks: {e}")
+        session.rollback()
+        return []
+    finally:
+        session.close()
+
+
+def _list_guard_decisions(store_id: str, pending_only: bool = False, limit: int = 300) -> list:
+    session = _get_sync_db_session()
+    if not session:
+        return []
+    try:
+        from backend.db.models import PriceWarRivalDecisionDB
+        import datetime as _dt
+        stmt = select(PriceWarRivalDecisionDB).where(PriceWarRivalDecisionDB.store_id == store_id)
+        if pending_only:
+            stale = _dt.datetime.utcnow() - _dt.timedelta(days=GUARD_ASK_STALE_DAYS)
+            stmt = stmt.where(PriceWarRivalDecisionDB.status == "ASK",
+                              PriceWarRivalDecisionDB.last_seen >= stale)
+            stmt = stmt.order_by(PriceWarRivalDecisionDB.first_seen.desc())
+        else:
+            stmt = stmt.where(PriceWarRivalDecisionDB.status != "ASK")
+            stmt = stmt.order_by(PriceWarRivalDecisionDB.decided_at.desc())
+        return [_decision_row_to_dict(r) for r in session.scalars(stmt.limit(limit)).all()]
+    except Exception as e:
+        logger.debug(f"DB list guard decisions error: {e}")
+        return []
+    finally:
+        session.close()
+
+
+def _get_guard_decision(decision_id: int):
+    session = _get_sync_db_session()
+    if not session:
+        return None
+    try:
+        from backend.db.models import PriceWarRivalDecisionDB
+        row = session.get(PriceWarRivalDecisionDB, int(decision_id))
+        return {**_decision_row_to_dict(row), "store_id": row.store_id} if row else None
+    finally:
+        session.close()
+
+
+def _set_guard_decision(decision_id: int, status: str, decided_by: str, store_id: str = None):
+    """Записывает решение. store_id задан — строка обязана принадлежать этому
+    магазину (кабинет); None — вызов из Телеграма, где магазин проверяется
+    по самой строке. Возвращает dict строки или None, если строки нет."""
+    session = _get_sync_db_session()
+    if not session:
+        return None
+    try:
+        from backend.db.models import PriceWarRivalDecisionDB
+        import datetime as _dt
+        row = session.get(PriceWarRivalDecisionDB, int(decision_id))
+        if row is None or (store_id is not None and row.store_id != store_id):
+            return None
+        row.status = status
+        row.decided_at = None if status == "ASK" else _dt.datetime.utcnow()
+        row.decided_by = None if status == "ASK" else (decided_by or "")[:200]
+        session.commit()
+        return {**_decision_row_to_dict(row), "store_id": row.store_id}
+    except Exception as e:
+        logger.error(f"Error saving guard decision: {e}")
+        session.rollback()
+        raise
     finally:
         session.close()
 

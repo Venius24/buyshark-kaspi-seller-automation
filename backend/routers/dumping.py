@@ -4,11 +4,12 @@ import asyncio
 import logging
 import functools
 from fastapi import APIRouter, Depends, HTTPException
-from backend.models import DumpingConfigRequest
+from backend.models import DumpingConfigRequest, DumpingGuardSettings
 from backend.state_helpers import _load_dumping_configs, _save_dumping_configs, _save_override, _apply_overrides, _load_products, _save_products
 from backend.dumper import run_price_dumping_job
 from backend.security.store_context import StoreContext, get_store_context, get_store_context_billed, list_active_stores
 from backend.security.store_roles import require_store_manager_billed, store_section_guard
+from backend.routers.auth_v1 import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dumping", tags=["dumping"], dependencies=[Depends(store_section_guard("dumping"))])
@@ -158,6 +159,9 @@ def save_dumping_config(req: DumpingConfigRequest, ctx: StoreContext = Depends(r
         "blacklisted_merchants": req.blacklisted_merchants or [],
         "city_code": req.city_code or "750000000"
     }
+    # Защиту пишем, только если форма её прислала (None = «наследовать»).
+    if "guard" in req.model_fields_set:
+        configs[req.sku]["guard"] = req.guard
     # Пишем только изменённый SKU: _save_dumping_configs делает SELECT+upsert
     # на каждый ключ переданного словаря, и весь конфиг магазина (сотни SKU)
     # ре-трогался бы ради правки одного — единственная причина, по которой
@@ -236,3 +240,91 @@ async def run_price_dumping(ctx: StoreContext = Depends(require_store_manager_bi
         return res
     finally:
         store_state.is_running = False
+
+
+# ---------------------------------------------------------------------------
+# Защита от оттеснения (backend/dumper/guard.py)
+# ---------------------------------------------------------------------------
+
+@router.get("/guard")
+def get_dumping_guard(ctx: StoreContext = Depends(get_store_context)):
+    """Общие настройки защиты магазина + подписи причин для интерфейса."""
+    from backend.dumper import guard
+    from backend.state_helpers import _load_store_guard
+    settings = guard.GuardConfig.from_dict(_load_store_guard(ctx.store_id)).to_dict()
+    return {"success": True, "settings": settings, "reason_labels": guard.REASON_LABELS}
+
+
+@router.put("/guard")
+def save_dumping_guard(req: DumpingGuardSettings, ctx: StoreContext = Depends(require_store_manager_billed)):
+    from backend.dumper import guard
+    from backend.state_helpers import _save_store_guard, _load_store_guard
+    current = guard.GuardConfig.from_dict(_load_store_guard(ctx.store_id)).to_dict()
+    try:
+        clean = guard.clean_guard_settings({**current, **req.model_dump(exclude_unset=True)})
+    except guard.GuardValidationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    _save_store_guard(ctx.store_id, clean)
+    return {"success": True, "settings": clean}
+
+
+@router.get("/attacks")
+def get_dumping_attacks(ctx: StoreContext = Depends(get_store_context)):
+    """Отчёт «Под атакой»: товары с признаками оттеснения, соперники,
+    которые встречаются на нескольких товарах, и сколько ₸ с единицы съела
+    война за 30 дней."""
+    from backend.services import dumping_attacks
+    return {"success": True, **dumping_attacks.build_report(ctx.store_id)}
+
+
+@router.get("/guard/decisions")
+def get_guard_decisions(ctx: StoreContext = Depends(get_store_context)):
+    """Продавцы без рейтинга рядом с нами: ждут решения менеджера и уже решённые."""
+    from backend.state_helpers import _list_guard_decisions
+    return {
+        "success": True,
+        "pending": _list_guard_decisions(ctx.store_id, pending_only=True),
+        "decided": _list_guard_decisions(ctx.store_id, pending_only=False),
+    }
+
+
+@router.post("/guard/decisions/{decision_id}")
+def set_guard_decision(
+    decision_id: int,
+    body: dict,
+    ctx: StoreContext = Depends(require_store_manager_billed),
+    user=Depends(get_current_user),
+):
+    """decision: IGNORE (не учитывать на этом товаре), CONSIDER (учитывать),
+    IGNORE_ALL (в чёрный список магазина + IGNORE здесь), ASK (отменить решение)."""
+    from backend.dumper import guard
+    from backend.state_helpers import (
+        _set_guard_decision, _get_guard_decision, _load_store_guard, _save_store_guard,
+    )
+    decision = str((body or {}).get("decision") or "").upper()
+    if decision not in ("IGNORE", "CONSIDER", "IGNORE_ALL", "ASK"):
+        raise HTTPException(status_code=422, detail="decision: IGNORE, CONSIDER, IGNORE_ALL или ASK")
+    row = _get_guard_decision(decision_id)
+    if not row or row["store_id"] != ctx.store_id:
+        raise HTTPException(status_code=404, detail="Решение не найдено")
+    if decision == "IGNORE_ALL":
+        settings = guard.GuardConfig.from_dict(_load_store_guard(ctx.store_id)).to_dict()
+        if row["merchant_id"] not in settings["blacklist"]:
+            settings["blacklist"] = settings["blacklist"] + [row["merchant_id"]]
+            _save_store_guard(ctx.store_id, guard.clean_guard_settings(settings))
+        decision = "IGNORE"
+    who = getattr(user, "email", None) or "cabinet"
+    saved = _set_guard_decision(decision_id, decision, who, store_id=ctx.store_id)
+    saved.pop("store_id", None)
+    return {"success": True, "decision": saved}
+
+
+@router.get("/attacks/{sku}/moves")
+def get_dumping_attack_moves(sku: str, days: int = 14, ctx: StoreContext = Depends(get_store_context)):
+    """История наших ходов по одному товару — для графика лесенки."""
+    from backend.state_helpers import _load_price_war_moves
+    days = max(1, min(int(days), 45))
+    moves = _load_price_war_moves(ctx.store_id, hours=days * 24, sku=sku).get(sku, [])
+    for m in moves:
+        m["created_at"] = m["created_at"].isoformat()
+    return {"success": True, "sku": sku, "moves": moves}

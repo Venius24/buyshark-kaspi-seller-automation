@@ -123,6 +123,12 @@ def build_effective_dumping_configs(products, configs: dict, master_groups: dict
         excluded_skus = {
             canonical.get(str(s), str(s)) for s in (group.get("dumping_excluded_skus") or [])
         }
+        # Настройки защиты от оттеснения группы — средний слой наследования
+        # «магазин → группа → товар» (backend/dumper/guard.py). Действуют и
+        # на товары группы со своим конфигом демпинга: свой конфиг меняет
+        # цены/режим, а не то, от кого защищаться, — защиту товар
+        # переопределяет отдельно своим полем guard.
+        group_guard = g_dump_cfg.get("guard")
         for sku in group.get("linked_skus", []):
             if canonical.get(str(sku), str(sku)) in excluded_skus:
                 # Товар явно исключён из группового демпинга — групповой
@@ -133,8 +139,12 @@ def build_effective_dumping_configs(products, configs: dict, master_groups: dict
             # Если индивидуального конфига нет или он выключен — применяем демпинг группы
             if not indiv_cfg or not indiv_cfg.get("enabled"):
                 merged = dict(g_dump_cfg)
+                merged.pop("guard", None)
                 merged["sku"] = sku
+                merged["group_guard"] = group_guard
                 effective_configs[sku] = merged
                 source_by_sku[sku] = "group"
+            elif group_guard and "group_guard" not in indiv_cfg:
+                effective_configs[sku] = {**indiv_cfg, "group_guard": group_guard}
 
     return effective_configs, source_by_sku

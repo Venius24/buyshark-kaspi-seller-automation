@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Boolean, Integer, BigInteger, Float, Text, DateTime, ForeignKey, Column
+from sqlalchemy import String, Boolean, Integer, BigInteger, Float, Text, DateTime, ForeignKey, Column, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.db.database import Base
 
@@ -190,6 +190,9 @@ class DumpingConfigDB(Base):
     same_city_only: Mapped[bool] = mapped_column(Boolean, default=False)
     blacklisted_merchants: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-stringified list
     city_code: Mapped[str] = mapped_column(String(50), default="750000000")
+    # Переопределение защиты от оттеснения для этого товара (guard.py):
+    # JSON {"mode": "INHERIT"|"CUSTOM"|"OFF", ...поля GuardConfig}. NULL — наследовать.
+    guard_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -573,7 +576,65 @@ class PriceWarSnapshotDB(Base):
     best_competitor_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     best_competitor_name: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
     url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # Защита от оттеснения на последнем цикле: сигналы атаки, отсеянные
+    # соперники, сработавшее ограничение (JSON, см. brain.BrainWorker).
+    guard_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class StoreDumpingGuardDB(Base):
+    """Общие настройки защиты демпинга от оттеснения для магазина —
+    нижний слой наследования «магазин → Мастер-Группа → товар».
+    payload — JSON полей backend/dumper/guard.py::GuardConfig."""
+    __tablename__ = "store_dumping_guard"
+
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PriceWarMoveDB(Base):
+    """Каждое наше изменение цены демпингом и соперник, на которого мы
+    отвечали. По этой истории guard.detect_ladder узнаёт лесенку, а отчёт
+    считает, сколько ₸ съела война. Хранится 45 дней."""
+    __tablename__ = "price_war_moves"
+    __table_args__ = (Index("ix_price_war_moves_store_sku_created", "store_id", "sku", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False)
+    sku: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    our_old: Mapped[float] = mapped_column(Float, nullable=False)
+    our_new: Mapped[float] = mapped_column(Float, nullable=False)
+    rival_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    rival_name: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    rival_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    rival_reviews: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    rival_rating: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    rival_intercity: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    action: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+
+class PriceWarRivalDecisionDB(Base):
+    """Решение менеджера по продавцу без рейтинга на конкретном товаре
+    (guard.no_rating_action = ASK): ASK — ждёт решения, IGNORE — не
+    учитывать на этом товаре, CONSIDER — учитывать и больше не спрашивать."""
+    __tablename__ = "price_war_rival_decisions"
+    __table_args__ = (UniqueConstraint("store_id", "sku", "merchant_id", name="uq_price_war_rival_decision"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    sku: Mapped[str] = mapped_column(String(100), nullable=False)
+    merchant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    merchant_name: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    product_name: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ASK")
+    price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    our_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    decided_by: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
 
 class CompetitorEncounterLogDB(Base):

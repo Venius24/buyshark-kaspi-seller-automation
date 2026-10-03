@@ -28,6 +28,9 @@ import { useActiveStoreId } from '../storeContext';
 import { openImageLightbox } from './shared/ImageLightbox';
 import { HelpHint } from './shared/HelpHint';
 import { SkuRecipeEditor } from './SkuRecipeEditor';
+import { GuardOverrideEditor } from './dumping/GuardOverrideEditor';
+import { useGuardSettings } from '../hooks/useDumpingGuard';
+import type { GuardOverride } from '../types';
 import {
   type SkuRecipes,
   cleanRecipesForSubmit,
@@ -48,6 +51,8 @@ interface GroupDumpingConfig {
   same_city_only?: boolean;
   blacklisted_merchants?: string[];
   city_code?: string;
+  /** Защита от оттеснения для товаров группы. null — как у магазина. */
+  guard?: GuardOverride;
 }
 
 export interface MasterStockGroup {
@@ -209,6 +214,11 @@ export const MasterStockGroups: React.FC<{ isWsConnected: boolean; wsEvent: Tele
   const [formDumpingMode, setFormDumpingMode] = useState<string>('TOP_1');
   const [formTargetPosition, setFormTargetPosition] = useState<number>(1);
   const [formDumpingExcludedSkus, setFormDumpingExcludedSkus] = useState<string[]>([]);
+  // Защита от оттеснения группы. Не трогали в форме — не отправляем, и бэкенд
+  // оставит прежнюю (routers/stock_groups.py).
+  const [formGuard, setFormGuard] = useState<GuardOverride>(null);
+  const [formGuardTouched, setFormGuardTouched] = useState(false);
+  const storeGuard = useGuardSettings().data?.settings;
 
   // Inline Stock Edit State
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
@@ -326,6 +336,8 @@ export const MasterStockGroups: React.FC<{ isWsConnected: boolean; wsEvent: Tele
     setFormDumpingMode('TOP_1');
     setFormTargetPosition(1);
     setFormDumpingExcludedSkus([]);
+    setFormGuard(null);
+    setFormGuardTouched(false);
     setIsModalOpen(true);
   };
 
@@ -355,6 +367,8 @@ export const MasterStockGroups: React.FC<{ isWsConnected: boolean; wsEvent: Tele
       setFormTargetPosition(1);
     }
     setFormDumpingExcludedSkus([...(group.dumping_excluded_skus || [])]);
+    setFormGuard(group.dumping_config?.guard ?? null);
+    setFormGuardTouched(false);
     setIsModalOpen(true);
 
     setModalPackaging(null);
@@ -431,6 +445,7 @@ export const MasterStockGroups: React.FC<{ isWsConnected: boolean; wsEvent: Tele
             dump_step: formDumpStep,
             mode: formDumpingMode,
             target_position: formTargetPosition,
+            ...(formGuardTouched ? { guard: formGuard } : {}),
           } : null,
           dumping_excluded_skus: formDumpingEnabled ? formDumpingExcludedSkus : [],
         }),
@@ -1547,6 +1562,16 @@ export const MasterStockGroups: React.FC<{ isWsConnected: boolean; wsEvent: Tele
                         style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', background: 'var(--card-bg)', border: '1px solid var(--card-border)', color: '#fff', fontSize: '12px' }}
                       />
                     </div>
+                  </div>
+                )}
+
+                {formDumpingEnabled && (
+                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    <GuardOverrideEditor
+                      value={formGuard}
+                      onChange={(next) => { setFormGuard(next); setFormGuardTouched(true); }}
+                      inherited={storeGuard}
+                    />
                   </div>
                 )}
 

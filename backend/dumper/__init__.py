@@ -16,6 +16,27 @@ from backend.dumper.xml_feed import generate_xml_feed
 logger = logging.getLogger(__name__)
 
 
+def _load_guard_data(store_id) -> dict:
+    """Всё, что нужно защите от оттеснения на один цикл: общие настройки
+    магазина, история наших ходов (72 часа — с запасом на окно лесенки,
+    перемирие и сутки до сброса лесенки) и решения менеджера по продавцам
+    без рейтинга. От чего меряется падение цены, считает guard.drop_state.
+    Ошибка чтения не должна останавливать демпинг — защита тогда просто
+    не сработает в этом цикле."""
+    import datetime as _dt
+    data = {"store_defaults": {}, "moves_by_sku": {}, "decisions_by_sku": {}, "now": _dt.datetime.utcnow()}
+    if store_id is None:
+        return data
+    try:
+        from backend.state_helpers import _load_store_guard, _load_price_war_moves, _load_guard_decisions
+        data["store_defaults"] = _load_store_guard(store_id)
+        data["moves_by_sku"] = _load_price_war_moves(store_id, hours=72)
+        data["decisions_by_sku"] = _load_guard_decisions(store_id)
+    except Exception as e:
+        logger.error(f"Не удалось загрузить данные защиты демпинга: {e}")
+    return data
+
+
 async def run_price_dumping_job(
     token: str,
     configs: dict,
@@ -62,7 +83,10 @@ async def run_price_dumping_job(
         }
 
     # 2. 🧠 Воркер-Мозг
-    brain_result = BrainWorker.calculate_price_decisions(market_snapshot, effective_configs, merchant_id)
+    guard_data = _load_guard_data(store_id)
+    brain_result = BrainWorker.calculate_price_decisions(
+        market_snapshot, effective_configs, merchant_id, guard_data=guard_data
+    )
     update_queue = brain_result["update_queue"]
     analytics = brain_result["analytics"]
     calculation_logs = brain_result.get("calculation_logs", [])
@@ -83,6 +107,36 @@ async def run_price_dumping_job(
         _append_competitor_encounters(brain_result.get("competitor_encounters", []), store_id=store_id)
     except Exception:
         pass
+
+    # История ходов для защиты от лесенки и отчёта об атаках: каждое наше
+    # изменение цены и соперник, на которого мы отвечали.
+    if store_id is not None:
+        try:
+            from backend.state_helpers import _record_price_war_moves
+            _record_price_war_moves([
+                {
+                    "sku": t["sku"],
+                    "our_old": t["old_price"],
+                    "our_new": t["new_price"],
+                    "action": t["calculation_result"].get("action"),
+                    "rival": t["calculation_result"].get("rival"),
+                }
+                for t in update_queue
+            ] + list(brain_result.get("guard_events") or []), store_id=store_id)
+        except Exception as e:
+            logger.error(f"Не удалось записать ходы демпинга: {e}")
+
+        # Продавцы без рейтинга, о которых ещё не спрашивали менеджера, и
+        # паузы после резкого падения цены — в Телеграм. Сбой уведомлений
+        # не должен ронять цикл.
+        try:
+            from backend.state_helpers import _upsert_guard_asks
+            from backend.dumper import guard_notify
+            new_asks = _upsert_guard_asks(brain_result.get("guard_asks") or [], store_id=store_id)
+            await guard_notify.notify_new_asks(store_id, new_asks)
+            await guard_notify.notify_drop_pauses(store_id, brain_result.get("guard_alerts") or [])
+        except Exception as e:
+            logger.error(f"Не удалось обработать вопросы/тревоги защиты демпинга: {e}")
 
     # Бродкаст аналитики в WebSocket
     from backend.dumper.telemetry import telemetry_manager

@@ -224,7 +224,12 @@ async def update_stock_group(
                 group_id, group.get("sku_recipes"), groups, group["linked_skus"], strict=False
             )
         if "dumping_config" in provided:
-            group["dumping_config"] = req.dumping_config.model_dump() if req.dumping_config else None
+            new_cfg = req.dumping_config.model_dump() if req.dumping_config else None
+            # Защиту от оттеснения форма группы может не прислать — тогда
+            # сохраняем прежнюю, а не стираем её молча.
+            if new_cfg is not None and "guard" not in req.dumping_config.model_fields_set:
+                new_cfg["guard"] = (group.get("dumping_config") or {}).get("guard")
+            group["dumping_config"] = new_cfg
         if req.dumping_excluded_skus is not None:
             group["dumping_excluded_skus"] = [s for s in req.dumping_excluded_skus if s in group["linked_skus"]]
 

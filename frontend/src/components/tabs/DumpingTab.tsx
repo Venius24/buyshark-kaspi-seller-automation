@@ -1,6 +1,6 @@
-import type { FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Product, DumpingConfig, DumpingFacets, DumpingFilters, KaspiQuotaStatus } from '../../types';
+import type { Product, DumpingConfig, DumpingFacets, DumpingFilters, GuardOverride, KaspiQuotaStatus } from '../../types';
 import { Pagination } from '../shared/Pagination';
 import { ProductCardHeader } from '../shared/ProductCardHeader';
 import { PriceWarSummary } from '../PriceWarSummary';
@@ -8,6 +8,9 @@ import { usePriceWarStats, leaderPrice, type PriceWarProduct } from '../../hooks
 import { HelpHint } from '../shared/HelpHint';
 import { ParcelLoader } from '../shared/ParcelLoader';
 import { DumpingFilterBar } from './DumpingFilterBar';
+import { DumpingGuardPanel, SIGNAL_COLORS } from '../dumping/DumpingGuardPanel';
+import { GuardOverrideEditor } from '../dumping/GuardOverrideEditor';
+import { useGuardSettings } from '../../hooks/useDumpingGuard';
 
 const EMPTY_CONFIG: DumpingConfig = {
   min_price: 0, max_price: 0, dump_step: 2, enabled: false,
@@ -25,6 +28,8 @@ function getStatusBadge(status: string, t: (key: string) => string) {
       return <span className="badge" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#a855f7', border: '1px solid rgba(168, 85, 247, 0.3)' }}>{t('status_target_reached')}</span>;
     case 'AT_MIN_PRICE':
       return <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)' }}>{t('status_at_min_price')}</span>;
+    case 'GUARD_HOLD':
+      return <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.12)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)' }} title={t('status_guard_hold_hint')}>{t('status_guard_hold')}</span>;
     case 'MAX_PRICE_SINGLE':
       return <span className="badge" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#ec4899', border: '1px solid rgba(236, 72, 153, 0.3)' }}>{t('status_max_price_single')}</span>;
     default:
@@ -86,6 +91,33 @@ function PriceStateBadge({ product, t }: { product: Product; t: (key: string) =>
   return null;
 }
 
+/** Сигналы атаки и что сделала защита на последнем цикле. */
+function AttackBadges({ product }: { product: Product }) {
+  const { t } = useTranslation('dumping_guard');
+  const signals = product.attack_signals || [];
+  const gs = product.guard_state;
+  if (!signals.length && !(gs && (gs.limit || gs.ignored_count))) return null;
+  return (
+    <>
+      {signals.map((s) => {
+        const color = SIGNAL_COLORS[s] || '#9ca3af';
+        return (
+          <span key={s} className="badge" title={t(`signal_hint_${s}`)}
+            style={{ background: `${color}22`, color, border: `1px solid ${color}55` }}>
+            ⚠ {t(`signal_${s}`)}
+          </span>
+        );
+      })}
+      {gs && (gs.limit || gs.ignored_count > 0) && (
+        <span className="badge" title={gs.limit ? t(`limit_${gs.limit}`) : ''}
+          style={{ background: 'rgba(16,185,129,0.12)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)' }}>
+          🛡 {gs.limit ? t(`limit_${gs.limit}`) : t('ignored_n', { n: gs.ignored_count })}
+        </span>
+      )}
+    </>
+  );
+}
+
 interface DumpingTabProps {
   products: Product[];
   fetchingProducts: boolean;
@@ -125,8 +157,11 @@ interface DumpingTabProps {
     minSellerRating: number | null,
     sameCityOnly: boolean,
     blacklistedMerchants: string[],
-    displaySku: string
+    displaySku: string,
+    guard?: GuardOverride
   ) => void;
+  canEdit?: boolean;
+  onFocusSku?: (sku: string) => void;
   currentPage: number;
   totalPages: number;
   onPageChange: (page: number) => void;
@@ -160,6 +195,8 @@ export function DumpingTab({
   selectedModes,
   onModeChange,
   onSaveDumpingConfig,
+  canEdit = true,
+  onFocusSku,
   currentPage,
   totalPages,
   onPageChange,
@@ -168,11 +205,17 @@ export function DumpingTab({
   const priceWarStats = usePriceWarStats();
   const priceWarBySku: Record<string, PriceWarProduct> = {};
   priceWarStats.products.forEach((p) => { priceWarBySku[p.sku] = p; });
+  const storeGuard = useGuardSettings().data?.settings;
+  // Правка защиты на товаре до сохранения. Нет ключа — форма защиту не
+  // трогала, и при сохранении поле не уходит (бэкенд оставит как было).
+  const [guardDrafts, setGuardDrafts] = useState<Record<string, GuardOverride>>({});
   return (
     <>
       <div style={{ marginBottom: '20px' }}>
         <PriceWarSummary data={priceWarStats} />
       </div>
+
+      <DumpingGuardPanel canEdit={canEdit} onFocusSku={onFocusSku} />
 
       {/* Header with Search, Filter & Page Size */}
       <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '16px', marginBottom: '20px' }}>
@@ -417,6 +460,7 @@ export function DumpingTab({
 
                         <PriceStateBadge product={product} t={t} />
                         <CompetitorBadge product={product} t={t} />
+                        <AttackBadges product={product} />
 
                         {product.url && (
                           <a
@@ -606,6 +650,15 @@ export function DumpingTab({
                         )}
                       </div>
 
+                      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '10px' }}>
+                        <GuardOverrideEditor
+                          value={sku in guardDrafts ? guardDrafts[sku] : (cfg.guard ?? null)}
+                          onChange={(next) => setGuardDrafts((prev) => ({ ...prev, [sku]: next }))}
+                          inherited={storeGuard}
+                          disabled={!canEdit}
+                        />
+                      </div>
+
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: '#fff' }}>
                           <input
@@ -631,20 +684,25 @@ export function DumpingTab({
                             const modeVal = (document.getElementById(`mode-${sku}`) as HTMLSelectElement)?.value || 'TOP_1';
                             const targetPosEl = document.getElementById(`target_pos-${sku}`) as HTMLInputElement | null;
                             const targetPosVal = targetPosEl ? (parseInt(targetPosEl.value) || 1) : 1;
+                            // Блок «Фильтры конкурентов» свёрнут — его полей нет в
+                            // DOM. Раньше это молча затирало сохранённые фильтры
+                            // пустыми значениями; теперь берём их из конфига.
                             const maxDelivEl = document.getElementById(`max_deliv-${sku}`) as HTMLInputElement | null;
-                            const maxDelivVal = maxDelivEl?.value ? parseInt(maxDelivEl.value) : null;
+                            const maxDelivVal = maxDelivEl ? (maxDelivEl.value ? parseInt(maxDelivEl.value) : null) : (cfg.max_delivery_days ?? null);
                             const minRatingEl = document.getElementById(`min_rating-${sku}`) as HTMLInputElement | null;
-                            const minRatingVal = minRatingEl?.value ? parseFloat(minRatingEl.value) : null;
+                            const minRatingVal = minRatingEl ? (minRatingEl.value ? parseFloat(minRatingEl.value) : null) : (cfg.min_seller_rating ?? null);
                             const sameCityEl = document.getElementById(`same_city-${sku}`) as HTMLInputElement | null;
-                            const sameCityVal = sameCityEl ? sameCityEl.checked : false;
+                            const sameCityVal = sameCityEl ? sameCityEl.checked : !!cfg.same_city_only;
                             const blacklistEl = document.getElementById(`blacklist-${sku}`) as HTMLInputElement | null;
-                            const blacklistRaw = blacklistEl ? blacklistEl.value : '';
-                            const blacklistArr = blacklistRaw ? blacklistRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+                            const blacklistArr = blacklistEl
+                              ? (blacklistEl.value ? blacklistEl.value.split(',').map(s => s.trim()).filter(Boolean) : [])
+                              : (cfg.blacklisted_merchants || []);
 
                             onSaveDumpingConfig(
                               cfgKey, minVal, maxVal, stepVal, enabledVal,
                               modeVal, targetPosVal, maxDelivVal, minRatingVal, sameCityVal, blacklistArr,
-                              sku
+                              sku,
+                              sku in guardDrafts ? guardDrafts[sku] : undefined
                             );
                           }}
                         >

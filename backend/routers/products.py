@@ -44,6 +44,7 @@ def get_products(
     rank_state: str = Query("", description="LEADER | NOT_LEADER | NO_DATA"),
     min_competitors: Optional[int] = Query(None, ge=0),
     max_competitors: Optional[int] = Query(None, ge=0),
+    attack_state: str = Query("", description="UNDER_ATTACK | LADDER | GUARDED"),
     ctx: StoreContext = Depends(_products),
 ):
     """Получить список товаров из кэша или Kaspi API с конфигурациями и статусами демпинга."""
@@ -139,6 +140,7 @@ def get_products(
         dumping_status_filter=dumping_status_filter,
         min_competitors=min_competitors,
         max_competitors=max_competitors,
+        attack_state=attack_state,
     )
 
     total_count = len(filtered)

@@ -42,6 +42,11 @@ RANK_STATE_LEADER = "LEADER"
 RANK_STATE_NOT_LEADER = "NOT_LEADER"
 RANK_STATE_NO_DATA = "NO_DATA"
 
+# Защита от оттеснения (backend/dumper/guard.py, отчёт services/dumping_attacks.py)
+ATTACK_STATE_UNDER_ATTACK = "UNDER_ATTACK"   # есть сигнал атаки на последнем цикле
+ATTACK_STATE_LADDER = "LADDER"               # среди сигналов — лесенка
+ATTACK_STATE_GUARDED = "GUARDED"             # защита кого-то отсеяла или подняла цену
+
 # Цена в тенге — сравнения на равенство делаем с допуском, иначе товар,
 # стоящий ровно на минимуме, из-за копеечного дребезга float то попадает в
 # срез «упёрлись в минимум», то нет.
@@ -144,6 +149,18 @@ def annotate_products(
         # None (не пустой список полей) — честное «мы никогда не сканировали
         # этот товар», в отличие от нуля конкурентов при реальном скане.
         p["competitors_count"] = competitors_count
+        g = (pw or {}).get("guard") or {}
+        p["attack_signals"] = list(g.get("signals") or [])
+        p["guard_state"] = (
+            {
+                "enabled": g.get("enabled", False),
+                "limit": g.get("limit"),
+                "ladder_active": g.get("ladder_active", False),
+                "ignored_count": len(g.get("ignored") or []),
+            }
+            if g
+            else None
+        )
         p["price_war"] = (
             {
                 "our_rank": pw.get("our_rank"),
@@ -179,9 +196,14 @@ def apply_dumping_filters(
     dumping_status_filter: str = "",
     min_competitors: Optional[int] = None,
     max_competitors: Optional[int] = None,
+    attack_state: str = "",
 ) -> List[dict]:
     """Все переданные условия комбинируются через И. Пустые — игнорируются."""
     out = products
+
+    if attack_state:
+        wanted = attack_state.strip().upper()
+        out = [p for p in out if _matches_attack_state(p, wanted)]
 
     if dumping_state:
         wanted = dumping_state.strip().upper()
@@ -217,6 +239,18 @@ def apply_dumping_filters(
     return out
 
 
+def _matches_attack_state(p: dict, wanted: str) -> bool:
+    signals = p.get("attack_signals") or []
+    if wanted == ATTACK_STATE_UNDER_ATTACK:
+        return bool(signals)
+    if wanted == ATTACK_STATE_LADDER:
+        return "ladder" in signals
+    if wanted == ATTACK_STATE_GUARDED:
+        gs = p.get("guard_state") or {}
+        return bool(gs.get("limit") or gs.get("ignored_count"))
+    return True
+
+
 def facet_counts(products: List[dict]) -> Dict[str, Any]:
     """
     Сколько товаров попало бы в каждый срез — считается по набору ДО применения
@@ -236,8 +270,14 @@ def facet_counts(products: List[dict]) -> Dict[str, Any]:
         RANK_STATE_LEADER: 0,
         RANK_STATE_NOT_LEADER: 0,
         RANK_STATE_NO_DATA: 0,
+        ATTACK_STATE_UNDER_ATTACK: 0,
+        ATTACK_STATE_LADDER: 0,
+        ATTACK_STATE_GUARDED: 0,
     }
     for p in products:
+        for a in (ATTACK_STATE_UNDER_ATTACK, ATTACK_STATE_LADDER, ATTACK_STATE_GUARDED):
+            if _matches_attack_state(p, a):
+                counts[a] += 1
         state = p.get("dumping_state")
         if state in counts:
             counts[state] += 1

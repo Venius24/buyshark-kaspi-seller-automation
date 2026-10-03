@@ -22,6 +22,15 @@ export interface Product {
   rank_state?: 'LEADER' | 'NOT_LEADER' | 'NO_DATA';
   /** null — товар ни разу не сканировался (это НЕ ноль конкурентов). */
   competitors_count?: number | null;
+  /** Сигналы атаки на последнем цикле: weak_rival | ladder | farm | shadow. */
+  attack_signals?: string[];
+  /** Что защита от оттеснения сделала на последнем цикле. null — товар не сканировался. */
+  guard_state?: {
+    enabled: boolean;
+    limit: string | null;
+    ladder_active: boolean;
+    ignored_count: number;
+  } | null;
   price_war?: {
     our_rank: number | null;
     competitors_count: number;
@@ -188,6 +197,8 @@ export interface DumpingConfig {
   min_seller_rating?: number | null;
   same_city_only?: boolean;
   blacklisted_merchants?: string[];
+  /** Переопределение защиты от оттеснения на этом товаре. null/нет — наследовать. */
+  guard?: GuardOverride;
 }
 
 /** Срезы вкладки авто-демпинга. Пустая строка / null = фильтр не применён. */
@@ -200,6 +211,8 @@ export interface DumpingFilters {
   priceState: string;
   /** LEADER | NOT_LEADER | NO_DATA */
   rankState: string;
+  /** UNDER_ATTACK | LADDER | GUARDED */
+  attackState: string;
   minCompetitors: number | null;
   maxCompetitors: number | null;
 }
@@ -209,9 +222,142 @@ export const EMPTY_DUMPING_FILTERS: DumpingFilters = {
   dumpingState: '',
   priceState: '',
   rankState: '',
+  attackState: '',
   minCompetitors: null,
   maxCompetitors: null,
 };
+
+/** Защита демпинга от оттеснения — поля backend/dumper/guard.py::GuardConfig. */
+export interface GuardSettings {
+  enabled: boolean;
+  /** Наблюдение: защита всё считает и показывает в отчёте, но цены не трогает. */
+  observe_only: boolean;
+  /** Порог отзывов — только для продавцов с рейтингом. */
+  min_reviews: number | null;
+  /** Продавец без рейтинга: ASK — учитывать и спросить менеджера; IGNORE; CONSIDER. */
+  no_rating_action: 'ASK' | 'IGNORE' | 'CONSIDER';
+  min_rating: number | null;
+  min_merchant_age_days: number | null;
+  ignore_intercity: boolean;
+  max_extra_delivery_days: number | null;
+  ignore_preorder: boolean;
+  blacklist: string[];
+  whitelist: string[];
+  /** HOLD — все соперники отсеяны: держим цену; MAX — ставим max_price. */
+  all_ignored_action: 'HOLD' | 'MAX';
+  floor_below_next_pct: number | null;
+  /** Цена упала на X% за сутки — пауза в демпинге этого товара. */
+  max_daily_drop_pct: number | null;
+  drop_pause_hours: number;
+  drop_alert: boolean;
+  ladder_min_moves: number;
+  ladder_window_hours: number;
+  /** FLAG — только отметить; FREEZE — не снижать; RETREAT — перестать отвечать этому сопернику;
+   *  RESET_MAX — мы на 1–2 месте: раз в сутки прыжок на max_price, лесенка обнуляется. */
+  ladder_response: 'FLAG' | 'FREEZE' | 'RETREAT' | 'RESET_MAX';
+  ladder_cooldown_hours: number;
+}
+
+/** Переопределение на товаре / Мастер-Группе. null — наследовать. */
+export type GuardOverride =
+  | null
+  | { mode: 'OFF' }
+  | ({ mode: 'CUSTOM' } & Partial<Omit<GuardSettings, 'enabled'>>);
+
+export interface AttackSuspect {
+  merchant_id: string;
+  name: string;
+  price: number;
+  reviews: number | null;
+  rating: number | null;
+  intercity: boolean | null;
+  age_days: number | null;
+  marks: string[];
+  adjacent: boolean;
+}
+
+export interface AttackItem {
+  sku: string;
+  name: string | null;
+  url: string | null;
+  our_price: number;
+  our_rank: number | null;
+  peak_price_30d: number | null;
+  lost_per_unit: number;
+  lost_pct: number;
+  down_moves_30d: number;
+  signals: string[];
+  suspects: AttackSuspect[];
+  ladder: {
+    rival_id: string;
+    rival_name: string;
+    moves: number;
+    first_at: string;
+    last_at: string;
+    price_from: number;
+    price_to: number;
+    active_until: string | null;
+  } | null;
+  ladder_active: boolean;
+  ignored: Array<{ merchant_id: string; name: string; price: number; reasons: string[] }>;
+  guard_limit: string | null;
+  guard_enabled: boolean;
+  observe: boolean;
+  /** Режим наблюдения: какую цену поставила бы защита (null — ту же). */
+  would: { price: number; action: string } | null;
+  asks: number;
+  pause_until: string | null;
+  last_reset_at: string | null;
+  ladder_resets_30d: number;
+  best_competitor_name: string | null;
+  best_competitor_price: number | null;
+  checked_at: string | null;
+}
+
+export interface AttackRival {
+  merchant_id: string;
+  name: string | null;
+  skus: string[];
+  sku_count: number;
+  kinds: string[];
+  reviews?: number | null;
+  rating?: number | null;
+  age_days?: number | null;
+}
+
+export interface AttackReport {
+  items: AttackItem[];
+  rivals: AttackRival[];
+  summary: {
+    under_attack: number;
+    ladders: number;
+    weak_rivals: number;
+    lost_per_unit_total: number;
+    guarded: number;
+    would_change: number;
+    ladder_resets_30d: number;
+    paused: number;
+    pending_asks: number;
+  };
+  signal_labels: Record<string, string>;
+  pending: GuardDecision[];
+}
+
+/** Продавец без рейтинга рядом с нами на конкретном товаре — решает менеджер. */
+export interface GuardDecision {
+  id: number;
+  sku: string;
+  merchant_id: string;
+  merchant_name: string | null;
+  product_name: string | null;
+  status: 'ASK' | 'IGNORE' | 'CONSIDER';
+  price: number | null;
+  our_price: number | null;
+  first_seen: string | null;
+  last_seen: string | null;
+  decided_at: string | null;
+  decided_by: string | null;
+}
 
 /** Сколько товаров попало бы в каждый срез — приходит с /api/products. */
 export type DumpingFacets = Record<string, number>;

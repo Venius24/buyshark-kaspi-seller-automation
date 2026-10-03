@@ -1,5 +1,5 @@
 from typing import Optional, List, Any, Dict
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 class AuthRequest(BaseModel):
     token: str
@@ -38,6 +38,15 @@ class DumpingConfigRequest(BaseModel):
     same_city_only: Optional[bool] = False
     blacklisted_merchants: Optional[List[str]] = []
     city_code: Optional[str] = "750000000"
+    # Переопределение защиты от оттеснения (backend/dumper/guard.py):
+    # {"mode": "INHERIT"|"CUSTOM"|"OFF", ...}. Не прислали — не трогаем.
+    guard: Optional[Dict[str, Any]] = None
+
+    @field_validator("guard")
+    @classmethod
+    def _check_guard(cls, v):
+        from backend.dumper.guard import clean_guard_override
+        return clean_guard_override(v)
 
 class AutoAssemblyRuleRequest(BaseModel):
     delivery_type: str
@@ -69,6 +78,13 @@ class GroupDumpingConfig(BaseModel):
     same_city_only: Optional[bool] = False
     blacklisted_merchants: Optional[List[str]] = []
     city_code: Optional[str] = "750000000"
+    guard: Optional[Dict[str, Any]] = None
+
+    @field_validator("guard")
+    @classmethod
+    def _check_guard(cls, v):
+        from backend.dumper.guard import clean_guard_override
+        return clean_guard_override(v)
 
 class SkuRecipeComponent(BaseModel):
     group_id: str
@@ -133,3 +149,29 @@ class AutolistDraftPatchRequest(BaseModel):
 
 
 
+
+
+class DumpingGuardSettings(BaseModel):
+    """Общие настройки защиты демпинга от оттеснения (guard.GuardConfig).
+    Неприсланные поля не сбрасываются в умолчания — роутер накладывает
+    присланное поверх сохранённого (model_dump(exclude_unset=True))."""
+    enabled: bool = False
+    observe_only: bool = False
+    min_reviews: Optional[int] = 50
+    no_rating_action: str = "ASK"
+    min_rating: Optional[float] = None
+    min_merchant_age_days: Optional[int] = None
+    ignore_intercity: bool = False
+    max_extra_delivery_days: Optional[int] = None
+    ignore_preorder: bool = False
+    blacklist: List[str] = []
+    whitelist: List[str] = []
+    all_ignored_action: str = "HOLD"
+    floor_below_next_pct: Optional[float] = None
+    max_daily_drop_pct: Optional[float] = 15.0
+    drop_pause_hours: int = 3
+    drop_alert: bool = True
+    ladder_min_moves: int = 5
+    ladder_window_hours: int = 24
+    ladder_response: str = "RESET_MAX"
+    ladder_cooldown_hours: int = 12
