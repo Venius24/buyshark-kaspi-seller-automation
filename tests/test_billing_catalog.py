@@ -57,10 +57,10 @@ class TariffCatalogTest(unittest.TestCase):
 
     def test_plan_codes_and_prices(self):
         expected = {
-            "START": (50, 640_000, 20_000),
-            "HUNTER": (200, 1_130_000, 50_000),
-            "PREDATOR": (1000, 1_790_000, 100_000),
-            "PREDATOR_PLUS": (2000, 2_980_000, 200_000),
+            "START": (50, 499_000, 20_000),
+            "HUNTER": (200, 999_000, 50_000),
+            "PREDATOR": (1000, 1_499_000, 100_000),
+            "PREDATOR_PLUS": (2000, 2_499_000, 200_000),
         }
         for code, (max_products, price, daily_credits) in expected.items():
             plan = self.catalog.PLANS[code]
@@ -98,7 +98,7 @@ class TariffCatalogTest(unittest.TestCase):
         self.assertEqual(self.catalog.effective_daily_credits("GIGA", 0), 0)
 
     def test_plan_price_minor_uses_custom_override_when_present(self):
-        self.assertEqual(self.catalog.plan_price_minor("START", None), 640_000)
+        self.assertEqual(self.catalog.plan_price_minor("START", None), 499_000)
         self.assertEqual(self.catalog.plan_price_minor("GIGA", 5_000_000), 5_000_000)
         self.assertEqual(self.catalog.plan_price_minor("GIGA", None), 0)
 

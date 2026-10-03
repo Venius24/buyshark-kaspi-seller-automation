@@ -84,7 +84,7 @@ class BillingWorkerTest(unittest.TestCase):
     def test_cycle_charges_paused_store_and_skips_dev(self):
         import asyncio
         asyncio.run(self.billing_worker.run_billing_cycle())
-        self.assertEqual(self.ledger.balance("paused-store"), -640_000)
+        self.assertEqual(self.ledger.balance("paused-store"), -499_000)
         self.assertEqual(self.ledger.balance("dev-store"), 0)
 
     def test_one_store_failure_does_not_stop_cycle(self):

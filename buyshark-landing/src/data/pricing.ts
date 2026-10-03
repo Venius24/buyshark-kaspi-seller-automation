@@ -21,7 +21,7 @@ export const PRICING_TIERS: PricingTier[] = [
   {
     name: 'Бодрый старт',
     limit: 'до 50 товаров',
-    priceMinor: 640_000,
+    priceMinor: 499_000,
     features: [
       'Листинг и массовое обновление цен',
       'Упаковка заказов, трансферы, накладные и этикетки',
@@ -32,7 +32,7 @@ export const PRICING_TIERS: PricingTier[] = [
   {
     name: 'Охотник',
     limit: 'до 200 товаров',
-    priceMinor: 1_130_000,
+    priceMinor: 999_000,
     features: [
       'Всё из «Бодрый старт»',
       'Авто-демпинг с защитой маржи',
@@ -43,7 +43,7 @@ export const PRICING_TIERS: PricingTier[] = [
   {
     name: 'Хищник',
     limit: 'до 1000 товаров',
-    priceMinor: 1_790_000,
+    priceMinor: 1_499_000,
     features: [
       'Всё из «Охотник»',
       'Синхронизация остатков между складами',

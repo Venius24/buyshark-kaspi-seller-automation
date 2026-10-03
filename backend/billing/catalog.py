@@ -46,26 +46,26 @@ class Plan:
 PLANS: dict[str, Plan] = {
     "START": Plan(
         code="START", name="Бодрый старт",
-        max_products=50, monthly_price_minor=640_000,
+        max_products=50, monthly_price_minor=499_000,
         daily_credit_limit_milli=20_000,
         max_employees=0,
     ),
     "HUNTER": Plan(
         code="HUNTER", name="Охотник",
-        max_products=200, monthly_price_minor=1_130_000,
+        max_products=200, monthly_price_minor=999_000,
         daily_credit_limit_milli=50_000,
         max_employees=2,
     ),
     "PREDATOR": Plan(
         code="PREDATOR", name="Хищник",
-        max_products=1000, monthly_price_minor=1_790_000,
+        max_products=1000, monthly_price_minor=1_499_000,
         daily_credit_limit_milli=100_000,
         max_employees=5,
         badge="ХИТ ПРОДАЖ",
     ),
     "PREDATOR_PLUS": Plan(
         code="PREDATOR_PLUS", name="Хищник+",
-        max_products=2000, monthly_price_minor=2_980_000,
+        max_products=2000, monthly_price_minor=2_499_000,
         daily_credit_limit_milli=200_000,
         max_employees=10,
     ),

@@ -116,7 +116,7 @@ class BillingEngineTest(unittest.TestCase):
         # только charge_subscription должен попасть в леджер (не 3 строки,
         # как раньше, когда была ещё отдельная кредитная надбавка).
         self.assertEqual(len(txns), 1)
-        self.assertEqual(self.ledger.balance("store-a"), -640_000)
+        self.assertEqual(self.ledger.balance("store-a"), -499_000)
 
     def test_charge_writes_exactly_two_lines_when_prompt_band_charges(self):
         self._make_tariff(plan_code="START")
@@ -126,7 +126,7 @@ class BillingEngineTest(unittest.TestCase):
         kinds = {t["kind"] for t in txns}
         self.assertEqual(kinds, {"charge_subscription", "charge_prompt_addon"})
         self.assertEqual(len(txns), 2)
-        self.assertEqual(self.ledger.balance("store-a"), -740_000)
+        self.assertEqual(self.ledger.balance("store-a"), -599_000)
 
     def test_charge_advances_period_and_next_charge_moves_forward(self):
         self._make_tariff(plan_code="START")
