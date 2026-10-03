@@ -117,6 +117,15 @@ class DumpingEngine:
             g = dict(live.get("guard") or {})
             # «Поставила бы» — только если защита расходится с обычным демпингом.
             differs = abs(float(live["targetPrice"]) - float(plain["targetPrice"])) >= 1.0
+            # ВРЕМЕННО (суточное наблюдение Бархана с 03.10.2026): снимок перезаписывается
+            # каждый цикл, история «поставила бы» живёт только в этом логе. Убрать 04.10.
+            if differs:
+                logger.info(
+                    "[GuardObserve] sku=%s now=%s plain=%s(%s) guard=%s(%s) ignored=%d asks=%d "
+                    "ladder=%s pause_until=%s",
+                    config.sku, config.my_current_price, plain["targetPrice"], plain.get("action"),
+                    live["targetPrice"], live.get("action"), len(g.get("ignored") or []),
+                    len(g.get("asks") or []), g.get("ladder_active", False), g.get("pause_until"))
             g.update({
                 "observe": True,
                 "would": {"price": live["targetPrice"], "action": live["action"]} if differs else None,
