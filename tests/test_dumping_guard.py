@@ -387,15 +387,20 @@ class TestBrainWorkerSignals(unittest.TestCase):
 
     def test_shadow_across_skus(self):
         market = {
-            "S1": snapshot("S1", 433, [me(433), kaspi_offer("20437934", 435, rating=5.0, reviews=240)]),
-            "S2": snapshot("S2", 638, [me(638), kaspi_offer("20437934", 640, rating=5.0, reviews=240)]),
+            "S1": snapshot("S1", 433, [me(433), kaspi_offer("20437934", 435, rating=5.0, reviews=24),
+                                       kaspi_offer("9", 432, rating=4.9, reviews=900)]),
+            "S2": snapshot("S2", 638, [me(638), kaspi_offer("20437934", 640, rating=5.0, reviews=24),
+                                       kaspi_offer("9", 637, rating=4.9, reviews=900)]),
             "S3": snapshot("S3", 500, [me(500), kaspi_offer("7", 900, rating=5.0, reviews=240)]),
+            # Нормальный продавец «9» рядом с нами на S1, S2 и S4 — это просто сосед по нише, не тень.
+            "S4": snapshot("S4", 700, [me(700), kaspi_offer("9", 699, rating=4.9, reviews=900)]),
         }
         res = self.run_brain(market)
         by = {it["sku"]: it for it in res["price_war_items"]}
         self.assertIn("shadow", by["S1"]["guard"]["signals"])
         self.assertIn("shadow", by["S2"]["guard"]["signals"])
         self.assertNotIn("shadow", by["S3"]["guard"]["signals"])
+        self.assertNotIn("shadow", by["S4"]["guard"]["signals"])
 
     def test_store_defaults_and_sku_override_applied(self):
         offers = [me(433), kaspi_offer("20437934", 431, rating=5.0, reviews=24),
@@ -725,3 +730,10 @@ class TestObservationFixes(unittest.TestCase):
         self.assertIn("2-е место из 4", text)
         self.assertIn("ещё на 2 наших товарах", text)
         self.assertIn("1 250 ₸ (+557 ₸)", text)
+
+    def test_no_ask_for_tiny_impact(self):
+        # Без рейтинга за 436 — над нами на 3 ₸; без него встанем под 440, то есть +4 ₸: не спрашиваем.
+        offers = [me(433), kaspi_offer("20460997", 436), kaspi_offer("2", 440, rating=4.9, reviews=900)]
+        res = DumpingEngine.calculate_new_price(cfg(433), ME, offers, guard_cfg=guard.GuardConfig(enabled=True),
+                                                guard_ctx={"now": NOW})
+        self.assertEqual(res["guard"]["asks"], [])

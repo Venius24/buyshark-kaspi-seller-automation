@@ -7,6 +7,12 @@ from backend.dumper import guard
 
 logger = logging.getLogger(__name__)
 
+# Вопрос менеджеру о продавце без рейтинга — только если решение сдвигает
+# нашу цену хотя бы на столько.
+ASK_MIN_IMPACT_PCT = 2.0
+ASK_MIN_IMPACT_TENGE = 5.0
+
+
 class DumpingEngine:
     @staticmethod
     def filter_offers(config: DumpingProductConfig, my_merchant_id: str, sellers_offers: List[dict]) -> List[dict]:
@@ -401,7 +407,10 @@ class DumpingEngine:
                     {**gctx, "_impact": True,
                      "decisions": {**decisions, a["merchant_id"]: guard.DECISION_IGNORE}})
                 alt_price = float(alt["targetPrice"])
-                if abs(alt_price - float(target_price)) < 1.0:
+                # Разница в пару тенге — не повод дёргать менеджера (05.10.2026:
+                # 6 из 21 вопроса меняли цену на 1–7 ₸).
+                if abs(alt_price - float(target_price)) < max(ASK_MIN_IMPACT_TENGE,
+                                                               float(target_price) * ASK_MIN_IMPACT_PCT / 100):
                     continue
                 kept.append({
                     **a,
@@ -712,8 +721,13 @@ class BrainWorker:
             signals.append(SIGNAL_FARM)
         if guard_info.get("ladder"):
             signals.append(SIGNAL_LADDER)
+        # Для «тени» — только провокаторы в паре шагов от нас (с обеих сторон).
+        # До 05.10.2026 сюда шли все, кто дешевле нас, включая нормальных продавцов
+        # своей ниши, и «тень» стояла на 144 SKU из 216.
+        suspect_ids = {sp["merchant_id"] for sp in suspects}
         return {
             "signals": signals,
             "suspects": suspects[:8],
-            "_adjacent": adjacent,
+            "_adjacent": [r for r in adjacent
+                          if r["merchant_id"] in suspect_ids and abs(r["price"] - ours) <= near],
         }
