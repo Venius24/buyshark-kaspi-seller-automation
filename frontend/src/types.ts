@@ -252,8 +252,10 @@ export interface GuardSettings {
   drop_alert: boolean;
   ladder_min_moves: number;
   ladder_window_hours: number;
+  /** Лесенка — только если за серию цену утянули вниз хотя бы на X%. */
+  ladder_min_slide_pct: number | null;
   /** FLAG — только отметить; FREEZE — не снижать; RETREAT — перестать отвечать этому сопернику;
-   *  RESET_MAX — мы на 1–2 месте: раз в сутки прыжок на max_price, лесенка обнуляется. */
+   *  RESET_MAX — мы на 1–2 месте: раз в сутки цена возвращается к началу лесенки (не выше max_price). */
   ladder_response: 'FLAG' | 'FREEZE' | 'RETREAT' | 'RESET_MAX';
   ladder_cooldown_hours: number;
 }
@@ -353,6 +355,9 @@ export interface GuardDecision {
   status: 'ASK' | 'IGNORE' | 'CONSIDER';
   price: number | null;
   our_price: number | null;
+  /** Наша цена, если этого продавца не учитывать. */
+  price_without: number | null;
+  url: string | null;
   first_seen: string | null;
   last_seen: string | null;
   decided_at: string | null;

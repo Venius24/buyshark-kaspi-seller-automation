@@ -333,7 +333,13 @@ function DecisionsBlock({ canEdit, onFocusSku }: { canEdit: boolean; onFocusSku?
               </button>
             : (d.product_name || d.sku)}
           {' · '}{d.sku}
+          {d.url && <>{' · '}<a href={d.url} target="_blank" rel="noreferrer" style={{ color: '#60a5fa', textDecoration: 'none' }}>Kaspi ↗</a></>}
         </div>
+        {d.status === 'ASK' && d.price_without != null && d.our_price != null && (
+          <div style={{ color: '#fbbf24' }}>
+            {t('ask_impact', { v: money(d.price_without), d: (d.price_without >= d.our_price ? '+' : '−') + money(Math.abs(d.price_without - d.our_price)) })}
+          </div>
+        )}
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{actions}</div>
     </div>

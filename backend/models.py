@@ -171,7 +171,8 @@ class DumpingGuardSettings(BaseModel):
     max_daily_drop_pct: Optional[float] = 15.0
     drop_pause_hours: int = 3
     drop_alert: bool = True
-    ladder_min_moves: int = 5
+    ladder_min_moves: int = 10
     ladder_window_hours: int = 24
+    ladder_min_slide_pct: Optional[float] = 10.0
     ladder_response: str = "RESET_MAX"
     ladder_cooldown_hours: int = 12

@@ -29,7 +29,7 @@ const selectStyle: React.CSSProperties = { background: 'var(--input-bg)', color:
 
 type NumKey = 'min_reviews' | 'min_rating' | 'min_merchant_age_days' | 'max_extra_delivery_days'
   | 'floor_below_next_pct' | 'max_daily_drop_pct' | 'drop_pause_hours'
-  | 'ladder_min_moves' | 'ladder_window_hours' | 'ladder_cooldown_hours';
+  | 'ladder_min_moves' | 'ladder_min_slide_pct' | 'ladder_window_hours' | 'ladder_cooldown_hours';
 type BoolKey = 'ignore_intercity' | 'ignore_preorder' | 'drop_alert';
 type SelectKey = 'all_ignored_action' | 'ladder_response' | 'no_rating_action';
 const SELECT_KEYS: ReadonlyArray<keyof GuardSettings> = ['all_ignored_action', 'ladder_response', 'no_rating_action'];
@@ -191,6 +191,7 @@ export function GuardSettingsForm({ value, onChange, mode, inherited, disabled }
       <div style={section}>
         {select('ladder_response', ['RESET_MAX', 'FLAG', 'FREEZE', 'RETREAT'])}
         {num('ladder_min_moves')}
+        {num('ladder_min_slide_pct', { suffix: '%' })}
         {num('ladder_window_hours')}
         {num('ladder_cooldown_hours')}
       </div>

@@ -24,8 +24,9 @@ export const DEFAULT_GUARD: GuardSettings = {
   max_daily_drop_pct: 15,
   drop_pause_hours: 3,
   drop_alert: true,
-  ladder_min_moves: 5,
+  ladder_min_moves: 10,
   ladder_window_hours: 24,
+  ladder_min_slide_pct: 10,
   ladder_response: 'RESET_MAX',
   ladder_cooldown_hours: 12,
 };

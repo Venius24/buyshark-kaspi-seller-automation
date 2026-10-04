@@ -660,15 +660,16 @@ def register_handlers():
     async def process_guard_decision(callback_query: types.CallbackQuery):
         """Кнопка под вопросом защиты демпинга «продавец без рейтинга рядом
         с нами» (backend/dumper/guard_notify.py): I — не учитывать его на
-        этом товаре, C — учитывать. Магазин берётся из самой строки решения."""
-        from backend.state_helpers import _get_guard_decision, _set_guard_decision
+        этом товаре, A — не учитывать нигде (чёрный список магазина),
+        C — учитывать. Магазин берётся из самой строки решения."""
+        from backend.state_helpers import _get_guard_decision, _set_guard_decision, _guard_blacklist_merchant
         try:
             _, raw_id, choice = callback_query.data.split(":", 2)
             decision_id = int(raw_id)
         except ValueError:
             await callback_query.answer("Кнопка устарела.", show_alert=True)
             return
-        status = {"I": "IGNORE", "C": "CONSIDER"}.get(choice)
+        status = {"I": "IGNORE", "A": "IGNORE", "C": "CONSIDER"}.get(choice)
         row = await asyncio.to_thread(_get_guard_decision, decision_id)
         if not row or not status:
             await callback_query.answer("Вопрос уже не актуален.", show_alert=True)
@@ -682,13 +683,16 @@ def register_handlers():
             await callback_query.answer("Решать может только владелец или менеджер магазина.", show_alert=True)
             return
         who = f"tg:{callback_query.from_user.id}"
+        if choice == "A":
+            await asyncio.to_thread(_guard_blacklist_merchant, row["store_id"], row["merchant_id"])
         await asyncio.to_thread(_set_guard_decision, decision_id, status, who)
         await asyncio.to_thread(
             audit.log_action, row["store_id"], callback_query.from_user.id,
-            "guard_decision", f"{row['sku']} {row['merchant_id']} -> {status}",
+            "guard_decision", f"{row['sku']} {row['merchant_id']} -> {'IGNORE_ALL' if choice == 'A' else status}",
         )
-        verdict = ("🚫 Не учитываем на этом товаре." if status == "IGNORE"
-                   else "✅ Учитываем, больше не спрашиваем.")
+        verdict = {"I": "🚫 Не учитываем на этом товаре.",
+                   "A": "⛔ Не учитываем на всех товарах (чёрный список).",
+                   "C": "✅ Учитываем, больше не спрашиваем."}[choice]
         try:
             await callback_query.message.edit_text(
                 (callback_query.message.text or "") + "\n\n" + verdict, reply_markup=None)

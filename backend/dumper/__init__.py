@@ -132,8 +132,9 @@ async def run_price_dumping_job(
         try:
             from backend.state_helpers import _upsert_guard_asks
             from backend.dumper import guard_notify
-            new_asks = _upsert_guard_asks(brain_result.get("guard_asks") or [], store_id=store_id)
-            await guard_notify.notify_new_asks(store_id, new_asks)
+            all_asks = brain_result.get("guard_asks") or []
+            new_asks = _upsert_guard_asks(all_asks, store_id=store_id)
+            await guard_notify.notify_new_asks(store_id, new_asks, all_asks)
             await guard_notify.notify_drop_pauses(store_id, brain_result.get("guard_alerts") or [])
         except Exception as e:
             logger.error(f"Не удалось обработать вопросы/тревоги защиты демпинга: {e}")

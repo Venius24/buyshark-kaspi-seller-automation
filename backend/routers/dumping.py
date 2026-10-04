@@ -297,10 +297,7 @@ def set_guard_decision(
 ):
     """decision: IGNORE (не учитывать на этом товаре), CONSIDER (учитывать),
     IGNORE_ALL (в чёрный список магазина + IGNORE здесь), ASK (отменить решение)."""
-    from backend.dumper import guard
-    from backend.state_helpers import (
-        _set_guard_decision, _get_guard_decision, _load_store_guard, _save_store_guard,
-    )
+    from backend.state_helpers import _set_guard_decision, _get_guard_decision, _guard_blacklist_merchant
     decision = str((body or {}).get("decision") or "").upper()
     if decision not in ("IGNORE", "CONSIDER", "IGNORE_ALL", "ASK"):
         raise HTTPException(status_code=422, detail="decision: IGNORE, CONSIDER, IGNORE_ALL или ASK")
@@ -308,10 +305,7 @@ def set_guard_decision(
     if not row or row["store_id"] != ctx.store_id:
         raise HTTPException(status_code=404, detail="Решение не найдено")
     if decision == "IGNORE_ALL":
-        settings = guard.GuardConfig.from_dict(_load_store_guard(ctx.store_id)).to_dict()
-        if row["merchant_id"] not in settings["blacklist"]:
-            settings["blacklist"] = settings["blacklist"] + [row["merchant_id"]]
-            _save_store_guard(ctx.store_id, guard.clean_guard_settings(settings))
+        _guard_blacklist_merchant(ctx.store_id, row["merchant_id"])
         decision = "IGNORE"
     who = getattr(user, "email", None) or "cabinet"
     saved = _set_guard_decision(decision_id, decision, who, store_id=ctx.store_id)

@@ -631,6 +631,9 @@ class PriceWarRivalDecisionDB(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ASK")
     price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     our_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Какой была бы наша цена, если этого продавца не учитывать (048).
+    price_without: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     first_seen: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     last_seen: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

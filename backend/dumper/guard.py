@@ -188,7 +188,8 @@ _INT_FIELDS = {"min_reviews", "min_merchant_age_days", "max_extra_delivery_days"
 # считается «пол под следующим конкурентом» (иначе пол строится от
 # предзаказа на 18 дней — живой случай T114-0023-1, 03.10.2026).
 FLOOR_REF_MAX_EXTRA_DAYS = 2
-_NULLABLE_FIELDS = _INT_FIELDS | {"min_rating", "floor_below_next_pct", "max_daily_drop_pct"}
+_NULLABLE_FIELDS = _INT_FIELDS | {"min_rating", "floor_below_next_pct", "max_daily_drop_pct",
+                                   "ladder_min_slide_pct"}
 
 OVERRIDE_INHERIT = "INHERIT"
 OVERRIDE_CUSTOM = "CUSTOM"
@@ -217,8 +218,12 @@ class GuardConfig:
     max_daily_drop_pct: Optional[float] = 15.0    # упали на X% за сутки — пауза
     drop_pause_hours: int = 3                     # сколько длится пауза после такого падения
     drop_alert: bool = True                       # сообщать о паузе в Телеграм
-    ladder_min_moves: int = 5                     # сколько ответов одному сопернику...
-    ladder_window_hours: int = 24                 # ...за сколько часов — это лесенка
+    # Пороги лесенки — по суткам наблюдения Бархана 04.10.2026: «5 ответов» набирает
+    # любая живая война (демпинг ходит до 96 раз в сутки), лесенкой было 38 SKU из 57.
+    # Вред — когда цену утянули вниз: с порогом сползания 10% остаётся 3 SKU.
+    ladder_min_moves: int = 10                    # сколько ответов одному сопернику...
+    ladder_window_hours: int = 24                 # ...за сколько часов
+    ladder_min_slide_pct: Optional[float] = 10.0  # ...и насколько он утянул цену вниз за серию
     ladder_response: str = LADDER_RESET_MAX
     ladder_cooldown_hours: int = 12               # длительность перемирия (FREEZE / RETREAT)
 
@@ -251,7 +256,7 @@ class GuardConfig:
             cfg.ladder_response = LADDER_FLAG
         if cfg.all_ignored_action not in (ALL_IGNORED_HOLD, ALL_IGNORED_MAX):
             cfg.all_ignored_action = ALL_IGNORED_HOLD
-        cfg.ladder_min_moves = max(2, int(cfg.ladder_min_moves or 5))
+        cfg.ladder_min_moves = max(2, int(cfg.ladder_min_moves or 10))
         cfg.ladder_window_hours = max(1, int(cfg.ladder_window_hours or 24))
         cfg.ladder_cooldown_hours = max(0, int(cfg.ladder_cooldown_hours or 0))
         cfg.drop_pause_hours = max(1, int(cfg.drop_pause_hours or 3))
@@ -367,9 +372,25 @@ def weak_reasons(off: dict, cfg: GuardConfig, our: Optional[dict] = None,
     return reasons
 
 
+# Радар, когда API офферов не ответил, подставляет лучшую цену со страницы
+# товара под merchantId COMPETITOR_TOP_1 (radar.py, HTML fallback). Это не
+# продавец: чаще всего это наша же цена.
+RADAR_STUB_PREFIX = "COMPETITOR_"
+
+
+def is_radar_stub(merchant_id) -> bool:
+    return str(merchant_id or "").startswith(RADAR_STUB_PREFIX)
+
+
+def is_real_merchant(off: dict) -> bool:
+    return bool(off.get("merchant_id")) and not is_radar_stub(off.get("merchant_id"))
+
+
 def needs_decision(off: dict, cfg: GuardConfig, decision: Optional[str] = None) -> bool:
     """Продавец без рейтинга, по которому менеджер ещё не решал."""
     if decision in (DECISION_IGNORE, DECISION_CONSIDER):
+        return False
+    if not is_real_merchant(off):
         return False
     if cfg.no_rating_action != NO_RATING_ASK or not has_no_rating(off):
         return False
@@ -479,6 +500,9 @@ def detect_ladder(moves: List[dict], cfg: GuardConfig, step: float,
         j, i = hit
         # Захватываем всю серию до последнего хода, а не только окно.
         series = ms[j:]
+        start, end = float(series[0]["our_old"]), float(series[-1]["our_new"])
+        if cfg.ladder_min_slide_pct and start > 0 and (start - end) / start * 100 < cfg.ladder_min_slide_pct:
+            continue  # обычная война на месте: цену не утянули — не лесенка
         last_at = series[-1]["created_at"]
         active_until = last_at + timedelta(hours=cfg.ladder_cooldown_hours) if cfg.ladder_cooldown_hours else None
         sig = LadderSignal(
@@ -515,13 +539,25 @@ def moves_since_reset(moves: List[dict]) -> List[dict]:
     return [m for m in moves if m["created_at"] > reset_at]
 
 
+def ladder_reset_target(ladder: Optional[LadderSignal], current: float, max_price: float) -> Optional[float]:
+    """Куда прыгать при сбросе: на цену, с которой лесенка нас утянула, но не выше
+    max_price. Прыжок прямо на max_price (так было до 04.10.2026) за сутки
+    наблюдения давал +100…+567% у 15 SKU: max_price часто стоит далеко над рынком."""
+    if not ladder or not ladder.price_from:
+        return None
+    target = float(ladder.price_from)
+    if max_price and max_price > 0:
+        target = min(target, float(max_price))
+    return target if target >= current + 1 else None
+
+
 def ladder_reset_due(ladder: Optional[LadderSignal], moves: List[dict], cfg: GuardConfig,
                      card_rank: Optional[int], max_price: float,
                      now: Optional[datetime] = None) -> bool:
-    """Пора ли прыгнуть на max_price и обнулить лесенку: ответ RESET_MAX,
+    """Пора ли сбросить лесенку (вернуть цену к её началу): ответ RESET_MAX,
     лесенка свежая (последний ход в окне), мы на 1–2 месте и прошлый сброс
-    был не меньше суток назад."""
-    if cfg.ladder_response != LADDER_RESET_MAX or not ladder or max_price <= 0:
+    был не меньше суток назад. max_price — только потолок, не условие."""
+    if cfg.ladder_response != LADDER_RESET_MAX or not ladder:
         return False
     if card_rank is None or card_rank > LADDER_RESET_MAX_RANK:
         return False
@@ -640,6 +676,7 @@ _LIMITS = {
     "floor_below_next_pct": (0.0, 90.0),
     "max_daily_drop_pct": (0.0, 90.0),
     "ladder_min_moves": (2, 100),
+    "ladder_min_slide_pct": (0.0, 90.0),
     "ladder_window_hours": (1, 168),
     "ladder_cooldown_hours": (0, 168),
     "drop_pause_hours": (1, 24),

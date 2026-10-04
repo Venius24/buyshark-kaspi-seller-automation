@@ -49,6 +49,10 @@ def cfg(price, **kw):
     return DumpingProductConfig(**base)
 
 
+# Механику лесенки проверяем на коротких сериях — пороги до 05.10.2026.
+OLD_LADDER = {"ladder_min_moves": 5, "ladder_min_slide_pct": None}
+
+
 def ladder_moves(start, n, rival_id="20437934", every_min=15, t0=None, undercut=1):
     """Наши ответы на подрезку по −1: мы X, соперник X−1, мы X−3 ..."""
     t0 = t0 or NOW - timedelta(minutes=every_min * n)
@@ -256,7 +260,7 @@ class TestEngineWithGuard(unittest.TestCase):
 
 class TestLadder(unittest.TestCase):
     def test_detects_minus_one_ladder(self):
-        g = guard.GuardConfig(enabled=True)
+        g = guard.GuardConfig(enabled=True, **OLD_LADDER)
         sig = guard.detect_ladder(ladder_moves(603, 8), g, step=2.0, now=NOW)
         self.assertIsNotNone(sig)
         self.assertEqual(sig.rival_id, "20437934")
@@ -277,7 +281,7 @@ class TestLadder(unittest.TestCase):
             ladder_moves(603, 6, every_min=60 * 10, t0=NOW - timedelta(hours=60)), g, step=2.0, now=NOW))
 
     def test_cooldown_expires(self):
-        g = guard.GuardConfig(enabled=True, ladder_cooldown_hours=12)
+        g = guard.GuardConfig(enabled=True, ladder_cooldown_hours=12, **OLD_LADDER)
         moves = ladder_moves(603, 8, t0=NOW - timedelta(hours=20))
         sig = guard.detect_ladder(moves, g, step=2.0, now=NOW)
         self.assertIsNotNone(sig)
@@ -287,7 +291,7 @@ class TestLadder(unittest.TestCase):
     def test_freeze_holds_price(self):
         offers = [me(587), kaspi_offer("20437934", 586, rating=5.0, reviews=24),
                   kaspi_offer("2", 700, rating=4.8, reviews=400)]
-        g = guard.GuardConfig(enabled=True, ladder_response="FREEZE", min_reviews=None)
+        g = guard.GuardConfig(enabled=True, ladder_response="FREEZE", min_reviews=None, **OLD_LADDER)
         res = DumpingEngine.calculate_new_price(cfg(587), ME, offers, guard_cfg=g,
                                                 guard_ctx={"now": NOW, "moves": ladder_moves(620, 6)})
         self.assertTrue(res["guard"]["ladder_active"])
@@ -297,7 +301,7 @@ class TestLadder(unittest.TestCase):
     def test_retreat_stops_answering_that_rival(self):
         offers = [me(587), kaspi_offer("20437934", 586, rating=5.0, reviews=240),
                   kaspi_offer("2", 700, rating=4.8, reviews=400)]
-        g = guard.GuardConfig(enabled=True, ladder_response="RETREAT")
+        g = guard.GuardConfig(enabled=True, ladder_response="RETREAT", **OLD_LADDER)
         res = DumpingEngine.calculate_new_price(cfg(587), ME, offers, guard_cfg=g,
                                                 guard_ctx={"now": NOW, "moves": ladder_moves(620, 6)})
         self.assertEqual(res["targetPrice"], 698.0)  # встаём под следующего
@@ -305,7 +309,7 @@ class TestLadder(unittest.TestCase):
 
     def test_flag_only_reports(self):
         offers = [me(587), kaspi_offer("20437934", 586, rating=5.0, reviews=240)]
-        g = guard.GuardConfig(enabled=True, ladder_response="FLAG")
+        g = guard.GuardConfig(enabled=True, ladder_response="FLAG", **OLD_LADDER)
         res = DumpingEngine.calculate_new_price(cfg(587), ME, offers, guard_cfg=g,
                                                 guard_ctx={"now": NOW, "moves": ladder_moves(620, 6)})
         self.assertEqual(res["targetPrice"], 584.0)
@@ -374,7 +378,7 @@ class TestBrainWorkerSignals(unittest.TestCase):
     def test_weak_rival_and_farm_and_card_rank(self):
         market = {"S1": snapshot("S1", 433, [
             me(433), kaspi_offer("20437934", 431, rating=5.0, reviews=24),
-            kaspi_offer("20460997", 440), kaspi_offer("2", 1200, rating=4.9, reviews=900)])}
+            kaspi_offer("20460997", 436), kaspi_offer("2", 1200, rating=4.9, reviews=900)])}
         res = self.run_brain(market)
         item = res["price_war_items"][0]
         self.assertIn("weak_rival", item["guard"]["signals"])
@@ -503,23 +507,23 @@ class TestOwnerDecisions(unittest.TestCase):
         return [me(our), kaspi_offer("20437934", rival_price, rating=5.0, reviews=240),
                 kaspi_offer("2", 900, rating=4.8, reviews=400)]
 
-    def test_ladder_reset_to_max_when_first_or_second(self):
-        g = guard.GuardConfig(enabled=True)
+    def test_ladder_reset_to_start_when_first_or_second(self):
+        g = guard.GuardConfig(enabled=True, **OLD_LADDER)
         res = DumpingEngine.calculate_new_price(cfg(587), ME, self.ladder_offers(587, 586), guard_cfg=g,
                                                 guard_ctx={"now": NOW, "moves": ladder_moves(620, 6)})
-        self.assertEqual(res["targetPrice"], 890.0)
+        self.assertEqual(res["targetPrice"], 620.0)  # к началу лесенки, а не на max_price 900
         self.assertEqual(res["action"], guard.ACTION_LADDER_RESET)
         self.assertEqual(res["guard"]["event"], guard.ACTION_LADDER_RESET)
 
     def test_no_reset_when_third_or_lower(self):
-        g = guard.GuardConfig(enabled=True)
+        g = guard.GuardConfig(enabled=True, **OLD_LADDER)
         offers = self.ladder_offers(587, 586) + [kaspi_offer("3", 500, rating=4.8, reviews=400)]
         res = DumpingEngine.calculate_new_price(cfg(587), ME, offers, guard_cfg=g,
                                                 guard_ctx={"now": NOW, "moves": ladder_moves(620, 6)})
         self.assertNotEqual(res["action"], guard.ACTION_LADDER_RESET)
 
     def test_reset_once_a_day_and_clears_ladder(self):
-        g = guard.GuardConfig(enabled=True)
+        g = guard.GuardConfig(enabled=True, **OLD_LADDER)
         reset = {"created_at": NOW - timedelta(hours=3), "our_old": 560.0, "our_new": 890.0,
                  "action": guard.ACTION_LADDER_RESET}
         # Лесенка до сброса не считается.
@@ -641,3 +645,83 @@ class TestBackfillParse(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestObservationFixes(unittest.TestCase):
+    """Правки по суткам наблюдения Бархана 04.10.2026 (HANDOFF §3.112)."""
+
+    def test_war_in_place_is_not_ladder(self):
+        g = guard.GuardConfig(enabled=True)
+        # 20 ответов, но цена ушла 1000 → 940 (6%): обычная война, не лесенка.
+        self.assertIsNone(guard.detect_ladder(ladder_moves(1000, 20), g, step=2.0, now=NOW))
+
+    def test_steep_slide_is_ladder(self):
+        g = guard.GuardConfig(enabled=True)
+        sig = guard.detect_ladder(ladder_moves(300, 12), g, step=2.0, now=NOW)  # 300 → 264, −12%
+        self.assertIsNotNone(sig)
+        self.assertEqual(sig.price_from, 300)
+
+    def test_too_few_answers_even_with_slide(self):
+        g = guard.GuardConfig(enabled=True)
+        self.assertIsNone(guard.detect_ladder(ladder_moves(100, 9), g, step=2.0, now=NOW))
+
+    def test_reset_target_capped_by_max_price(self):
+        sig = guard.detect_ladder(ladder_moves(620, 6), guard.GuardConfig(enabled=True, **OLD_LADDER), 2.0, NOW)
+        self.assertEqual(guard.ladder_reset_target(sig, 587, 600), 600)
+        self.assertEqual(guard.ladder_reset_target(sig, 587, 0), 620)
+        self.assertIsNone(guard.ladder_reset_target(sig, 620, 900))  # уже там — прыгать некуда
+
+    def test_radar_stub_equal_to_us_holds(self):
+        stub = [{"merchantId": "COMPETITOR_TOP_1", "merchantName": "Конкурент (Top 1)", "price": 600.0}]
+        for g in (None, guard.GuardConfig(enabled=True)):
+            res = DumpingEngine.calculate_new_price(cfg(600), ME, stub, guard_cfg=g, guard_ctx={"now": NOW})
+            self.assertEqual(res["targetPrice"], 600)
+            self.assertEqual(res["action"], "HOLD_POSITION_NO_DATA")
+
+    def test_radar_stub_below_us_is_followed_but_never_asked(self):
+        stub = [{"merchantId": "COMPETITOR_TOP_1", "merchantName": "Конкурент (Top 1)", "price": 590.0}]
+        res = DumpingEngine.calculate_new_price(cfg(600), ME, stub, guard_cfg=guard.GuardConfig(enabled=True),
+                                                guard_ctx={"now": NOW})
+        self.assertEqual(res["targetPrice"], 588)
+        self.assertEqual(res["guard"]["asks"], [])
+        self.assertFalse(guard.needs_decision({"merchant_id": "COMPETITOR_TOP_1", "rating": None},
+                                               guard.GuardConfig()))
+
+    def test_no_ask_when_decision_changes_nothing(self):
+        # Без рейтинга за 300, нормальный продавец за 310, наш минимум 326:
+        # с ним и без него стоим на минимуме — спрашивать незачем.
+        offers = [me(326), kaspi_offer("20460997", 300), kaspi_offer("2", 310, rating=4.9, reviews=900)]
+        res = DumpingEngine.calculate_new_price(cfg(326), ME, offers, guard_cfg=guard.GuardConfig(enabled=True),
+                                                guard_ctx={"now": NOW})
+        self.assertEqual(res["guard"]["asks"], [])
+
+    def test_ask_below_min_price_when_it_holds_us_down(self):
+        # А вот если за ним дальше только нормальный за 800 — без него встанем под 800.
+        offers = [me(326), kaspi_offer("20460997", 300), kaspi_offer("2", 800, rating=4.9, reviews=900)]
+        res = DumpingEngine.calculate_new_price(cfg(326), ME, offers, guard_cfg=guard.GuardConfig(enabled=True),
+                                                guard_ctx={"now": NOW})
+        [ask] = res["guard"]["asks"]
+        self.assertEqual((ask["price_with"], ask["price_without"]), (326, 798))
+
+    def test_ask_carries_price_with_and_without(self):
+        offers = [me(433), kaspi_offer("20460997", 431), kaspi_offer("2", 800, rating=4.9, reviews=900)]
+        res = DumpingEngine.calculate_new_price(cfg(433), ME, offers, guard_cfg=guard.GuardConfig(enabled=True),
+                                                guard_ctx={"now": NOW})
+        self.assertEqual(res["targetPrice"], 429)
+        [ask] = res["guard"]["asks"]
+        self.assertEqual((ask["price_with"], ask["price_without"]), (429, 798))
+        self.assertEqual((ask["rival_rank"], ask["our_rank"], ask["offers_count"]), (1, 2, 3))
+
+    def test_ask_message_is_informative(self):
+        import backend.main  # noqa: F401 — как на проде; прямой импорт notifications ловит старый цикл
+        from backend.dumper import guard_notify
+        row = {"sku": "T219-0005-9", "product_name": "Термосумка", "url": "https://kaspi.kz/shop/p/t-123/",
+               "merchant_id": "20473863", "merchant_name": "ИП ЯСМИНА", "price": 695, "our_price": 693,
+               "rival_rank": 2, "our_rank": 1, "offers_count": 4, "delivery_days": 1, "min_price": 376,
+               "price_with": 693, "price_without": 1250}
+        text = guard_notify.ask_text(row, also_on=2)
+        self.assertIn("(https://kaspi.kz/shop/p/t-123/)", text)
+        self.assertIn("(https://kaspi.kz/shop/info/merchant/20473863/address-tab/)", text)
+        self.assertIn("2-е место из 4", text)
+        self.assertIn("ещё на 2 наших товарах", text)
+        self.assertIn("1 250 ₸ (+557 ₸)", text)

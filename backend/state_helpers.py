@@ -1978,13 +1978,16 @@ def _load_price_war_moves(store_id: str, hours: int = 72, sku: str = None) -> di
 
 # Сколько дней «ждёт решения» продавец, которого радар больше не видит рядом
 # с нами, прежде чем пропасть из очереди менеджера (строка остаётся).
-GUARD_ASK_STALE_DAYS = 3
+# Вопрос, который цикл демпинга перестал задавать (продавец ушёл или решение
+# больше не меняет цену), через столько часов пропадает из «Ждут решения».
+GUARD_ASK_STALE_HOURS = 6
 
 
 def _decision_row_to_dict(r) -> dict:
     return {
         "id": r.id, "sku": r.sku, "merchant_id": r.merchant_id, "merchant_name": r.merchant_name,
         "product_name": r.product_name, "status": r.status, "price": r.price, "our_price": r.our_price,
+        "price_without": r.price_without, "url": r.url,
         "first_seen": r.first_seen.isoformat() if r.first_seen else None,
         "last_seen": r.last_seen.isoformat() if r.last_seen else None,
         "decided_at": r.decided_at.isoformat() if r.decided_at else None,
@@ -2046,14 +2049,17 @@ def _upsert_guard_asks(asks: list, store_id: str) -> list:
                 )
                 session.add(row)
                 existing[(sku, mid)] = row
-                created.append(row)
+                created.append((row, a))
             row.last_seen = now
             row.merchant_name = (str(a.get("merchant_name") or "")[:300] or row.merchant_name)
             row.product_name = (str(a.get("product_name") or "")[:500] or row.product_name)
             row.price = a.get("price")
             row.our_price = a.get("our_price")
+            row.price_without = a.get("price_without")
+            row.url = (str(a.get("url") or "")[:500] or row.url)
         session.commit()
-        return [_decision_row_to_dict(r) for r in created]
+        # Для уведомления — вместе с подробностями из цикла (место, доставка, min_price).
+        return [{**a, **_decision_row_to_dict(r)} for r, a in created]
     except Exception as e:
         logger.error(f"Error persisting guard asks: {e}")
         session.rollback()
@@ -2071,7 +2077,7 @@ def _list_guard_decisions(store_id: str, pending_only: bool = False, limit: int 
         import datetime as _dt
         stmt = select(PriceWarRivalDecisionDB).where(PriceWarRivalDecisionDB.store_id == store_id)
         if pending_only:
-            stale = _dt.datetime.utcnow() - _dt.timedelta(days=GUARD_ASK_STALE_DAYS)
+            stale = _dt.datetime.utcnow() - _dt.timedelta(hours=GUARD_ASK_STALE_HOURS)
             stmt = stmt.where(PriceWarRivalDecisionDB.status == "ASK",
                               PriceWarRivalDecisionDB.last_seen >= stale)
             stmt = stmt.order_by(PriceWarRivalDecisionDB.first_seen.desc())
@@ -2123,6 +2129,16 @@ def _set_guard_decision(decision_id: int, status: str, decided_by: str, store_id
     finally:
         session.close()
 
+
+
+def _guard_blacklist_merchant(store_id: str, merchant_id: str) -> None:
+    """«Не учитывать нигде»: продавец в чёрный список защиты магазина
+    (кабинет и кнопка в Телеграме)."""
+    from backend.dumper import guard
+    settings = guard.GuardConfig.from_dict(_load_store_guard(store_id)).to_dict()
+    if merchant_id not in settings["blacklist"]:
+        settings["blacklist"] = settings["blacklist"] + [merchant_id]
+        _save_store_guard(store_id, guard.clean_guard_settings(settings))
 
 def _append_competitor_encounters(encounters: list, store_id: str):
     """encounters: [{sku, competitor_name}] — одна запись за цикл на SKU, где

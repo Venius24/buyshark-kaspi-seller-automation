@@ -104,6 +104,22 @@ class DumpingEngine:
                 "dumping_status": "OFF"
             }
 
+        # Офферы не получены, радар подставил лучшую цену со страницы товара
+        # (заглушка COMPETITOR_TOP_1). Если она не ниже нашей — это, скорее всего,
+        # мы сами: до 04.10.2026 демпинг в этом случае снижал цену под себя же.
+        stubs = [o for o in sellers_offers or [] if guard.is_radar_stub(o.get("merchantId"))]
+        if stubs and len(stubs) == len(sellers_offers):
+            stub_price = min((guard.parse_price(o.get("price")) for o in stubs), key=lambda p: p or 1e18)
+            if stub_price is None or stub_price >= config.my_current_price:
+                return {
+                    "targetPrice": config.my_current_price,
+                    "currentPos": 1,
+                    "bestCompetitorPrice": None,
+                    "firstPrice": config.my_current_price,
+                    "action": "HOLD_POSITION_NO_DATA",
+                    "dumping_status": "WINNING_1ST",
+                }
+
         gcfg = guard_cfg if guard_cfg is not None else guard.GuardConfig()
         gctx = guard_ctx or {}
 
@@ -117,15 +133,6 @@ class DumpingEngine:
             g = dict(live.get("guard") or {})
             # «Поставила бы» — только если защита расходится с обычным демпингом.
             differs = abs(float(live["targetPrice"]) - float(plain["targetPrice"])) >= 1.0
-            # ВРЕМЕННО (суточное наблюдение Бархана с 03.10.2026): снимок перезаписывается
-            # каждый цикл, история «поставила бы» живёт только в этом логе. Убрать 04.10.
-            if differs:
-                logger.info(
-                    "[GuardObserve] sku=%s now=%s plain=%s(%s) guard=%s(%s) ignored=%d asks=%d "
-                    "ladder=%s pause_until=%s",
-                    config.sku, config.my_current_price, plain["targetPrice"], plain.get("action"),
-                    live["targetPrice"], live.get("action"), len(g.get("ignored") or []),
-                    len(g.get("asks") or []), g.get("ladder_active", False), g.get("pause_until"))
             g.update({
                 "observe": True,
                 "would": {"price": live["targetPrice"], "action": live["action"]} if differs else None,
@@ -152,7 +159,6 @@ class DumpingEngine:
             if str(o.get("merchantId", "")) != str(my_merchant_id)
         ]
         card_rank = 1 + sum(1 for rp in rival_prices if rp is not None and rp < config.my_current_price)
-        near = max(3.0, step_for_ladder * 2 + 1)
         ignored = []
         asks = []
         if gcfg.enabled:
@@ -170,9 +176,9 @@ class DumpingEngine:
                     ignored.append({**o["norm"], "reasons": reasons})
                 else:
                     considered.append(o)
-                    # Без рейтинга и влияет на нашу цену — спросить менеджера.
-                    if (guard.needs_decision(o["norm"], gcfg, decision)
-                            and o["price"] <= config.my_current_price + near):
+                    # Без рейтинга — кандидат в вопрос менеджеру. Останется
+                    # вопросом, только если решение меняет нашу цену (ниже).
+                    if guard.needs_decision(o["norm"], gcfg, decision):
                         asks.append(dict(o["norm"]))
             cleaned_offers = considered
         drop = guard.drop_state(all_moves, gcfg, config.my_current_price, now)
@@ -374,14 +380,38 @@ class DumpingEngine:
                 if target_price > best_competitor_price:
                     dumping_status = "GUARD_HOLD"
 
-            # Лесенка, а мы на 1–2 месте: раз в сутки прыгаем на максимум.
-            if guard.ladder_reset_due(ladder, all_moves, gcfg, card_rank, config.max_price, now):
-                target_price = config.max_price
+            # Лесенка, а мы на 1–2 месте: раз в сутки возвращаем цену к началу лесенки.
+            reset_to = guard.ladder_reset_target(ladder, config.my_current_price, config.max_price)
+            if reset_to and guard.ladder_reset_due(ladder, all_moves, gcfg, card_rank, config.max_price, now):
+                target_price = reset_to
                 action = guard.ACTION_LADDER_RESET
                 dumping_status = "GUARD_HOLD"
                 guard_info["limit"] = guard.ACTION_LADDER_RESET
                 guard_info["event"] = guard.ACTION_LADDER_RESET
                 guard_info["alert"] = False
+
+        # Вопрос менеджеру — только если «не учитывать» меняет нашу цену. За сутки
+        # наблюдения 04.10.2026 18 из 56 вопросов были о продавцах ниже нашего
+        # min_price: ответ на них ничего не менял.
+        if asks and not gctx.get("_impact"):
+            kept = []
+            for a in asks:
+                alt = DumpingEngine.calculate_new_price(
+                    config, my_merchant_id, sellers_offers, replace(gcfg, observe_only=False),
+                    {**gctx, "_impact": True,
+                     "decisions": {**decisions, a["merchant_id"]: guard.DECISION_IGNORE}})
+                alt_price = float(alt["targetPrice"])
+                if abs(alt_price - float(target_price)) < 1.0:
+                    continue
+                kept.append({
+                    **a,
+                    "price_with": round(float(target_price), 2),
+                    "price_without": round(alt_price, 2),
+                    "rival_rank": 1 + sum(1 for rp in rival_prices if rp is not None and rp < a["price"]),
+                    "our_rank": card_rank,
+                    "offers_count": len(rival_prices) + 1,
+                })
+            guard_info["asks"] = kept
 
         rival = competitors[0]
         return {
@@ -501,7 +531,11 @@ class BrainWorker:
                     "our_price": float(config.my_current_price),
                     "merchant_id": a.get("merchant_id"), "merchant_name": a.get("name"),
                     "price": a.get("price"), "reviews": a.get("reviews"),
-                    "intercity": a.get("intercity"),
+                    "intercity": a.get("intercity"), "delivery_days": a.get("delivery_days"),
+                    "price_with": a.get("price_with"), "price_without": a.get("price_without"),
+                    "rival_rank": a.get("rival_rank"), "our_rank": a.get("our_rank"),
+                    "offers_count": a.get("offers_count"),
+                    "min_price": float(config.min_price or 0) or None,
                 })
             if g_res.get("alert") and g_res.get("event") == guard.ACTION_DAILY_DROP:
                 guard_alerts.append({
@@ -671,7 +705,10 @@ class BrainWorker:
                 })
         if any(sp["adjacent"] for sp in suspects):
             signals.append(SIGNAL_WEAK_RIVAL)
-        if len(suspects) >= 2:
+        # Ферма — 2+ провокатора вплотную к нам. Раньше считались все на карточке,
+        # и 04.10.2026 «под атакой» было 206 SKU из 216: продавцов с <50 отзывами
+        # на любой живой карточке несколько.
+        if sum(1 for sp in suspects if sp["adjacent"]) >= 2:
             signals.append(SIGNAL_FARM)
         if guard_info.get("ladder"):
             signals.append(SIGNAL_LADDER)
