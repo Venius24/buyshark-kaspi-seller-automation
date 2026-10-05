@@ -21,17 +21,23 @@ LEGACY_ENV=/root/buyshark/.env
 mkdir -p "$RELEASES" "$DATA_DIR"
 OLD_RELEASE="$(readlink -f "$CURRENT" 2>/dev/null || true)"
 
-if [[ ! -d "$RELEASE" ]]; then
+if [[ ! -f "$RELEASE/.ready" ]]; then
+  # A prior failed install may have left an incomplete, inactive release.
+  if [[ -d "$RELEASE" ]]; then
+    rm -rf -- "$RELEASE"
+  fi
   STAGE="$(mktemp -d "$RELEASES/.stage-${SHA}.XXXXXX")"
   trap 'rm -rf -- "$STAGE"' EXIT
   tar -xzf "$ARCHIVE" -C "$STAGE"
   test -f "$STAGE/offer_service/main.py"
   test -f "$STAGE/offer_service/requirements.txt"
   test -f "$STAGE/deploy/offer-service.service"
-  python3 -m venv "$STAGE/venv"
-  "$STAGE/venv/bin/pip" install --disable-pip-version-check -r "$STAGE/offer_service/requirements.txt"
   mv -- "$STAGE" "$RELEASE"
   trap - EXIT
+  # venv launchers contain absolute paths: build it only at its final location.
+  python3 -m venv "$RELEASE/venv"
+  "$RELEASE/venv/bin/pip" install --disable-pip-version-check -r "$RELEASE/offer_service/requirements.txt"
+  touch "$RELEASE/.ready"
 fi
 
 # On the first deploy, move only the offer token to a dedicated environment.
