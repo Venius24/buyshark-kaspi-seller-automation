@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'offer_service/**'
+      - 'deploy/deploy-offer.sh'
+      - 'deploy/offer-service.service'
+      - '.github/workflows/offer-deploy.yml'
 
 jobs:
   # ─────────────────────────────────────────────────────────────

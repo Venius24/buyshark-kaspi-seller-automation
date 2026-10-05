@@ -1,0 +1,18 @@
+[Unit]
+Description=offer.buyshark.kz — personalised commercial offers
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/buyshark-offer/current
+EnvironmentFile=/etc/buyshark-offer.env
+Environment=OFFER_DB_PATH=/var/lib/buyshark-offer/offers.db
+ExecStart=/opt/buyshark-offer/current/venv/bin/uvicorn offer_service.main:app --host 127.0.0.1 --port 8030 --workers 1
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

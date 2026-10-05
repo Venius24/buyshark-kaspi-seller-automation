@@ -6,11 +6,12 @@
 """
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "data" / "offers.db"
+DB_PATH = Path(os.environ.get("OFFER_DB_PATH", Path(__file__).parent / "data" / "offers.db"))
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS offers (
