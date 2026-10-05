@@ -312,7 +312,7 @@ REASON_LABELS = {
     REASON_INTERCITY: "везёт из другого города",
     REASON_SLOW_DELIVERY: "доставка дольше нашей",
     REASON_PREORDER: "предзаказ",
-    REASON_LADDER_RETREAT: "перемирие после лесенки",
+    REASON_LADDER_RETREAT: "не отвечаем: стычка",
     REASON_MANAGER: "решение менеджера",
 }
 
@@ -579,15 +579,24 @@ def drop_state(moves: List[dict], cfg: GuardConfig, current: Optional[float] = N
     """Падение меряется от «якоря» — самого позднего из трёх моментов:
     - 24 часа назад (тогда от нашей цены на начало окна);
     - прошлая пауза из-за падения (от цены, на которой встали);
-    - сброс лесенки (от цены ДО прыжка на максимум — иначе возврат с
-      max_price после каждого сброса защита считала бы обвалом).
+    - охлаждение рынка (от цены ДО прыжка вверх — иначе возврат вниз, когда
+      соперник за нами не поднялся, защита считала бы обвалом).
     После паузы бот может снова опуститься ещё на max_daily_drop_pct —
-    а не стоит до конца суток."""
+    а не стоит до конца суток.
+
+    Охлаждение отменяет паузу, начатую до него, и цены между «до прыжка» и
+    «после прыжка» пиком не считаются: 05.10.2026 X172-0009-1 прыгнул
+    147 → 192, соперник не пошёл следом, и защита записала возврат к 146 как
+    падение на 15% от 192 — три часа стояли на 164 при сопернике на 146;
+    T079-0005-3 пауза за 15 минут до прыжка продержала 715 при сопернике
+    на 609 три часа."""
     now = now or datetime.utcnow()
     moves = sorted([m for m in moves or [] if m.get("created_at")], key=lambda m: m["created_at"])
     last_drop = next((m for m in reversed(moves) if m.get("action") == ACTION_DAILY_DROP), None)
     last_reset = next((m for m in reversed(moves) if m.get("action") == ACTION_LADDER_RESET), None)
     pause_until = last_drop["created_at"] + timedelta(hours=cfg.drop_pause_hours) if last_drop else None
+    if last_drop and last_reset and last_reset["created_at"] > last_drop["created_at"]:
+        pause_until = None
 
     anchor_at = now - timedelta(hours=24)
     start_ref = None
@@ -603,9 +612,15 @@ def drop_state(moves: List[dict], cfg: GuardConfig, current: Optional[float] = N
     if from_window_start and after:
         candidates.append(after[0].get("our_old"))
     candidates += [m.get("our_new") for m in after]
-    candidates = [float(c) for c in candidates if c is not None]
     if candidates and current is not None:
-        candidates.append(float(current))
+        candidates.append(current)
+    candidates = [float(c) for c in candidates if c is not None]
+    if last_reset is not None and anchor_at == last_reset["created_at"]:
+        # Якорь — охлаждение: «до прыжка» и всё, что выше самого прыжка
+        # (рынок поднялся сам). Цены между ними — наша ставка, не потеря.
+        jump = float(last_reset.get("our_new") or 0)
+        base = [float(start_ref)] if start_ref is not None else []
+        candidates = base + [c for c in candidates[len(base):] if c > jump]
     return DropState(peak=max(candidates) if candidates else None, pause_until=pause_until)
 
 

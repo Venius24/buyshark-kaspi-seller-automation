@@ -548,9 +548,36 @@ class TestOwnerDecisions(unittest.TestCase):
         reset = {"created_at": NOW - timedelta(hours=1), "our_old": 560.0, "our_new": 890.0,
                  "action": guard.ACTION_LADDER_RESET}
         st = guard.drop_state([reset], g, current=890.0, now=NOW)
-        self.assertEqual(st.peak, 890.0)  # текущая цена
+        self.assertEqual(st.peak, 560.0)  # от цены до прыжка, а не от самого прыжка
         st = guard.drop_state([reset], g, current=600.0, now=NOW)
-        self.assertEqual(st.peak, 600.0)  # не 890: от прыжка падение не меряем
+        self.assertEqual(st.peak, 560.0)
+        # Рынок сам поднялся выше прыжка — падение оттуда уже настоящее.
+        up = {"created_at": NOW - timedelta(minutes=30), "our_old": 890.0, "our_new": 1000.0,
+              "action": "PULL_UP_PRICE"}
+        st = guard.drop_state([reset, up], g, current=990.0, now=NOW)
+        self.assertEqual(st.peak, 1000.0)
+
+    def test_cooling_not_followed_returns_down_freely(self):
+        # X172-0009-1, 05.10.2026: 147 → 192, соперник остался на 146.
+        g = guard.GuardConfig(enabled=True)
+        reset = {"created_at": NOW - timedelta(minutes=14), "our_old": 147.0, "our_new": 192.0,
+                 "action": guard.ACTION_LADDER_RESET}
+        offers = [me(192), kaspi_offer("1", 146, rating=4.9, reviews=300)]
+        res = DumpingEngine.calculate_new_price(cfg(192, min_price=100.0), ME, offers, guard_cfg=g,
+                                                guard_ctx={"now": NOW, "moves": [reset]})
+        self.assertEqual(res["targetPrice"], 144.0)
+        self.assertIsNone(res["guard"]["limit"])
+
+    def test_cooling_cancels_earlier_pause(self):
+        # T079-0005-3, 04.10.2026: пауза в 21:54, прыжок в 22:08 — пауза держала 715 три часа.
+        g = guard.GuardConfig(enabled=True)
+        moves = [{"created_at": NOW - timedelta(minutes=30), "our_old": 610.0, "our_new": 608.0,
+                  "action": guard.ACTION_DAILY_DROP},
+                 {"created_at": NOW - timedelta(minutes=15), "our_old": 608.0, "our_new": 715.0,
+                  "action": guard.ACTION_LADDER_RESET}]
+        st = guard.drop_state(moves, g, current=715.0, now=NOW)
+        self.assertIsNone(st.pause_until)
+        self.assertEqual(st.peak, 608.0)
 
     def test_validation_new_fields(self):
         with self.assertRaises(guard.GuardValidationError):

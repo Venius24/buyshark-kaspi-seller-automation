@@ -156,6 +156,21 @@ def _load_overrides(store_id: str) -> dict:
             session.close()
     return overrides
 
+# Сколько Kaspi отдаёт в каталоге старую цену после нашей записи. Оверрайд
+# моложе отсечки минус это время ещё «в пути»: каталог его не видел. Без запаса
+# 04–05.10.2026 синхронизация через 2–3 минуты после цикла демпинга стирала
+# только что записанную цену — так терялось ~20% ходов, в т.ч. 4 из 10
+# охлаждений рынка (их можно делать раз в сутки) и подъёмы вида 2445 → 3200.
+# Протухнуть навсегда (баг 605 ₸ от 13.08) оверрайд всё равно не может:
+# следующая синхронизация через полчаса его уберёт.
+OVERRIDE_KASPI_LAG_MINUTES = 15
+
+
+def _override_cutoff(fetched_at):
+    import datetime as _dt
+    return fetched_at - _dt.timedelta(minutes=OVERRIDE_KASPI_LAG_MINUTES)
+
+
 def _purge_stale_overrides(store_id: str, before) -> int:
     """
     Удалить оверрайды старше `before` — момента, когда каталог был выкачан из
@@ -179,7 +194,7 @@ def _purge_stale_overrides(store_id: str, before) -> int:
         from backend.db.models import ProductOverrideDB
         deleted = session.query(ProductOverrideDB).filter(
             ProductOverrideDB.store_id == store_id,
-            ProductOverrideDB.updated_at < before,
+            ProductOverrideDB.updated_at < _override_cutoff(before),
         ).delete(synchronize_session=False)
         session.commit()
         if deleted:
@@ -343,7 +358,7 @@ def _apply_overrides(products: list, store_id: str, *, fresh_from_kaspi_at=None)
         ov = _override_for_product(p, overrides)
         if ov:
             ov_at = ov.get("updated_at")
-            if fresh_from_kaspi_at and ov_at and ov_at < fresh_from_kaspi_at:
+            if fresh_from_kaspi_at and ov_at and ov_at < _override_cutoff(fresh_from_kaspi_at):
                 continue
             if "price_num" in ov:
                 p["price_num"] = ov["price_num"]

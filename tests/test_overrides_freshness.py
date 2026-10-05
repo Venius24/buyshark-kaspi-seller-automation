@@ -13,6 +13,8 @@ from backend import state_helpers
 # на первом же обращении в чистом tmp-каталоге ловится "no such table".
 from backend.db import models as _db_models  # noqa: F401
 
+LAG = datetime.timedelta(minutes=state_helpers.OVERRIDE_KASPI_LAG_MINUTES)
+
 
 class TestOverrideMatchingAndFreshness(unittest.TestCase):
     """Регрессия 2026-08-13: каталог вечно показывал позавчерашнюю локальную цену.
@@ -46,7 +48,7 @@ class TestOverrideMatchingAndFreshness(unittest.TestCase):
 
     def test_stale_override_does_not_shadow_fresh_kaspi_price(self):
         state_helpers._save_override("111881073", 605, 492, store_id=self.store)
-        fetched_at = datetime.datetime.utcnow() + datetime.timedelta(seconds=1)
+        fetched_at = datetime.datetime.utcnow() + LAG + datetime.timedelta(seconds=1)
 
         out = state_helpers._apply_overrides(
             [self._product()], store_id=self.store, fresh_from_kaspi_at=fetched_at
@@ -74,7 +76,7 @@ class TestOverrideMatchingAndFreshness(unittest.TestCase):
     def test_purge_removes_stale_overrides_but_keeps_fresh_ones(self):
         state_helpers._save_override("111881073", 605, 492, store_id=self.store)
         # Отсечка ровно между двумя записями: первая старше её, вторая нет.
-        cutoff = datetime.datetime.utcnow()
+        cutoff = datetime.datetime.utcnow() + LAG
         state_helpers._save_override("T219-0005-1", 595, 492, store_id=self.store)
 
         deleted = state_helpers._purge_stale_overrides(self.store, cutoff)
@@ -88,11 +90,25 @@ class TestOverrideMatchingAndFreshness(unittest.TestCase):
         """Цикл демпинга накладывает оверрайды БЕЗ барьера свежести — значит
         протухшая запись обязана быть удалена, а не просто пропущена."""
         state_helpers._save_override("111881073", 605, 492, store_id=self.store)
-        cutoff = datetime.datetime.utcnow() + datetime.timedelta(seconds=1)
+        cutoff = datetime.datetime.utcnow() + LAG + datetime.timedelta(seconds=1)
         state_helpers._purge_stale_overrides(self.store, cutoff)
 
         out = state_helpers._apply_overrides([self._product()], store_id=self.store)
         self.assertEqual(out[0]["price_num"], 595)
+
+    def test_just_written_price_survives_sync_while_kaspi_lags(self):
+        """04.10.2026: цикл записал 765 ₸, через 2 минуты синхронизация выкачала
+        из Kaspi ещё старые 615 ₸ и стёрла оверрайд — следующий цикл видел 615."""
+        state_helpers._save_override("111881073", 765, 492, store_id=self.store)
+        fetched_at = datetime.datetime.utcnow() + datetime.timedelta(minutes=2)
+
+        out = state_helpers._apply_overrides(
+            [self._product()], store_id=self.store, fresh_from_kaspi_at=fetched_at
+        )
+        self.assertEqual(out[0]["price_num"], 765)
+        self.assertEqual(state_helpers._purge_stale_overrides(self.store, fetched_at), 0)
+        out = state_helpers._apply_overrides([self._product()], store_id=self.store)
+        self.assertEqual(out[0]["price_num"], 765)
 
     def test_newer_key_wins_when_both_keys_exist(self):
         state_helpers._save_override("T219-0005-1", 595, 492, store_id=self.store)

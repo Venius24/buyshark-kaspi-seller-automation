@@ -288,7 +288,8 @@ export function DumpingGuardPanel({ canEdit, onFocusSku }: Props) {
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {report.items.slice(0, 60).map((it) => (
-                  <AttackRow key={it.sku} item={it} labels={report.signal_labels} reasonLabels={reasonLabels} onFocusSku={onFocusSku} />
+                  <AttackRow key={it.sku} item={it} labels={report.signal_labels} reasonLabels={reasonLabels} onFocusSku={onFocusSku}
+                    holdsAfterSkirmish={settings.ladder_response === 'FREEZE' || settings.ladder_response === 'RETREAT'} />
                 ))}
               </div>
             </div>
@@ -396,8 +397,10 @@ function DecisionsBlock({ canEdit, onFocusSku }: { canEdit: boolean; onFocusSku?
   );
 }
 
-function AttackRow({ item, labels, reasonLabels, onFocusSku }: {
+function AttackRow({ item, labels, reasonLabels, onFocusSku, holdsAfterSkirmish }: {
   item: AttackItem;
+  /** «Не снижать» / «Не отвечать» действуют до active_until; при охлаждении и «отметить» срок ничего не значит. */
+  holdsAfterSkirmish: boolean;
   labels: Record<string, string>;
   reasonLabels: Record<string, string>;
   onFocusSku?: (sku: string) => void;
@@ -442,7 +445,7 @@ function AttackRow({ item, labels, reasonLabels, onFocusSku }: {
                 from: money(item.ladder.price_from),
                 to: money(item.ladder.price_to),
               })}</strong>
-              {item.ladder_active && item.ladder.active_until && (
+              {holdsAfterSkirmish && item.ladder_active && item.ladder.active_until && (
                 <span style={{ color: 'var(--text-muted)' }}> · {t('ceasefire_until', { at: new Date(item.ladder.active_until + 'Z').toLocaleString('ru-RU') })}</span>
               )}
             </div>
@@ -490,7 +493,7 @@ function AttackRow({ item, labels, reasonLabels, onFocusSku }: {
   );
 }
 
-/** Ступеньки нашей цены за 14 дней — лесенка видна глазом. */
+/** Ступеньки нашей цены за 14 дней — стычка видна глазом. */
 function MovesChart({ sku }: { sku: string }) {
   const { t } = useTranslation('dumping_guard');
   const { data: moves = [], isLoading } = usePriceMoves(sku, 14);
