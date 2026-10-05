@@ -88,19 +88,19 @@ class GroupDumpingConfig(BaseModel):
 
 class SkuRecipeComponent(BaseModel):
     group_id: str
-    qty: int = 1
+    qty: float = 1
 
 
 class SkuRecipe(BaseModel):
     """Рецепт списания артикула: qty своей группы + другие группы набора.
-    См. backend/services/sku_recipes.py."""
-    qty: int = 1
+    См. backend/services/sku_recipes.py. qty дробный (0.5 за продажу)."""
+    qty: float = 1
     extra: Optional[List[SkuRecipeComponent]] = None
 
 
 class MasterStockGroupCreateRequest(BaseModel):
     group_name: str
-    shared_stock: int
+    shared_stock: float
     linked_skus: List[str]
     external_code: Optional[str] = None
     is_active: Optional[bool] = True
@@ -114,7 +114,7 @@ class MasterStockGroupCreateRequest(BaseModel):
 
 class MasterStockGroupUpdateRequest(BaseModel):
     group_name: Optional[str] = None
-    shared_stock: Optional[int] = None
+    shared_stock: Optional[float] = None
     linked_skus: Optional[List[str]] = None
     external_code: Optional[str] = None
     is_active: Optional[bool] = None
@@ -124,12 +124,12 @@ class MasterStockGroupUpdateRequest(BaseModel):
     dumping_excluded_skus: Optional[List[str]] = None
 
 class UpdateStockQtyRequest(BaseModel):
-    shared_stock: int
+    shared_stock: float
 
 class PublicStockUpdateRequest(BaseModel):
     group_id: Optional[str] = None
     external_code: Optional[str] = None
-    new_stock: int
+    new_stock: float
     mode: Optional[str] = "SET"  # "SET" (exact stock) or "DELTA" (+/- relative)
 
 class ApiKeyCreateRequest(BaseModel):

@@ -506,8 +506,8 @@ def _load_master_stock_groups(store_id: str) -> dict:
                 groups[r.group_id] = {
                     "group_id": r.group_id,
                     "group_name": r.group_name,
-                    "shared_stock": r.shared_stock,
-                    "oversold": r.oversold or 0,
+                    "shared_stock": _stock_num(r.shared_stock),
+                    "oversold": _stock_num(r.oversold or 0),
                     "sku_recipes": sku_recipes,
                     "linked_skus": linked_skus,
                     "external_code": r.external_code,
@@ -529,6 +529,12 @@ def _load_master_stock_groups(store_id: str) -> dict:
             session.close()
     return groups
 
+def _stock_num(v):
+    """Остаток группы: дробный, но целое отдаём как int (см. sku_recipes.num)."""
+    from backend.services.sku_recipes import num
+    return num(v or 0)
+
+
 def _save_master_stock_groups(groups: dict, store_id: str):
     session = _get_sync_db_session()
     if not session:
@@ -547,8 +553,8 @@ def _save_master_stock_groups(groups: dict, store_id: str):
                     group_id=gid,
                     store_id=store_id,
                     group_name=g.get("group_name", "Группа"),
-                    shared_stock=int(g.get("shared_stock", 0)),
-                    oversold=int(g.get("oversold", 0)),
+                    shared_stock=_stock_num(g.get("shared_stock", 0)),
+                    oversold=_stock_num(g.get("oversold", 0)),
                     sku_recipes=recipes_str,
                     linked_skus=linked_str,
                     external_code=g.get("external_code"),
@@ -567,8 +573,8 @@ def _save_master_stock_groups(groups: dict, store_id: str):
                 session.add(db_obj)
             else:
                 db_obj.group_name = g.get("group_name", "Группа")
-                db_obj.shared_stock = int(g.get("shared_stock", 0))
-                db_obj.oversold = int(g.get("oversold", 0))
+                db_obj.shared_stock = _stock_num(g.get("shared_stock", 0))
+                db_obj.oversold = _stock_num(g.get("oversold", 0))
                 # Словарь без ключа (собран не из _load_master_stock_groups) не
                 # должен молча стирать наборы группы.
                 if "sku_recipes" in g:

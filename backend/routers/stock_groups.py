@@ -134,7 +134,7 @@ async def create_stock_group(
     new_group = {
         "group_id": group_id,
         "group_name": req.group_name.strip(),
-        "shared_stock": int(req.shared_stock),
+        "shared_stock": recipes_lib.num(req.shared_stock),
         "linked_skus": expanded_skus,
         "external_code": (req.external_code or "").strip() or None,
         "is_active": req.is_active if req.is_active is not None else True,
@@ -201,7 +201,7 @@ async def update_stock_group(
         if req.group_name is not None and req.group_name.strip():
             group["group_name"] = req.group_name.strip()
         if req.shared_stock is not None and req.shared_stock >= 0:
-            group["shared_stock"] = int(req.shared_stock)
+            group["shared_stock"] = recipes_lib.num(req.shared_stock)
             group["oversold"] = 0  # пересчёт по факту склада закрывает долг
         if req.linked_skus is not None and req.linked_skus:
             group["linked_skus"] = await asyncio.to_thread(
@@ -270,15 +270,15 @@ async def update_stock_qty(
             raise HTTPException(status_code=404, detail=f"Мастер-Группа {group_id} не найдена.")
 
         group = groups[group_id]
-        group["shared_stock"] = int(req.shared_stock)
+        group["shared_stock"] = recipes_lib.num(req.shared_stock)
         # Ручной ввод — это пересчёт по факту склада, он закрывает долг
         # перепродажи: владелец уже видит реальное число штук.
-        debt = int(group.get("oversold", 0))
+        debt = recipes_lib.num(group.get("oversold", 0))
         group["oversold"] = 0
         group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         group["status"] = "updating"
         group["last_sync_log"] = (
-            f"Ручной ввод остатка: {req.shared_stock} шт."
+            f"Ручной ввод остатка: {recipes_lib.num(req.shared_stock)} шт."
             + (f" (долг {debt} шт. списан)" if debt else "")
         )
         # Только изменённая группа — см. комментарий в create_stock_group выше.
@@ -288,7 +288,7 @@ async def update_stock_qty(
 
     return {
         "success": True,
-        "message": f"Остаток группы '{group['group_name']}' изменен на {req.shared_stock} шт.",
+        "message": f"Остаток группы '{group['group_name']}' изменен на {recipes_lib.num(req.shared_stock)} шт.",
         "group": group
     }
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Layers, Plus, X } from 'lucide-react';
 import { type SkuRecipe, type SkuRecipes, findRecipe, isCustomRecipe } from './skuRecipes';
 
@@ -43,7 +43,38 @@ const numInput: React.CSSProperties = {
   boxSizing: 'border-box',
 };
 
-const clampQty = (v: string) => Math.min(1000, Math.max(1, parseInt(v) || 1));
+/**
+ * Количество за продажу дробное (0.5 м, 0.25 упаковки) — как sku_recipes на
+ * бэкенде: от 0.001 до 1000, три знака после запятой.
+ */
+const parseQty = (v: string): number | null => {
+  const n = parseFloat(v.replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? Math.min(1000, Math.max(0.001, Math.round(n * 1000) / 1000)) : null;
+};
+
+/**
+ * Поле ×N со своим черновиком: управляемый number-инпут с мгновенным
+ * clamp не даёт набрать «0.5» — на «0» он уже подставляет минимум.
+ */
+const QtyInput: React.FC<{ value: number; onChange: (v: number) => void; style?: React.CSSProperties }> = ({ value, onChange, style }) => {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => {
+    if (parseQty(draft) !== value) setDraft(String(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return (
+    <input
+      type="text" inputMode="decimal" value={draft}
+      onChange={e => {
+        setDraft(e.target.value);
+        const q = parseQty(e.target.value);
+        if (q !== null && q !== value) onChange(q);
+      }}
+      onBlur={() => setDraft(String(value))}
+      style={style}
+    />
+  );
+};
 
 /**
  * «Списание за 1 продажу» в модалке группы: ×N у каждой карточки и наборы из
@@ -69,7 +100,7 @@ export const SkuRecipeEditor: React.FC<Props> = ({
     // Незаполненная строка набора («— выберите группу —») живёт в форме,
     // пока её не заполнят; при сохранении её отбрасывает cleanRecipesForSubmit.
     const extra = r.extra || [];
-    if (r.qty > 1 || extra.length > 0) {
+    if (r.qty !== 1 || extra.length > 0) {
       next[card.label] = { qty: r.qty, ...(extra.length ? { extra } : {}) };
     }
     onChange(next);
@@ -84,7 +115,8 @@ export const SkuRecipeEditor: React.FC<Props> = ({
       const g = byId.get(x.group_id);
       if (g && g.is_active) parts.push({ stock: g.shared_stock, stop: g.stop_qty ?? 5, qty: x.qty || 1 });
     }
-    const avail = parts.map(p => Math.floor(Math.max(0, p.stock) / p.qty));
+    // Эпсилон — как whole_units на бэкенде: 0.3 / 0.1 во float это 2.999….
+    const avail = parts.map(p => Math.floor(Math.max(0, p.stock) / p.qty + 1e-9));
     const push = parts.map((p, i) => (p.stock > p.stop ? avail[i] : 0));
     return [Math.min(...avail), Math.min(...push)];
   };
@@ -97,7 +129,8 @@ export const SkuRecipeEditor: React.FC<Props> = ({
         Списание за 1 продажу
       </label>
       <p style={{ margin: '0 0 10px', fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-        ×N — сколько штук остатка этой группы уходит за одну проданную карточку (двойная упаковка — ×2).
+        ×N — сколько штук остатка этой группы уходит за одну проданную карточку (двойная упаковка — ×2,
+        можно дробное: 0.5 — половина единицы остатка).
         «Набор» — продажа списывает ещё и из других групп; на Kaspi набор показывает остаток
         самой бедной составляющей и снимается, как только любая из них дошла до стоп-количества.
       </p>
@@ -125,10 +158,10 @@ export const SkuRecipeEditor: React.FC<Props> = ({
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}
                       title="Сколько штук остатка ЭТОЙ группы уходит за одну продажу карточки">
                   ×
-                  <input
-                    type="number" min={1} max={1000} value={r.qty}
-                    onChange={e => setRecipe(card, { ...r, qty: clampQty(e.target.value) })}
-                    style={{ ...numInput, ...(r.qty > 1 ? { border: `1px solid ${PURPLE}`, color: PURPLE, fontWeight: 700 } : {}) }}
+                  <QtyInput
+                    value={r.qty}
+                    onChange={qty => setRecipe(card, { ...r, qty })}
+                    style={{ ...numInput, ...(r.qty !== 1 ? { border: `1px solid ${PURPLE}`, color: PURPLE, fontWeight: 700 } : {}) }}
                   />
                 </span>
                 <button
@@ -179,8 +212,7 @@ export const SkuRecipeEditor: React.FC<Props> = ({
                         </select>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
                           ×
-                          <input type="number" min={1} max={1000} value={x.qty}
-                                 onChange={e => update({ qty: clampQty(e.target.value) })} style={numInput} />
+                          <QtyInput value={x.qty} onChange={qty => update({ qty })} style={numInput} />
                         </span>
                         <button
                           type="button"

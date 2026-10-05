@@ -204,7 +204,8 @@ class MasterStockGroupDB(Base):
     # случайному uuid-суффиксу — составной PK тут не нужен, в отличие от sku).
     store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
     group_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    shared_stock: Mapped[int] = mapped_column(Integer, default=0)
+    # Float с миграции 049: рецепт может списывать дробное (0.5 м за продажу).
+    shared_stock: Mapped[float] = mapped_column(Float, default=0)
     linked_skus: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON-stringified list
     external_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -214,7 +215,7 @@ class MasterStockGroupDB(Base):
     # Долг: сколько штук продано сверх остатка. shared_stock обрезается по
     # нулю (отрицательный остаток нельзя слать в Kaspi), и без этого поля
     # факт перепродажи терялся молча — см. миграцию 031.
-    oversold: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    oversold: Mapped[float] = mapped_column(Float, nullable=False, default=0, server_default="0")
     # УСТАРЕЛО с миграции 044, код поле не читает (всегда 1): множитель теперь
     # у каждого артикула свой, в sku_recipes ниже. Было: сколько штук общего
     # остатка съедает ОДНА проданная единица товара. Для обычного товара 1. Для группы, где остаток считается в мелких единицах, а

@@ -11,6 +11,7 @@ from backend.routers.public_api.auth import get_api_key_user
 from backend.security.store_context import get_store_by_id
 from backend.services.stock_sync_worker import execute_broadcast_sync, get_stock_lock
 from backend.services.webhook_dispatcher import dispatch_webhook_event
+from backend.services.sku_recipes import num
 
 router = APIRouter(prefix="/api/v1/public", tags=["public-api"])
 
@@ -96,14 +97,14 @@ async def update_public_stock(
             )
 
         mode = (req.mode or "SET").upper()
-        current_stock = int(target_group.get("shared_stock", 0))
+        current_stock = num(target_group.get("shared_stock", 0))
 
         if mode == "DELTA":
-            new_stock = max(0, current_stock + req.new_stock)
+            new_stock = max(0, num(current_stock + req.new_stock))
         else:
-            new_stock = max(0, req.new_stock)
+            new_stock = max(0, num(req.new_stock))
 
-        debt = int(target_group.get("oversold", 0))
+        debt = num(target_group.get("oversold", 0))
         if mode != "DELTA":
             # SET — это пересчёт по факту склада, он закрывает долг
             # перепродажи. DELTA (приход/расход) долг не трогает: сколько

@@ -328,7 +328,7 @@ def build_forecast(
             "status": "Активен",
             "in_catalog": True,
             "members_count": len(members),
-            "stock": int(g.get("shared_stock", 0) or 0),
+            "stock": sku_recipes.num(g.get("shared_stock", 0) or 0),
             "sold": sum(s.get("sold", 0) for s in stats),
             "sold_recent": sum(s.get("sold_recent", 0) for s in stats),
             "velocity": _draw(gid, "velocity"),

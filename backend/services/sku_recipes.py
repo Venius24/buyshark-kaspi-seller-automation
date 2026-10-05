@@ -31,10 +31,43 @@ min(остаток группы // qty), и 0, если хоть одна сос
 Артикул в linked_skus ДВУХ групп без рецепта по-прежнему считается
 неоднозначным и не списывается (match_group_for_sku): набор заводится
 только явно, иначе опечатка в привязках молча списывала бы из обеих групп.
+
+Дробные количества (06.10.2026)
+-------------------------------
+`qty` и остаток группы — дробные: товар может продаваться частью единицы
+учёта (остаток в метрах, продаётся 0.5 м; остаток в упаковках, продаётся
+четверть). Числа округляются до STOCK_PRECISION знаков, чтобы 0.1+0.2 не
+копило хвосты. На Kaspi уходит только целое число наборов — floor.
 """
-from typing import Dict, Iterable, List, Optional, Tuple
+import math
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 MAX_QTY = 1000
+MIN_QTY = 0.001
+STOCK_PRECISION = 3
+
+Number = Union[int, float]
+
+
+def num(raw, default: Number = 0) -> Number:
+    """Остаток/количество как число: округлено, целое отдаётся как int.
+
+    int для целых — чтобы журнал, JSON и фронт показывали «5», а не «5.0».
+    """
+    try:
+        v = round(float(raw if raw is not None else default), STOCK_PRECISION)
+    except (TypeError, ValueError):
+        v = float(default)
+    if not math.isfinite(v):
+        v = float(default)
+    return int(v) if v == int(v) else v
+
+
+def whole_units(stock, qty: Number = 1) -> int:
+    """Сколько целых продаж выдерживает остаток при qty за продажу (floor)."""
+    q = _qty(qty)
+    # Эпсилон: 0.3 / 0.1 во float = 2.9999…, а это честные 3 продажи.
+    return max(0, int(math.floor(float(stock or 0) / q + 1e-9)))
 
 
 def _canon(raw) -> str:
@@ -51,11 +84,13 @@ def _first_token(raw) -> str:
     return s.split()[0] if s else ""
 
 
-def _qty(raw) -> int:
+def _qty(raw) -> Number:
+    """Количество за продажу; мусор и ноль -> 1 (прежнее поведение)."""
     try:
-        return max(1, int(raw or 1))
+        v = num(raw if raw not in (None, "") else 1, 1)
     except (TypeError, ValueError):
         return 1
+    return v if v >= MIN_QTY else 1
 
 
 def entry_for(group: Optional[dict], sku) -> Optional[dict]:
@@ -81,7 +116,7 @@ def entry_for(group: Optional[dict], sku) -> Optional[dict]:
     return None
 
 
-def components_for(home_gid: str, groups: dict, sku) -> List[Tuple[str, int]]:
+def components_for(home_gid: str, groups: dict, sku) -> List[Tuple[str, Number]]:
     """[(group_id, штук за 1 продажу)] — своя группа всегда первой."""
     entry = entry_for(groups.get(home_gid), sku)
     if not entry:
@@ -96,11 +131,11 @@ def components_for(home_gid: str, groups: dict, sku) -> List[Tuple[str, int]]:
     return comps
 
 
-def is_plain(components: List[Tuple[str, int]]) -> bool:
+def is_plain(components: List[Tuple[str, Number]]) -> bool:
     return len(components) == 1 and components[0][1] == 1
 
 
-def sellable(components: Iterable[Tuple[str, int]], groups: dict) -> Tuple[int, int]:
+def sellable(components: Iterable[Tuple[str, Number]], groups: dict) -> Tuple[int, int]:
     """(сколько наборов собирается из остатка, сколько выставлять на Kaspi).
 
     Первое число — для кэша каталога и оверрайда, второе — с учётом стоп-кол-ва
@@ -115,9 +150,9 @@ def sellable(components: Iterable[Tuple[str, int]], groups: dict) -> Tuple[int, 
         g = groups.get(gid)
         if not g or not g.get("is_active", True):
             continue
-        shared = max(0, int(g.get("shared_stock", 0) or 0))
+        shared = max(0, num(g.get("shared_stock", 0) or 0))
         stop = int(g.get("stop_qty", 5) if g.get("stop_qty") is not None else 5)
-        avail = shared // _qty(qty)
+        avail = whole_units(shared, qty)
         stock_vals.append(avail)
         push_vals.append(avail if shared > stop else 0)
     if not stock_vals:
@@ -184,13 +219,16 @@ def clean_recipes(home_gid: str, recipes: Optional[dict], groups: dict,
     return out
 
 
-def _check_qty(raw, sku: str) -> int:
+def _check_qty(raw, sku: str) -> Number:
     try:
-        n = int(raw if raw is not None else 1)
+        v = float(str(raw).replace(",", ".")) if raw is not None else 1.0
     except (TypeError, ValueError):
-        raise ValueError(f"{sku}: количество должно быть целым числом.")
-    if n < 1 or n > MAX_QTY:
-        raise ValueError(f"{sku}: количество должно быть от 1 до {MAX_QTY}.")
+        raise ValueError(f"{sku}: количество должно быть числом.")
+    if not math.isfinite(v):
+        raise ValueError(f"{sku}: количество должно быть числом.")
+    n = num(v)
+    if n < MIN_QTY or n > MAX_QTY:
+        raise ValueError(f"{sku}: количество должно быть от {MIN_QTY} до {MAX_QTY}.")
     return n
 
 
@@ -211,6 +249,6 @@ def drop_group_refs(groups: dict, gid: str) -> Dict[str, dict]:
                     entry.pop("extra", None)
         if touched:
             g["sku_recipes"] = {k: v for k, v in recipes.items()
-                                if _qty(v.get("qty")) > 1 or v.get("extra")}
+                                if _qty(v.get("qty")) != 1 or v.get("extra")}
             changed[home_gid] = g
     return changed

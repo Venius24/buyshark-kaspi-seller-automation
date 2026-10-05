@@ -97,6 +97,35 @@ class TestSellable(unittest.TestCase):
         self.assertEqual(R.sellable([("g46", 1), ("g48", 1)], gr), (317, 317))
 
 
+class TestFractional(unittest.TestCase):
+    """Дробное списание (06.10.2026): 0.5 м за продажу, остаток в метрах."""
+
+    def test_half_unit_doubles_sellable(self):
+        gr = {"a": g("a", "A", ["X"], stock=7.5)}
+        self.assertEqual(R.sellable([("a", 0.5)], gr), (15, 15))
+
+    def test_kaspi_gets_whole_units_only(self):
+        gr = {"a": g("a", "A", ["X"], stock=2.9)}
+        self.assertEqual(R.sellable([("a", 1)], gr), (2, 2))
+
+    def test_float_division_noise_is_not_lost(self):
+        gr = {"a": g("a", "A", ["X"], stock=0.3)}
+        self.assertEqual(R.sellable([("a", 0.1)], gr), (3, 3))
+
+    def test_fractional_qty_is_stored(self):
+        out = R.clean_recipes("g46", {"S517-0046": {"qty": "0,25"}}, bundle_groups(), ["S517-0046"])
+        self.assertEqual(out, {"S517-0046": {"qty": 0.25}})
+
+    def test_whole_qty_stays_int(self):
+        out = R.clean_recipes("g46", {"S517-0046": {"qty": 2.0}}, bundle_groups(), ["S517-0046"])
+        self.assertEqual(out["S517-0046"]["qty"], 2)
+        self.assertIsInstance(out["S517-0046"]["qty"], int)
+
+    def test_num_rounds_accumulated_noise(self):
+        self.assertEqual(R.num(0.1 + 0.2), 0.3)
+        self.assertEqual(R.num(10 - 0.5 * 4), 8)
+
+
 class TestBundlesTouching(unittest.TestCase):
     def test_component_group_sees_the_foreign_bundle(self):
         self.assertEqual(R.bundles_touching("g48", bundle_groups()), [("g46", "S517-0046-48")])
@@ -214,6 +243,24 @@ class TestPackOnCard(DeductionTestCase):
             {"merchant_sku": "H422-0007-9 2шт", "title": "t", "quantity": 1},
         ]}], "wait_for_courier": []})
         self.assertEqual(self.groups["a"]["shared_stock"], 97)
+
+    def test_fractional_pack_deducts_fraction(self):
+        self.groups = {"a": g("a", "Лента", ["L-05"], stock=10,
+                              recipes={"L-05": {"qty": 0.5}})}
+        self.run_cycle({"cargo_assembly": [{"code": "911", "items": [
+            {"merchant_sku": "L-05", "title": "t", "quantity": 3},
+        ]}], "wait_for_courier": []})
+        self.assertEqual(self.groups["a"]["shared_stock"], 8.5)
+        self.assertEqual(self.groups["a"].get("oversold", 0), 0)
+
+    def test_fractional_oversell_goes_into_debt(self):
+        self.groups = {"a": g("a", "Лента", ["L-05"], stock=0.5,
+                              recipes={"L-05": {"qty": 0.75}})}
+        self.run_cycle({"cargo_assembly": [{"code": "912", "items": [
+            {"merchant_sku": "L-05", "title": "t", "quantity": 1},
+        ]}], "wait_for_courier": []})
+        self.assertEqual(self.groups["a"]["shared_stock"], 0)
+        self.assertEqual(self.groups["a"]["oversold"], 0.25)
 
 
 # ── Рассылка остатка на Kaspi ───────────────────────────────────────────────

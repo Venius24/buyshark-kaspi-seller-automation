@@ -63,7 +63,7 @@ DEDUCTION_FULL_SWEEP_INTERVAL_SECONDS = float(
 )
 _last_full_sweep_at: Dict[Optional[str], float] = {}
 
-async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus: List[str], store_id: Optional[str] = None, trigger_order_info: Optional[dict] = None, shared_stock: int = 0, stop_qty: int = 5):
+async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus: List[str], store_id: Optional[str] = None, trigger_order_info: Optional[dict] = None, shared_stock: float = 0, stop_qty: int = 5):
     """Уведомление при просаде остатка группы ниже (или равно) её "Стоп
     кол-ва" (по умолчанию 5, настраивается per-группа) с деталями о
     заказе-триггере — реальным привязанным через deep-link пользователям
@@ -111,7 +111,7 @@ async def notify_zero_stock_telegram(group_name: str, group_id: str, linked_skus
 
 async def notify_oversold_telegram(
     group_name: str, group_id: str, store_id: Optional[str],
-    order_code: str, sku: str, units: int, old_stock: int, debt: int,
+    order_code: str, sku: str, units: float, old_stock: float, debt: float,
 ) -> None:
     """Заказов пришло больше, чем числилось остатка.
 
@@ -125,7 +125,7 @@ async def notify_oversold_telegram(
         from backend.chatbot import notify_dispatch
         from backend.chatbot.notifications import _esc_md
 
-        shortfall = max(0, units - old_stock)
+        shortfall = max(0, sku_recipes.num(units - old_stock))
         text = (
             f"🚨 *ПЕРЕПРОДАЖА: заказов больше, чем остатка*\n\n"
             f"📦 *Группа:* {_esc_md(group_name)}\n"
@@ -250,7 +250,7 @@ async def _execute_broadcast_sync_impl(group_id: str, token: str, store_id: Opti
     await broadcast_ws_event("stock_group_updated", group, store_id=store_id)
 
     linked_skus = group.get("linked_skus", [])
-    shared_stock = int(group.get("shared_stock", 0))
+    shared_stock = sku_recipes.num(group.get("shared_stock", 0))
     stop_qty = int(group.get("stop_qty", 5))
     group_name = group.get("group_name", "Без названия")
 
@@ -850,7 +850,7 @@ def claim_stock_deduction(
     return True
 
 
-def _calculate_physical_units(merchant_sku: str, quantity: int = 1, per_unit: int = 1) -> int:
+def _calculate_physical_units(merchant_sku: str, quantity: int = 1, per_unit: float = 1):
     """
     Физическое количество штук по позиции заказа: заказанное количество,
     умноженное на множитель артикула из его рецепта (`sku_recipes`, по
@@ -879,26 +879,28 @@ def _calculate_physical_units(merchant_sku: str, quantity: int = 1, per_unit: in
     не угадываем: если у товара действительно комплект, размер должен
     задаваться явно, а не выводиться из артикула.
     """
-    return int(quantity) * max(1, int(per_unit or 1))
+    # per_unit может быть дробным (0.5 м за продажу) — см. sku_recipes.num.
+    return sku_recipes.num(int(quantity) * sku_recipes._qty(per_unit))
 
 
 
-def _deduct_from_group(group: dict, units: int, *, ordered: int, per_unit: int,
+def _deduct_from_group(group: dict, units: float, *, ordered: int, per_unit: float,
                        order_code: str, m_sku: str, bundle_label: Optional[str] = None) -> dict:
     """Вычитает units из остатка группы (на месте) и пишет строку в её журнал.
 
     Возвращает {old_stock, new_stock, shortfall, debt}. Сохранение группы,
     отметка заказа и рассылка — на вызывающем.
     """
-    old_stock = int(group.get("shared_stock", 0))
-    new_stock = max(0, old_stock - units)
+    num = sku_recipes.num
+    old_stock = num(group.get("shared_stock", 0))
+    new_stock = max(0, num(old_stock - units))
     # Сколько штук заказали сверх того, что числилось. max(0, ...)
     # обрезает остаток по нулю — иначе отрицательное число утечёт
     # в оверрайд каталога и в Kaspi. Но сам факт нехватки терялся
     # прямо здесь: журнал показывал "было 4 → стало 0" и ни слова
     # о том, что трёх штук нет. Копим долг отдельным полем.
-    shortfall = max(0, units - old_stock)
-    debt = int(group.get("oversold", 0)) + shortfall
+    shortfall = max(0, num(units - old_stock))
+    debt = num(num(group.get("oversold", 0)) + shortfall)
     group["shared_stock"] = new_stock
     group["oversold"] = debt
     group["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -912,14 +914,14 @@ def _deduct_from_group(group: dict, units: int, *, ordered: int, per_unit: int,
     if shortfall:
         tail = f", не хватило {shortfall} шт. — продано больше, чем числилось"
         logger.warning(
-            "🚨 [AutoDeduction] Перепродажа: заказ #%s списал %d шт. у группы '%s' "
-            "при остатке %d. Не хватает %d шт. (всего долг %d).",
+            "🚨 [AutoDeduction] Перепродажа: заказ #%s списал %s шт. у группы '%s' "
+            "при остатке %s. Не хватает %s шт. (всего долг %s).",
             order_code, units, group.get("group_name"), old_stock, shortfall, debt,
         )
     # Комплект и набор показываем прямо в журнале: иначе "заказали 1 —
     # списали 7" или списание ключей по заказу съёмника снова выглядит
     # как поломка, а не как настройка.
-    pack = f" [заказано {ordered} × комплект {per_unit}]" if per_unit > 1 else ""
+    pack = f" [заказано {ordered} × комплект {per_unit}]" if per_unit != 1 else ""
     what = f"{m_sku}, набор: {bundle_label}" if bundle_label else m_sku
     log_entry = (
         f"[{now_time}] 🛒 Списание по заказу #{order_code} ({what}): "

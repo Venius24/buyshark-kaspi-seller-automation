@@ -34,7 +34,7 @@ export function findRecipe(recipes: SkuRecipes | undefined, ids: string[]): [str
 
 /** Рецепт отличается от «своя группа × 1». */
 export const isCustomRecipe = (r?: SkuRecipe | null): boolean =>
-  !!r && ((r.qty ?? 1) > 1 || (r.extra?.length ?? 0) > 0);
+  !!r && ((r.qty ?? 1) !== 1 || (r.extra?.length ?? 0) > 0);
 
 interface GroupLike {
   group_id: string;
@@ -81,7 +81,7 @@ export function cleanRecipesForSubmit(recipes: SkuRecipes, cards: { label: strin
     if (!found) continue;
     const [, r] = found;
     const extra = (r.extra || []).filter(x => x.group_id);
-    if ((r.qty ?? 1) > 1 || extra.length > 0) {
+    if ((r.qty ?? 1) !== 1 || extra.length > 0) {
       out[card.label] = { qty: r.qty ?? 1, ...(extra.length ? { extra } : {}) };
     }
   }

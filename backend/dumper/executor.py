@@ -282,9 +282,9 @@ class RateLimitExecutorWorker:
             stock_val = int(p.get("stock", 10))
             for mg in master_groups.values():
                 if mg.get("is_active", True) and sku_key in mg.get("linked_skus", []):
-                    mg_stock = int(mg.get("shared_stock", stock_val))
+                    mg_stock = float(mg.get("shared_stock", stock_val) or 0)
                     mg_stop_qty = int(mg.get("stop_qty", 5))
-                    stock_val = mg_stock if mg_stock > mg_stop_qty else 0
+                    stock_val = int(mg_stock) if mg_stock > mg_stop_qty else 0
                     break
 
             priority = RateLimitExecutorWorker._priority_for(

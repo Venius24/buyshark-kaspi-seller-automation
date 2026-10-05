@@ -971,8 +971,9 @@ export const MasterStockGroups: React.FC<{ isWsConnected: boolean; wsEvent: Tele
                             <input
                               type="number"
                               min={0}
+                              step="any"
                               value={inlineStockVal}
-                              onChange={e => setInlineStockVal(parseInt(e.target.value) || 0)}
+                              onChange={e => setInlineStockVal(parseFloat(e.target.value) || 0)}
                               style={{
                                 width: '80px',
                                 padding: '6px 10px',
@@ -1093,7 +1094,7 @@ export const MasterStockGroups: React.FC<{ isWsConnected: boolean; wsEvent: Tele
                               ].join('\n');
                               return (
                                 <span title={hint} style={{ color: '#c084fc', fontWeight: 700, fontFamily: 'inherit' }}>
-                                  {r.qty > 1 ? `×${r.qty}` : ''}{extra.length > 0 ? ` +набор` : ''}
+                                  {r.qty !== 1 ? `×${r.qty}` : ''}{extra.length > 0 ? ` +набор` : ''}
                                 </span>
                               );
                             };
@@ -1167,7 +1168,7 @@ export const MasterStockGroups: React.FC<{ isWsConnected: boolean; wsEvent: Tele
                                     }}
                                   >
                                     <Layers size={12} />
-                                    {fb.sku}{fb.qtyHere > 1 ? ` ×${fb.qtyHere}` : ''} · набор
+                                    {fb.sku}{fb.qtyHere !== 1 ? ` ×${fb.qtyHere}` : ''} · набор
                                   </span>
                                 ))}
 
@@ -1419,8 +1420,9 @@ export const MasterStockGroups: React.FC<{ isWsConnected: boolean; wsEvent: Tele
                   <input
                     type="number"
                     min="0"
+                    step="any"
                     value={formSharedStock}
-                    onChange={e => setFormSharedStock(parseInt(e.target.value) || 0)}
+                    onChange={e => setFormSharedStock(parseFloat(e.target.value) || 0)}
                     required
                     style={{
                       width: '100%',

@@ -152,7 +152,7 @@ def _stock_ok(order: dict, groups: dict) -> bool:
         for g in groups.values():
             linked = set(str(s).strip().lower() for s in g.get("linked_skus", []))
             if sku_lower in linked or any(s in sku_lower or sku_lower.startswith(s) for s in linked if len(s) >= 4):
-                if int(g.get("shared_stock", 0)) <= 0:
+                if float(g.get("shared_stock", 0) or 0) <= 0:
                     return False
     return True
 
