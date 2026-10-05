@@ -29,6 +29,11 @@ export const DEFAULT_GUARD: GuardSettings = {
   ladder_min_slide_pct: 10,
   ladder_response: 'RESET_MAX',
   ladder_cooldown_hours: 12,
+  cooling_per_day: 2,
+  cooling_hold_minutes: 30,
+  night_freeze: false,
+  night_from_hour: 1,
+  night_to_hour: 8,
 };
 
 export interface GuardMeta {

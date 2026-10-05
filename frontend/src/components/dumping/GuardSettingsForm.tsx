@@ -29,8 +29,9 @@ const selectStyle: React.CSSProperties = { background: 'var(--input-bg)', color:
 
 type NumKey = 'min_reviews' | 'min_rating' | 'min_merchant_age_days' | 'max_extra_delivery_days'
   | 'floor_below_next_pct' | 'max_daily_drop_pct' | 'drop_pause_hours'
-  | 'ladder_min_moves' | 'ladder_min_slide_pct' | 'ladder_window_hours' | 'ladder_cooldown_hours';
-type BoolKey = 'ignore_intercity' | 'ignore_preorder' | 'drop_alert';
+  | 'ladder_min_moves' | 'ladder_min_slide_pct' | 'ladder_window_hours' | 'ladder_cooldown_hours'
+  | 'cooling_per_day' | 'cooling_hold_minutes' | 'night_from_hour' | 'night_to_hour';
+type BoolKey = 'ignore_intercity' | 'ignore_preorder' | 'drop_alert' | 'night_freeze';
 type SelectKey = 'all_ignored_action' | 'ladder_response' | 'no_rating_action';
 const SELECT_KEYS: ReadonlyArray<keyof GuardSettings> = ['all_ignored_action', 'ladder_response', 'no_rating_action'];
 
@@ -190,10 +191,19 @@ export function GuardSettingsForm({ value, onChange, mode, inherited, disabled }
       <h5 style={sectionTitle}>{t('section_ladder')}</h5>
       <div style={section}>
         {select('ladder_response', ['RESET_MAX', 'FLAG', 'FREEZE', 'RETREAT'])}
+        {num('cooling_per_day')}
+        {num('cooling_hold_minutes')}
         {num('ladder_min_moves')}
         {num('ladder_min_slide_pct', { suffix: '%' })}
         {num('ladder_window_hours')}
         {num('ladder_cooldown_hours')}
+      </div>
+
+      <h5 style={sectionTitle}>{t('section_night')}</h5>
+      <div style={section}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: isOverride ? 0 : 10 }}>{bool('night_freeze')}</div>
+        {num('night_from_hour')}
+        {num('night_to_hour')}
       </div>
     </div>
   );

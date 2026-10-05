@@ -155,13 +155,20 @@ def normalize_offer(offer: dict, city_code: Optional[str] = None) -> dict:
 LADDER_FLAG = "FLAG"        # только пометить в отчёте
 LADDER_FREEZE = "FREEZE"    # не опускать цену, пока идёт перемирие
 LADDER_RETREAT = "RETREAT"  # перестать отвечать этому сопернику на время перемирия
-# Мы на 1–2 месте — раз в сутки прыгаем на max_price и обнуляем лесенку
-# (решение владельца 03.10.2026): бот-соперник, привязанный к нашей цене,
-# поднимается следом, и война продолжается с высокого уровня, а не с копеек.
+# «Охлаждение рынка»: мы на 1–2 месте — поднимаем цену к началу стычки и
+# обнуляем её (решение владельца 03.10.2026, уточнено 05.10): бот-соперник,
+# привязанный к нашей цене, поднимается следом, и война продолжается с высокого
+# уровня, а не с копеек. До cooling_per_day раз за сутки, только днём; после
+# подъёма cooling_hold_minutes ждём соперника, не снижая цену.
 LADDER_RESET_MAX = "RESET_MAX"
 LADDER_RESPONSES = (LADDER_FLAG, LADDER_FREEZE, LADDER_RETREAT, LADDER_RESET_MAX)
-LADDER_RESET_EVERY_HOURS = 24
 LADDER_RESET_MAX_RANK = 2
+# Между двумя охлаждениями одного товара — не меньше стольких часов, чтобы
+# второе за день не шло сразу следом за первым.
+COOLING_MIN_GAP_HOURS = 3
+# Казахстан с 01.03.2024 живёт по единому UTC+5; часы торговли и ночь в
+# настройках — по местному времени.
+LOCAL_UTC_OFFSET_HOURS = 5
 
 # Продавец без рейтинга: решает менеджер, по каждому товару отдельно.
 NO_RATING_ASK = "ASK"            # учитывать, но спросить менеджера
@@ -179,6 +186,9 @@ DECISIONS = (DECISION_ASK, DECISION_IGNORE, DECISION_CONSIDER)
 ACTION_DAILY_DROP = "GUARD_DAILY_DROP"
 ACTION_DROP_PAUSE = "GUARD_DROP_PAUSE"
 ACTION_LADDER_RESET = "GUARD_LADDER_RESET"
+# Удержания (пишутся как action хода, когда защита не дала снизить цену).
+HOLD_COOLING = "GUARD_COOLING_HOLD"   # после охлаждения ждём, пойдёт ли соперник следом
+HOLD_NIGHT = "GUARD_NIGHT_FREEZE"     # ночь: покупателей почти нет, цену не роняем
 
 ALL_IGNORED_HOLD = "HOLD"   # все соперники отсеяны — держим текущую цену
 ALL_IGNORED_MAX = "MAX"     # все соперники отсеяны — как будто мы одни (ставим max_price)
@@ -226,6 +236,12 @@ class GuardConfig:
     ladder_min_slide_pct: Optional[float] = 10.0  # ...и насколько он утянул цену вниз за серию
     ladder_response: str = LADDER_RESET_MAX
     ladder_cooldown_hours: int = 12               # длительность перемирия (FREEZE / RETREAT)
+    # --- охлаждение рынка и ночь (предложение владельца 05.10.2026) ---
+    cooling_per_day: int = 2                      # сколько охлаждений товара за сутки, только днём
+    cooling_hold_minutes: int = 30                # после охлаждения цену не снижаем столько минут
+    night_freeze: bool = False                    # ночью демпинг цену не снижает (поднимать можно)
+    night_from_hour: int = 1                      # ночь по местному времени: с ...
+    night_to_hour: int = 8                        # ... до (не включая); охлаждений ночью нет
 
     @classmethod
     def from_dict(cls, data: Optional[dict]) -> "GuardConfig":
@@ -260,6 +276,11 @@ class GuardConfig:
         cfg.ladder_window_hours = max(1, int(cfg.ladder_window_hours or 24))
         cfg.ladder_cooldown_hours = max(0, int(cfg.ladder_cooldown_hours or 0))
         cfg.drop_pause_hours = max(1, int(cfg.drop_pause_hours or 3))
+        cfg.cooling_per_day = max(0, int(cfg.cooling_per_day if cfg.cooling_per_day is not None else 2))
+        cfg.cooling_hold_minutes = max(0, int(cfg.cooling_hold_minutes or 0))
+        cfg.night_freeze = bool(cfg.night_freeze)
+        cfg.night_from_hour = int(cfg.night_from_hour or 0) % 24
+        cfg.night_to_hour = int(cfg.night_to_hour or 0) % 24
         return cfg
 
     def to_dict(self) -> dict:
@@ -554,18 +575,45 @@ def ladder_reset_target(ladder: Optional[LadderSignal], current: float, max_pric
 def ladder_reset_due(ladder: Optional[LadderSignal], moves: List[dict], cfg: GuardConfig,
                      card_rank: Optional[int], max_price: float,
                      now: Optional[datetime] = None) -> bool:
-    """Пора ли сбросить лесенку (вернуть цену к её началу): ответ RESET_MAX,
-    лесенка свежая (последний ход в окне), мы на 1–2 месте и прошлый сброс
-    был не меньше суток назад. max_price — только потолок, не условие."""
-    if cfg.ladder_response != LADDER_RESET_MAX or not ladder:
+    """Пора ли охладить рынок (вернуть цену к началу стычки): ответ RESET_MAX,
+    стычка свежая (последний ход в окне), мы на 1–2 месте, сейчас не ночь,
+    за сутки охлаждений меньше cooling_per_day и от прошлого прошло не меньше
+    COOLING_MIN_GAP_HOURS. max_price — только потолок, не условие."""
+    if cfg.ladder_response != LADDER_RESET_MAX or not ladder or cfg.cooling_per_day <= 0:
         return False
     if card_rank is None or card_rank > LADDER_RESET_MAX_RANK:
         return False
     now = now or datetime.utcnow()
     if now - ladder.last_at > timedelta(hours=cfg.ladder_window_hours):
         return False
+    if is_night(cfg, now):
+        return False
+    resets = [m["created_at"] for m in moves or []
+              if m.get("action") == ACTION_LADDER_RESET and m.get("created_at")
+              and now - m["created_at"] < timedelta(hours=24)]
+    if len(resets) >= cfg.cooling_per_day:
+        return False
+    return not resets or now - max(resets) >= timedelta(hours=COOLING_MIN_GAP_HOURS)
+
+
+def is_night(cfg: GuardConfig, now: Optional[datetime] = None) -> bool:
+    """Ночь по местному времени: [night_from_hour, night_to_hour), через
+    полночь тоже (1 → 8, 23 → 7). Одинаковые часы — ночи нет."""
+    a, b = cfg.night_from_hour, cfg.night_to_hour
+    if a == b:
+        return False
+    h = ((now or datetime.utcnow()) + timedelta(hours=LOCAL_UTC_OFFSET_HOURS)).hour
+    return a <= h < b if a < b else (h >= a or h < b)
+
+
+def cooling_hold_until(moves: List[dict], cfg: GuardConfig) -> Optional[datetime]:
+    """До какого момента держим цену после последнего охлаждения: ждём, пойдёт
+    ли соперник следом. Без паузы бот, который реагирует не каждые 15 минут,
+    не успевал подняться — на следующем цикле мы уже снова были под ним."""
     last = last_event_at(moves, ACTION_LADDER_RESET)
-    return last is None or now - last >= timedelta(hours=LADDER_RESET_EVERY_HOURS)
+    if last is None or cfg.cooling_hold_minutes <= 0:
+        return None
+    return last + timedelta(minutes=cfg.cooling_hold_minutes)
 
 
 @dataclass
@@ -695,6 +743,10 @@ _LIMITS = {
     "ladder_window_hours": (1, 168),
     "ladder_cooldown_hours": (0, 168),
     "drop_pause_hours": (1, 24),
+    "cooling_per_day": (0, 6),
+    "cooling_hold_minutes": (0, 240),
+    "night_from_hour": (0, 23),
+    "night_to_hour": (0, 23),
 }
 
 

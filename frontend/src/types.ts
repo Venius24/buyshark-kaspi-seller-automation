@@ -255,9 +255,16 @@ export interface GuardSettings {
   /** Лесенка — только если за серию цену утянули вниз хотя бы на X%. */
   ladder_min_slide_pct: number | null;
   /** FLAG — только отметить; FREEZE — не снижать; RETREAT — перестать отвечать этому сопернику;
-   *  RESET_MAX — мы на 1–2 месте: раз в сутки цена возвращается к началу лесенки (не выше max_price). */
+   *  RESET_MAX — охлаждение рынка: мы на 1–2 месте — цена возвращается к началу стычки (не выше max_price). */
   ladder_response: 'FLAG' | 'FREEZE' | 'RETREAT' | 'RESET_MAX';
   ladder_cooldown_hours: number;
+  /** Охлаждение рынка: сколько раз за сутки (только днём) и сколько минут после него не снижать цену. */
+  cooling_per_day: number;
+  cooling_hold_minutes: number;
+  /** Ночь по местному времени [from, to): демпинг цену не снижает, охлаждений нет. */
+  night_freeze: boolean;
+  night_from_hour: number;
+  night_to_hour: number;
 }
 
 /** Переопределение на товаре / Мастер-Группе. null — наследовать. */

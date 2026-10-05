@@ -176,3 +176,8 @@ class DumpingGuardSettings(BaseModel):
     ladder_min_slide_pct: Optional[float] = 10.0
     ladder_response: str = "RESET_MAX"
     ladder_cooldown_hours: int = 12
+    cooling_per_day: int = 2
+    cooling_hold_minutes: int = 30
+    night_freeze: bool = False
+    night_from_hour: int = 1
+    night_to_hour: int = 8

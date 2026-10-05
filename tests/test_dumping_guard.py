@@ -536,12 +536,17 @@ class TestOwnerDecisions(unittest.TestCase):
         res = DumpingEngine.calculate_new_price(cfg(587), ME, self.ladder_offers(587, 586), guard_cfg=g,
                                                 guard_ctx={"now": NOW, "moves": moves})
         self.assertIsNone(res["guard"]["ladder"])
-        # Новая лесенка после сброса, но суток не прошло — второй раз не прыгаем.
+        # Новая стычка после охлаждения: при одном охлаждении в сутки второй раз не прыгаем...
         moves2 = moves + ladder_moves(880, 6, t0=NOW - timedelta(hours=2))
-        res = DumpingEngine.calculate_new_price(cfg(587), ME, self.ladder_offers(587, 586), guard_cfg=g,
+        g1 = guard.GuardConfig(enabled=True, cooling_per_day=1, **OLD_LADDER)
+        res = DumpingEngine.calculate_new_price(cfg(587), ME, self.ladder_offers(587, 586), guard_cfg=g1,
                                                 guard_ctx={"now": NOW, "moves": moves2})
         self.assertIsNotNone(res["guard"]["ladder"])
         self.assertNotEqual(res["action"], guard.ACTION_LADDER_RESET)
+        # ...а при двух (по умолчанию) и 3+ часах после первого — охлаждаем снова.
+        res = DumpingEngine.calculate_new_price(cfg(587), ME, self.ladder_offers(587, 586), guard_cfg=g,
+                                                guard_ctx={"now": NOW, "moves": moves2})
+        self.assertEqual(res["action"], guard.ACTION_LADDER_RESET)
 
     def test_reset_jump_not_counted_as_drop_peak(self):
         g = guard.GuardConfig(enabled=True)
@@ -563,8 +568,17 @@ class TestOwnerDecisions(unittest.TestCase):
         reset = {"created_at": NOW - timedelta(minutes=14), "our_old": 147.0, "our_new": 192.0,
                  "action": guard.ACTION_LADDER_RESET}
         offers = [me(192), kaspi_offer("1", 146, rating=4.9, reviews=300)]
-        res = DumpingEngine.calculate_new_price(cfg(192, min_price=100.0), ME, offers, guard_cfg=g,
+        c = cfg(192, min_price=100.0)
+        # Первые полчаса ждём соперника — цену не снижаем.
+        res = DumpingEngine.calculate_new_price(c, ME, offers, guard_cfg=g,
                                                 guard_ctx={"now": NOW, "moves": [reset]})
+        self.assertEqual(res["targetPrice"], 192.0)
+        self.assertEqual(res["action"], guard.HOLD_COOLING)
+        self.assertIsNotNone(res["guard"]["cooling_until"])
+        # Не поднялся — возвращаемся под него без паузы «резкое падение».
+        later = NOW + timedelta(minutes=20)
+        res = DumpingEngine.calculate_new_price(c, ME, offers, guard_cfg=g,
+                                                guard_ctx={"now": later, "moves": [reset]})
         self.assertEqual(res["targetPrice"], 144.0)
         self.assertIsNone(res["guard"]["limit"])
 
@@ -764,3 +778,89 @@ class TestObservationFixes(unittest.TestCase):
         res = DumpingEngine.calculate_new_price(cfg(433), ME, offers, guard_cfg=guard.GuardConfig(enabled=True),
                                                 guard_ctx={"now": NOW})
         self.assertEqual(res["guard"]["asks"], [])
+
+
+# 05.10.2026 UTC 12:00 = 17:00 по Алматы (день), UTC 21:00 = 02:00 (ночь).
+DAY = datetime(2026, 10, 5, 12, 0, 0)
+NIGHT = datetime(2026, 10, 5, 21, 0, 0)
+
+
+class TestCoolingAndNight(unittest.TestCase):
+    def ladder_offers(self, our, rival_price):
+        return [me(our), kaspi_offer("20437934", rival_price, rating=5.0, reviews=240),
+                kaspi_offer("2", 900, rating=4.8, reviews=400)]
+
+    def test_is_night_local_time(self):
+        g = guard.GuardConfig()  # 1 → 8 по местному
+        self.assertTrue(guard.is_night(g, NIGHT))
+        self.assertFalse(guard.is_night(g, DAY))
+        self.assertFalse(guard.is_night(g, datetime(2026, 10, 5, 3, 0)))   # 08:00 — уже день
+        self.assertTrue(guard.is_night(g, datetime(2026, 10, 4, 20, 0)))   # 01:00
+        wrap = guard.GuardConfig(night_from_hour=23, night_to_hour=7)
+        self.assertTrue(guard.is_night(wrap, datetime(2026, 10, 5, 18, 30)))  # 23:30
+        self.assertTrue(guard.is_night(wrap, datetime(2026, 10, 5, 1, 0)))    # 06:00
+        self.assertFalse(guard.is_night(wrap, DAY))
+        self.assertFalse(guard.is_night(guard.GuardConfig(night_from_hour=3, night_to_hour=3), NIGHT))
+
+    def test_night_freeze_holds_but_allows_raise(self):
+        g = guard.GuardConfig(enabled=True, night_freeze=True)
+        c = cfg(600, min_price=100.0)
+        cut = [me(600), kaspi_offer("1", 590, rating=4.9, reviews=300)]
+        res = DumpingEngine.calculate_new_price(c, ME, cut, guard_cfg=g, guard_ctx={"now": NIGHT})
+        self.assertEqual(res["targetPrice"], 600.0)
+        self.assertEqual(res["action"], guard.HOLD_NIGHT)
+        self.assertTrue(res["guard"]["night"])
+        up = [me(600), kaspi_offer("1", 700, rating=4.9, reviews=300)]
+        res = DumpingEngine.calculate_new_price(c, ME, up, guard_cfg=g, guard_ctx={"now": NIGHT})
+        self.assertEqual(res["targetPrice"], 698.0)
+        # Днём — обычный демпинг; без галочки — и ночью тоже.
+        res = DumpingEngine.calculate_new_price(c, ME, cut, guard_cfg=g, guard_ctx={"now": DAY})
+        self.assertEqual(res["targetPrice"], 588.0)
+        res = DumpingEngine.calculate_new_price(c, ME, cut, guard_cfg=guard.GuardConfig(enabled=True),
+                                                guard_ctx={"now": NIGHT})
+        self.assertEqual(res["targetPrice"], 588.0)
+
+    def test_no_cooling_at_night(self):
+        g = guard.GuardConfig(enabled=True, **OLD_LADDER)
+        moves = ladder_moves(620, 6, t0=NIGHT - timedelta(minutes=90))
+        res = DumpingEngine.calculate_new_price(cfg(587), ME, self.ladder_offers(587, 586), guard_cfg=g,
+                                                guard_ctx={"now": NIGHT, "moves": moves})
+        self.assertIsNotNone(res["guard"]["ladder"])
+        self.assertNotEqual(res["action"], guard.ACTION_LADDER_RESET)
+
+    def test_cooling_limits_per_day_and_gap(self):
+        g = guard.GuardConfig(enabled=True, **OLD_LADDER)
+        first = {"created_at": DAY - timedelta(hours=2), "our_old": 560.0, "our_new": 620.0,
+                 "action": guard.ACTION_LADDER_RESET}
+        moves = [first] + ladder_moves(620, 6, t0=DAY - timedelta(minutes=90))
+        res = DumpingEngine.calculate_new_price(cfg(587), ME, self.ladder_offers(587, 586), guard_cfg=g,
+                                                guard_ctx={"now": DAY, "moves": moves})
+        self.assertIsNotNone(res["guard"]["ladder"])
+        self.assertNotEqual(res["action"], guard.ACTION_LADDER_RESET)  # меньше 3 часов после первого
+        first2 = {**first, "created_at": DAY - timedelta(hours=4)}
+        second = {**first, "created_at": DAY - timedelta(hours=8)}
+        moves = [second, first2] + ladder_moves(620, 6, t0=DAY - timedelta(minutes=90))
+        res = DumpingEngine.calculate_new_price(cfg(587), ME, self.ladder_offers(587, 586), guard_cfg=g,
+                                                guard_ctx={"now": DAY, "moves": moves})
+        self.assertIsNotNone(res["guard"]["ladder"])
+        self.assertNotEqual(res["action"], guard.ACTION_LADDER_RESET)  # два за сутки уже было
+        moves = [first2] + ladder_moves(620, 6, t0=DAY - timedelta(minutes=90))
+        res = DumpingEngine.calculate_new_price(cfg(587), ME, self.ladder_offers(587, 586), guard_cfg=g,
+                                                guard_ctx={"now": DAY, "moves": moves})
+        self.assertEqual(res["action"], guard.ACTION_LADDER_RESET)  # второе за сутки, 4 ч спустя
+        off = guard.GuardConfig(enabled=True, cooling_per_day=0, **OLD_LADDER)
+        moves = ladder_moves(620, 6, t0=DAY - timedelta(minutes=90))
+        res = DumpingEngine.calculate_new_price(cfg(587), ME, self.ladder_offers(587, 586), guard_cfg=off,
+                                                guard_ctx={"now": DAY, "moves": moves})
+        self.assertNotEqual(res["action"], guard.ACTION_LADDER_RESET)
+
+    def test_new_settings_validated(self):
+        with self.assertRaises(guard.GuardValidationError):
+            guard.clean_guard_settings({"night_from_hour": 24})
+        with self.assertRaises(guard.GuardValidationError):
+            guard.clean_guard_settings({"cooling_hold_minutes": 500})
+        out = guard.clean_guard_settings({"night_freeze": True, "cooling_per_day": 1})
+        self.assertTrue(out["night_freeze"])
+        self.assertEqual(out["cooling_per_day"], 1)
+        # Старый сохранённый набор без новых полей получает умолчания.
+        self.assertEqual(guard.GuardConfig.from_dict({"enabled": True}).cooling_hold_minutes, 30)

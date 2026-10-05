@@ -189,6 +189,8 @@ class DumpingEngine:
             cleaned_offers = considered
         drop = guard.drop_state(all_moves, gcfg, config.my_current_price, now)
         paused = bool(gcfg.enabled and drop.pause_until and now < drop.pause_until)
+        cooling_until = guard.cooling_hold_until(all_moves, gcfg)
+        night = bool(gcfg.enabled and gcfg.night_freeze and guard.is_night(gcfg, now))
         guard_info = {
             "enabled": gcfg.enabled,
             "observe": False,
@@ -199,6 +201,8 @@ class DumpingEngine:
             "last_reset_at": (lambda t: t.isoformat() if t else None)(
                 guard.last_event_at(all_moves, guard.ACTION_LADDER_RESET)),
             "pause_until": drop.pause_until.isoformat() if paused else None,
+            "cooling_until": cooling_until.isoformat() if cooling_until and now < cooling_until else None,
+            "night": night,
             "card_rank": card_rank,
             "limit": None,
             "event": None,
@@ -362,6 +366,10 @@ class DumpingEngine:
                 freeze = "GUARD_LADDER_FREEZE"
             elif paused:
                 freeze = guard.ACTION_DROP_PAUSE
+            elif cooling_until and now < cooling_until:
+                freeze = guard.HOLD_COOLING
+            elif night:
+                freeze = guard.HOLD_NIGHT
             guarded, limit_code = guard.apply_guard_limits(
                 target_price,
                 config.my_current_price,
@@ -386,7 +394,7 @@ class DumpingEngine:
                 if target_price > best_competitor_price:
                     dumping_status = "GUARD_HOLD"
 
-            # Лесенка, а мы на 1–2 месте: раз в сутки возвращаем цену к началу лесенки.
+            # Стычка, а мы на 1–2 месте: охлаждаем рынок — цену к началу стычки (днём, до cooling_per_day раз в сутки).
             reset_to = guard.ladder_reset_target(ladder, config.my_current_price, config.max_price)
             if reset_to and guard.ladder_reset_due(ladder, all_moves, gcfg, card_rank, config.max_price, now):
                 target_price = reset_to
