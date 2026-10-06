@@ -110,6 +110,7 @@
   .demo-image::before, .demo-image::after { content: ""; position: absolute; width: 290px; height: 290px; border: 1px solid rgba(21,79,77,.12); border-radius: 50%; }
   .demo-image::after { width: 390px; height: 390px; }
   .demo-image svg { width: min(73%, 265px); max-height: 220px; z-index: 1; filter: drop-shadow(0 22px 20px rgba(24,66,60,.18)); }
+  .demo-image img { width: 100%; height: 260px; object-fit: contain; z-index: 1; }
   .demo-image-label { position: absolute; top: 18px; left: 18px; z-index: 2; padding: 6px 10px; border-radius: 99px; background: rgba(15,53,54,.88); color: #d4fff2; font-size: 10px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
   .demo-product-info { padding: 24px; display: flex; flex-direction: column; flex: 1; }
   .demo-sku { margin: 0 0 8px; color: #47716d; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
@@ -331,7 +332,7 @@
     </a>
     <nav class="header-nav" aria-label="Разделы предложения">
       {% if snapshot_items %}<a href="#store">Ваш магазин</a>{% endif %}
-      <a href="#demo">Демо товара</a><a href="#plan">Тариф</a><a href="#compare">Сравнить</a><a href="#start">Запуск</a>
+      <a href="#demo">{{ 'Ваш товар' if sample_product else 'Демо товара' }}</a><a href="#plan">Тариф</a><a href="#compare">Сравнить</a><a href="#start">Запуск</a>
     </nav>
     <a class="header-cta" href="{{ wa_link }}" target="_blank" rel="noopener">Обсудить КП ↗</a>
   </div>
@@ -344,7 +345,7 @@
       <p class="hero-lead">Мы изучили ваш каталог на Kaspi и подобрали тариф под размер магазина. Цены, заказы и остатки — в одном рабочем ритме.</p>
       <div class="hero-actions">
         <a class="button button-primary" href="#plan">Посмотреть предложение <span aria-hidden="true">↗</span></a>
-        <a class="button button-ghost" href="#demo">Демо одного товара <span aria-hidden="true">↓</span></a>
+        <a class="button button-ghost" href="#demo">{{ 'Ваш товар на Kaspi' if sample_product else 'Демо одного товара' }} <span aria-hidden="true">↓</span></a>
       </div>
       <div class="hero-assurance"><span>7 дней бесплатно</span><span>Без банковской карты</span><span>Тариф можно изменить</span></div>
     </div>
@@ -398,13 +399,15 @@
   <section class="section" id="demo" aria-labelledby="demo-title">
     <div class="shell">
       <div class="section-heading reveal">
-        <div><div class="section-index"><span>{{ "02" if snapshot_items else "01" }} /</span> Демо товара</div><h2 id="demo-title">Один товар. Три сценария цены.</h2></div>
-        <p>Нажмите на цену конкурента и посмотрите, как меняется рекомендация с учётом заданного минимума.</p>
+        <div><div class="section-index"><span>{{ "02" if snapshot_items else "01" }} /</span> Товар на Kaspi</div><h2 id="demo-title">{% if sample_product %}Ваш товар и его цена на витрине.{% else %}Один товар. Три сценария цены.{% endif %}</h2></div>
+        <p>{% if sample_product %}Публичные цены в Алматы на {{ sample_product.observed_label }}. Откройте карточку, чтобы увидеть текущие предложения.{% else %}Нажмите на цену конкурента и посмотрите, как меняется рекомендация с учётом заданного минимума.{% endif %}</p>
       </div>
       <div class="demo-stage reveal">
-        <article class="demo-product" aria-label="Демонстрационный товар">
+        <article class="demo-product" aria-label="{{ 'Товар магазина' if sample_product else 'Демонстрационный товар' }}">
           <div class="demo-image">
-            <span class="demo-image-label">Пример · 1 товар</span>
+            <span class="demo-image-label">{% if sample_product %}Товар с вашей витрины{% else %}Пример · 1 товар{% endif %}</span>
+            {% if sample_product and sample_product.image_url %}<img src="{{ sample_product.image_url }}" alt="{{ sample_product.title }}" loading="lazy">
+            {% else %}
             <svg viewBox="0 0 260 220" fill="none" aria-hidden="true">
               <ellipse cx="132" cy="191" rx="89" ry="15" fill="#246b68" opacity=".16"/>
               <path d="M57 128c0-24 19-43 43-43h63c24 0 43 19 43 43v25c0 24-19 43-43 43h-63c-24 0-43-19-43-43v-25Z" fill="#163A40"/>
@@ -416,15 +419,44 @@
               <path d="M85 36c-11 0-19 9-19 20v19c0 9 6 15 14 15 8 0 14-6 14-15V57c0-3 2-5 5-5s5 2 5 5v45c0 7-5 12-12 12S80 109 80 102V80" stroke="#F7FCF5" stroke-width="9" stroke-linecap="round"/>
               <path d="M166 36c11 0 19 9 19 20v19c0 9-6 15-14 15-8 0-14-6-14-15V57c0-3-2-5-5-5s-5 2-5 5v45c0 7 5 12 12 12s12-5 12-12V80" stroke="#F7FCF5" stroke-width="9" stroke-linecap="round"/>
             </svg>
+            {% endif %}
           </div>
           <div class="demo-product-info">
+            {% if sample_product %}
+            <p class="demo-sku">Kaspi · товар {{ sample_product.sku }}</p>
+            <h3>{{ sample_product.title }}</h3>
+            <p class="demo-meta"><a href="{{ sample_product.url }}" target="_blank" rel="noopener noreferrer">Открыть товар на Kaspi ↗</a> · Алматы · {{ sample_product.observed_label }}</p>
+            <div class="demo-current"><small>Цена вашего магазина на момент проверки</small><strong>{{ sample_product.price | tg }}</strong></div>
+            {% else %}
             <p class="demo-sku">SKU DEMO-001 · электроника</p>
             <h3>Беспроводные наушники TWS</h3>
             <p class="demo-meta">Остаток: 12 шт. · товар для примера</p>
             <div class="demo-current"><small>Цена до изменения</small><strong>12 490 ₸</strong></div>
+            {% endif %}
           </div>
         </article>
         <div class="demo-panel">
+          {% if sample_product %}
+          <div class="demo-panel-top">Снимок предложений Kaspi · без изменения цен</div>
+          {% if sample_product.competitors %}
+          <h3>Цена рядом с конкурентами</h3>
+          <p class="demo-panel-lead">Выберите цену другого продавца. Ниже показан пример расчёта с шагом 10 ₸. Ваш минимальный порог здесь неизвестен и будет задан при подключении.</p>
+          <span class="demo-choice-label" id="demo-choice-label">Цена конкурента на момент проверки</span>
+          <div class="demo-choices" role="group" aria-labelledby="demo-choice-label">
+            {% for price in sample_product.competitors %}<button type="button" data-competitor="{{ price }}" aria-pressed="{{ 'true' if loop.first else 'false' }}">{{ price | tg }}</button>{% endfor %}
+          </div>
+          <div class="demo-prices" aria-live="polite">
+            <div class="demo-price-cell"><small>Конкурент</small><strong id="demo-competitor">{{ sample_product.competitors[0] | tg }}</strong></div>
+            <span class="demo-arrow" aria-hidden="true">→</span>
+            <div class="demo-price-cell highlight"><small>Расчётная цена</small><strong id="demo-target">{{ (sample_product.competitors[0] - 10) | tg }}</strong></div>
+          </div>
+          <p class="demo-status" id="demo-status">На 10 ₸ ниже цены конкурента, если позволяет ваш минимум</p>
+          {% else %}
+          <h3>Ваш товар в продаже</h3>
+          <p class="demo-panel-lead">Цена вашего магазина указана слева. На момент проверки других предложений по этой карточке не удалось получить.</p>
+          {% endif %}
+          <p class="demo-caption">Цены Kaspi могут измениться. Расчёт выше — иллюстрация, не обещание новой цены и не изменение цены на Kaspi.{% if tier.key == "start" %} Демпинг-бот доступен с тарифа «Охотник».{% endif %}</p>
+          {% else %}
           <div class="demo-panel-top">Симуляция · без изменения реальных цен</div>
           <h3>Что сделает демпинг-бот?</h3>
           <p class="demo-panel-lead">В этом примере он предлагает цену на 10 ₸ ниже конкурента, но не ниже вашего минимума.</p>
@@ -442,6 +474,7 @@
           <p class="demo-status" id="demo-status">На 10 ₸ ниже цены конкурента</p>
           <div class="demo-floor"><span>Заданный вами минимум</span><strong>9 900 ₸</strong></div>
           <p class="demo-caption">Товар и цены условные. Это демонстрация расчёта, а не изменение цены в Kaspi.{% if tier.key == "start" %} Демпинг-бот доступен с тарифа «Охотник».{% endif %}</p>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -593,14 +626,14 @@
     const formatTenge = value => new Intl.NumberFormat('ru-RU').format(value) + ' ₸';
     competitorButtons.forEach(button => button.addEventListener('click', () => {
       const competitor = Number(button.dataset.competitor);
-      const floor = 9900;
-      const target = Math.max(floor, competitor - 10);
+      const floor = {{ 'null' if sample_product else '9900' }};
+      const target = floor === null ? Math.max(0, competitor - 10) : Math.max(floor, competitor - 10);
       competitorButtons.forEach(choice => choice.setAttribute('aria-pressed', String(choice === button)));
       competitorOutput.textContent = formatTenge(competitor);
       targetOutput.textContent = formatTenge(target);
-      demoStatus.textContent = target === floor
+      demoStatus.textContent = floor !== null && target === floor
         ? 'Сохраняем ваш минимум — ниже 9 900 ₸ не опускаемся'
-        : 'На 10 ₸ ниже цены конкурента';
+        : 'На 10 ₸ ниже цены конкурента' + (floor === null ? ', если позволяет ваш минимум' : '');
     }));
 
     const range = document.querySelector('#product-range');

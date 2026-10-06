@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS offers (
     tier_override TEXT,
     first_month_price INTEGER,
     monthly_price INTEGER,
+    sample_product TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now', '+5 hours')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now', '+5 hours'))
 );
@@ -50,9 +51,10 @@ def init_db():
     with get_conn() as conn:
         conn.executescript(_SCHEMA)
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(offers)")}
-        for name in ("first_month_price", "monthly_price"):
+        for name in ("first_month_price", "monthly_price", "sample_product"):
             if name not in columns:
-                conn.execute(f"ALTER TABLE offers ADD COLUMN {name} INTEGER")
+                column_type = "TEXT" if name == "sample_product" else "INTEGER"
+                conn.execute(f"ALTER TABLE offers ADD COLUMN {name} {column_type}")
 
 
 def upsert_offer(row: dict):
@@ -61,10 +63,10 @@ def upsert_offer(row: dict):
             """
             INSERT INTO offers (slug, client_name, shop_url, product_count, orders_label,
                                  years_label, categories, discount_pct, tier_override,
-                                 first_month_price, monthly_price, updated_at)
+                                 first_month_price, monthly_price, sample_product, updated_at)
             VALUES (:slug, :client_name, :shop_url, :product_count, :orders_label,
                     :years_label, :categories, :discount_pct, :tier_override,
-                    :first_month_price, :monthly_price, datetime('now', '+5 hours'))
+                    :first_month_price, :monthly_price, :sample_product, datetime('now', '+5 hours'))
             ON CONFLICT(slug) DO UPDATE SET
                 client_name=excluded.client_name,
                 shop_url=excluded.shop_url,
@@ -76,6 +78,7 @@ def upsert_offer(row: dict):
                 tier_override=excluded.tier_override,
                 first_month_price=excluded.first_month_price,
                 monthly_price=excluded.monthly_price,
+                sample_product=excluded.sample_product,
                 updated_at=excluded.updated_at
             """,
             {
@@ -90,6 +93,7 @@ def upsert_offer(row: dict):
                 "tier_override": row.get("tier_override"),
                 "first_month_price": row.get("first_month_price"),
                 "monthly_price": row.get("monthly_price"),
+                "sample_product": json.dumps(row.get("sample_product"), ensure_ascii=False) if row.get("sample_product") else None,
             },
         )
 
@@ -103,6 +107,7 @@ def get_offer(slug: str) -> dict | None:
             return None
         data = dict(row)
         data["categories"] = json.loads(data["categories"] or "[]")
+        data["sample_product"] = json.loads(data["sample_product"]) if data.get("sample_product") else None
         return data
 
 

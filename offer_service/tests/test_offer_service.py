@@ -70,3 +70,26 @@ def test_fixed_price_offer_migrates_and_renders_without_percentage(tmp_path, mon
         conn.execute("DROP TABLE old_offers")
     db.init_db()
     assert db.get_offer("newcomer")["first_month_price"] is None
+
+
+def test_offer_uses_verified_seller_price_in_product_section(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "offers.db")
+    db.init_db()
+    sample = {
+        "sku": "197490648", "title": "Планшет для проверки",
+        "url": "https://kaspi.kz/shop/p/tablet-197490648/?c=750000000",
+        "image_url": "https://resources.cdn-kaspi.kz/img/m/example.jpeg",
+        "price": 38804, "competitors": [{"name": "Другой магазин", "price": 40000}],
+        "observed_at": "2026-10-06T13:00:00+00:00", "city": "Алматы",
+    }
+    db.upsert_offer({"slug": "actual-price", "client_name": "Магазин", "product_count": 31,
+                     "sample_product": sample})
+    assert db.get_offer("actual-price")["sample_product"] == sample
+
+    response = TestClient(app).get("/actual-price")
+    assert response.status_code == 200
+    assert "Планшет для проверки" in response.text
+    assert "38 804 ₸" in response.text
+    assert "40 000 ₸" in response.text
+    assert "12 490 ₸" not in response.text
+    assert "Цена вашего магазина на момент проверки" in response.text

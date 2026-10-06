@@ -142,6 +142,20 @@ def _build_context(request: Request, offer: dict) -> dict:
     monthly_price = offer["monthly_price"] if fixed_price_offer else tier.price
     discounted = (offer["first_month_price"] if fixed_price_offer else
                   tariffs.discounted_price(tier.price, discount_pct) if tier.price is not None else None)
+    sample_product = offer.get("sample_product")
+    if sample_product:
+        # The snapshot is immutable until the next explicit refresh. Kaspi prices change.
+        sample_product = dict(sample_product)
+        sample_product["competitors"] = sorted(
+            {int(o["price"]) for o in sample_product.get("competitors", [])
+             if isinstance(o.get("price"), (int, float)) and o["price"] > 10}
+        )[:3]
+        try:
+            sample_product["observed_label"] = datetime.fromisoformat(
+                sample_product["observed_at"]
+            ).astimezone(_ALMATY).strftime("%d.%m.%Y %H:%M")
+        except (KeyError, TypeError, ValueError):
+            sample_product["observed_label"] = "на момент подготовки КП"
 
     snapshot_items = []
     if product_count is not None:
@@ -169,6 +183,7 @@ def _build_context(request: Request, offer: dict) -> dict:
         "discounted_price": discounted,
         "monthly_price": monthly_price,
         "fixed_price_offer": fixed_price_offer,
+        "sample_product": sample_product,
         "recommendation_text": _recommendation_text(product_count, tier, prev),
         "snapshot_items": snapshot_items,
         "doc_number": doc_number,
@@ -208,6 +223,7 @@ class OfferIn(BaseModel):
     tier_override: str | None = None
     first_month_price: int | None = Field(default=None, gt=0)
     monthly_price: int | None = Field(default=None, gt=0)
+    sample_product: dict | None = None
 
     @model_validator(mode="after")
     def validate_fixed_prices(self):
