@@ -2,669 +2,640 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BuyShark × {{ offer.client_name }}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07131b">
+<meta name="description" content="Персональное коммерческое предложение BuyShark для {{ offer.client_name }}.">
+<title>КП для {{ offer.client_name }} · BuyShark</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root {
-    --abyss: #030712;
-    --surface: #0a1120;
-    --surface-raised: #101c34;
-    --hairline: rgba(244,251,255,0.09);
-    --hairline-strong: rgba(244,251,255,0.16);
-    --cyan: #22c9d6;
-    --cyan-dim: #0f8a96;
-    --gold: #ffcf40;
-    --gold-dim: #b8912b;
-    --ink: #f4fbff;
-    --fog: #8fa0b3;
-    --fog-dim: #5c6c80;
+    color-scheme: dark;
+    --bg: #07131b;
+    --bg-soft: #0b1b24;
+    --panel: #10232d;
+    --line: rgba(194, 229, 231, .14);
+    --line-strong: rgba(194, 229, 231, .28);
+    --white: #f5f8f3;
+    --muted: #a9bec2;
+    --teal: #8ce7d7;
+    --teal-dark: #153f43;
+    --orange: #f8ad71;
+    --dark-ink: #113138;
   }
-
-  * { box-sizing: border-box; }
-
-  body {
-    margin: 0;
-    background: var(--abyss);
-    color: var(--ink);
-    font-family: 'Manrope', system-ui, -apple-system, sans-serif;
-    font-size: 16px;
-    line-height: 1.55;
-    -webkit-font-smoothing: antialiased;
-  }
-
-  h1, h2, h3 {
-    font-family: 'Unbounded', 'Manrope', sans-serif;
-    font-weight: 700;
-    text-wrap: balance;
-    margin: 0;
-  }
-
-  .mono {
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .wrap {
-    max-width: 880px;
-    margin: 0 auto;
-    padding: clamp(28px, 6vw, 64px) clamp(20px, 5vw, 40px) 80px;
-  }
-
-  .eyebrow {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12.5px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--cyan);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .eyebrow::before {
-    content: '';
-    width: 22px;
-    height: 1px;
-    background: var(--cyan-dim);
-  }
-
-  .masthead {
-    padding-bottom: 36px;
-    border-bottom: 1px solid var(--hairline);
-    margin-bottom: 40px;
-  }
-
-  .masthead-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 24px;
-    margin-bottom: 26px;
-  }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-family: 'Unbounded', sans-serif;
-    font-weight: 600;
-    font-size: 15px;
-    color: var(--ink);
-  }
-
-  .brand-mark {
-    width: 26px;
-    height: 26px;
-    border-radius: 7px;
-    background: linear-gradient(135deg, var(--cyan), var(--cyan-dim));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    flex: none;
-  }
-
-  .doc-date {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12.5px;
-    color: var(--fog-dim);
-    text-align: right;
-    white-space: nowrap;
-    padding-top: 4px;
-  }
-
-  h1.title {
-    font-size: clamp(30px, 4.6vw, 44px);
-    line-height: 1.12;
-    margin: 14px 0 10px;
-  }
-
-  h1.title em {
-    font-style: normal;
-    color: var(--cyan);
-  }
-
-  .lede {
-    color: var(--fog);
-    font-size: 17px;
-    max-width: 56ch;
-  }
-
-  .snapshot {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1px;
-    background: var(--hairline);
-    border: 1px solid var(--hairline);
-    border-radius: 14px;
-    overflow: hidden;
-    margin-bottom: 44px;
-  }
-
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 94px; }
+  body { margin: 0; background: var(--bg); color: var(--white); font: 500 16px/1.55 Manrope, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  body::before { content: ""; position: absolute; inset: 0 0 auto; height: 900px; pointer-events: none; background: radial-gradient(ellipse 60% 46% at 83% 18%, rgba(32, 141, 142, .2), transparent 70%), radial-gradient(ellipse 43% 36% at 10% 4%, rgba(63, 101, 104, .14), transparent 75%); }
+  a { color: inherit; }
+  button, input { font: inherit; }
+  button { cursor: pointer; }
+  button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid var(--orange); outline-offset: 4px; }
+  h1, h2, h3, p { margin-top: 0; }
+  h1, h2, h3 { font-family: Unbounded, Manrope, sans-serif; letter-spacing: -.045em; line-height: 1.18; overflow-wrap: anywhere; }
+  h2 { font-size: clamp(28px, 3.7vw, 46px); }
+  h3 { font-size: clamp(19px, 2vw, 25px); }
+  .shell { width: min(100% - 64px, 1160px); margin-inline: auto; position: relative; }
+  .reading-progress { position: fixed; z-index: 50; top: 0; left: 0; height: 3px; width: 0; background: var(--teal); box-shadow: 0 0 16px rgba(140,231,215,.7); pointer-events: none; }
+  .site-header { position: relative; z-index: 20; border-bottom: 1px solid var(--line); }
+  .header-inner { min-height: 82px; display: flex; align-items: center; gap: 24px; }
+  .logo { display: inline-flex; align-items: center; gap: 11px; font: 700 18px/1 Unbounded, sans-serif; letter-spacing: -.06em; text-decoration: none; white-space: nowrap; }
+  .logo-mark { width: 35px; height: 35px; border-radius: 11px; background: var(--teal); color: var(--dark-ink); display: grid; place-items: center; box-shadow: 0 8px 26px rgba(62,199,185,.2); }
+  .logo-mark svg { width: 25px; height: 25px; }
+  .header-nav { margin-left: auto; display: flex; align-items: center; gap: 27px; }
+  .header-nav a { font-size: 13px; color: var(--muted); text-decoration: none; transition: color .2s; }
+  .header-nav a:hover, .header-nav a.is-current { color: var(--teal); }
+  .header-cta { border: 1px solid var(--line-strong); border-radius: 999px; padding: 9px 15px; font-size: 12px; font-weight: 800; text-decoration: none; white-space: nowrap; transition: background .2s, border-color .2s; }
+  .header-cta:hover { background: rgba(140,231,215,.1); border-color: var(--teal); }
+  .hero { padding: 86px 0 89px; display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(350px, .92fr); gap: min(6vw, 80px); align-items: center; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 10px; font-size: 11px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; color: var(--teal); }
+  .eyebrow::before { content: ""; width: 21px; height: 1px; background: currentColor; }
+  .hero h1 { max-width: 770px; font-size: clamp(40px, 5.3vw, 74px); line-height: 1.09; margin: 25px 0 25px; }
+  .hero h1 span { color: var(--teal); }
+  .hero-lead { max-width: 54ch; color: var(--muted); font-size: clamp(16px, 1.45vw, 19px); line-height: 1.65; margin-bottom: 31px; }
+  .hero-actions { display: flex; gap: 11px; flex-wrap: wrap; align-items: center; }
+  .button { min-height: 52px; padding: 13px 22px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 11px; font-size: 14px; font-weight: 800; line-height: 1.2; text-decoration: none; border: 1px solid transparent; transition: transform .2s, background .2s, border-color .2s; text-align: center; }
+  .button:hover { transform: translateY(-2px); }
+  .button-primary { color: #0b302f; background: var(--teal); box-shadow: 0 13px 30px rgba(88,205,188,.17); }
+  .button-primary:hover { background: #b2f5e8; }
+  .button-ghost { border-color: var(--line-strong); color: var(--white); background: rgba(255,255,255,.025); }
+  .button-ghost:hover { border-color: var(--teal); background: rgba(140,231,215,.06); }
+  .hero-assurance { display: flex; flex-wrap: wrap; gap: 12px 22px; color: var(--muted); font-size: 12px; margin-top: 25px; }
+  .hero-assurance span::before { content: "✓"; color: var(--teal); margin-right: 8px; font-weight: 800; }
+  .hero-visual { min-width: 0; position: relative; }
+  .visual-glow { position: absolute; z-index: -1; width: 82%; aspect-ratio: 1; top: 8%; right: 0; background: #278d8a; filter: blur(100px); opacity: .25; border-radius: 50%; }
+  .visual-card { border: 1px solid rgba(200,241,232,.25); border-radius: 26px; padding: 22px; background: linear-gradient(150deg, rgba(31,67,71,.95), rgba(10,26,36,.98) 68%); box-shadow: 0 35px 90px rgba(0,0,0,.35), inset 0 1px rgba(255,255,255,.06); transform: rotate(2deg); }
+  .visual-top { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+  .visual-top span:last-child { color: var(--teal); }
+  .visual-top span:last-child::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 12px var(--teal); vertical-align: 1px; }
+  .visual-main { padding: 24px 5px 23px; }
+  .visual-kicker { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+  .visual-title { font: 700 clamp(23px, 3vw, 32px)/1.2 Unbounded, sans-serif; letter-spacing: -.05em; margin: 0 0 7px; overflow-wrap: anywhere; }
+  .visual-subtitle { color: var(--teal); font-size: 12px; margin: 0; }
+  .visual-track { height: 9px; border-radius: 30px; background: rgba(255,255,255,.09); position: relative; overflow: hidden; margin: 10px 0 14px; }
+  .visual-track span { display: block; height: 100%; width: var(--fill); max-width: 100%; border-radius: inherit; background: linear-gradient(90deg, #5bb2ae, var(--teal)); }
+  .visual-scale { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+  .visual-scale strong { color: var(--white); }
+  .visual-divider { height: 1px; background: var(--line); margin: 22px 0; }
+  .visual-bottom { display: flex; justify-content: space-between; gap: 10px; align-items: flex-end; }
+  .visual-bottom small { color: var(--muted); display: block; font-size: 11px; }
+  .visual-bottom strong { display: block; font: 700 clamp(21px, 2.5vw, 29px)/1.3 Unbounded, sans-serif; letter-spacing: -.05em; color: var(--teal); }
+  .visual-badge { color: #192c25; background: var(--orange); padding: 8px 10px; border-radius: 9px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+  .visual-note { position: absolute; right: -23px; bottom: -30px; max-width: 210px; border: 1px solid rgba(248,173,113,.5); border-radius: 14px; padding: 13px 16px; background: #23343a; color: var(--white); font-size: 12px; box-shadow: 0 20px 35px rgba(0,0,0,.24); transform: rotate(-4deg); }
+  .visual-note b { display: block; color: var(--orange); font-size: 13px; }
+  .section { padding: 92px 0; border-top: 1px solid var(--line); scroll-margin-top: 78px; }
+  .section-heading { display: flex; justify-content: space-between; align-items: end; gap: 28px; margin-bottom: 37px; }
+  .section-heading h2 { margin: 12px 0 0; max-width: 700px; }
+  .section-heading p { color: var(--muted); max-width: 38ch; margin: 0; font-size: 14px; }
+  .section-index { display: flex; gap: 10px; align-items: center; color: var(--teal); font-size: 11px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+  .section-index span { opacity: .48; }
+  .snapshot { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
   .snapshot.cols-1 { grid-template-columns: 1fr; }
-  .snapshot.cols-2 { grid-template-columns: repeat(2, 1fr); }
-
-  .snap-cell {
-    background: var(--surface);
-    padding: 20px 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .snap-num {
-    font-family: 'Unbounded', sans-serif;
-    font-size: clamp(22px, 3.4vw, 30px);
-    color: var(--ink);
-  }
-
-  .snap-label {
-    font-size: 13px;
-    color: var(--fog);
-  }
-
-  section { margin-bottom: 52px; }
-
-  .sec-head {
-    display: flex;
-    align-items: baseline;
-    gap: 14px;
-    margin-bottom: 18px;
-  }
-
-  .sec-num {
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--fog-dim);
-    font-size: 14px;
-  }
-
-  h2.sec-title {
-    font-size: clamp(19px, 2.6vw, 23px);
-  }
-
-  p { color: var(--fog); margin: 0 0 12px; max-width: 66ch; }
-  p:last-child { margin-bottom: 0; }
-  strong { color: var(--ink); font-weight: 700; }
-
-  .catalog-note {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 16px;
-  }
-
-  .chip {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12.5px;
-    color: var(--fog);
-    border: 1px solid var(--hairline-strong);
-    border-radius: 999px;
-    padding: 5px 12px;
-    white-space: nowrap;
-  }
-
-  .chip b { color: var(--ink); font-weight: 600; }
-
-  .rec-card {
-    position: relative;
-    background: linear-gradient(165deg, var(--surface-raised), var(--surface) 70%);
-    border: 1px solid rgba(34, 201, 214, 0.35);
-    border-radius: 18px;
-    padding: clamp(22px, 4vw, 34px);
-    box-shadow: 0 0 0 1px rgba(34,201,214,0.05), 0 30px 60px -30px rgba(34,201,214,0.25);
-  }
-
-  .rec-ribbon {
-    position: absolute;
-    top: -13px;
-    left: clamp(22px, 4vw, 34px);
-    background: var(--gold);
-    color: #241a02;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11.5px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    padding: 4px 12px;
-    border-radius: 999px;
-  }
-
-  .rec-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    flex-wrap: wrap;
-    gap: 18px;
-    margin-bottom: 22px;
-    padding-top: 6px;
-  }
-
-  .rec-name {
-    font-family: 'Unbounded', sans-serif;
-    font-size: 26px;
-  }
-
-  .rec-limit {
-    color: var(--fog);
-    font-size: 14.5px;
-    margin-top: 4px;
-  }
-
-  .rec-price {
-    text-align: right;
-  }
-
-  .rec-price .num {
-    font-family: 'Unbounded', sans-serif;
-    font-size: clamp(26px, 4vw, 34px);
-    color: var(--cyan);
-  }
-
-  .rec-price .per {
-    font-size: 13px;
-    color: var(--fog-dim);
-  }
-
-  .rec-price .old {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 15px;
-    color: var(--fog-dim);
-    text-decoration: line-through;
-    margin-right: 8px;
-  }
-
-  .discount-badge {
-    position: absolute;
-    top: -13px;
-    right: clamp(22px, 4vw, 34px);
-    background: var(--ink);
-    color: var(--abyss);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11.5px;
-    font-weight: 600;
-    letter-spacing: 0.03em;
-    padding: 4px 12px;
-    border-radius: 999px;
-  }
-
-  .rec-features {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 22px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px 20px;
-  }
-
-  .rec-features li {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    padding-left: 17px;
-    position: relative;
-  }
-
-  .rec-features li::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 7px;
-    width: 7px;
-    height: 7px;
-    border-radius: 2px;
-    background: var(--cyan);
-  }
-
-  .feat-name {
-    font-weight: 700;
-    font-size: 14.5px;
-    color: var(--ink);
-  }
-
-  .feat-desc {
-    font-size: 13.5px;
-    color: var(--fog);
-    line-height: 1.45;
-  }
-
-  .rec-foot {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 10px;
-    padding-top: 18px;
-    border-top: 1px dashed var(--hairline-strong);
-    font-size: 13.5px;
-    color: var(--fog);
-  }
-
-  .rec-foot b { color: var(--gold); font-weight: 600; }
-
-  .lineup {
-    border: 1px solid var(--hairline);
-    border-radius: 14px;
-    overflow: hidden;
-  }
-
-  .lineup-row {
-    display: grid;
-    grid-template-columns: 1.3fr 1fr 1.7fr;
-    gap: 16px;
-    padding: 15px 18px;
-    align-items: center;
-    border-bottom: 1px solid var(--hairline);
-  }
-
-  .lineup-row:last-child { border-bottom: none; }
-
-  .lineup-row.head {
-    background: var(--surface);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--fog-dim);
-    padding-top: 12px;
-    padding-bottom: 12px;
-  }
-
-  .lineup-row.active {
-    background: rgba(34, 201, 214, 0.06);
-  }
-
-  .li-name {
-    font-weight: 700;
-    font-size: 14.5px;
-  }
-
-  .li-name .mark {
-    color: var(--cyan);
-    font-size: 12px;
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 500;
-    margin-left: 6px;
-  }
-
-  .li-limit {
-    color: var(--fog);
-    font-size: 13.5px;
-  }
-
-  .li-price {
-    text-align: right;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14.5px;
-  }
-
-  @media (max-width: 620px) {
-    .lineup-row { grid-template-columns: 1fr; gap: 4px; text-align: left; }
-    .lineup-row.head { display: none; }
-    .li-price { text-align: left; }
-    .snapshot { grid-template-columns: 1fr; }
-    .rec-features { grid-template-columns: 1fr; }
-  }
-
-  .steps {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    border-left: 1px solid var(--hairline-strong);
-    margin-left: 10px;
-  }
-
-  .step {
-    position: relative;
-    padding: 0 0 26px 26px;
-  }
-
-  .step:last-child { padding-bottom: 0; }
-
-  .step::before {
-    content: attr(data-n);
-    position: absolute;
-    left: -11px;
-    top: 0;
-    width: 21px;
-    height: 21px;
-    border-radius: 50%;
-    background: var(--abyss);
-    border: 1px solid var(--cyan-dim);
-    color: var(--cyan);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .step h3 {
-    font-family: 'Manrope', sans-serif;
-    font-weight: 700;
-    font-size: 15px;
-    margin-bottom: 4px;
-  }
-
-  .step p { font-size: 14.5px; }
-
-  .cta {
-    background: var(--surface);
-    border: 1px solid var(--hairline);
-    border-radius: 18px;
-    padding: clamp(24px, 4vw, 34px);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 20px;
-  }
-
-  .cta-copy h2 { font-size: 21px; margin-bottom: 6px; }
-  .cta-copy p { font-size: 14.5px; margin: 0; }
-
-  .cta-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-
-  .btn {
-    font-family: 'Manrope', sans-serif;
-    font-weight: 700;
-    font-size: 14.5px;
-    padding: 12px 20px;
-    border-radius: 10px;
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    white-space: nowrap;
-  }
-
-  .btn-primary {
-    background: var(--cyan);
-    color: #00252a;
-  }
-
-  a:focus-visible, .btn:focus-visible {
-    outline: 2px solid var(--cyan);
-    outline-offset: 2px;
-  }
-
-  footer {
-    margin-top: 40px;
-    padding-top: 20px;
-    border-top: 1px solid var(--hairline);
-    display: flex;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 10px;
-    font-size: 12.5px;
-    color: var(--fog-dim);
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  @media print {
-    * {
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-      color-adjust: exact !important;
-    }
-    @page { size: A4; margin: 14mm 12mm; }
-    body { background: var(--abyss) !important; }
-    .rec-card, .snapshot, .cta { animation: none !important; opacity: 1 !important; transform: none !important; }
-    section, .rec-card { break-inside: avoid; }
-  }
-
+  .snapshot.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat-card { min-height: 156px; border: 1px solid var(--line); border-radius: 18px; padding: 24px; background: linear-gradient(150deg, #132b34, #0c1e28); display: flex; flex-direction: column; justify-content: space-between; }
+  .stat-icon { width: 29px; height: 29px; border: 1px solid rgba(140,231,215,.4); border-radius: 9px; display: grid; place-items: center; color: var(--teal); font-size: 14px; }
+  .stat-value { font: 700 clamp(23px, 3vw, 34px)/1.2 Unbounded, sans-serif; letter-spacing: -.05em; }
+  .stat-label { color: var(--muted); font-size: 13px; }
+  .context-note { display: grid; grid-template-columns: 3px 1fr; gap: 19px; margin-top: 20px; max-width: 780px; }
+  .context-note::before { content: ""; background: var(--orange); border-radius: 4px; }
+  .context-note p { color: var(--muted); font-size: 14px; margin: 0; }
+  .context-note strong { color: var(--white); }
+  .category-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .category-list span { border: 1px solid var(--line-strong); border-radius: 99px; padding: 6px 11px; font-size: 11px; color: var(--muted); }
+  .category-list b { color: var(--white); }
+  .demo-stage { display: grid; grid-template-columns: minmax(0, .88fr) minmax(0, 1.12fr); gap: 14px; align-items: stretch; }
+  .demo-product { min-width: 0; overflow: hidden; border-radius: 22px; background: #e5f0e9; color: var(--dark-ink); display: flex; flex-direction: column; }
+  .demo-image { min-height: 250px; padding: 20px; display: grid; place-items: center; position: relative; overflow: hidden; background: radial-gradient(circle at 50% 44%, #effaf1 0, #d2e7de 56%, #b9d8d0 100%); }
+  .demo-image::before, .demo-image::after { content: ""; position: absolute; width: 290px; height: 290px; border: 1px solid rgba(21,79,77,.12); border-radius: 50%; }
+  .demo-image::after { width: 390px; height: 390px; }
+  .demo-image svg { width: min(73%, 265px); max-height: 220px; z-index: 1; filter: drop-shadow(0 22px 20px rgba(24,66,60,.18)); }
+  .demo-image-label { position: absolute; top: 18px; left: 18px; z-index: 2; padding: 6px 10px; border-radius: 99px; background: rgba(15,53,54,.88); color: #d4fff2; font-size: 10px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+  .demo-product-info { padding: 24px; display: flex; flex-direction: column; flex: 1; }
+  .demo-sku { margin: 0 0 8px; color: #47716d; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  .demo-product h3 { margin: 0 0 10px; font-size: clamp(20px, 2vw, 27px); }
+  .demo-meta { color: #4e706c; font-size: 12px; margin: 0 0 23px; }
+  .demo-current { margin-top: auto; padding-top: 16px; border-top: 1px solid rgba(30,93,86,.18); display: flex; align-items: end; justify-content: space-between; gap: 12px; }
+  .demo-current small { color: #4e706c; font-size: 11px; }
+  .demo-current strong { font: 700 20px Unbounded, sans-serif; letter-spacing: -.05em; white-space: nowrap; }
+  .demo-panel { min-width: 0; border: 1px solid rgba(140,231,215,.3); border-radius: 22px; padding: clamp(22px, 3vw, 34px); background: linear-gradient(150deg, #17343a, #0d222b); }
+  .demo-panel-top { display: flex; align-items: center; gap: 9px; color: var(--teal); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  .demo-panel-top::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 12px var(--teal); }
+  .demo-panel h3 { margin: 15px 0 9px; }
+  .demo-panel-lead { color: var(--muted); font-size: 13px; margin: 0 0 23px; }
+  .demo-choice-label { display: block; color: var(--muted); font-size: 11px; font-weight: 800; margin-bottom: 10px; }
+  .demo-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+  .demo-choices button { min-height: 44px; padding: 9px 13px; border: 1px solid var(--line-strong); border-radius: 10px; background: rgba(255,255,255,.03); color: var(--white); font-size: 12px; font-weight: 800; }
+  .demo-choices button:hover, .demo-choices button[aria-pressed="true"] { background: var(--teal); border-color: var(--teal); color: #103438; }
+  .demo-prices { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; margin-top: 27px; }
+  .demo-price-cell { border: 1px solid var(--line); border-radius: 13px; padding: 15px; min-width: 0; }
+  .demo-price-cell.highlight { background: rgba(140,231,215,.1); border-color: rgba(140,231,215,.32); }
+  .demo-price-cell small { display: block; color: var(--muted); font-size: 10px; margin-bottom: 5px; }
+  .demo-price-cell strong { display: block; color: var(--white); font: 700 clamp(14px, 1.7vw, 21px) Unbounded, sans-serif; letter-spacing: -.05em; white-space: nowrap; }
+  .demo-price-cell.highlight strong { color: var(--teal); }
+  .demo-arrow { color: var(--teal); font-size: 24px; }
+  .demo-status { margin: 17px 0 0; color: var(--white); font-size: 13px; font-weight: 800; }
+  .demo-status::before { content: "✓"; display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 9px; border-radius: 6px; background: rgba(140,231,215,.14); color: var(--teal); }
+  .demo-floor { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); padding-top: 18px; margin-top: 20px; color: var(--muted); font-size: 12px; }
+  .demo-floor strong { color: var(--orange); white-space: nowrap; }
+  .demo-caption { margin: 16px 0 0; color: var(--muted); font-size: 11px; }
+  .recommendation-intro { color: var(--muted); max-width: 72ch; margin: -12px 0 25px; }
+  .offer-card { overflow: hidden; border: 1px solid rgba(140,231,215,.4); border-radius: 26px; background: radial-gradient(ellipse at 96% 0%, rgba(140,231,215,.1), transparent 45%), #10252d; box-shadow: 0 26px 80px rgba(0,0,0,.17); }
+  .offer-card-top { padding: clamp(25px, 4vw, 45px); display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 16px 30px; }
+  .offer-label { display: inline-flex; padding: 7px 12px; border-radius: 99px; background: var(--teal); color: #103337; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; }
+  .offer-card h3 { font-size: clamp(29px, 4vw, 47px); margin: 22px 0 10px; }
+  .offer-limit { color: var(--muted); font-size: 14px; margin: 0; }
+  .offer-price { text-align: right; align-self: end; }
+  .offer-price .old { display: block; color: var(--muted); text-decoration: line-through; font-size: 15px; }
+  .offer-price .price { display: block; font: 700 clamp(28px, 3.7vw, 44px)/1.15 Unbounded, sans-serif; letter-spacing: -.06em; color: var(--teal); white-space: nowrap; }
+  .offer-price .period { display: block; color: var(--muted); font-size: 11px; margin-top: 8px; }
+  .offer-features { padding: 0 clamp(25px, 4vw, 45px) 33px; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+  .feature { border: 1px solid var(--line); border-radius: 14px; padding: 17px 18px; background: rgba(255,255,255,.025); }
+  .feature b { display: block; margin-bottom: 6px; font-size: 13px; }
+  .feature b::before { content: "↗"; color: var(--teal); margin-right: 9px; }
+  .feature p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+  .offer-footer { padding: 22px clamp(25px, 4vw, 45px); background: rgba(6,21,27,.5); border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 14px; }
+  .offer-footer p { color: var(--muted); font-size: 12px; margin: 0; max-width: 55ch; }
+  .offer-footer strong { color: var(--white); }
+  .offer-footer .button { flex: none; }
+  .explorer { border: 1px solid var(--line); border-radius: 22px; padding: clamp(22px, 3vw, 34px); background: #0e222b; }
+  .explorer-head { display: flex; align-items: start; justify-content: space-between; gap: 18px; }
+  .explorer-head h3 { margin: 0 0 7px; }
+  .explorer-head p { color: var(--muted); font-size: 13px; max-width: 65ch; margin: 0; }
+  .explorer-tag { border: 1px solid var(--line-strong); color: var(--teal); border-radius: 99px; padding: 6px 10px; font-size: 10px; font-weight: 800; white-space: nowrap; text-transform: uppercase; }
+  .range-row { display: flex; align-items: center; gap: 20px; margin-top: 30px; }
+  .range-row label { font-size: 12px; font-weight: 800; color: var(--muted); }
+  .range-row output { margin-left: auto; color: var(--white); font: 700 19px Unbounded, sans-serif; white-space: nowrap; }
+  input[type="range"] { width: 100%; accent-color: var(--teal); cursor: pointer; height: 26px; }
+  .range-ticks { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
+  .growth-presets { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 15px; }
+  .growth-presets button { min-height: 40px; padding: 9px 14px; border: 1px solid var(--line-strong); border-radius: 999px; background: transparent; color: var(--muted); font-size: 11px; }
+  .growth-presets button:hover, .growth-presets button.active { border-color: var(--teal); color: var(--teal); background: rgba(140,231,215,.08); }
+  .explorer-result { margin-top: 25px; padding: 21px 23px; background: #1b3940; border-radius: 15px; display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+  .explorer-result small { display: block; color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+  .explorer-result strong { display: block; font: 700 20px Unbounded, sans-serif; letter-spacing: -.04em; }
+  .explorer-result .result-price { color: var(--teal); text-align: right; }
+  .explorer-footnote { color: var(--muted); font-size: 11px; margin: 12px 0 0; }
+  .lineup-toggle { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 14px; background: transparent; color: var(--white); padding: 17px 19px; text-align: left; font-weight: 800; font-size: 13px; margin-top: 15px; }
+  .lineup-toggle:hover { border-color: var(--line-strong); background: rgba(255,255,255,.03); }
+  .lineup-toggle span:last-child { color: var(--teal); transition: transform .2s; }
+  .lineup-toggle[aria-expanded="true"] span:last-child { transform: rotate(45deg); }
+  .lineup { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 10px; margin-top: 15px; }
+  .lineup[hidden] { display: none; }
+  .tier-card { border: 1px solid var(--line); border-radius: 15px; padding: 17px; background: #10222b; min-width: 0; }
+  .tier-card.is-offer { border-color: var(--teal); background: #173439; }
+  .tier-card h4 { min-height: 43px; margin: 0 0 13px; font: 700 13px/1.35 Unbounded, sans-serif; letter-spacing: -.04em; overflow-wrap: anywhere; }
+  .tier-card p { color: var(--muted); margin: 0 0 13px; font-size: 11px; }
+  .tier-card strong { color: var(--white); font-size: 13px; white-space: nowrap; }
+  .tier-card .tier-tag { display: block; color: var(--teal); font-size: 10px; font-weight: 800; margin-top: 7px; }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .step { border: 1px solid var(--line); border-radius: 18px; padding: 27px; background: #0d2029; position: relative; min-height: 224px; }
+  .step-number { width: 35px; height: 35px; border-radius: 10px; background: rgba(140,231,215,.13); color: var(--teal); display: grid; place-items: center; font: 700 13px Unbounded, sans-serif; margin-bottom: 29px; }
+  .step h3 { font: 800 16px/1.35 Manrope, sans-serif; letter-spacing: 0; margin-bottom: 10px; }
+  .step p { color: var(--muted); font-size: 13px; margin: 0; }
+  .faq-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .faq-list details { border: 1px solid var(--line); border-radius: 13px; background: #0d2029; padding: 0 18px; }
+  .faq-list summary { cursor: pointer; list-style: none; padding: 17px 25px 17px 0; font-size: 13px; font-weight: 800; position: relative; }
+  .faq-list summary::-webkit-details-marker { display: none; }
+  .faq-list summary::after { content: "+"; position: absolute; right: 0; top: 14px; color: var(--teal); font-size: 20px; font-weight: 500; }
+  .faq-list details[open] summary::after { content: "−"; }
+  .faq-list details p { color: var(--muted); font-size: 12px; margin: 0 0 17px; }
+  .final-cta { padding: clamp(30px, 5vw, 60px); border-radius: 25px; background: #a8e7d8; color: var(--dark-ink); display: flex; justify-content: space-between; align-items: center; gap: 28px; position: relative; overflow: hidden; }
+  .final-cta::after { content: ""; position: absolute; right: -42px; bottom: -165px; width: 370px; height: 370px; border: 1px solid rgba(10,75,74,.22); border-radius: 50%; box-shadow: 0 0 0 38px rgba(10,75,74,.07), 0 0 0 76px rgba(10,75,74,.05); pointer-events: none; }
+  .final-cta h2 { font-size: clamp(26px, 3.5vw, 42px); max-width: 650px; margin: 0 0 12px; }
+  .final-cta p { margin: 0; max-width: 57ch; font-size: 13px; }
+  .final-cta .button { background: #0d2e34; color: var(--white); position: relative; z-index: 1; white-space: nowrap; }
+  footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px 25px; padding: 28px 0 39px; color: var(--muted); font-size: 11px; }
+  footer a { text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+  .mobile-cta { display: none; }
+  .reveal { opacity: 1; }
   @media (prefers-reduced-motion: no-preference) {
-    .rec-card, .snapshot, .cta { animation: rise 0.5s ease both; }
-    .snapshot { animation-delay: 0.05s; }
-    .rec-card { animation-delay: 0.1s; }
-    @keyframes rise {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
+    .js .reveal { opacity: 0; transform: translateY(18px); transition: opacity .55s ease, transform .55s ease; }
+    .js .reveal.visible { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .button, .mobile-cta { transition: none; }
+  }
+  @media (max-width: 1000px) {
+    .hero { grid-template-columns: 1fr .78fr; gap: 32px; }
+    .hero h1 { font-size: clamp(38px, 5.5vw, 58px); }
+    .lineup { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  }
+  @media (max-width: 760px) {
+    .shell { width: min(100% - 36px, 540px); }
+    .header-inner { min-height: 64px; }
+    .logo { font-size: 15px; }
+    .logo-mark { width: 31px; height: 31px; }
+    .header-nav { display: none; }
+    .header-cta { margin-left: auto; font-size: 11px; padding: 7px 12px; }
+    .hero { display: flex; flex-direction: column; align-items: stretch; padding: 48px 0 59px; gap: 33px; }
+    .hero h1 { font-size: clamp(35px, 8.3vw, 54px); margin: 21px 0 19px; }
+    .hero-lead { font-size: 15px; margin-bottom: 25px; }
+    .hero-actions .button { flex: 1; }
+    .visual-card { transform: none; }
+    .visual-note { position: relative; right: auto; bottom: auto; margin: -16px 0 0 auto; transform: rotate(-3deg); }
+    .section { padding: 67px 0; }
+    .section-heading { display: block; margin-bottom: 25px; }
+    .section-heading h2 { margin-top: 9px; }
+    .section-heading p { margin-top: 13px; }
+    .snapshot, .snapshot.cols-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .stat-card { min-height: 128px; padding: 17px; }
+    .stat-value { font-size: 24px; }
+    .demo-stage { grid-template-columns: 1fr; }
+    .demo-product { display: grid; grid-template-columns: 42% 58%; }
+    .demo-image { min-height: 230px; }
+    .demo-image svg { width: 100%; }
+    .demo-product-info { padding: 19px; }
+    .demo-current { display: block; }
+    .demo-current strong { display: block; margin-top: 5px; font-size: 17px; }
+    .offer-card-top { grid-template-columns: 1fr; }
+    .offer-card h3 { margin-top: 17px; }
+    .offer-price { text-align: left; align-self: auto; }
+    .offer-price .old { display: inline; margin-right: 8px; }
+    .offer-price .price { display: inline; }
+    .offer-features { grid-template-columns: 1fr; gap: 8px; }
+    .offer-footer { flex-direction: column; align-items: stretch; }
+    .offer-footer .button { width: 100%; }
+    .steps { grid-template-columns: 1fr; gap: 10px; }
+    .step { min-height: 0; padding: 20px; }
+    .step-number { margin-bottom: 16px; }
+    .faq-list { grid-template-columns: 1fr; }
+    .final-cta { display: block; }
+    .final-cta .button { width: 100%; margin-top: 25px; }
+    .mobile-cta { position: fixed; z-index: 40; left: 0; right: 0; bottom: 0; padding: 10px max(18px, env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-right)); display: flex; gap: 12px; align-items: center; background: rgba(7,19,27,.95); border-top: 1px solid var(--line-strong); backdrop-filter: blur(16px); transform: translateY(110%); transition: transform .25s ease; }
+    .mobile-cta.visible { transform: none; }
+    .mobile-cta div { min-width: 0; flex: 1; }
+    .mobile-cta small { color: var(--muted); font-size: 10px; display: block; }
+    .mobile-cta b { color: var(--white); font-size: 13px; white-space: nowrap; }
+    .mobile-cta .button { min-height: 42px; padding: 8px 13px; font-size: 11px; flex: none; }
+    footer { padding-bottom: 110px; }
+  }
+  @media (max-width: 470px) {
+    .hero h1 { font-size: clamp(32px, 8.6vw, 41px); }
+    .hero-actions { flex-direction: column; align-items: stretch; }
+    .hero-actions .button { width: 100%; }
+    .snapshot, .snapshot.cols-2 { grid-template-columns: 1fr 1fr; }
+    .snapshot.cols-1 { grid-template-columns: 1fr; }
+    .stat-card { min-height: 116px; }
+    .stat-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
+    .demo-product { grid-template-columns: 1fr; }
+    .demo-image { min-height: 210px; }
+    .demo-image svg { width: min(68%, 220px); }
+    .demo-current { display: flex; }
+    .demo-current strong { margin-top: 0; }
+    .demo-prices { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 5px; }
+    .demo-price-cell { padding: 11px 8px; }
+    .demo-price-cell strong { font-size: 13px; }
+    .visual-note { font-size: 10px; max-width: 170px; }
+    .explorer-head { display: block; }
+    .explorer-tag { display: inline-block; margin-top: 13px; }
+    .range-row { gap: 8px; }
+    .range-row output { font-size: 15px; }
+    .explorer-result { align-items: flex-start; flex-direction: column; }
+    .explorer-result strong { font-size: 16px; }
+    .explorer-result .result-price { text-align: left; }
+    .lineup { grid-template-columns: 1fr 1fr; }
+    .tier-card { padding: 13px; }
+    .tier-card strong { font-size: 11px; }
+  }
+  @media print {
+    :root { color-scheme: light; }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    @page { size: A4; margin: 12mm; }
+    html { scroll-behavior: auto; }
+    body { background: var(--bg) !important; }
+    .reading-progress, .header-nav, .header-cta, .hero-actions, .mobile-cta, .explorer, .lineup-toggle { display: none !important; }
+    .hero, .section { padding: 25px 0; }
+    .hero { grid-template-columns: 1fr 280px; }
+    .hero h1 { font-size: 36px; }
+    .visual-card { transform: none; }
+    .visual-note { display: none; }
+    .lineup[hidden] { display: grid !important; }
+    .reveal, .js .reveal { opacity: 1 !important; transform: none !important; }
+    .offer-card, .stat-card, .step, .final-cta, .demo-stage { break-inside: avoid; }
+    .faq-list details:not([open]) { display: none; }
+    .final-cta .button { display: none; }
+    footer { padding-bottom: 0; }
   }
 </style>
+<script>document.documentElement.classList.add('js');</script>
 </head>
 <body>
-
-<div class="wrap">
-
-  <div class="masthead">
-    <div class="masthead-top">
-      <div class="brand"><span class="brand-mark">🦈</span> BuyShark</div>
-      <div class="doc-date">{{ doc_number }}<br>{{ doc_date }}</div>
-    </div>
-    <div class="eyebrow">Коммерческое предложение</div>
-    <h1 class="title">Автоматизация Kaspi Магазина<br>для <em>{{ offer.client_name }}</em></h1>
-    <p class="lede">Мы посмотрели ваш магазин на Kaspi.kz и подобрали тариф под ваш реальный каталог — без переплаты за лимиты, которые вы не используете, и с запасом на рост.</p>
+<div class="reading-progress" aria-hidden="true"></div>
+<header class="site-header">
+  <div class="shell header-inner">
+    <a class="logo" href="https://buyshark.kz/" aria-label="BuyShark — главная">
+      <span class="logo-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M3 22.5c6.9-2.4 10.1-9.3 12.5-17.5 2.2 3.2 3.4 6.6 3.7 10.2 4.5.2 7.7 2.4 9.8 6.7-5.1-.7-8.7.2-11.5 4.1C12.7 24.3 8 23.4 3 22.5Z" fill="currentColor"/></svg></span>
+      BuyShark
+    </a>
+    <nav class="header-nav" aria-label="Разделы предложения">
+      {% if snapshot_items %}<a href="#store">Ваш магазин</a>{% endif %}
+      <a href="#demo">Демо товара</a><a href="#plan">Тариф</a><a href="#compare">Сравнить</a><a href="#start">Запуск</a>
+    </nav>
+    <a class="header-cta" href="{{ wa_link }}" target="_blank" rel="noopener">Обсудить КП ↗</a>
   </div>
+</header>
+<main>
+  <section class="shell hero" aria-labelledby="hero-title">
+    <div class="hero-copy">
+      <span class="eyebrow">Персональное предложение · {{ doc_date }}</span>
+      <h1 id="hero-title">Больше контроля.<br><span>Меньше рутины.</span><br>Для {{ offer.client_name }}.</h1>
+      <p class="hero-lead">Мы изучили ваш каталог на Kaspi и подобрали тариф под размер магазина. Цены, заказы и остатки — в одном рабочем ритме.</p>
+      <div class="hero-actions">
+        <a class="button button-primary" href="#plan">Посмотреть предложение <span aria-hidden="true">↗</span></a>
+        <a class="button button-ghost" href="#demo">Демо одного товара <span aria-hidden="true">↓</span></a>
+      </div>
+      <div class="hero-assurance"><span>7 дней бесплатно</span><span>Без банковской карты</span><span>Тариф можно изменить</span></div>
+    </div>
+    <div class="hero-visual" aria-label="Краткое содержание предложения">
+      <div class="visual-glow" aria-hidden="true"></div>
+      <div class="visual-card">
+        <div class="visual-top"><span>Подобрано для вас</span><span>BuyShark</span></div>
+        <div class="visual-main">
+          <p class="visual-kicker">Ваш тариф</p>
+          <p class="visual-title">{{ tier.name }}</p>
+          <p class="visual-subtitle">{{ "До " ~ "{:,}".format(tier.limit).replace(",", " ") ~ " товаров" if tier.limit else "Безлимит товаров" }}</p>
+        </div>
+        {% if offer.product_count is not none and tier.limit %}
+        <div class="visual-track" role="img" aria-label="{{ offer.product_count }} из {{ tier.limit }} товаров в лимите тарифа" style="--fill: {{ ((offer.product_count / tier.limit) * 100)|round|int }}%"><span></span></div>
+        <div class="visual-scale"><span>Ваш каталог <strong>{{ offer.product_count }}</strong></span><span>Лимит <strong>{{ tier.limit }}</strong></span></div>
+        {% else %}
+        <div class="visual-track" aria-hidden="true" style="--fill: 65%"><span></span></div>
+        <div class="visual-scale"><span>Под ваш масштаб</span><span>Можно расти</span></div>
+        {% endif %}
+        <div class="visual-divider"></div>
+        <div class="visual-bottom">
+          <div><small>{% if discounted_price %}Первый оплаченный месяц{% else %}Стоимость в месяц{% endif %}</small><strong>{{ discounted_price | tg if discounted_price else tier.price | tg }}</strong></div>
+          {% if discounted_price %}<span class="visual-badge">−{{ discount_pct }}% на старт</span>{% else %}<span class="visual-badge">7 дней бесплатно</span>{% endif %}
+        </div>
+      </div>
+      <div class="visual-note"><b>{{ doc_number }}</b>Подготовлено специально для вашего магазина</div>
+    </div>
+  </section>
 
   {% if snapshot_items %}
-  <section>
-    <div class="sec-head"><span class="sec-num">01</span><h2 class="sec-title">Ваш магазин сегодня</h2></div>
-    <div class="snapshot cols-{{ snapshot_items|length if snapshot_items|length <= 3 else 3 }}">
-      {% for value, label in snapshot_items %}
-      <div class="snap-cell">
-        <div class="snap-num mono">{{ value }}</div>
-        <div class="snap-label">{{ label }}</div>
+  <section class="section" id="store" aria-labelledby="store-title">
+    <div class="shell">
+      <div class="section-heading reveal">
+        <div><div class="section-index"><span>01 /</span> Ваш контекст</div><h2 id="store-title">Сначала — ваш магазин.</h2></div>
+        <p>Подбор опирается на размер каталога и информацию о магазине, а не на универсальный пакет для всех.</p>
       </div>
-      {% endfor %}
+      <div class="snapshot cols-{{ snapshot_items|length if snapshot_items|length <= 3 else 3 }} reveal">
+        {% for value, label in snapshot_items %}
+        <div class="stat-card"><span class="stat-icon" aria-hidden="true">{{ ["◇", "↗", "◷"][loop.index0 % 3] }}</span><div><div class="stat-value">{{ value }}</div><div class="stat-label">{{ label }}</div></div></div>
+        {% endfor %}
+      </div>
+      {% if offer.categories %}
+      <div class="context-note reveal"><div><p>В вашем каталоге несколько крупных направлений. <strong>Конкуренция по цене на карточке</strong> влияет на то, увидит ли покупатель ваш магазин.</p>
+        <div class="category-list">{% for c in offer.categories %}<span>{{ c.name }} <b>{{ c.count }}</b></span>{% endfor %}</div>
+      </div></div>
+      {% endif %}
     </div>
-    {% if offer.categories %}
-    <p>Каталог сосредоточен в нескольких крупных нишах — это видно по структуре:
-      {% for c in offer.categories %}<strong>{{ c.name }} ({{ c.count }})</strong>{% if not loop.last %}, {% endif %}{% endfor %}.
-      Такой каталог живёт и умирает конкуренцией по цене на карточке — именно там решается, увидит ли покупатель вас или соседний магазин с тем же товаром.</p>
-    <div class="catalog-note">
-      {% for c in offer.categories %}
-      <span class="chip">{{ c.name }} <b>{{ c.count }}</b></span>
-      {% endfor %}
-    </div>
-    {% endif %}
   </section>
   {% endif %}
 
-  <section>
-    <div class="sec-head"><span class="sec-num">{{ "02" if snapshot_items else "01" }}</span><h2 class="sec-title">Рекомендуемый тариф</h2></div>
-    <p>{{ recommendation_text }}</p>
-    <div class="rec-card" style="margin-top:18px;">
-      {% if tier.ribbon %}<span class="rec-ribbon">{{ tier.ribbon }} · РЕКОМЕНДУЕМ</span>{% endif %}
-      {% if discounted_price %}<span class="discount-badge">−{{ discount_pct }}% на первый месяц</span>{% endif %}
-      <div class="rec-top">
-        <div>
-          <div class="rec-name">{{ tier.name }}</div>
-          <div class="rec-limit">
-            {{ "до " ~ "{:,}".format(tier.limit).replace(",", " ") ~ " товаров" if tier.limit else "безлимит товаров" }}
-            {% if offer.product_count %} · сейчас у вас {{ offer.product_count }}{% endif %}
+  <section class="section" id="demo" aria-labelledby="demo-title">
+    <div class="shell">
+      <div class="section-heading reveal">
+        <div><div class="section-index"><span>{{ "02" if snapshot_items else "01" }} /</span> Демо товара</div><h2 id="demo-title">Один товар. Три сценария цены.</h2></div>
+        <p>Нажмите на цену конкурента и посмотрите, как меняется рекомендация с учётом заданного минимума.</p>
+      </div>
+      <div class="demo-stage reveal">
+        <article class="demo-product" aria-label="Демонстрационный товар">
+          <div class="demo-image">
+            <span class="demo-image-label">Пример · 1 товар</span>
+            <svg viewBox="0 0 260 220" fill="none" aria-hidden="true">
+              <ellipse cx="132" cy="191" rx="89" ry="15" fill="#246b68" opacity=".16"/>
+              <path d="M57 128c0-24 19-43 43-43h63c24 0 43 19 43 43v25c0 24-19 43-43 43h-63c-24 0-43-19-43-43v-25Z" fill="#163A40"/>
+              <path d="M57 134c0-22 18-40 40-40h69c22 0 40 18 40 40v6c0 23-19 42-42 42H99c-23 0-42-19-42-42v-6Z" fill="#204B50"/>
+              <path d="M58 133h148" stroke="#77B9AD" stroke-width="2" opacity=".7"/>
+              <rect x="122" y="151" width="20" height="5" rx="2.5" fill="#A7EBDB"/>
+              <path d="M85 36c-11 0-19 9-19 20v19c0 9 6 15 14 15 8 0 14-6 14-15V57c0-3 2-5 5-5s5 2 5 5v45c0 7-5 12-12 12S80 109 80 102V80" stroke="#15383D" stroke-width="15" stroke-linecap="round"/>
+              <path d="M166 36c11 0 19 9 19 20v19c0 9-6 15-14 15-8 0-14-6-14-15V57c0-3-2-5-5-5s-5 2-5 5v45c0 7 5 12 12 12s12-5 12-12V80" stroke="#15383D" stroke-width="15" stroke-linecap="round"/>
+              <path d="M85 36c-11 0-19 9-19 20v19c0 9 6 15 14 15 8 0 14-6 14-15V57c0-3 2-5 5-5s5 2 5 5v45c0 7-5 12-12 12S80 109 80 102V80" stroke="#F7FCF5" stroke-width="9" stroke-linecap="round"/>
+              <path d="M166 36c11 0 19 9 19 20v19c0 9-6 15-14 15-8 0-14-6-14-15V57c0-3-2-5-5-5s-5 2-5 5v45c0 7 5 12 12 12s12-5 12-12V80" stroke="#F7FCF5" stroke-width="9" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="demo-product-info">
+            <p class="demo-sku">SKU DEMO-001 · электроника</p>
+            <h3>Беспроводные наушники TWS</h3>
+            <p class="demo-meta">Остаток: 12 шт. · товар для примера</p>
+            <div class="demo-current"><small>Цена до изменения</small><strong>12 490 ₸</strong></div>
+          </div>
+        </article>
+        <div class="demo-panel">
+          <div class="demo-panel-top">Симуляция · без изменения реальных цен</div>
+          <h3>Что сделает демпинг-бот?</h3>
+          <p class="demo-panel-lead">В этом примере он предлагает цену на 10 ₸ ниже конкурента, но не ниже вашего минимума.</p>
+          <span class="demo-choice-label" id="demo-choice-label">Выберите цену конкурента</span>
+          <div class="demo-choices" role="group" aria-labelledby="demo-choice-label">
+            <button type="button" data-competitor="11990" aria-pressed="true">11 990 ₸</button>
+            <button type="button" data-competitor="10490" aria-pressed="false">10 490 ₸</button>
+            <button type="button" data-competitor="8590" aria-pressed="false">8 590 ₸</button>
+          </div>
+          <div class="demo-prices" aria-live="polite">
+            <div class="demo-price-cell"><small>Конкурент</small><strong id="demo-competitor">11 990 ₸</strong></div>
+            <span class="demo-arrow" aria-hidden="true">→</span>
+            <div class="demo-price-cell highlight"><small>Ваша цена</small><strong id="demo-target">11 980 ₸</strong></div>
+          </div>
+          <p class="demo-status" id="demo-status">На 10 ₸ ниже цены конкурента</p>
+          <div class="demo-floor"><span>Заданный вами минимум</span><strong>9 900 ₸</strong></div>
+          <p class="demo-caption">Товар и цены условные. Это демонстрация расчёта, а не изменение цены в Kaspi.{% if tier.key == "start" %} Демпинг-бот доступен с тарифа «Охотник».{% endif %}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="plan" aria-labelledby="plan-title">
+    <div class="shell">
+      <div class="section-heading reveal">
+        <div><div class="section-index"><span>{{ "03" if snapshot_items else "02" }} /</span> Рекомендация</div><h2 id="plan-title">Тариф под ваш масштаб.</h2></div>
+        <p>Инструменты для ежедневной работы и место для роста каталога.</p>
+      </div>
+      <p class="recommendation-intro reveal">{{ recommendation_text }}</p>
+      <div class="offer-card reveal">
+        <div class="offer-card-top">
+          <div>
+            <span class="offer-label">Рекомендуем для {{ offer.client_name }}</span>
+            <h3>{{ tier.name }}</h3>
+            <p class="offer-limit">{{ "До " ~ "{:,}".format(tier.limit).replace(",", " ") ~ " товаров" if tier.limit else "Безлимит товаров" }}{% if offer.product_count is not none %} · сейчас {{ offer.product_count }}{% endif %}</p>
+          </div>
+          <div class="offer-price">
+            {% if discounted_price %}<span class="old">{{ tier.price | tg }}</span>{% endif %}
+            <span class="price">{{ discounted_price | tg if discounted_price else tier.price | tg }}</span>
+            <span class="period">{% if discounted_price %}первый оплаченный месяц · затем {{ tier.price | tg }}/мес{% elif tier.price %}в месяц{% else %}индивидуально под ваш объём{% endif %}</span>
           </div>
         </div>
-        <div class="rec-price">
-          {% if discounted_price %}
-          <div class="num mono"><span class="old">{{ tier.price | tg }}</span>{{ discounted_price | tg }}</div>
-          <div class="per">первый месяц, дальше {{ tier.price | tg }}/мес</div>
-          {% elif tier.price %}
-          <div class="num mono">{{ tier.price | tg }}</div>
-          <div class="per">в месяц</div>
-          {% else %}
-          <div class="num mono">по договору</div>
-          <div class="per">под ваш объём</div>
-          {% endif %}
+        <div class="offer-features">
+          {% for name, desc in tier.features %}
+          <div class="feature"><b>{{ name }}</b><p>{{ desc }}</p></div>
+          {% endfor %}
+        </div>
+        <div class="offer-footer">
+          <p><strong>Первые 7 дней бесплатно.</strong> Без банковской карты. {% if discounted_price %}После пробного периода первый оплаченный месяц со скидкой {{ discount_pct }}%.{% endif %}</p>
+          <a class="button button-primary" href="{{ wa_link }}" target="_blank" rel="noopener">Обсудить подключение <span aria-hidden="true">↗</span></a>
         </div>
       </div>
-      <ul class="rec-features">
-        {% for name, desc in tier.features %}
-        <li>
-          <span class="feat-name">{{ name }}</span>
-          <span class="feat-desc">{{ desc }}</span>
-        </li>
+    </div>
+  </section>
+
+  <section class="section" id="compare" aria-labelledby="compare-title">
+    <div class="shell">
+      <div class="section-heading reveal">
+        <div><div class="section-index"><span>{{ "04" if snapshot_items else "03" }} /</span> Выбор</div><h2 id="compare-title">А если каталог вырастет?</h2></div>
+        <p>Передвиньте ползунок и посмотрите, какой тариф подходит по лимиту товаров.</p>
+      </div>
+      <div class="explorer reveal">
+        <div class="explorer-head"><div><h3>Примерьте другой объём</h3><p>Расчёт по количеству товаров. Ваше персональное предложение выше остаётся тем же.</p></div><span class="explorer-tag">Интерактивно</span></div>
+        <div class="range-row"><label for="product-range">Товаров</label><output id="product-count" for="product-range">—</output></div>
+        <input id="product-range" type="range" min="1" max="3000" value="{{ [offer.product_count or 500, 3000]|min }}" aria-label="Количество товаров для подбора тарифа">
+        <div class="range-ticks"><span>1 товар</span><span>3 000+ товаров</span></div>
+        <div class="growth-presets" aria-label="Быстрый выбор количества товаров">
+          {% if offer.product_count is not none %}<button type="button" data-count="{{ offer.product_count }}">Сейчас: {{ offer.product_count }}</button>{% endif %}
+          <button type="button" data-count="50">50</button><button type="button" data-count="200">200</button><button type="button" data-count="1000">1 000</button><button type="button" data-count="2000">2 000</button><button type="button" data-count="3000">3 000+</button>
+        </div>
+        <div class="explorer-result" aria-live="polite"><div><small>Подходит по лимиту</small><strong id="matched-tier">—</strong></div><div class="result-price"><small>Цена тарифа в месяц</small><strong id="matched-price">—</strong></div></div>
+        <p class="explorer-footnote">Ориентир по открытому каталогу тарифов. Индивидуальные условия и скидка из этого КП указаны выше.</p>
+      </div>
+      <button class="lineup-toggle reveal" type="button" aria-expanded="false" aria-controls="full-lineup"><span>Посмотреть все 5 тарифов и цены</span><span aria-hidden="true">+</span></button>
+      <div class="lineup" id="full-lineup" hidden>
+        {% for t in all_tiers %}
+        <div class="tier-card{% if t.key == tier.key %} is-offer{% endif %}" data-limit="{{ t.limit or 0 }}" data-name="{{ t.name }}" data-price="{{ t.price | tg }}">
+          <h4>{{ t.name }}</h4><p>{{ "До " ~ "{:,}".format(t.limit).replace(",", " ") ~ " товаров" if t.limit else "Безлимит, свой SLA" }}</p><strong>{{ t.price | tg }}</strong>{% if t.key == tier.key %}<span class="tier-tag">Ваше КП</span>{% endif %}
+        </div>
         {% endfor %}
-      </ul>
-      <div class="rec-foot">
-        {% if tier.price %}
-        <span>Первые 7 дней — вообще бесплатно, без карты{% if discounted_price %}. Дальше месяц со скидкой{% endif %}</span>
-        <span><b>{{ (discounted_price or tier.price) | tg }}</b> за 1-й {% if discounted_price %}оплаченный {% endif %}месяц</span>
-        {% else %}
-        <span>Обсудим объём, SLA и цену на созвоне</span>
-        <span><b>По договору</b></span>
-        {% endif %}
       </div>
     </div>
   </section>
 
-  <section>
-    <div class="sec-head"><span class="sec-num">{{ "03" if snapshot_items else "02" }}</span><h2 class="sec-title">Полная линейка — для сравнения</h2></div>
-    <div class="lineup">
-      <div class="lineup-row head">
-        <div>Тариф</div><div>Лимит</div><div style="text-align:right">Цена / мес</div>
+  <section class="section" id="start" aria-labelledby="start-title">
+    <div class="shell">
+      <div class="section-heading reveal">
+        <div><div class="section-index"><span>{{ "05" if snapshot_items else "04" }} /</span> Старт</div><h2 id="start-title">От КП до рабочего магазина.</h2></div>
+        <p>Три простых шага, чтобы проверить сервис на своих товарах.</p>
       </div>
-      {% for t in all_tiers %}
-      <div class="lineup-row{% if t.key == tier.key %} active{% endif %}">
-        <div class="li-name">{{ t.name }}{% if t.key == tier.key %}<span class="mark">← вам</span>{% endif %}</div>
-        <div class="li-limit">{{ ("до " ~ "{:,}".format(t.limit).replace(",", " ") ~ " товаров") if t.limit else "безлимит, свой SLA" }}</div>
-        <div class="li-price mono">{{ t.price | tg }}</div>
-      </div>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section>
-    <div class="sec-head"><span class="sec-num">{{ "04" if snapshot_items else "03" }}</span><h2 class="sec-title">Как запускаемся</h2></div>
-    <div class="steps">
-      <div class="step" data-n="1">
-        <h3>Подключаете магазин</h3>
-        <p>Через кабинет продавца — авторизация по email, без передачи паролей нам. Занимает 5–10 минут.</p>
-      </div>
-      <div class="step" data-n="2">
-        <h3>7 дней бесплатно на тарифе «{{ tier.name }}»</h3>
-        <p>Всё включено с первого дня. Смотрите на своих реальных товарах и заказах, не на демо.</p>
-      </div>
-      <div class="step" data-n="3">
-        {% if discounted_price %}
-        <h3>Первый оплаченный месяц — со скидкой {{ discount_pct }}%</h3>
-        <p>{{ discounted_price | tg }} вместо {{ tier.price | tg }}. Дальше — обычная цена тарифа, и его в любой момент можно поменять из кабинета вверх или вниз без штрафов.</p>
-        {% else %}
-        <h3>Решаете, оставаться ли на «{{ tier.name }}»</h3>
-        <p>Тариф меняется в любой момент из кабинета — вверх или вниз, без штрафов и потери истории.</p>
-        {% endif %}
+      <div class="steps">
+        <div class="step reveal"><span class="step-number">01</span><h3>Подключаете магазин</h3><p>Авторизация через кабинет продавца по email. Обычно это занимает 5–10 минут.</p></div>
+        <div class="step reveal"><span class="step-number">02</span><h3>Пробуете 7 дней</h3><p>Тариф «{{ tier.name }}» работает на ваших товарах и заказах с первого дня. Банковская карта не нужна.</p></div>
+        <div class="step reveal"><span class="step-number">03</span><h3>{% if discounted_price %}Первый месяц со скидкой{% else %}Решаете, оставаться ли{% endif %}</h3><p>{% if discounted_price %}{{ discounted_price | tg }} вместо {{ tier.price | tg }} за первый оплаченный месяц. Затем обычная цена тарифа.{% else %}После пробного периода решаете, подходит ли вам сервис и тариф.{% endif %} Тариф можно поменять в кабинете.</p></div>
       </div>
     </div>
   </section>
 
-  <section style="margin-bottom:0;">
-    <div class="cta">
-      <div class="cta-copy">
-        <h2>Готовы подключить {{ offer.client_name }}?</h2>
-        <p>Ответим в WhatsApp обычно за пару минут, будни 10:00–23:00.</p>
-      </div>
-      <div class="cta-actions">
-        <a class="btn btn-primary" href="{{ wa_link }}" target="_blank" rel="noopener">Написать в WhatsApp →</a>
+  <section class="section" id="questions" aria-labelledby="questions-title">
+    <div class="shell">
+      <div class="section-heading reveal"><div><div class="section-index"><span>{{ "06" if snapshot_items else "05" }} /</span> Вопросы</div><h2 id="questions-title">Коротко о главном.</h2></div></div>
+      <div class="faq-list reveal">
+        <details><summary>Нужна ли карта для пробного периода?</summary><p>Нет. Первые 7 дней доступны без банковской карты.</p></details>
+        <details><summary>Что будет после 7 дней?</summary><p>{% if discounted_price %}Первый оплаченный месяц на тарифе «{{ tier.name }}» стоит {{ discounted_price | tg }}. Далее — {{ tier.price | tg }} в месяц.{% elif tier.price %}Стоимость тарифа «{{ tier.name }}» — {{ tier.price | tg }} в месяц.{% else %}Стоимость и условия для вашего объёма обсудим индивидуально.{% endif %}</p></details>
+        <details><summary>Можно ли поменять тариф?</summary><p>Да. Тариф можно изменить из кабинета вверх или вниз без потери истории.</p></details>
+        <details><summary>Как задать вопрос по КП?</summary><p>Напишите нам в WhatsApp по кнопке ниже — сообщение уже содержит название вашего магазина и тарифа.</p></details>
       </div>
     </div>
   </section>
 
-  <footer>
-    <span>BuyShark · buyshark.kz · автоматизация продаж на Kaspi</span>
-    <span>Действительно 30 дней с даты выпуска</span>
-  </footer>
-
+  <div class="shell">
+    <div class="final-cta reveal" id="contact">
+      <div><div class="section-index" style="color:#23615e;margin-bottom:18px">Следующий шаг</div><h2>Готовы подключить {{ offer.client_name }}?</h2><p>Ответим в WhatsApp, расскажем о запуске и поможем выбрать удобное время. Будни 10:00–23:00.</p></div>
+      <a class="button" href="{{ wa_link }}" target="_blank" rel="noopener">Написать в WhatsApp <span aria-hidden="true">↗</span></a>
+    </div>
+    <footer><span>BuyShark · <a href="https://buyshark.kz/">buyshark.kz</a> · автоматизация продаж на Kaspi</span><span>{{ doc_number }} · Действительно 30 дней с даты выпуска</span></footer>
+  </div>
+</main>
+<div class="mobile-cta" aria-label="Быстрая связь по коммерческому предложению">
+  <div><small>Ваш тариф · {{ tier.name }}</small><b>{{ discounted_price | tg if discounted_price else tier.price | tg }}</b></div>
+  <a class="button button-primary" href="{{ wa_link }}" target="_blank" rel="noopener">Написать ↗</a>
 </div>
+<script>
+  (() => {
+    const progress = document.querySelector('.reading-progress');
+    const mobileCta = document.querySelector('.mobile-cta');
+    const hero = document.querySelector('.hero');
+    const contact = document.querySelector('#contact');
+    const updateScroll = () => {
+      const max = document.documentElement.scrollHeight - innerHeight;
+      progress.style.width = (max > 0 ? Math.min(100, scrollY / max * 100) : 100) + '%';
+      mobileCta.classList.toggle('visible', hero.getBoundingClientRect().bottom < 90 && contact.getBoundingClientRect().top > innerHeight * .62);
+    };
+    addEventListener('scroll', updateScroll, { passive: true });
+    addEventListener('resize', updateScroll);
+    updateScroll();
+
+    const revealItems = document.querySelectorAll('.reveal');
+    if ('IntersectionObserver' in window) {
+      const revealObserver = new IntersectionObserver(entries => {
+        for (const entry of entries) if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          revealObserver.unobserve(entry.target);
+        }
+      }, { rootMargin: '0px 0px 80px 0px', threshold: .02 });
+      revealItems.forEach(item => revealObserver.observe(item));
+    } else revealItems.forEach(item => item.classList.add('visible'));
+
+    const navLinks = [...document.querySelectorAll('.header-nav a')];
+    if ('IntersectionObserver' in window && navLinks.length) {
+      const navObserver = new IntersectionObserver(entries => {
+        for (const entry of entries) if (entry.isIntersecting) {
+          navLinks.forEach(link => link.classList.toggle('is-current', link.hash === '#' + entry.target.id));
+        }
+      }, { rootMargin: '-25% 0px -65% 0px' });
+      navLinks.forEach(link => {
+        const section = document.querySelector(link.hash);
+        if (section) navObserver.observe(section);
+      });
+    }
+
+    const competitorButtons = [...document.querySelectorAll('.demo-choices button')];
+    const competitorOutput = document.querySelector('#demo-competitor');
+    const targetOutput = document.querySelector('#demo-target');
+    const demoStatus = document.querySelector('#demo-status');
+    const formatTenge = value => new Intl.NumberFormat('ru-RU').format(value) + ' ₸';
+    competitorButtons.forEach(button => button.addEventListener('click', () => {
+      const competitor = Number(button.dataset.competitor);
+      const floor = 9900;
+      const target = Math.max(floor, competitor - 10);
+      competitorButtons.forEach(choice => choice.setAttribute('aria-pressed', String(choice === button)));
+      competitorOutput.textContent = formatTenge(competitor);
+      targetOutput.textContent = formatTenge(target);
+      demoStatus.textContent = target === floor
+        ? 'Сохраняем ваш минимум — ниже 9 900 ₸ не опускаемся'
+        : 'На 10 ₸ ниже цены конкурента';
+    }));
+
+    const range = document.querySelector('#product-range');
+    const countOutput = document.querySelector('#product-count');
+    const matchedTier = document.querySelector('#matched-tier');
+    const matchedPrice = document.querySelector('#matched-price');
+    const presets = [...document.querySelectorAll('.growth-presets button')];
+    const tiers = [...document.querySelectorAll('.tier-card')].map(card => ({
+      limit: Number(card.dataset.limit) || Infinity,
+      name: card.dataset.name,
+      price: card.dataset.price
+    }));
+    const format = value => new Intl.NumberFormat('ru-RU').format(value);
+    const updateExplorer = value => {
+      const count = Math.max(1, Math.min(3000, Number(value) || 1));
+      range.value = String(count);
+      range.style.background = 'linear-gradient(90deg, var(--teal) ' + ((count - 1) / 2999 * 100) + '%, rgba(255,255,255,.13) 0)';
+      countOutput.textContent = format(count) + (count === 3000 ? '+' : '');
+      const match = tiers.find(tier => count <= tier.limit) || tiers[tiers.length - 1];
+      matchedTier.textContent = match.name;
+      matchedPrice.textContent = match.price;
+      presets.forEach(button => button.classList.toggle('active', Number(button.dataset.count) === count));
+    };
+    range.addEventListener('input', () => updateExplorer(range.value));
+    presets.forEach(button => button.addEventListener('click', () => updateExplorer(button.dataset.count)));
+    updateExplorer(range.value);
+
+    const toggle = document.querySelector('.lineup-toggle');
+    const lineup = document.querySelector('#full-lineup');
+    toggle.addEventListener('click', () => {
+      const expanded = toggle.getAttribute('aria-expanded') === 'true';
+      toggle.setAttribute('aria-expanded', String(!expanded));
+      lineup.hidden = expanded;
+    });
+  })();
+</script>
 </body>
 </html>
