@@ -616,6 +616,38 @@ def cooling_hold_until(moves: List[dict], cfg: GuardConfig) -> Optional[datetime
     return last + timedelta(minutes=cfg.cooling_hold_minutes)
 
 
+ACTION_PULL_UP = "PULL_UP_PRICE"
+# Подтяжка вверх за соперником считается «нашей ценой», от которой меряется
+# падение, только если продержалась столько дневных минут. 06.10.2026
+# X172-0009 8шт: в 04:18 соперник поднялся до 2 010, мы следом до 2 000, к
+# утру он вернулся на 998 — защита считала это обвалом с 2 000 и спускала нас
+# по 15% с паузами до 13:19. T219-0005-5: 804 продержались 15 минут — то же.
+PULL_UP_PEAK_MIN_MINUTES = 60
+
+
+def _active_minutes(start: datetime, end: datetime, cfg: "GuardConfig") -> float:
+    """Минуты между start и end без ночных часов (если ночью демпинг стоит)."""
+    if end <= start:
+        return 0.0
+    if not cfg.night_freeze:
+        return (end - start).total_seconds() / 60
+    total, t, step = 0.0, start, timedelta(minutes=5)
+    while t < end:
+        nxt = min(t + step, end)
+        if not is_night(cfg, t):
+            total += (nxt - t).total_seconds() / 60
+        t = nxt
+    return total
+
+
+def _brief_pull_up(m: dict, moves: List[dict], cfg: "GuardConfig", now: datetime) -> bool:
+    if m.get("action") != ACTION_PULL_UP or not m.get("created_at"):
+        return False
+    later = [x["created_at"] for x in moves if x.get("created_at") and x["created_at"] > m["created_at"]]
+    end = min(later) if later else now
+    return _active_minutes(m["created_at"], end, cfg) < PULL_UP_PEAK_MIN_MINUTES
+
+
 @dataclass
 class DropState:
     peak: Optional[float]               # от какой цены меряется падение
@@ -659,8 +691,8 @@ def drop_state(moves: List[dict], cfg: GuardConfig, current: Optional[float] = N
     candidates = [start_ref]
     if from_window_start and after:
         candidates.append(after[0].get("our_old"))
-    candidates += [m.get("our_new") for m in after]
-    if candidates and current is not None:
+    candidates += [m.get("our_new") for m in after if not _brief_pull_up(m, moves, cfg, now)]
+    if candidates and current is not None and not (moves and _brief_pull_up(moves[-1], moves, cfg, now)):
         candidates.append(current)
     candidates = [float(c) for c in candidates if c is not None]
     if last_reset is not None and anchor_at == last_reset["created_at"]:

@@ -556,8 +556,9 @@ class TestOwnerDecisions(unittest.TestCase):
         self.assertEqual(st.peak, 560.0)  # от цены до прыжка, а не от самого прыжка
         st = guard.drop_state([reset], g, current=600.0, now=NOW)
         self.assertEqual(st.peak, 560.0)
-        # Рынок сам поднялся выше прыжка — падение оттуда уже настоящее.
-        up = {"created_at": NOW - timedelta(minutes=30), "our_old": 890.0, "our_new": 1000.0,
+        # Рынок сам поднялся выше прыжка и продержался — падение оттуда уже настоящее.
+        reset = {**reset, "created_at": NOW - timedelta(hours=4)}
+        up = {"created_at": NOW - timedelta(hours=3), "our_old": 890.0, "our_new": 1000.0,
               "action": "PULL_UP_PRICE"}
         st = guard.drop_state([reset, up], g, current=990.0, now=NOW)
         self.assertEqual(st.peak, 1000.0)
@@ -864,3 +865,35 @@ class TestCoolingAndNight(unittest.TestCase):
         self.assertEqual(out["cooling_per_day"], 1)
         # Старый сохранённый набор без новых полей получает умолчания.
         self.assertEqual(guard.GuardConfig.from_dict({"enabled": True}).cooling_hold_minutes, 30)
+
+
+class TestPullUpPeak(unittest.TestCase):
+    def test_night_pull_up_abandoned_by_rival_is_not_a_peak(self):
+        # X172-0009 8шт, 06.10.2026: 04:18 по местному подтянулись 864 → 2000 за
+        # соперником, к 08:02 он снова на 998 — спускаемся сразу, без пауз по 15%.
+        g = guard.GuardConfig(enabled=True, night_freeze=True)
+        moves = [{"created_at": datetime(2026, 10, 5, 19, 52), "our_old": 867.0, "our_new": 864.0,
+                  "action": "DUMP_TOP_1"},
+                 {"created_at": datetime(2026, 10, 5, 23, 18), "our_old": 864.0, "our_new": 2000.0,
+                  "action": "PULL_UP_PRICE"}]
+        morning = datetime(2026, 10, 6, 3, 2)
+        offers = [me(2000), kaspi_offer("1", 998, rating=4.9, reviews=300)]
+        res = DumpingEngine.calculate_new_price(cfg(2000, min_price=100.0, max_price=5000.0), ME, offers,
+                                                guard_cfg=g, guard_ctx={"now": morning, "moves": moves})
+        self.assertEqual(res["targetPrice"], 996.0)
+        self.assertIsNone(res["guard"]["limit"])
+
+    def test_short_day_pull_up_is_not_a_peak(self):
+        # T219-0005-5: 669 → 804 за соперником, через 15 минут он на 668.
+        g = guard.GuardConfig(enabled=True)
+        moves = [{"created_at": DAY - timedelta(minutes=15), "our_old": 669.0, "our_new": 804.0,
+                  "action": "PULL_UP_PRICE"}]
+        st = guard.drop_state(moves, g, current=804.0, now=DAY)
+        self.assertEqual(st.peak, 669.0)
+
+    def test_held_pull_up_is_a_peak(self):
+        g = guard.GuardConfig(enabled=True)
+        moves = [{"created_at": DAY - timedelta(hours=3), "our_old": 669.0, "our_new": 804.0,
+                  "action": "PULL_UP_PRICE"}]
+        st = guard.drop_state(moves, g, current=804.0, now=DAY)
+        self.assertEqual(st.peak, 804.0)
