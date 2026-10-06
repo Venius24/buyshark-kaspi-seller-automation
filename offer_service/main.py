@@ -234,6 +234,16 @@ def _build_context(request: Request, offer: dict, lang: str = "ru") -> dict:
         "tier": tier,
         "prev_tier": prev,
         "all_tiers": [_localized_tier(t, lang) for t in tariffs.TIERS],
+        "capabilities": [
+            {
+                "title": translate(lang, title),
+                "description": translate(lang, description),
+                "tier_name": tariffs.tier_by_key(min_tier).name,
+                "included": next(i for i, item in enumerate(tariffs.TIERS) if item.key == tier.key)
+                            >= next(i for i, item in enumerate(tariffs.TIERS) if item.key == min_tier),
+            }
+            for min_tier, title, description in tariffs.CAPABILITIES
+        ],
         "discount_pct": discount_pct,
         "discounted_price": discounted,
         "monthly_price": monthly_price,

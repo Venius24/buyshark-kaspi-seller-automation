@@ -139,7 +139,31 @@ def test_all_offer_copy_and_tariff_features_have_kazakh_translations():
     feature_keys = {
         copy for tier in tariffs.TIERS for feature in tier.features for copy in feature
     }
-    assert (used_keys | feature_keys) - KZ.keys() == set()
+    capability_keys = {
+        copy for _, title, description in tariffs.CAPABILITIES
+        for copy in (title, description)
+    }
+    assert (used_keys | feature_keys | capability_keys) - KZ.keys() == set()
+
+
+def test_review_mailing_is_visible_and_correctly_labeled_in_both_languages(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "offers.db")
+    db.init_db()
+    db.upsert_offer({"slug": "small", "client_name": "Магазин", "product_count": 25})
+    db.upsert_offer({"slug": "large", "client_name": "Магазин", "product_count": 500})
+    client = TestClient(app)
+
+    for lang, name, higher_label, included_label in (
+        ("ru", "Просьба оставить отзыв", "С тарифа «Хищник»", "✓ В вашем тарифе"),
+        ("kz", "Пікір қалдыруды сұрау", "«Хищник» тарифінен бастап", "✓ Сіздің тарифіңізде"),
+    ):
+        small = client.get(f"/small?lang={lang}").text
+        large = client.get(f"/large?lang={lang}").text
+        small_card = re.search(r'<div class="capability">\s*<small>(.*?)</small>\s*<b>' + name, small)
+        large_card = re.search(r'<div class="capability included">\s*<small>(.*?)</small>\s*<b>' + name, large)
+        assert small_card and small_card.group(1) == higher_label
+        assert large_card and large_card.group(1) == included_label
+        assert 'capability-count' in small and 'capability-count' in large
 
 
 def test_kazakh_text_for_unlimited_and_unknown_catalog(tmp_path, monkeypatch):

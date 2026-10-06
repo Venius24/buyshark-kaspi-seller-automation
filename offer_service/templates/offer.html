@@ -162,6 +162,18 @@
   .offer-footer p { color: var(--muted); font-size: 12px; margin: 0; max-width: 55ch; }
   .offer-footer strong { color: var(--white); }
   .offer-footer .button { flex: none; }
+  .capability-panel { margin-top: 28px; border: 1px solid var(--line); border-radius: 22px; padding: clamp(21px, 3vw, 32px); background: #0e222b; }
+  .capability-head { display: flex; justify-content: space-between; align-items: end; gap: 18px; margin-bottom: 19px; }
+  .capability-head h3 { margin: 0 0 7px; font-size: clamp(20px, 2.5vw, 27px); }
+  .capability-head p { margin: 0; color: var(--muted); font-size: 12px; max-width: 70ch; }
+  .capability-count { border: 1px solid var(--line-strong); border-radius: 999px; padding: 8px 12px; color: var(--teal); font-size: 11px; font-weight: 800; white-space: nowrap; }
+  .capability-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+  .capability { min-width: 0; border: 1px solid var(--line); border-radius: 14px; padding: 15px; background: rgba(255,255,255,.025); }
+  .capability.included { border-color: rgba(140,231,215,.34); background: rgba(140,231,215,.055); }
+  .capability small { display: block; color: var(--orange); font-size: 10px; font-weight: 800; margin-bottom: 9px; }
+  .capability.included small { color: var(--teal); }
+  .capability b { display: block; font-size: 13px; }
+  .capability p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
   .explorer { border: 1px solid var(--line); border-radius: 22px; padding: clamp(22px, 3vw, 34px); background: #0e222b; }
   .explorer-head { display: flex; align-items: start; justify-content: space-between; gap: 18px; }
   .explorer-head h3 { margin: 0 0 7px; }
@@ -225,6 +237,7 @@
     .hero { grid-template-columns: 1fr .78fr; gap: 32px; }
     .hero h1 { font-size: clamp(38px, 5.5vw, 58px); }
     .lineup { grid-template-columns: repeat(3, minmax(0,1fr)); }
+    .capability-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
   @media (max-width: 760px) {
     .shell { width: min(100% - 36px, 540px); }
@@ -262,6 +275,10 @@
     .offer-features { grid-template-columns: 1fr; gap: 8px; }
     .offer-footer { flex-direction: column; align-items: stretch; }
     .offer-footer .button { width: 100%; }
+    .capability-head { display: block; }
+    .capability-count { display: inline-block; margin-top: 13px; }
+    .capability-grid { grid-template-columns: 1fr; }
+    .capability { padding: 13px 15px; }
     .steps { grid-template-columns: 1fr; gap: 10px; }
     .step { min-height: 0; padding: 20px; }
     .step-number { margin-bottom: 16px; }
@@ -516,6 +533,20 @@
         <div class="offer-footer">
           <p><strong>{{ tr('Первые 7 дней бесплатно.') }}</strong> {{ tr('Без банковской карты') }}. {% if fixed_price_offer %}{{ tr('После пробного периода первый оплаченный месяц — {first}, затем {monthly}/мес.', first=discounted_price | tg, monthly=monthly_price | tg) }}{% elif discounted_price %}{{ tr('После пробного периода первый оплаченный месяц со скидкой {discount}%.', discount=discount_pct) }}{% endif %}</p>
           <a class="button button-primary" href="{{ wa_link }}" target="_blank" rel="noopener">{{ tr('Обсудить подключение') }} <span aria-hidden="true">↗</span></a>
+        </div>
+      </div>
+      <div class="capability-panel reveal" id="capabilities">
+        <div class="capability-head">
+          <div><h3>{{ tr('Что умеет BuyShark') }}</h3><p>{{ tr('Основные возможности сервиса. Отметки показывают, что входит в предложенный тариф, а что доступно при переходе на старший.') }}</p></div>
+          <span class="capability-count">{{ tr('В вашем тарифе: {count} из {total}', count=capabilities | selectattr('included') | list | length, total=capabilities | length) }}</span>
+        </div>
+        <div class="capability-grid">
+          {% for capability in capabilities %}
+          <div class="capability{% if capability.included %} included{% endif %}">
+            <small>{{ tr('✓ В вашем тарифе') if capability.included else tr('С тарифа «{name}»', name=capability.tier_name) }}</small>
+            <b>{{ capability.title }}</b><p>{{ capability.description }}</p>
+          </div>
+          {% endfor %}
         </div>
       </div>
     </div>
