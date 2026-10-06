@@ -4,7 +4,9 @@
 """
 
 import os
+import re
 import secrets
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -14,9 +16,11 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.templating import Jinja2Templates
+from jinja2 import pass_context
 from pydantic import BaseModel, Field, model_validator
 
 from offer_service import db, tariffs
+from offer_service.locale import translate
 
 app = FastAPI(title="offer.buyshark.kz")
 app.add_middleware(
@@ -26,9 +30,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def _fmt_tenge(value) -> str:
+@pass_context
+def _fmt_tenge(context, value) -> str:
     if value is None:
-        return "по договору"
+        return translate(context.get("lang", "ru"), "по договору")
     return f"{value:,.0f}".replace(",", " ") + " ₸"
 
 
@@ -84,12 +89,19 @@ def _require_admin(k: str | None):
 # ---------------------------------------------------------------------------
 
 
-def _wa_link(client_name: str, tier_name: str) -> str:
-    text = (
-        f"Здравствуйте, я из {client_name}. "
-        f"Получил КП по тарифу «{tier_name}», хочу подключить магазин.\n\n"
-        f"[КП {client_name}]"
-    )
+def _wa_link(client_name: str, tier_name: str, lang: str = "ru") -> str:
+    if lang == "kz":
+        text = (
+            f"Сәлеметсіз бе! Мен {client_name} дүкеніненмін. "
+            f"«{tier_name}» тарифі бойынша коммерциялық ұсынысты алдым. "
+            f"Дүкенді қосқым келеді.\n\n[Ұсыныс {client_name}]"
+        )
+    else:
+        text = (
+            f"Здравствуйте, я из {client_name}. "
+            f"Получил КП по тарифу «{tier_name}», хочу подключить магазин.\n\n"
+            f"[КП {client_name}]"
+        )
     return f"https://wa.me/{_WHATSAPP_PHONE}?text={quote(text)}"
 
 
@@ -105,8 +117,25 @@ def _pl_tovar(n: int) -> str:
     return "товаров"
 
 
-def _recommendation_text(product_count: int | None, tier: tariffs.Tier, prev: tariffs.Tier | None) -> str:
+def _recommendation_text(product_count: int | None, tier: tariffs.Tier,
+                         prev: tariffs.Tier | None, lang: str = "ru") -> str:
     name = tier.name
+    if lang == "kz":
+        if product_count is None:
+            return (f"«{name}» тарифін бастауға ыңғайлы нұсқа ретінде ұсынамыз. "
+                    "Каталогтің нақты көлемін қосылу кезінде анықтаймыз.")
+        if tier.key == "giga":
+            return (f"Сізде {product_count} тауар бар — бұл «Хищник+» тарифінің "
+                    "2 000 тауарлық шегінен асады. Сондықтан баға мен SLA-ны "
+                    "дүкен көлеміне қарай жеке есептейміз.")
+        if prev is None or product_count <= prev.limit:
+            return (f"Сізде {product_count} тауар бар. Олар «{name}» тарифінің "
+                    f"{tier.limit} тауарлық шегіне сыяды және өсуге орын қалады.")
+        headroom = tier.limit - product_count
+        return (f"Сіздегі {product_count} тауар «{prev.name}» тарифінің "
+                f"{prev.limit} тауарлық шегінен асады, ал «{name}» тарифінің "
+                f"{tier.limit} тауарлық шегіне сыяды. Тағы {headroom} тауар қосуға "
+                "болады, сондықтан каталог өскенде тарифті бірден ауыстыру қажет емес.")
     if product_count is None:
         return f"Подбираем тариф «{name}» как разумный старт — уточним точный размер каталога при подключении."
     word = _pl_tovar(product_count)
@@ -129,12 +158,29 @@ def _recommendation_text(product_count: int | None, tier: tariffs.Tier, prev: ta
     )
 
 
-def _build_context(request: Request, offer: dict) -> dict:
+def _localized_tier(tier: tariffs.Tier | None, lang: str) -> tariffs.Tier | None:
+    if tier is None or lang != "kz":
+        return tier
+    return replace(tier, features=[
+        (translate(lang, name), translate(lang, desc)) for name, desc in tier.features
+    ])
+
+
+def _years_label(value: str, lang: str) -> str:
+    if lang != "kz":
+        return value
+    match = re.fullmatch(r"\s*(\d+)\s*(?:год|года|лет)\s*", value, flags=re.I)
+    return f"{match.group(1)} жыл" if match else value
+
+
+def _build_context(request: Request, offer: dict, lang: str = "ru") -> dict:
     product_count = offer.get("product_count")
     override = offer.get("tier_override")
     tier = tariffs.tier_by_key(override) if override else tariffs.pick_tier(product_count)
     tier = tier or tariffs.pick_tier(product_count)
     prev = tariffs.prev_tier(tier)
+    tier = _localized_tier(tier, lang)
+    prev = _localized_tier(prev, lang)
 
     discount_pct = offer.get("discount_pct") or tariffs.DISCOUNT_PCT_DEFAULT
     fixed_price_offer = (offer.get("first_month_price") is not None
@@ -155,40 +201,49 @@ def _build_context(request: Request, offer: dict) -> dict:
                 sample_product["observed_at"]
             ).astimezone(_ALMATY).strftime("%d.%m.%Y %H:%M")
         except (KeyError, TypeError, ValueError):
-            sample_product["observed_label"] = "на момент подготовки КП"
+            sample_product["observed_label"] = (
+                "ұсыныс дайындалған кезде" if lang == "kz" else "на момент подготовки КП"
+            )
 
     snapshot_items = []
     if product_count is not None:
         cat_count = len(offer.get("categories") or [])
-        word = _pl_tovar(product_count)
-        adj = "активный" if word == "товар" else "активных"
-        label = f"{adj} {word}" + (f" в {cat_count} категориях" if cat_count else "")
+        if lang == "kz":
+            label = "белсенді тауар" + (f" · {cat_count} санатта" if cat_count else "")
+        else:
+            word = _pl_tovar(product_count)
+            adj = "активный" if word == "товар" else "активных"
+            label = f"{adj} {word}" + (f" в {cat_count} категориях" if cat_count else "")
         snapshot_items.append((f"{product_count:,}".replace(",", " "), label))
     if offer.get("orders_label"):
-        snapshot_items.append((offer["orders_label"], "заказов за всё время на Kaspi"))
+        snapshot_items.append((offer["orders_label"],
+                               translate(lang, "заказов за всё время на Kaspi")))
     if offer.get("years_label"):
-        snapshot_items.append((offer["years_label"], "в Kaspi Магазине"))
+        snapshot_items.append((_years_label(offer["years_label"], lang),
+                               translate(lang, "в Kaspi Магазине")))
 
     now = datetime.now(_ALMATY)
-    doc_number = f"КП № {offer['slug'].upper()}-{now:%Y-%m}"
+    doc_number = f"{'Ұсыныс' if lang == 'kz' else 'КП'} № {offer['slug'].upper()}-{now:%Y-%m}"
     doc_date = f"Алматы, {now:%d.%m.%Y}"
 
     return {
         "request": request,
+        "lang": lang,
+        "tr": lambda source, **values: translate(lang, source, **values),
         "offer": offer,
         "tier": tier,
         "prev_tier": prev,
-        "all_tiers": tariffs.TIERS,
+        "all_tiers": [_localized_tier(t, lang) for t in tariffs.TIERS],
         "discount_pct": discount_pct,
         "discounted_price": discounted,
         "monthly_price": monthly_price,
         "fixed_price_offer": fixed_price_offer,
         "sample_product": sample_product,
-        "recommendation_text": _recommendation_text(product_count, tier, prev),
+        "recommendation_text": _recommendation_text(product_count, tier, prev, lang),
         "snapshot_items": snapshot_items,
         "doc_number": doc_number,
         "doc_date": doc_date,
-        "wa_link": _wa_link(offer["client_name"], tier.name),
+        "wa_link": _wa_link(offer["client_name"], tier.name, lang),
     }
 
 
@@ -202,7 +257,8 @@ def render_offer(slug: str, request: Request):
     offer = db.get_offer(slug)
     if not offer:
         raise HTTPException(status_code=404, detail="Предложение не найдено")
-    ctx = _build_context(request, offer)
+    lang = "kz" if request.query_params.get("lang") in {"kz", "kk"} else "ru"
+    ctx = _build_context(request, offer, lang)
     return templates.TemplateResponse(request, "offer.html", ctx)
 
 

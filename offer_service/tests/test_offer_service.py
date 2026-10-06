@@ -1,8 +1,13 @@
+import re
+from pathlib import Path
+from urllib.parse import unquote
+
 from fastapi.testclient import TestClient
 import pytest
 
 from backend.billing.catalog import PLANS
 from offer_service import db, tariffs
+from offer_service.locale import KZ
 from offer_service.main import app
 
 
@@ -93,3 +98,60 @@ def test_offer_uses_verified_seller_price_in_product_section(tmp_path, monkeypat
     assert "40 000 ₸" in response.text
     assert "12 490 ₸" not in response.text
     assert "Цена вашего магазина на момент проверки" in response.text
+
+
+def test_kazakh_offer_uses_same_data_and_shareable_language_url(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "offers.db")
+    db.init_db()
+    db.upsert_offer({
+        "slug": "bilingual", "client_name": "Тест дүкені", "product_count": 31,
+        "tier_override": "hunter", "first_month_price": 3000, "monthly_price": 5000,
+        "orders_label": "120+", "years_label": "5 лет",
+        "categories": [{"name": "Электроника", "name_kz": "Электроника", "count": 31}],
+        "sample_product": {
+            "sku": "12345", "title": "Планшет", "title_kz": "Планшет",
+            "url": "https://kaspi.kz/shop/p/tablet-12345/",
+            "price": 38804, "competitors": [{"price": 40000}],
+            "observed_at": "2026-10-06T13:00:00+00:00",
+        },
+    })
+    client = TestClient(app)
+    ru = client.get("/bilingual?lang=ru")
+    kz = client.get("/bilingual?lang=kz")
+    assert ru.status_code == kz.status_code == 200
+    assert '<html lang="ru">' in ru.text
+    assert '<html lang="kk">' in kz.text
+    assert 'href="/bilingual?lang=kz"' in kz.text
+    assert 'href="/bilingual?lang=ru"' in kz.text
+    assert "Күнделікті жұмыс азырақ." in kz.text
+    assert "5 жыл" in kz.text
+    assert "3 000 ₸" in ru.text and "3 000 ₸" in kz.text
+    assert "5 000 ₸" in ru.text and "5 000 ₸" in kz.text
+    assert "38 804 ₸" in ru.text and "38 804 ₸" in kz.text
+    assert "Первый оплаченный месяц" not in kz.text
+    assert "коммерциялық ұсынысты алдым" in unquote(kz.text)
+    assert '<html lang="ru">' in client.get("/bilingual?lang=unknown").text
+
+
+def test_all_offer_copy_and_tariff_features_have_kazakh_translations():
+    template = (Path(__file__).parents[1] / "templates" / "offer.html").read_text(encoding="utf-8")
+    used_keys = set(re.findall(r"\btr\('([^']+)'", template))
+    feature_keys = {
+        copy for tier in tariffs.TIERS for feature in tier.features for copy in feature
+    }
+    assert (used_keys | feature_keys) - KZ.keys() == set()
+
+
+def test_kazakh_text_for_unlimited_and_unknown_catalog(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "offers.db")
+    db.init_db()
+    db.upsert_offer({"slug": "giga-kz", "client_name": "Үлкен дүкен", "product_count": 2500})
+    db.upsert_offer({"slug": "unknown-kz", "client_name": "Жаңа дүкен"})
+    client = TestClient(app)
+
+    giga = client.get("/giga-kz?lang=kz")
+    unknown = client.get("/unknown-kz?lang=kz")
+    assert giga.status_code == unknown.status_code == 200
+    assert "келісім бойынша" in giga.text
+    assert "2 000 тауарлық шегінен асады" in giga.text
+    assert "Каталогтің нақты көлемін қосылу кезінде анықтаймыз" in unknown.text

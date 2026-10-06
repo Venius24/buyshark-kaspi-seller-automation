@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="ru">
+<html lang="{{ 'kk' if lang == 'kz' else 'ru' }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#07131b">
-<meta name="description" content="Персональное коммерческое предложение BuyShark для {{ offer.client_name }}.">
-<title>КП для {{ offer.client_name }} · BuyShark</title>
+<meta name="description" content="{{ tr('Персональное коммерческое предложение BuyShark для {name}.', name=offer.client_name) }}">
+<title>{{ tr('КП для {name}', name=offer.client_name) }} · BuyShark</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -46,6 +46,9 @@
   .header-nav { margin-left: auto; display: flex; align-items: center; gap: 27px; }
   .header-nav a { font-size: 13px; color: var(--muted); text-decoration: none; transition: color .2s; }
   .header-nav a:hover, .header-nav a.is-current { color: var(--teal); }
+  .language-switch { display: inline-flex; flex: none; padding: 3px; border: 1px solid var(--line-strong); border-radius: 999px; }
+  .language-switch a { min-width: 39px; padding: 5px 8px; border-radius: 999px; color: var(--muted); text-align: center; text-decoration: none; font-size: 11px; font-weight: 800; }
+  .language-switch a[aria-current="page"] { background: var(--teal); color: var(--dark-ink); }
   .header-cta { border: 1px solid var(--line-strong); border-radius: 999px; padding: 9px 15px; font-size: 12px; font-weight: 800; text-decoration: none; white-space: nowrap; transition: background .2s, border-color .2s; }
   .header-cta:hover { background: rgba(140,231,215,.1); border-color: var(--teal); }
   .hero { padding: 86px 0 89px; display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(350px, .92fr); gap: min(6vw, 80px); align-items: center; }
@@ -229,7 +232,8 @@
     .logo { font-size: 15px; }
     .logo-mark { width: 31px; height: 31px; }
     .header-nav { display: none; }
-    .header-cta { margin-left: auto; font-size: 11px; padding: 7px 12px; }
+    .language-switch { margin-left: auto; }
+    .header-cta { display: none; }
     .hero { display: flex; flex-direction: column; align-items: stretch; padding: 48px 0 59px; gap: 33px; }
     .hero h1 { font-size: clamp(35px, 8.3vw, 54px); margin: 21px 0 19px; }
     .hero-lead { font-size: 15px; margin-bottom: 25px; }
@@ -326,52 +330,56 @@
 <div class="reading-progress" aria-hidden="true"></div>
 <header class="site-header">
   <div class="shell header-inner">
-    <a class="logo" href="https://buyshark.kz/" aria-label="BuyShark — главная">
+    <a class="logo" href="https://buyshark.kz/" aria-label="{{ tr('BuyShark — главная') }}">
       <span class="logo-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M3 22.5c6.9-2.4 10.1-9.3 12.5-17.5 2.2 3.2 3.4 6.6 3.7 10.2 4.5.2 7.7 2.4 9.8 6.7-5.1-.7-8.7.2-11.5 4.1C12.7 24.3 8 23.4 3 22.5Z" fill="currentColor"/></svg></span>
       BuyShark
     </a>
-    <nav class="header-nav" aria-label="Разделы предложения">
-      {% if snapshot_items %}<a href="#store">Ваш магазин</a>{% endif %}
-      <a href="#demo">{{ 'Ваш товар' if sample_product else 'Демо товара' }}</a><a href="#plan">Тариф</a><a href="#compare">Сравнить</a><a href="#start">Запуск</a>
+    <nav class="header-nav" aria-label="{{ tr('Разделы предложения') }}">
+      {% if snapshot_items %}<a href="#store">{{ tr('Ваш магазин') }}</a>{% endif %}
+      <a href="#demo">{{ tr('Ваш товар') if sample_product else tr('Демо товара') }}</a><a href="#plan">{{ tr('Тариф') }}</a><a href="#compare">{{ tr('Сравнить') }}</a><a href="#start">{{ tr('Запуск') }}</a>
     </nav>
-    <a class="header-cta" href="{{ wa_link }}" target="_blank" rel="noopener">Обсудить КП ↗</a>
+    <div class="language-switch" role="group" aria-label="Тіл / Язык">
+      <a href="{{ request.url.path }}?lang=ru" lang="ru"{% if lang == 'ru' %} aria-current="page"{% endif %}>RU</a>
+      <a href="{{ request.url.path }}?lang=kz" lang="kk"{% if lang == 'kz' %} aria-current="page"{% endif %}>ҚАЗ</a>
+    </div>
+    <a class="header-cta" href="{{ wa_link }}" target="_blank" rel="noopener">{{ tr('Обсудить КП') }} ↗</a>
   </div>
 </header>
 <main>
   <section class="shell hero" aria-labelledby="hero-title">
     <div class="hero-copy">
-      <span class="eyebrow">Персональное предложение · {{ doc_date }}</span>
-      <h1 id="hero-title">Больше контроля.<br><span>Меньше рутины.</span><br>Для {{ offer.client_name }}.</h1>
-      <p class="hero-lead">Мы изучили ваш каталог на Kaspi и подобрали тариф под размер магазина. Цены, заказы и остатки — в одном рабочем ритме.</p>
+      <span class="eyebrow">{{ tr('Персональное предложение') }} · {{ doc_date }}</span>
+      <h1 id="hero-title">{{ tr('Больше контроля.') }}<br><span>{{ tr('Меньше рутины.') }}</span><br>{{ tr('Для {name}.', name=offer.client_name) }}</h1>
+      <p class="hero-lead">{{ tr('Мы изучили ваш каталог на Kaspi и подобрали тариф под размер магазина. Цены, заказы и остатки — в одном рабочем ритме.') }}</p>
       <div class="hero-actions">
-        <a class="button button-primary" href="#plan">Посмотреть предложение <span aria-hidden="true">↗</span></a>
-        <a class="button button-ghost" href="#demo">{{ 'Ваш товар на Kaspi' if sample_product else 'Демо одного товара' }} <span aria-hidden="true">↓</span></a>
+        <a class="button button-primary" href="#plan">{{ tr('Посмотреть предложение') }} <span aria-hidden="true">↗</span></a>
+        <a class="button button-ghost" href="#demo">{{ tr('Ваш товар на Kaspi') if sample_product else tr('Демо одного товара') }} <span aria-hidden="true">↓</span></a>
       </div>
-      <div class="hero-assurance"><span>7 дней бесплатно</span><span>Без банковской карты</span><span>Тариф можно изменить</span></div>
+      <div class="hero-assurance"><span>{{ tr('7 дней бесплатно') }}</span><span>{{ tr('Без банковской карты') }}</span><span>{{ tr('Тариф можно изменить') }}</span></div>
     </div>
-    <div class="hero-visual" aria-label="Краткое содержание предложения">
+    <div class="hero-visual" aria-label="{{ tr('Краткое содержание предложения') }}">
       <div class="visual-glow" aria-hidden="true"></div>
       <div class="visual-card">
-        <div class="visual-top"><span>Подобрано для вас</span><span>BuyShark</span></div>
+        <div class="visual-top"><span>{{ tr('Подобрано для вас') }}</span><span>BuyShark</span></div>
         <div class="visual-main">
-          <p class="visual-kicker">Ваш тариф</p>
+          <p class="visual-kicker">{{ tr('Ваш тариф') }}</p>
           <p class="visual-title">{{ tier.name }}</p>
-          <p class="visual-subtitle">{{ "До " ~ "{:,}".format(tier.limit).replace(",", " ") ~ " товаров" if tier.limit else "Безлимит товаров" }}</p>
+          <p class="visual-subtitle">{{ tr('До {limit} товаров', limit="{:,}".format(tier.limit).replace(",", " ")) if tier.limit else tr('Безлимит товаров') }}</p>
         </div>
         {% if offer.product_count is not none and tier.limit %}
-        <div class="visual-track" role="img" aria-label="{{ offer.product_count }} из {{ tier.limit }} товаров в лимите тарифа" style="--fill: {{ ((offer.product_count / tier.limit) * 100)|round|int }}%"><span></span></div>
-        <div class="visual-scale"><span>Ваш каталог <strong>{{ offer.product_count }}</strong></span><span>Лимит <strong>{{ tier.limit }}</strong></span></div>
+        <div class="visual-track" role="img" aria-label="{{ tr('{count} из {limit} товаров в лимите тарифа', count=offer.product_count, limit=tier.limit) }}" style="--fill: {{ ((offer.product_count / tier.limit) * 100)|round|int }}%"><span></span></div>
+        <div class="visual-scale"><span>{{ tr('Ваш каталог') }} <strong>{{ offer.product_count }}</strong></span><span>{{ tr('Лимит') }} <strong>{{ tier.limit }}</strong></span></div>
         {% else %}
         <div class="visual-track" aria-hidden="true" style="--fill: 65%"><span></span></div>
-        <div class="visual-scale"><span>Под ваш масштаб</span><span>Можно расти</span></div>
+        <div class="visual-scale"><span>{{ tr('Под ваш масштаб') }}</span><span>{{ tr('Можно расти') }}</span></div>
         {% endif %}
         <div class="visual-divider"></div>
         <div class="visual-bottom">
-          <div><small>{% if discounted_price %}Первый оплаченный месяц{% else %}Стоимость в месяц{% endif %}</small><strong>{{ discounted_price | tg if discounted_price else monthly_price | tg }}</strong></div>
-          {% if fixed_price_offer %}<span class="visual-badge">Специальная цена на старт</span>{% elif discounted_price %}<span class="visual-badge">−{{ discount_pct }}% на старт</span>{% else %}<span class="visual-badge">7 дней бесплатно</span>{% endif %}
+          <div><small>{{ tr('Первый оплаченный месяц') if discounted_price else tr('Стоимость в месяц') }}</small><strong>{{ discounted_price | tg if discounted_price else monthly_price | tg }}</strong></div>
+          {% if fixed_price_offer %}<span class="visual-badge">{{ tr('Специальная цена на старт') }}</span>{% elif discounted_price %}<span class="visual-badge">{{ tr('−{discount}% на старт', discount=discount_pct) }}</span>{% else %}<span class="visual-badge">{{ tr('7 дней бесплатно') }}</span>{% endif %}
         </div>
       </div>
-      <div class="visual-note"><b>{{ doc_number }}</b>Подготовлено специально для вашего магазина</div>
+      <div class="visual-note"><b>{{ doc_number }}</b>{{ tr('Подготовлено специально для вашего магазина') }}</div>
     </div>
   </section>
 
@@ -379,8 +387,8 @@
   <section class="section" id="store" aria-labelledby="store-title">
     <div class="shell">
       <div class="section-heading reveal">
-        <div><div class="section-index"><span>01 /</span> Ваш контекст</div><h2 id="store-title">Сначала — ваш магазин.</h2></div>
-        <p>Подбор опирается на размер каталога и информацию о магазине, а не на универсальный пакет для всех.</p>
+        <div><div class="section-index"><span>01 /</span> {{ tr('Ваш контекст') }}</div><h2 id="store-title">{{ tr('Сначала — ваш магазин.') }}</h2></div>
+        <p>{{ tr('Подбор опирается на размер каталога и информацию о магазине, а не на универсальный пакет для всех.') }}</p>
       </div>
       <div class="snapshot cols-{{ snapshot_items|length if snapshot_items|length <= 3 else 3 }} reveal">
         {% for value, label in snapshot_items %}
@@ -388,8 +396,8 @@
         {% endfor %}
       </div>
       {% if offer.categories %}
-      <div class="context-note reveal"><div><p>В вашем каталоге несколько крупных направлений. <strong>Конкуренция по цене на карточке</strong> влияет на то, увидит ли покупатель ваш магазин.</p>
-        <div class="category-list">{% for c in offer.categories %}<span>{{ c.name }} <b>{{ c.count }}</b></span>{% endfor %}</div>
+      <div class="context-note reveal"><div><p>{{ tr('В вашем каталоге несколько крупных направлений.') }} <strong>{{ tr('Конкуренция по цене на карточке') }}</strong> {{ tr('влияет на то, увидит ли покупатель ваш магазин.') }}</p>
+        <div class="category-list">{% for c in offer.categories %}<span>{{ c.get('name_kz', c.name) if lang == 'kz' else c.name }} <b>{{ c.count }}</b></span>{% endfor %}</div>
       </div></div>
       {% endif %}
     </div>
@@ -399,13 +407,13 @@
   <section class="section" id="demo" aria-labelledby="demo-title">
     <div class="shell">
       <div class="section-heading reveal">
-        <div><div class="section-index"><span>{{ "02" if snapshot_items else "01" }} /</span> Товар на Kaspi</div><h2 id="demo-title">{% if sample_product %}Ваш товар и его цена на витрине.{% else %}Один товар. Три сценария цены.{% endif %}</h2></div>
-        <p>{% if sample_product %}Публичные цены в Алматы на {{ sample_product.observed_label }}. Откройте карточку, чтобы увидеть текущие предложения.{% else %}Нажмите на цену конкурента и посмотрите, как меняется рекомендация с учётом заданного минимума.{% endif %}</p>
+        <div><div class="section-index"><span>{{ "02" if snapshot_items else "01" }} /</span> {{ tr('Товар на Kaspi') }}</div><h2 id="demo-title">{{ tr('Ваш товар и его цена на витрине.') if sample_product else tr('Один товар. Три сценария цены.') }}</h2></div>
+        <p>{{ tr('Публичные цены в Алматы на {date}. Откройте карточку, чтобы увидеть текущие предложения.', date=sample_product.observed_label) if sample_product else tr('Нажмите на цену конкурента и посмотрите, как меняется рекомендация с учётом заданного минимума.') }}</p>
       </div>
       <div class="demo-stage reveal">
-        <article class="demo-product" aria-label="{{ 'Товар магазина' if sample_product else 'Демонстрационный товар' }}">
+        <article class="demo-product" aria-label="{{ tr('Товар магазина') if sample_product else tr('Демонстрационный товар') }}">
           <div class="demo-image">
-            <span class="demo-image-label">{% if sample_product %}Товар с вашей витрины{% else %}Пример · 1 товар{% endif %}</span>
+            <span class="demo-image-label">{{ tr('Товар с вашей витрины') if sample_product else tr('Пример · 1 товар') }}</span>
             {% if sample_product and sample_product.image_url %}<img src="{{ sample_product.image_url }}" alt="{{ sample_product.title }}" loading="lazy">
             {% else %}
             <svg viewBox="0 0 260 220" fill="none" aria-hidden="true">
@@ -423,57 +431,57 @@
           </div>
           <div class="demo-product-info">
             {% if sample_product %}
-            <p class="demo-sku">Kaspi · товар {{ sample_product.sku }}</p>
-            <h3>{{ sample_product.title }}</h3>
-            <p class="demo-meta"><a href="{{ sample_product.url }}" target="_blank" rel="noopener noreferrer">Открыть товар на Kaspi ↗</a> · Алматы · {{ sample_product.observed_label }}</p>
-            <div class="demo-current"><small>Цена вашего магазина на момент проверки</small><strong>{{ sample_product.price | tg }}</strong></div>
+            <p class="demo-sku">{{ tr('Kaspi · товар {sku}', sku=sample_product.sku) }}</p>
+            <h3>{{ sample_product.get('title_kz', sample_product.title) if lang == 'kz' else sample_product.title }}</h3>
+            <p class="demo-meta"><a href="{{ sample_product.url }}" target="_blank" rel="noopener noreferrer">{{ tr('Открыть товар на Kaspi') }} ↗</a> · Алматы · {{ sample_product.observed_label }}</p>
+            <div class="demo-current"><small>{{ tr('Цена вашего магазина на момент проверки') }}</small><strong>{{ sample_product.price | tg }}</strong></div>
             {% else %}
-            <p class="demo-sku">SKU DEMO-001 · электроника</p>
-            <h3>Беспроводные наушники TWS</h3>
-            <p class="demo-meta">Остаток: 12 шт. · товар для примера</p>
-            <div class="demo-current"><small>Цена до изменения</small><strong>12 490 ₸</strong></div>
+            <p class="demo-sku">{{ tr('SKU DEMO-001 · электроника') }}</p>
+            <h3>{{ tr('Беспроводные наушники TWS') }}</h3>
+            <p class="demo-meta">{{ tr('Остаток: 12 шт. · товар для примера') }}</p>
+            <div class="demo-current"><small>{{ tr('Цена до изменения') }}</small><strong>12 490 ₸</strong></div>
             {% endif %}
           </div>
         </article>
         <div class="demo-panel">
           {% if sample_product %}
-          <div class="demo-panel-top">Снимок предложений Kaspi · без изменения цен</div>
+          <div class="demo-panel-top">{{ tr('Снимок предложений Kaspi · без изменения цен') }}</div>
           {% if sample_product.competitors %}
-          <h3>Цена рядом с конкурентами</h3>
-          <p class="demo-panel-lead">Выберите цену другого продавца. Ниже показан пример расчёта с шагом 10 ₸. Ваш минимальный порог здесь неизвестен и будет задан при подключении.</p>
-          <span class="demo-choice-label" id="demo-choice-label">Цена конкурента на момент проверки</span>
+          <h3>{{ tr('Цена рядом с конкурентами') }}</h3>
+          <p class="demo-panel-lead">{{ tr('Выберите цену другого продавца. Ниже показан пример расчёта с шагом 10 ₸. Ваш минимальный порог здесь неизвестен и будет задан при подключении.') }}</p>
+          <span class="demo-choice-label" id="demo-choice-label">{{ tr('Цена конкурента на момент проверки') }}</span>
           <div class="demo-choices" role="group" aria-labelledby="demo-choice-label">
             {% for price in sample_product.competitors %}<button type="button" data-competitor="{{ price }}" aria-pressed="{{ 'true' if loop.first else 'false' }}">{{ price | tg }}</button>{% endfor %}
           </div>
           <div class="demo-prices" aria-live="polite">
-            <div class="demo-price-cell"><small>Конкурент</small><strong id="demo-competitor">{{ sample_product.competitors[0] | tg }}</strong></div>
+            <div class="demo-price-cell"><small>{{ tr('Конкурент') }}</small><strong id="demo-competitor">{{ sample_product.competitors[0] | tg }}</strong></div>
             <span class="demo-arrow" aria-hidden="true">→</span>
-            <div class="demo-price-cell highlight"><small>Расчётная цена</small><strong id="demo-target">{{ (sample_product.competitors[0] - 10) | tg }}</strong></div>
+            <div class="demo-price-cell highlight"><small>{{ tr('Расчётная цена') }}</small><strong id="demo-target">{{ (sample_product.competitors[0] - 10) | tg }}</strong></div>
           </div>
-          <p class="demo-status" id="demo-status">На 10 ₸ ниже цены конкурента, если позволяет ваш минимум</p>
+          <p class="demo-status" id="demo-status">{{ tr('На 10 ₸ ниже цены конкурента, если позволяет ваш минимум') }}</p>
           {% else %}
-          <h3>Ваш товар в продаже</h3>
-          <p class="demo-panel-lead">Цена вашего магазина указана слева. На момент проверки других предложений по этой карточке не удалось получить.</p>
+          <h3>{{ tr('Ваш товар в продаже') }}</h3>
+          <p class="demo-panel-lead">{{ tr('Цена вашего магазина указана слева. На момент проверки других предложений по этой карточке не удалось получить.') }}</p>
           {% endif %}
-          <p class="demo-caption">Цены Kaspi могут измениться. Расчёт выше — иллюстрация, не обещание новой цены и не изменение цены на Kaspi.{% if tier.key == "start" %} Демпинг-бот доступен с тарифа «Охотник».{% endif %}</p>
+          <p class="demo-caption">{{ tr('Цены Kaspi могут измениться. Расчёт выше — иллюстрация, не обещание новой цены и не изменение цены на Kaspi.') }}{% if tier.key == "start" %} {{ tr('Демпинг-бот доступен с тарифа «Охотник».') }}{% endif %}</p>
           {% else %}
-          <div class="demo-panel-top">Симуляция · без изменения реальных цен</div>
-          <h3>Что сделает демпинг-бот?</h3>
-          <p class="demo-panel-lead">В этом примере он предлагает цену на 10 ₸ ниже конкурента, но не ниже вашего минимума.</p>
-          <span class="demo-choice-label" id="demo-choice-label">Выберите цену конкурента</span>
+          <div class="demo-panel-top">{{ tr('Симуляция · без изменения реальных цен') }}</div>
+          <h3>{{ tr('Что сделает демпинг-бот?') }}</h3>
+          <p class="demo-panel-lead">{{ tr('В этом примере он предлагает цену на 10 ₸ ниже конкурента, но не ниже вашего минимума.') }}</p>
+          <span class="demo-choice-label" id="demo-choice-label">{{ tr('Выберите цену конкурента') }}</span>
           <div class="demo-choices" role="group" aria-labelledby="demo-choice-label">
             <button type="button" data-competitor="11990" aria-pressed="true">11 990 ₸</button>
             <button type="button" data-competitor="10490" aria-pressed="false">10 490 ₸</button>
             <button type="button" data-competitor="8590" aria-pressed="false">8 590 ₸</button>
           </div>
           <div class="demo-prices" aria-live="polite">
-            <div class="demo-price-cell"><small>Конкурент</small><strong id="demo-competitor">11 990 ₸</strong></div>
+            <div class="demo-price-cell"><small>{{ tr('Конкурент') }}</small><strong id="demo-competitor">11 990 ₸</strong></div>
             <span class="demo-arrow" aria-hidden="true">→</span>
-            <div class="demo-price-cell highlight"><small>Ваша цена</small><strong id="demo-target">11 980 ₸</strong></div>
+            <div class="demo-price-cell highlight"><small>{{ tr('Ваша цена') }}</small><strong id="demo-target">11 980 ₸</strong></div>
           </div>
-          <p class="demo-status" id="demo-status">На 10 ₸ ниже цены конкурента</p>
-          <div class="demo-floor"><span>Заданный вами минимум</span><strong>9 900 ₸</strong></div>
-          <p class="demo-caption">Товар и цены условные. Это демонстрация расчёта, а не изменение цены в Kaspi.{% if tier.key == "start" %} Демпинг-бот доступен с тарифа «Охотник».{% endif %}</p>
+          <p class="demo-status" id="demo-status">{{ tr('На 10 ₸ ниже цены конкурента') }}</p>
+          <div class="demo-floor"><span>{{ tr('Заданный вами минимум') }}</span><strong>9 900 ₸</strong></div>
+          <p class="demo-caption">{{ tr('Товар и цены условные. Это демонстрация расчёта, а не изменение цены в Kaspi.') }}{% if tier.key == "start" %} {{ tr('Демпинг-бот доступен с тарифа «Охотник».') }}{% endif %}</p>
           {% endif %}
         </div>
       </div>
@@ -483,21 +491,21 @@
   <section class="section" id="plan" aria-labelledby="plan-title">
     <div class="shell">
       <div class="section-heading reveal">
-        <div><div class="section-index"><span>{{ "03" if snapshot_items else "02" }} /</span> Рекомендация</div><h2 id="plan-title">Тариф под ваш масштаб.</h2></div>
-        <p>Инструменты для ежедневной работы и место для роста каталога.</p>
+        <div><div class="section-index"><span>{{ "03" if snapshot_items else "02" }} /</span> {{ tr('Рекомендация') }}</div><h2 id="plan-title">{{ tr('Тариф под ваш масштаб.') }}</h2></div>
+        <p>{{ tr('Инструменты для ежедневной работы и место для роста каталога.') }}</p>
       </div>
       <p class="recommendation-intro reveal">{{ recommendation_text }}</p>
       <div class="offer-card reveal">
         <div class="offer-card-top">
           <div>
-            <span class="offer-label">Рекомендуем для {{ offer.client_name }}</span>
+            <span class="offer-label">{{ tr('Рекомендуем для {name}', name=offer.client_name) }}</span>
             <h3>{{ tier.name }}</h3>
-            <p class="offer-limit">{{ "До " ~ "{:,}".format(tier.limit).replace(",", " ") ~ " товаров" if tier.limit else "Безлимит товаров" }}{% if offer.product_count is not none %} · сейчас {{ offer.product_count }}{% endif %}</p>
+            <p class="offer-limit">{{ tr('До {limit} товаров', limit="{:,}".format(tier.limit).replace(",", " ")) if tier.limit else tr('Безлимит товаров') }}{% if offer.product_count is not none %}{{ tr(' · сейчас {count}', count=offer.product_count) }}{% endif %}</p>
           </div>
           <div class="offer-price">
             {% if discounted_price %}<span class="old">{{ monthly_price | tg }}</span>{% endif %}
             <span class="price">{{ discounted_price | tg if discounted_price else monthly_price | tg }}</span>
-            <span class="period">{% if discounted_price %}первый оплаченный месяц · затем {{ monthly_price | tg }}/мес{% elif monthly_price %}в месяц{% else %}индивидуально под ваш объём{% endif %}</span>
+            <span class="period">{% if discounted_price %}{{ tr('первый оплаченный месяц · затем {price}/мес', price=monthly_price | tg) }}{% elif monthly_price %}{{ tr('в месяц') }}{% else %}{{ tr('индивидуально под ваш объём') }}{% endif %}</span>
           </div>
         </div>
         <div class="offer-features">
@@ -506,8 +514,8 @@
           {% endfor %}
         </div>
         <div class="offer-footer">
-          <p><strong>Первые 7 дней бесплатно.</strong> Без банковской карты. {% if fixed_price_offer %}После пробного периода первый оплаченный месяц — {{ discounted_price | tg }}, затем {{ monthly_price | tg }}/мес.{% elif discounted_price %}После пробного периода первый оплаченный месяц со скидкой {{ discount_pct }}%.{% endif %}</p>
-          <a class="button button-primary" href="{{ wa_link }}" target="_blank" rel="noopener">Обсудить подключение <span aria-hidden="true">↗</span></a>
+          <p><strong>{{ tr('Первые 7 дней бесплатно.') }}</strong> {{ tr('Без банковской карты') }}. {% if fixed_price_offer %}{{ tr('После пробного периода первый оплаченный месяц — {first}, затем {monthly}/мес.', first=discounted_price | tg, monthly=monthly_price | tg) }}{% elif discounted_price %}{{ tr('После пробного периода первый оплаченный месяц со скидкой {discount}%.', discount=discount_pct) }}{% endif %}</p>
+          <a class="button button-primary" href="{{ wa_link }}" target="_blank" rel="noopener">{{ tr('Обсудить подключение') }} <span aria-hidden="true">↗</span></a>
         </div>
       </div>
     </div>
@@ -516,26 +524,26 @@
   <section class="section" id="compare" aria-labelledby="compare-title">
     <div class="shell">
       <div class="section-heading reveal">
-        <div><div class="section-index"><span>{{ "04" if snapshot_items else "03" }} /</span> Выбор</div><h2 id="compare-title">А если каталог вырастет?</h2></div>
-        <p>Передвиньте ползунок и посмотрите, какой тариф подходит по лимиту товаров.</p>
+        <div><div class="section-index"><span>{{ "04" if snapshot_items else "03" }} /</span> {{ tr('Выбор') }}</div><h2 id="compare-title">{{ tr('А если каталог вырастет?') }}</h2></div>
+        <p>{{ tr('Передвиньте ползунок и посмотрите, какой тариф подходит по лимиту товаров.') }}</p>
       </div>
       <div class="explorer reveal">
-        <div class="explorer-head"><div><h3>Примерьте другой объём</h3><p>Расчёт по количеству товаров. Ваше персональное предложение выше остаётся тем же.</p></div><span class="explorer-tag">Интерактивно</span></div>
-        <div class="range-row"><label for="product-range">Товаров</label><output id="product-count" for="product-range">—</output></div>
-        <input id="product-range" type="range" min="1" max="3000" value="{{ [offer.product_count or 500, 3000]|min }}" aria-label="Количество товаров для подбора тарифа">
-        <div class="range-ticks"><span>1 товар</span><span>3 000+ товаров</span></div>
-        <div class="growth-presets" aria-label="Быстрый выбор количества товаров">
-          {% if offer.product_count is not none %}<button type="button" data-count="{{ offer.product_count }}">Сейчас: {{ offer.product_count }}</button>{% endif %}
+        <div class="explorer-head"><div><h3>{{ tr('Примерьте другой объём') }}</h3><p>{{ tr('Расчёт по количеству товаров. Ваше персональное предложение выше остаётся тем же.') }}</p></div><span class="explorer-tag">{{ tr('Интерактивно') }}</span></div>
+        <div class="range-row"><label for="product-range">{{ tr('Товаров') }}</label><output id="product-count" for="product-range">—</output></div>
+        <input id="product-range" type="range" min="1" max="3000" value="{{ [offer.product_count or 500, 3000]|min }}" aria-label="{{ tr('Количество товаров для подбора тарифа') }}">
+        <div class="range-ticks"><span>{{ tr('1 товар') }}</span><span>{{ tr('3 000+ товаров') }}</span></div>
+        <div class="growth-presets" aria-label="{{ tr('Быстрый выбор количества товаров') }}">
+          {% if offer.product_count is not none %}<button type="button" data-count="{{ offer.product_count }}">{{ tr('Сейчас: {count}', count=offer.product_count) }}</button>{% endif %}
           <button type="button" data-count="50">50</button><button type="button" data-count="200">200</button><button type="button" data-count="1000">1 000</button><button type="button" data-count="2000">2 000</button><button type="button" data-count="3000">3 000+</button>
         </div>
-        <div class="explorer-result" aria-live="polite"><div><small>Подходит по лимиту</small><strong id="matched-tier">—</strong></div><div class="result-price"><small>Цена тарифа в месяц</small><strong id="matched-price">—</strong></div></div>
-        <p class="explorer-footnote">Ориентир по открытому каталогу тарифов. Индивидуальные условия и скидка из этого КП указаны выше.</p>
+        <div class="explorer-result" aria-live="polite"><div><small>{{ tr('Подходит по лимиту') }}</small><strong id="matched-tier">—</strong></div><div class="result-price"><small>{{ tr('Цена тарифа в месяц') }}</small><strong id="matched-price">—</strong></div></div>
+        <p class="explorer-footnote">{{ tr('Ориентир по открытому каталогу тарифов. Индивидуальные условия и скидка из этого КП указаны выше.') }}</p>
       </div>
-      <button class="lineup-toggle reveal" type="button" aria-expanded="false" aria-controls="full-lineup"><span>Посмотреть все 5 тарифов и цены</span><span aria-hidden="true">+</span></button>
+      <button class="lineup-toggle reveal" type="button" aria-expanded="false" aria-controls="full-lineup"><span>{{ tr('Посмотреть все 5 тарифов и цены') }}</span><span aria-hidden="true">+</span></button>
       <div class="lineup" id="full-lineup" hidden>
         {% for t in all_tiers %}
         <div class="tier-card{% if t.key == tier.key %} is-offer{% endif %}" data-limit="{{ t.limit or 0 }}" data-name="{{ t.name }}" data-price="{{ t.price | tg }}">
-          <h4>{{ t.name }}</h4><p>{{ "До " ~ "{:,}".format(t.limit).replace(",", " ") ~ " товаров" if t.limit else "Безлимит, свой SLA" }}</p><strong>{{ t.price | tg }}</strong>{% if t.key == tier.key %}<span class="tier-tag">Ваше КП</span>{% endif %}
+          <h4>{{ t.name }}</h4><p>{{ tr('До {limit} товаров', limit="{:,}".format(t.limit).replace(",", " ")) if t.limit else tr('безлимит, свой SLA') }}</p><strong>{{ t.price | tg }}</strong>{% if t.key == tier.key %}<span class="tier-tag">{{ tr('Ваше КП') }}</span>{% endif %}
         </div>
         {% endfor %}
       </div>
@@ -545,40 +553,40 @@
   <section class="section" id="start" aria-labelledby="start-title">
     <div class="shell">
       <div class="section-heading reveal">
-        <div><div class="section-index"><span>{{ "05" if snapshot_items else "04" }} /</span> Старт</div><h2 id="start-title">От КП до рабочего магазина.</h2></div>
-        <p>Три простых шага, чтобы проверить сервис на своих товарах.</p>
+        <div><div class="section-index"><span>{{ "05" if snapshot_items else "04" }} /</span> {{ tr('Старт') }}</div><h2 id="start-title">{{ tr('От КП до рабочего магазина.') }}</h2></div>
+        <p>{{ tr('Три простых шага, чтобы проверить сервис на своих товарах.') }}</p>
       </div>
       <div class="steps">
-        <div class="step reveal"><span class="step-number">01</span><h3>Подключаете магазин</h3><p>Авторизация через кабинет продавца по email. Обычно это занимает 5–10 минут.</p></div>
-        <div class="step reveal"><span class="step-number">02</span><h3>Пробуете 7 дней</h3><p>Тариф «{{ tier.name }}» работает на ваших товарах и заказах с первого дня. Банковская карта не нужна.</p></div>
-        <div class="step reveal"><span class="step-number">03</span><h3>{% if discounted_price %}Первый месяц по специальной цене{% else %}Решаете, оставаться ли{% endif %}</h3><p>{% if discounted_price %}{{ discounted_price | tg }} за первый оплаченный месяц. Затем {{ monthly_price | tg }} в месяц.{% else %}После пробного периода решаете, подходит ли вам сервис и тариф.{% endif %} Тариф можно поменять в кабинете.</p></div>
+        <div class="step reveal"><span class="step-number">01</span><h3>{{ tr('Подключаете магазин') }}</h3><p>{{ tr('Авторизация через кабинет продавца по email. Обычно это занимает 5–10 минут.') }}</p></div>
+        <div class="step reveal"><span class="step-number">02</span><h3>{{ tr('Пробуете 7 дней') }}</h3><p>{{ tr('Тариф «{name}» работает на ваших товарах и заказах с первого дня. Банковская карта не нужна.', name=tier.name) }}</p></div>
+        <div class="step reveal"><span class="step-number">03</span><h3>{{ tr('Первый месяц по специальной цене') if discounted_price else tr('Решаете, оставаться ли') }}</h3><p>{% if discounted_price %}{{ tr('{first} за первый оплаченный месяц. Затем {monthly} в месяц.', first=discounted_price | tg, monthly=monthly_price | tg) }}{% else %}{{ tr('После пробного периода решаете, подходит ли вам сервис и тариф.') }}{% endif %} {{ tr('Тариф можно поменять в кабинете.') }}</p></div>
       </div>
     </div>
   </section>
 
   <section class="section" id="questions" aria-labelledby="questions-title">
     <div class="shell">
-      <div class="section-heading reveal"><div><div class="section-index"><span>{{ "06" if snapshot_items else "05" }} /</span> Вопросы</div><h2 id="questions-title">Коротко о главном.</h2></div></div>
+      <div class="section-heading reveal"><div><div class="section-index"><span>{{ "06" if snapshot_items else "05" }} /</span> {{ tr('Вопросы') }}</div><h2 id="questions-title">{{ tr('Коротко о главном.') }}</h2></div></div>
       <div class="faq-list reveal">
-        <details><summary>Нужна ли карта для пробного периода?</summary><p>Нет. Первые 7 дней доступны без банковской карты.</p></details>
-        <details><summary>Что будет после 7 дней?</summary><p>{% if discounted_price %}Первый оплаченный месяц на тарифе «{{ tier.name }}» стоит {{ discounted_price | tg }}. Далее — {{ monthly_price | tg }} в месяц.{% elif monthly_price %}Стоимость тарифа «{{ tier.name }}» — {{ monthly_price | tg }} в месяц.{% else %}Стоимость и условия для вашего объёма обсудим индивидуально.{% endif %}</p></details>
-        <details><summary>Можно ли поменять тариф?</summary><p>Да. Тариф можно изменить из кабинета вверх или вниз без потери истории.</p></details>
-        <details><summary>Как задать вопрос по КП?</summary><p>Напишите нам в WhatsApp по кнопке ниже — сообщение уже содержит название вашего магазина и тарифа.</p></details>
+        <details><summary>{{ tr('Нужна ли карта для пробного периода?') }}</summary><p>{{ tr('Нет. Первые 7 дней доступны без банковской карты.') }}</p></details>
+        <details><summary>{{ tr('Что будет после 7 дней?') }}</summary><p>{% if discounted_price %}{{ tr('Первый оплаченный месяц на тарифе «{name}» стоит {first}. Далее — {monthly} в месяц.', name=tier.name, first=discounted_price | tg, monthly=monthly_price | tg) }}{% elif monthly_price %}{{ tr('Стоимость тарифа «{name}» — {monthly} в месяц.', name=tier.name, monthly=monthly_price | tg) }}{% else %}{{ tr('Стоимость и условия для вашего объёма обсудим индивидуально.') }}{% endif %}</p></details>
+        <details><summary>{{ tr('Можно ли поменять тариф?') }}</summary><p>{{ tr('Да. Тариф можно изменить из кабинета вверх или вниз без потери истории.') }}</p></details>
+        <details><summary>{{ tr('Как задать вопрос по КП?') }}</summary><p>{{ tr('Напишите нам в WhatsApp по кнопке ниже — сообщение уже содержит название вашего магазина и тарифа.') }}</p></details>
       </div>
     </div>
   </section>
 
   <div class="shell">
     <div class="final-cta reveal" id="contact">
-      <div><div class="section-index" style="color:#23615e;margin-bottom:18px">Следующий шаг</div><h2>Готовы подключить {{ offer.client_name }}?</h2><p>Ответим в WhatsApp, расскажем о запуске и поможем выбрать удобное время. Будни 10:00–23:00.</p></div>
-      <a class="button" href="{{ wa_link }}" target="_blank" rel="noopener">Написать в WhatsApp <span aria-hidden="true">↗</span></a>
+      <div><div class="section-index" style="color:#23615e;margin-bottom:18px">{{ tr('Следующий шаг') }}</div><h2>{{ tr('Готовы подключить {name}?', name=offer.client_name) }}</h2><p>{{ tr('Ответим в WhatsApp, расскажем о запуске и поможем выбрать удобное время. Будни 10:00–23:00.') }}</p></div>
+      <a class="button" href="{{ wa_link }}" target="_blank" rel="noopener">{{ tr('Написать в WhatsApp') }} <span aria-hidden="true">↗</span></a>
     </div>
-    <footer><span>BuyShark · <a href="https://buyshark.kz/">buyshark.kz</a> · автоматизация продаж на Kaspi</span><span>{{ doc_number }} · Действительно 30 дней с даты выпуска</span></footer>
+    <footer><span>BuyShark · <a href="https://buyshark.kz/">buyshark.kz</a> · {{ tr('автоматизация продаж на Kaspi') }}</span><span>{{ doc_number }} · {{ tr('Действительно 30 дней с даты выпуска') }}</span></footer>
   </div>
 </main>
-<div class="mobile-cta" aria-label="Быстрая связь по коммерческому предложению">
-  <div><small>Ваш тариф · {{ tier.name }}</small><b>{{ discounted_price | tg if discounted_price else monthly_price | tg }}</b></div>
-  <a class="button button-primary" href="{{ wa_link }}" target="_blank" rel="noopener">Написать ↗</a>
+<div class="mobile-cta" aria-label="{{ tr('Быстрая связь по коммерческому предложению') }}">
+  <div><small>{{ tr('Ваш тариф · {name}', name=tier.name) }}</small><b>{{ discounted_price | tg if discounted_price else monthly_price | tg }}</b></div>
+  <a class="button button-primary" href="{{ wa_link }}" target="_blank" rel="noopener">{{ tr('Написать') }} ↗</a>
 </div>
 <script>
   (() => {
@@ -632,8 +640,8 @@
       competitorOutput.textContent = formatTenge(competitor);
       targetOutput.textContent = formatTenge(target);
       demoStatus.textContent = floor !== null && target === floor
-        ? 'Сохраняем ваш минимум — ниже 9 900 ₸ не опускаемся'
-        : 'На 10 ₸ ниже цены конкурента' + (floor === null ? ', если позволяет ваш минимум' : '');
+        ? {{ tr('Сохраняем ваш минимум — ниже 9 900 ₸ не опускаемся') | tojson }}
+        : {{ tr('На 10 ₸ ниже цены конкурента') | tojson }} + (floor === null ? {{ tr(', если позволяет ваш минимум') | tojson }} : '');
     }));
 
     const range = document.querySelector('#product-range');
