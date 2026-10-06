@@ -618,6 +618,12 @@ class BrainWorker:
                     "asks": len((res.get("guard") or {}).get("asks") or []),
                     "pause_until": (res.get("guard") or {}).get("pause_until"),
                     "last_reset_at": (res.get("guard") or {}).get("last_reset_at"),
+                    # Кто рядом на карточке — для недельного отчёта по конкурентам
+                    # (отзывы за неделю ≈ их продажи), без лишних походов в Kaspi.
+                    "rivals": [
+                        {k: r.get(k) for k in ("merchant_id", "name", "price", "reviews", "rating")}
+                        for r in rival_offers[:5]
+                    ],
                 },
             })
             if res["dumping_status"] not in ("WINNING_1ST", "MAX_PRICE_SINGLE") and best_rival:
