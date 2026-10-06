@@ -366,8 +366,8 @@
         {% endif %}
         <div class="visual-divider"></div>
         <div class="visual-bottom">
-          <div><small>{% if discounted_price %}Первый оплаченный месяц{% else %}Стоимость в месяц{% endif %}</small><strong>{{ discounted_price | tg if discounted_price else tier.price | tg }}</strong></div>
-          {% if discounted_price %}<span class="visual-badge">−{{ discount_pct }}% на старт</span>{% else %}<span class="visual-badge">7 дней бесплатно</span>{% endif %}
+          <div><small>{% if discounted_price %}Первый оплаченный месяц{% else %}Стоимость в месяц{% endif %}</small><strong>{{ discounted_price | tg if discounted_price else monthly_price | tg }}</strong></div>
+          {% if fixed_price_offer %}<span class="visual-badge">Специальная цена на старт</span>{% elif discounted_price %}<span class="visual-badge">−{{ discount_pct }}% на старт</span>{% else %}<span class="visual-badge">7 дней бесплатно</span>{% endif %}
         </div>
       </div>
       <div class="visual-note"><b>{{ doc_number }}</b>Подготовлено специально для вашего магазина</div>
@@ -462,9 +462,9 @@
             <p class="offer-limit">{{ "До " ~ "{:,}".format(tier.limit).replace(",", " ") ~ " товаров" if tier.limit else "Безлимит товаров" }}{% if offer.product_count is not none %} · сейчас {{ offer.product_count }}{% endif %}</p>
           </div>
           <div class="offer-price">
-            {% if discounted_price %}<span class="old">{{ tier.price | tg }}</span>{% endif %}
-            <span class="price">{{ discounted_price | tg if discounted_price else tier.price | tg }}</span>
-            <span class="period">{% if discounted_price %}первый оплаченный месяц · затем {{ tier.price | tg }}/мес{% elif tier.price %}в месяц{% else %}индивидуально под ваш объём{% endif %}</span>
+            {% if discounted_price %}<span class="old">{{ monthly_price | tg }}</span>{% endif %}
+            <span class="price">{{ discounted_price | tg if discounted_price else monthly_price | tg }}</span>
+            <span class="period">{% if discounted_price %}первый оплаченный месяц · затем {{ monthly_price | tg }}/мес{% elif monthly_price %}в месяц{% else %}индивидуально под ваш объём{% endif %}</span>
           </div>
         </div>
         <div class="offer-features">
@@ -473,7 +473,7 @@
           {% endfor %}
         </div>
         <div class="offer-footer">
-          <p><strong>Первые 7 дней бесплатно.</strong> Без банковской карты. {% if discounted_price %}После пробного периода первый оплаченный месяц со скидкой {{ discount_pct }}%.{% endif %}</p>
+          <p><strong>Первые 7 дней бесплатно.</strong> Без банковской карты. {% if fixed_price_offer %}После пробного периода первый оплаченный месяц — {{ discounted_price | tg }}, затем {{ monthly_price | tg }}/мес.{% elif discounted_price %}После пробного периода первый оплаченный месяц со скидкой {{ discount_pct }}%.{% endif %}</p>
           <a class="button button-primary" href="{{ wa_link }}" target="_blank" rel="noopener">Обсудить подключение <span aria-hidden="true">↗</span></a>
         </div>
       </div>
@@ -518,7 +518,7 @@
       <div class="steps">
         <div class="step reveal"><span class="step-number">01</span><h3>Подключаете магазин</h3><p>Авторизация через кабинет продавца по email. Обычно это занимает 5–10 минут.</p></div>
         <div class="step reveal"><span class="step-number">02</span><h3>Пробуете 7 дней</h3><p>Тариф «{{ tier.name }}» работает на ваших товарах и заказах с первого дня. Банковская карта не нужна.</p></div>
-        <div class="step reveal"><span class="step-number">03</span><h3>{% if discounted_price %}Первый месяц со скидкой{% else %}Решаете, оставаться ли{% endif %}</h3><p>{% if discounted_price %}{{ discounted_price | tg }} вместо {{ tier.price | tg }} за первый оплаченный месяц. Затем обычная цена тарифа.{% else %}После пробного периода решаете, подходит ли вам сервис и тариф.{% endif %} Тариф можно поменять в кабинете.</p></div>
+        <div class="step reveal"><span class="step-number">03</span><h3>{% if discounted_price %}Первый месяц по специальной цене{% else %}Решаете, оставаться ли{% endif %}</h3><p>{% if discounted_price %}{{ discounted_price | tg }} за первый оплаченный месяц. Затем {{ monthly_price | tg }} в месяц.{% else %}После пробного периода решаете, подходит ли вам сервис и тариф.{% endif %} Тариф можно поменять в кабинете.</p></div>
       </div>
     </div>
   </section>
@@ -528,7 +528,7 @@
       <div class="section-heading reveal"><div><div class="section-index"><span>{{ "06" if snapshot_items else "05" }} /</span> Вопросы</div><h2 id="questions-title">Коротко о главном.</h2></div></div>
       <div class="faq-list reveal">
         <details><summary>Нужна ли карта для пробного периода?</summary><p>Нет. Первые 7 дней доступны без банковской карты.</p></details>
-        <details><summary>Что будет после 7 дней?</summary><p>{% if discounted_price %}Первый оплаченный месяц на тарифе «{{ tier.name }}» стоит {{ discounted_price | tg }}. Далее — {{ tier.price | tg }} в месяц.{% elif tier.price %}Стоимость тарифа «{{ tier.name }}» — {{ tier.price | tg }} в месяц.{% else %}Стоимость и условия для вашего объёма обсудим индивидуально.{% endif %}</p></details>
+        <details><summary>Что будет после 7 дней?</summary><p>{% if discounted_price %}Первый оплаченный месяц на тарифе «{{ tier.name }}» стоит {{ discounted_price | tg }}. Далее — {{ monthly_price | tg }} в месяц.{% elif monthly_price %}Стоимость тарифа «{{ tier.name }}» — {{ monthly_price | tg }} в месяц.{% else %}Стоимость и условия для вашего объёма обсудим индивидуально.{% endif %}</p></details>
         <details><summary>Можно ли поменять тариф?</summary><p>Да. Тариф можно изменить из кабинета вверх или вниз без потери истории.</p></details>
         <details><summary>Как задать вопрос по КП?</summary><p>Напишите нам в WhatsApp по кнопке ниже — сообщение уже содержит название вашего магазина и тарифа.</p></details>
       </div>
@@ -544,7 +544,7 @@
   </div>
 </main>
 <div class="mobile-cta" aria-label="Быстрая связь по коммерческому предложению">
-  <div><small>Ваш тариф · {{ tier.name }}</small><b>{{ discounted_price | tg if discounted_price else tier.price | tg }}</b></div>
+  <div><small>Ваш тариф · {{ tier.name }}</small><b>{{ discounted_price | tg if discounted_price else monthly_price | tg }}</b></div>
   <a class="button button-primary" href="{{ wa_link }}" target="_blank" rel="noopener">Написать ↗</a>
 </div>
 <script>

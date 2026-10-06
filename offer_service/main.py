@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from offer_service import db, tariffs
 
@@ -115,7 +115,7 @@ def _recommendation_text(product_count: int | None, tier: tariffs.Tier, prev: ta
             f"У вас {product_count} {word} — это больше потолка «Хищник+» (2 000), "
             f"поэтому считаем цену индивидуально под ваш объём и SLA."
         )
-    if prev is None:
+    if prev is None or product_count <= prev.limit:
         return (
             f"У вас {product_count} {word} — укладывается в тариф «{name}» "
             f"(до {tier.limit}) с запасом на рост."
@@ -137,9 +137,11 @@ def _build_context(request: Request, offer: dict) -> dict:
     prev = tariffs.prev_tier(tier)
 
     discount_pct = offer.get("discount_pct") or tariffs.DISCOUNT_PCT_DEFAULT
-    discounted = (
-        tariffs.discounted_price(tier.price, discount_pct) if tier.price is not None else None
-    )
+    fixed_price_offer = (offer.get("first_month_price") is not None
+                         and offer.get("monthly_price") is not None)
+    monthly_price = offer["monthly_price"] if fixed_price_offer else tier.price
+    discounted = (offer["first_month_price"] if fixed_price_offer else
+                  tariffs.discounted_price(tier.price, discount_pct) if tier.price is not None else None)
 
     snapshot_items = []
     if product_count is not None:
@@ -165,6 +167,8 @@ def _build_context(request: Request, offer: dict) -> dict:
         "all_tiers": tariffs.TIERS,
         "discount_pct": discount_pct,
         "discounted_price": discounted,
+        "monthly_price": monthly_price,
+        "fixed_price_offer": fixed_price_offer,
         "recommendation_text": _recommendation_text(product_count, tier, prev),
         "snapshot_items": snapshot_items,
         "doc_number": doc_number,
@@ -202,6 +206,17 @@ class OfferIn(BaseModel):
     categories: list[dict] = []
     discount_pct: int = tariffs.DISCOUNT_PCT_DEFAULT
     tier_override: str | None = None
+    first_month_price: int | None = Field(default=None, gt=0)
+    monthly_price: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_fixed_prices(self):
+        if (self.first_month_price is None) != (self.monthly_price is None):
+            raise ValueError("first_month_price и monthly_price задаются вместе")
+        if (self.first_month_price is not None
+                and self.first_month_price > self.monthly_price):
+            raise ValueError("first_month_price не может превышать monthly_price")
+        return self
 
 
 @app.post("/api/admin/offers")

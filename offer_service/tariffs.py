@@ -119,3 +119,14 @@ def prev_tier(tier: Tier) -> Tier | None:
 
 def discounted_price(price: int, discount_pct: int) -> int:
     return round(price * (100 - discount_pct) / 100)
+
+
+def newcomer_terms(product_count: int) -> tuple[str, int, int]:
+    """Тариф, первый оплаченный месяц и дальнейшая цена для новичка."""
+    if 1 <= product_count <= 30:
+        return "start", 1_000, 3_000
+    if product_count <= 100:
+        return "hunter", 3_000, 5_000
+    if product_count <= 200:
+        return "hunter", 5_000, 8_000
+    raise ValueError("КП для новичков рассчитано на каталог от 1 до 200 товаров")
