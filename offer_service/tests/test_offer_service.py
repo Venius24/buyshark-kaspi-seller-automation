@@ -159,11 +159,36 @@ def test_review_mailing_is_visible_and_correctly_labeled_in_both_languages(tmp_p
     ):
         small = client.get(f"/small?lang={lang}").text
         large = client.get(f"/large?lang={lang}").text
-        small_card = re.search(r'<div class="capability">\s*<small>(.*?)</small>\s*<b>' + name, small)
-        large_card = re.search(r'<div class="capability included">\s*<small>(.*?)</small>\s*<b>' + name, large)
-        assert small_card and small_card.group(1) == higher_label
-        assert large_card and large_card.group(1) == included_label
+        def review_card(html):
+            cards = re.findall(r'<article class="([^"]+)" data-included="([^"]+)">(.*?)</article>', html, re.S)
+            assert len(cards) == len(tariffs.CAPABILITIES) == 10
+            return next(card for card in cards if f'<h4>{name}</h4>' in card[2])
+
+        small_card = review_card(small)
+        large_card = review_card(large)
+        assert small_card[1] == "false" and higher_label in small_card[2]
+        assert large_card[1] == "true" and included_label in large_card[2]
         assert 'capability-count' in small and 'capability-count' in large
+        assert 'data-capability-filter="included"' in small
+        assert 'data-capability-filter="later"' in small
+        assert 'class="idea-card"' in small
+        assert 'Добавление товаров с AI' not in small
+        assert 'Несколько магазинов' not in small
+
+
+def test_idea_invitation_is_available_to_every_tier(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "offers.db")
+    db.init_db()
+    db.upsert_offer({"slug": "plus", "client_name": "Магазин", "tier_override": "predator-plus"})
+    db.upsert_offer({"slug": "giga", "client_name": "Магазин", "tier_override": "giga"})
+    client = TestClient(app)
+    for slug in ("plus", "giga"):
+        for lang, label in (("ru", "Открыты к идеям"), ("kz", "Идеяларға ашықпыз")):
+            html = client.get(f"/{slug}?lang={lang}").text
+            assert label in html
+            assert 'class="idea-card"' in html
+            assert "Автодобавление товаров" not in html
+            assert "Несколько магазинов" not in html
 
 
 def test_kazakh_text_for_unlimited_and_unknown_catalog(tmp_path, monkeypatch):

@@ -105,6 +105,14 @@ def _wa_link(client_name: str, tier_name: str, lang: str = "ru") -> str:
     return f"https://wa.me/{_WHATSAPP_PHONE}?text={quote(text)}"
 
 
+def _wa_idea_link(client_name: str, lang: str = "ru") -> str:
+    if lang == "kz":
+        text = f"Сәлеметсіз бе! Мен {client_name} дүкеніненмін. BuyShark үшін идеям бар, талқылағым келеді."
+    else:
+        text = f"Здравствуйте! Я из {client_name}. У меня есть идея для BuyShark, хочу её обсудить."
+    return f"https://wa.me/{_WHATSAPP_PHONE}?text={quote(text)}"
+
+
 def _pl_tovar(n: int) -> str:
     n_mod100 = n % 100
     if 11 <= n_mod100 <= 14:
@@ -225,6 +233,7 @@ def _build_context(request: Request, offer: dict, lang: str = "ru") -> dict:
     now = datetime.now(_ALMATY)
     doc_number = f"{'Ұсыныс' if lang == 'kz' else 'КП'} № {offer['slug'].upper()}-{now:%Y-%m}"
     doc_date = f"Алматы, {now:%d.%m.%Y}"
+    tier_rank = {item.key: index for index, item in enumerate(tariffs.TIERS)}
 
     return {
         "request": request,
@@ -239,8 +248,8 @@ def _build_context(request: Request, offer: dict, lang: str = "ru") -> dict:
                 "title": translate(lang, title),
                 "description": translate(lang, description),
                 "tier_name": tariffs.tier_by_key(min_tier).name,
-                "included": next(i for i, item in enumerate(tariffs.TIERS) if item.key == tier.key)
-                            >= next(i for i, item in enumerate(tariffs.TIERS) if item.key == min_tier),
+                "included": tier_rank[tier.key] >= tier_rank[min_tier],
+                "featured": title == "Просьба оставить отзыв",
             }
             for min_tier, title, description in tariffs.CAPABILITIES
         ],
@@ -254,6 +263,7 @@ def _build_context(request: Request, offer: dict, lang: str = "ru") -> dict:
         "doc_number": doc_number,
         "doc_date": doc_date,
         "wa_link": _wa_link(offer["client_name"], tier.name, lang),
+        "idea_link": _wa_idea_link(offer["client_name"], lang),
     }
 
 

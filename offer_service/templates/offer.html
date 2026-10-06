@@ -162,18 +162,42 @@
   .offer-footer p { color: var(--muted); font-size: 12px; margin: 0; max-width: 55ch; }
   .offer-footer strong { color: var(--white); }
   .offer-footer .button { flex: none; }
-  .capability-panel { margin-top: 28px; border: 1px solid var(--line); border-radius: 22px; padding: clamp(21px, 3vw, 32px); background: #0e222b; }
-  .capability-head { display: flex; justify-content: space-between; align-items: end; gap: 18px; margin-bottom: 19px; }
-  .capability-head h3 { margin: 0 0 7px; font-size: clamp(20px, 2.5vw, 27px); }
-  .capability-head p { margin: 0; color: var(--muted); font-size: 12px; max-width: 70ch; }
-  .capability-count { border: 1px solid var(--line-strong); border-radius: 999px; padding: 8px 12px; color: var(--teal); font-size: 11px; font-weight: 800; white-space: nowrap; }
-  .capability-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
-  .capability { min-width: 0; border: 1px solid var(--line); border-radius: 14px; padding: 15px; background: rgba(255,255,255,.025); }
-  .capability.included { border-color: rgba(140,231,215,.34); background: rgba(140,231,215,.055); }
-  .capability small { display: block; color: var(--orange); font-size: 10px; font-weight: 800; margin-bottom: 9px; }
+  .capability-panel { position: relative; overflow: hidden; margin-top: 28px; border: 1px solid rgba(140,231,215,.26); border-radius: 26px; padding: clamp(22px, 3.5vw, 40px); background: radial-gradient(circle at 90% 0%, rgba(105,224,202,.13), transparent 35%), linear-gradient(155deg, #112b32, #091d27 72%); }
+  .capability-panel::before { content: ""; position: absolute; width: 330px; height: 330px; top: -250px; right: -110px; border: 1px solid rgba(140,231,215,.14); border-radius: 50%; box-shadow: 0 0 0 44px rgba(140,231,215,.035), 0 0 0 88px rgba(140,231,215,.025); pointer-events: none; }
+  .capability-head { position: relative; display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 24px; }
+  .capability-kicker { display: block; color: var(--teal); font-size: 10px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; margin-bottom: 11px; }
+  .capability-head h3 { margin: 0 0 10px; font-size: clamp(25px, 3.3vw, 38px); }
+  .capability-head p { margin: 0; color: var(--muted); font-size: 13px; max-width: 62ch; }
+  .capability-count { min-width: 132px; padding: 12px 15px; border: 1px solid var(--line-strong); border-radius: 16px; background: rgba(6,26,31,.7); color: var(--muted); }
+  .capability-count strong { display: block; color: var(--teal); font: 700 30px/1 Unbounded, sans-serif; }
+  .capability-count span { display: block; font-size: 10px; line-height: 1.4; margin-top: 6px; }
+  .capability-filters { position: relative; display: flex; gap: 8px; overflow-x: auto; padding-bottom: 3px; margin-bottom: 16px; scrollbar-width: none; }
+  .capability-filters::-webkit-scrollbar { display: none; }
+  .capability-filters button { flex: none; min-height: 40px; padding: 9px 15px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); background: rgba(255,255,255,.02); font-size: 11px; font-weight: 800; cursor: pointer; transition: color .2s, background .2s, border-color .2s; }
+  .capability-filters button:hover, .capability-filters button[aria-pressed="true"] { color: #0b302f; background: var(--teal); border-color: var(--teal); }
+  .capability-filters button:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
+  .capability-grid { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .capability { position: relative; min-width: 0; min-height: 162px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 18px; padding: 20px; background: linear-gradient(140deg, rgba(255,255,255,.055), rgba(255,255,255,.015)); transition: transform .2s, border-color .2s, box-shadow .2s; }
+  .capability[hidden] { display: none; }
+  .capability:hover { transform: translateY(-3px); border-color: var(--teal); box-shadow: 0 14px 32px rgba(0,0,0,.15); }
+  .capability.included { border-color: rgba(140,231,215,.35); }
+  .capability.featured { grid-column: 1 / -1; min-height: 170px; background: radial-gradient(circle at 90% 10%, rgba(248,173,113,.18), transparent 36%), linear-gradient(125deg, #244047, #142931); border-color: rgba(248,173,113,.5); }
+  .capability.featured::after { content: "★"; position: absolute; right: 24px; bottom: 13px; color: rgba(248,173,113,.12); font-size: 90px; line-height: 1; pointer-events: none; }
+  .capability-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: auto; }
+  .capability-number { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; color: var(--teal); background: rgba(140,231,215,.1); font: 700 11px Unbounded, sans-serif; }
+  .capability.featured .capability-number { color: var(--orange); background: rgba(248,173,113,.12); }
+  .capability small { color: var(--orange); font-size: 10px; font-weight: 800; text-align: right; }
   .capability.included small { color: var(--teal); }
-  .capability b { display: block; font-size: 13px; }
-  .capability p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+  .capability h4 { position: relative; z-index: 1; margin: 22px 0 5px; font: 800 clamp(16px, 1.8vw, 21px)/1.25 Manrope, sans-serif; letter-spacing: -.025em; }
+  .capability.featured h4 { font-size: clamp(21px, 2.4vw, 27px); }
+  .capability p { position: relative; z-index: 1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; max-width: 55ch; }
+  .idea-card { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 22px; margin-top: 18px; padding: 24px 27px; border-radius: 19px; background: linear-gradient(115deg, #f7b480, #f4d7b6); color: #243336; }
+  .idea-card::after { content: "✳"; position: absolute; right: 235px; bottom: -42px; font-size: 145px; color: rgba(70,57,44,.08); line-height: 1; pointer-events: none; }
+  .idea-card > * { position: relative; z-index: 1; }
+  .idea-card small { display: block; font-size: 10px; font-weight: 900; letter-spacing: .13em; text-transform: uppercase; margin-bottom: 7px; }
+  .idea-card h4 { font: 800 clamp(19px, 2.2vw, 26px)/1.25 Manrope, sans-serif; letter-spacing: -.03em; margin: 0 0 6px; }
+  .idea-card p { font-size: 12px; max-width: 57ch; margin: 0; }
+  .idea-card .button { flex: none; color: var(--white); background: #12363a; }
   .explorer { border: 1px solid var(--line); border-radius: 22px; padding: clamp(22px, 3vw, 34px); background: #0e222b; }
   .explorer-head { display: flex; align-items: start; justify-content: space-between; gap: 18px; }
   .explorer-head h3 { margin: 0 0 7px; }
@@ -237,7 +261,6 @@
     .hero { grid-template-columns: 1fr .78fr; gap: 32px; }
     .hero h1 { font-size: clamp(38px, 5.5vw, 58px); }
     .lineup { grid-template-columns: repeat(3, minmax(0,1fr)); }
-    .capability-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
   @media (max-width: 760px) {
     .shell { width: min(100% - 36px, 540px); }
@@ -275,10 +298,16 @@
     .offer-features { grid-template-columns: 1fr; gap: 8px; }
     .offer-footer { flex-direction: column; align-items: stretch; }
     .offer-footer .button { width: 100%; }
-    .capability-head { display: block; }
-    .capability-count { display: inline-block; margin-top: 13px; }
+    .capability-head { align-items: start; }
+    .capability-count { min-width: 110px; }
+    .capability-filters { flex-wrap: wrap; overflow: visible; }
     .capability-grid { grid-template-columns: 1fr; }
-    .capability { padding: 13px 15px; }
+    .capability { min-height: 138px; padding: 16px 18px; }
+    .capability.featured { grid-column: auto; min-height: 160px; }
+    .capability h4 { margin-top: 18px; }
+    .idea-card { flex-direction: column; align-items: stretch; padding: 23px; }
+    .idea-card::after { right: -25px; bottom: 20px; }
+    .idea-card .button { width: 100%; }
     .steps { grid-template-columns: 1fr; gap: 10px; }
     .step { min-height: 0; padding: 20px; }
     .step-number { margin-bottom: 16px; }
@@ -320,6 +349,9 @@
     .lineup { grid-template-columns: 1fr 1fr; }
     .tier-card { padding: 13px; }
     .tier-card strong { font-size: 11px; }
+    .capability-head { display: block; }
+    .capability-count { display: inline-flex; align-items: center; gap: 10px; margin-top: 15px; }
+    .capability-count span { margin: 0; max-width: 18ch; }
   }
   @media print {
     :root { color-scheme: light; }
@@ -327,7 +359,8 @@
     @page { size: A4; margin: 12mm; }
     html { scroll-behavior: auto; }
     body { background: var(--bg) !important; }
-    .reading-progress, .header-nav, .header-cta, .hero-actions, .mobile-cta, .explorer, .lineup-toggle { display: none !important; }
+    .reading-progress, .header-nav, .header-cta, .hero-actions, .mobile-cta, .explorer, .lineup-toggle, .capability-filters { display: none !important; }
+    .capability[hidden] { display: flex !important; }
     .hero, .section { padding: 25px 0; }
     .hero { grid-template-columns: 1fr 280px; }
     .hero h1 { font-size: 36px; }
@@ -537,17 +570,23 @@
       </div>
       <div class="capability-panel reveal" id="capabilities">
         <div class="capability-head">
-          <div><h3>{{ tr('Что умеет BuyShark') }}</h3><p>{{ tr('Основные возможности сервиса. Отметки показывают, что входит в предложенный тариф, а что доступно при переходе на старший.') }}</p></div>
-          <span class="capability-count">{{ tr('В вашем тарифе: {count} из {total}', count=capabilities | selectattr('included') | list | length, total=capabilities | length) }}</span>
+          <div><span class="capability-kicker">{{ tr('Инструменты для роста') }}</span><h3>{{ tr('Что умеет BuyShark') }}</h3><p>{{ tr('Выберите, что посмотреть: возможности вашего тарифа или то, что можно подключить позже.') }}</p></div>
+          <div class="capability-count"><strong>{{ capabilities | selectattr('included') | list | length }}/{{ capabilities | length }}</strong><span>{{ tr('возможностей уже в вашем тарифе') }}</span></div>
+        </div>
+        <div class="capability-filters" role="group" aria-label="{{ tr('Фильтр возможностей') }}">
+          <button type="button" data-capability-filter="all" aria-pressed="true">{{ tr('Все возможности') }}</button>
+          <button type="button" data-capability-filter="included" aria-pressed="false">{{ tr('В вашем тарифе') }}</button>
+          {% if capabilities | selectattr('included') | list | length < capabilities | length %}<button type="button" data-capability-filter="later" aria-pressed="false">{{ tr('Можно подключить позже') }}</button>{% endif %}
         </div>
         <div class="capability-grid">
           {% for capability in capabilities %}
-          <div class="capability{% if capability.included %} included{% endif %}">
-            <small>{{ tr('✓ В вашем тарифе') if capability.included else tr('С тарифа «{name}»', name=capability.tier_name) }}</small>
-            <b>{{ capability.title }}</b><p>{{ capability.description }}</p>
-          </div>
+          <article class="capability{% if capability.included %} included{% endif %}{% if capability.featured %} featured{% endif %}" data-included="{{ 'true' if capability.included else 'false' }}">
+            <div class="capability-top"><span class="capability-number" aria-hidden="true">{{ '%02d' | format(loop.index) }}</span><small>{{ tr('✓ В вашем тарифе') if capability.included else tr('С тарифа «{name}»', name=capability.tier_name) }}</small></div>
+            <h4>{{ capability.title }}</h4><p>{{ capability.description }}</p>
+          </article>
           {% endfor %}
         </div>
+        <div class="idea-card"><div><small>{{ tr('Открыты к идеям') }}</small><h4>{{ tr('Ваши идеи и интеграции') }}</h4><p>{{ tr('Расскажите о задаче — обсудим новую функцию или интеграцию под ваш процесс.') }}</p></div><a class="button" href="{{ idea_link }}" target="_blank" rel="noopener">{{ tr('Предложить идею') }} <span aria-hidden="true">↗</span></a></div>
       </div>
     </div>
   </section>
@@ -707,6 +746,17 @@
       toggle.setAttribute('aria-expanded', String(!expanded));
       lineup.hidden = expanded;
     });
+
+    const capabilityFilters = [...document.querySelectorAll('[data-capability-filter]')];
+    const capabilityCards = [...document.querySelectorAll('.capability-grid .capability')];
+    capabilityFilters.forEach(button => button.addEventListener('click', () => {
+      const filter = button.dataset.capabilityFilter;
+      capabilityFilters.forEach(option => option.setAttribute('aria-pressed', String(option === button)));
+      capabilityCards.forEach(card => {
+        card.hidden = filter === 'included' ? card.dataset.included !== 'true'
+          : filter === 'later' ? card.dataset.included !== 'false' : false;
+      });
+    }));
   })();
 </script>
 </body>
