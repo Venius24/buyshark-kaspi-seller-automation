@@ -467,6 +467,9 @@
         <div class="stat-card"><span class="stat-icon" aria-hidden="true">{{ ["◇", "↗", "◷"][loop.index0 % 3] }}</span><div><div class="stat-value">{{ value }}</div><div class="stat-label">{{ label }}</div></div></div>
         {% endfor %}
       </div>
+      {% if offer.product_count == 0 %}
+      <div class="context-note reveal"><div><p>{{ tr('На момент проверки в открытом каталоге нет активных товаров. Откройте витрину, чтобы сверить изменения.') }} <a href="{{ offer.shop_url }}" target="_blank" rel="noopener noreferrer">{{ tr('Открыть витрину Kaspi') }} ↗</a></p></div></div>
+      {% endif %}
       {% if offer.categories %}
       <div class="context-note reveal"><div><p>{{ tr('В вашем каталоге несколько крупных направлений.') }} <strong>{{ tr('Конкуренция по цене на карточке') }}</strong> {{ tr('влияет на то, увидит ли покупатель ваш магазин.') }}</p>
         <div class="category-list">{% for c in offer.categories %}<span>{{ c.get('name_kz', c.name) if lang == 'kz' else c.name }} <b>{{ c.count }}</b></span>{% endfor %}</div>
@@ -476,6 +479,7 @@
   </section>
   {% endif %}
 
+  {% if offer.product_count != 0 %}
   <section class="section" id="demo" aria-labelledby="demo-title">
     <div class="shell">
       <div class="section-heading reveal">
@@ -559,6 +563,7 @@
       </div>
     </div>
   </section>
+  {% endif %}
 
   <section class="section" id="plan" aria-labelledby="plan-title">
     <div class="shell">

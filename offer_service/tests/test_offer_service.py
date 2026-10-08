@@ -100,6 +100,21 @@ def test_offer_uses_verified_seller_price_in_product_section(tmp_path, monkeypat
     assert "Цена вашего магазина на момент проверки" in response.text
 
 
+def test_empty_catalog_offer_has_no_demo_product_or_fake_discount(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "offers.db")
+    db.init_db()
+    db.upsert_offer({"slug": "empty-store", "client_name": "Пустая витрина",
+                     "product_count": 0, "discount_pct": 0,
+                     "shop_url": "https://kaspi.kz/shop/search/?q=%3AallMerchants%3A123"})
+    response = TestClient(app).get("/empty-store")
+    assert response.status_code == 200
+    assert "нет активных товаров" in response.text
+    assert "Открыть витрину Kaspi" in response.text
+    assert "Демонстрационный товар" not in response.text
+    assert "12 490 ₸" not in response.text
+    assert "4 990 ₸" in response.text
+
+
 def test_kazakh_offer_uses_same_data_and_shareable_language_url(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "offers.db")
     db.init_db()

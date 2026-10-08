@@ -206,12 +206,14 @@ def _build_context(request: Request, offer: dict, lang: str = "ru") -> dict:
     tier = _localized_tier(tier, lang)
     prev = _localized_tier(prev, lang)
 
-    discount_pct = offer.get("discount_pct") or tariffs.DISCOUNT_PCT_DEFAULT
+    discount_pct = (offer["discount_pct"] if offer.get("discount_pct") is not None
+                    else tariffs.DISCOUNT_PCT_DEFAULT)
     fixed_price_offer = (offer.get("first_month_price") is not None
                          and offer.get("monthly_price") is not None)
     monthly_price = offer["monthly_price"] if fixed_price_offer else tier.price
     discounted = (offer["first_month_price"] if fixed_price_offer else
-                  tariffs.discounted_price(tier.price, discount_pct) if tier.price is not None else None)
+                  tariffs.discounted_price(tier.price, discount_pct)
+                  if tier.price is not None and discount_pct > 0 else None)
     sample_product = offer.get("sample_product")
     if sample_product:
         # The snapshot is immutable until the next explicit refresh. Kaspi prices change.
