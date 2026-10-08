@@ -145,11 +145,12 @@ def fetch_finance_orders(token: str, ge_ms: int, le_ms: int) -> list[dict]:
         cursor = w_end
     # Фильтр Kaspi `creationDate` для ARCHIVE на деле срабатывает по дате
     # закрытия заказа (completionDate, замер 08.10.2026): окно [ge, le] отдаёт
-    # заказы, закрытые в нём, в том числе созданные до ge. Окна и так тянутся
-    # до текущего момента, поэтому созданные в периоде заказы найдены все,
-    # а лишние (созданные раньше) отбрасываем здесь: отчёт по когорте создания.
+    # заказы, закрытые в нём, в том числе созданные задолго до ge. Это и есть
+    # когорта отчёта — «закрыто за период»: полные цифры без хвоста заказов в
+    # пути и честная доля возвратов (по когорте создания за 14 дней возвратов
+    # выходило 0,08% вместо 0,74% — они приходят через недели).
     # Окна стыкуются по границе ($ge/$le включительно) — дедуп по id.
-    return list({o["id"]: o for o in orders if (o["created_ms"] or 0) >= ge_ms}.values())
+    return list({o["id"]: o for o in orders}.values())
 
 
 def _order_commission(order: dict) -> tuple[float, float, list[str]]:
@@ -273,7 +274,7 @@ def compute_store_finance(token: str, days: int, now: Optional[datetime] = None)
     logger.info(f"[OrderFinance] {len(orders)} заказов за {days} дн. за {time.monotonic() - t0:.1f}с")
     return {
         "period": {"from": start.isoformat() + "Z", "to": now.isoformat() + "Z", "days": days,
-                   "cohort": "creation_date"},
+                   "cohort": "completion_date"},
         "commission_table": load_commission_table()["effective_from"],
         **summary,
     }

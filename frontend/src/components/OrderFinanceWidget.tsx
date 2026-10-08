@@ -192,7 +192,7 @@ export const OrderFinanceWidget: React.FC = () => {
         </div>
 
         <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-          Заказы, созданные за последние {data.period.days} дн. и уже закрытые. Заказы, которые ещё в пути, появятся после закрытия.
+          Заказы, закрытые (выданы, возвращены или отменены) за последние {data.period.days} дн., — в том числе созданные раньше. Так же Kaspi начисляет комиссию и списания.
           {commission.uncertain_orders > 0 && ` ${commission.uncertain_orders} заказ(ов) в рассрочку на 24 мес.: по ним Kaspi может брать другую ставку.`}
           {unknownCount > 0 && ` ${unknownCount} категори(й) нет в таблице Kaspi — для них взята ставка 12,5%.`}
         </div>

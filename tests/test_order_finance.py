@@ -115,9 +115,10 @@ def test_fetch_queries_each_status_and_dedups_window_borders():
     assert [o["id"] for o in orders] == ["A"]
 
 
-def test_fetch_drops_orders_created_before_period():
+def test_fetch_keeps_orders_closed_in_period_but_created_before():
     # Kaspi фильтрует ARCHIVE по completionDate: окно отдаёт и заказы,
-    # созданные раньше периода, — в когорту создания они не входят.
+    # созданные раньше периода. Когорта отчёта — «закрыто за период»,
+    # поэтому они остаются (замер 08.10.2026, см. HANDOFF 3.125).
     created = 1789569091039
     page = _response(
         ("OLD", "COMPLETED", 1000.0, 0.0, [("S1", "Воздушные шары", 1, 1000.0)], {"creationDate": created - 5 * 86400 * 1000}),
@@ -128,7 +129,7 @@ def test_fetch_drops_orders_created_before_period():
     with patch("backend.kaspi_wrapper.KaspiAPI._get", return_value=resp):
         orders = of.fetch_finance_orders("tok", created - 86400 * 1000, created + 86400 * 1000)
 
-    assert [o["id"] for o in orders] == ["NEW"]
+    assert sorted(o["id"] for o in orders) == ["NEW", "OLD"]
 
 
 def test_fetch_raises_on_kaspi_error():
