@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -8,7 +9,12 @@ import pytest
 from backend.billing.catalog import PLANS
 from offer_service import db, tariffs
 from offer_service.locale import KZ
-from offer_service.main import app
+from offer_service.main import _ALMATY, app
+
+
+def test_almaty_uses_current_kazakhstan_utc_offset():
+    observed = datetime(2026, 10, 8, 18, 41, tzinfo=timezone.utc)
+    assert observed.astimezone(_ALMATY).strftime("%d.%m.%Y %H:%M") == "08.10.2026 23:41"
 
 
 def test_offer_tariffs_match_billing_catalog():

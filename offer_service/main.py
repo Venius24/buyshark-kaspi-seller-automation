@@ -7,10 +7,9 @@ import os
 import re
 import secrets
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
-from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,7 +40,9 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 templates.env.filters["tg"] = _fmt_tenge
 
-_ALMATY = ZoneInfo("Asia/Almaty")
+# Kazakhstan uses UTC+5 nationwide since 2024. The VPS still ships tzdata
+# 2022g, which incorrectly renders current Almaty timestamps as UTC+6.
+_ALMATY = timezone(timedelta(hours=5), name="Asia/Almaty")
 _WHATSAPP_PHONE = "77009990011"
 
 db.init_db()
