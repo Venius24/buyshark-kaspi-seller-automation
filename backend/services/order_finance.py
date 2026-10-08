@@ -143,8 +143,13 @@ def fetch_finance_orders(token: str, ge_ms: int, le_ms: int) -> list[dict]:
                 if len(page_orders) < 100:
                     break
         cursor = w_end
+    # Фильтр Kaspi `creationDate` для ARCHIVE на деле срабатывает по дате
+    # закрытия заказа (completionDate, замер 08.10.2026): окно [ge, le] отдаёт
+    # заказы, закрытые в нём, в том числе созданные до ge. Окна и так тянутся
+    # до текущего момента, поэтому созданные в периоде заказы найдены все,
+    # а лишние (созданные раньше) отбрасываем здесь: отчёт по когорте создания.
     # Окна стыкуются по границе ($ge/$le включительно) — дедуп по id.
-    return list({o["id"]: o for o in orders}.values())
+    return list({o["id"]: o for o in orders if (o["created_ms"] or 0) >= ge_ms}.values())
 
 
 def _order_commission(order: dict) -> tuple[float, float, list[str]]:

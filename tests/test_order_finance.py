@@ -105,13 +105,30 @@ def test_fetch_queries_each_status_and_dedups_window_borders():
     resp.json.return_value = page
     with patch("backend.kaspi_wrapper.KaspiAPI._get", return_value=resp) as get:
         day = 86400 * 1000
-        orders = of.fetch_finance_orders("tok", 0, 20 * day)  # два окна по ≤13 дней
+        ge = 1789569091039 - day
+        orders = of.fetch_finance_orders("tok", ge, ge + 20 * day)  # два окна по ≤13 дней
 
     statuses = [c.args[2]["filter[orders][status]"] for c in get.call_args_list]
     assert sorted(set(statuses)) == sorted(of.FINANCE_STATUSES)
     assert len(get.call_args_list) == 2 * len(of.FINANCE_STATUSES)
     assert all(c.args[2]["filter[orders][state]"] == "ARCHIVE" for c in get.call_args_list)
     assert [o["id"] for o in orders] == ["A"]
+
+
+def test_fetch_drops_orders_created_before_period():
+    # Kaspi фильтрует ARCHIVE по completionDate: окно отдаёт и заказы,
+    # созданные раньше периода, — в когорту создания они не входят.
+    created = 1789569091039
+    page = _response(
+        ("OLD", "COMPLETED", 1000.0, 0.0, [("S1", "Воздушные шары", 1, 1000.0)], {"creationDate": created - 5 * 86400 * 1000}),
+        ("NEW", "COMPLETED", 2000.0, 0.0, [("S2", "Воздушные шары", 1, 2000.0)], {"creationDate": created}),
+    )
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = page
+    with patch("backend.kaspi_wrapper.KaspiAPI._get", return_value=resp):
+        orders = of.fetch_finance_orders("tok", created - 86400 * 1000, created + 86400 * 1000)
+
+    assert [o["id"] for o in orders] == ["NEW"]
 
 
 def test_fetch_raises_on_kaspi_error():
