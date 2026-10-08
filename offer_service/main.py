@@ -113,6 +113,22 @@ def _wa_idea_link(client_name: str, lang: str = "ru") -> str:
     return f"https://wa.me/{_WHATSAPP_PHONE}?text={quote(text)}"
 
 
+def _wa_switch_link(client_name: str, lang: str = "ru") -> str:
+    if lang == "kz":
+        text = (
+            f"Сәлеметсіз бе! Мен {client_name} дүкеніненмін. Қазір басқа баға ботын қолданамын. "
+            "BuyShark-қа баға ережелерін көшіруді және жазылым бағасын талқылағым келеді. "
+            "Қай бот: нақтылаймын. Қазіргі айлық төлем: нақтылаймын."
+        )
+    else:
+        text = (
+            f"Здравствуйте! Я из {client_name}. Уже пользуюсь другим ботом цен. "
+            "Хочу обсудить перенос правил цен и стоимость подписки BuyShark. "
+            "Какой бот: уточню. Текущая плата в месяц: уточню."
+        )
+    return f"https://wa.me/{_WHATSAPP_PHONE}?text={quote(text)}"
+
+
 def _pl_tovar(n: int) -> str:
     n_mod100 = n % 100
     if 11 <= n_mod100 <= 14:
@@ -263,6 +279,7 @@ def _build_context(request: Request, offer: dict, lang: str = "ru") -> dict:
         "doc_number": doc_number,
         "doc_date": doc_date,
         "wa_link": _wa_link(offer["client_name"], tier.name, lang),
+        "switch_link": _wa_switch_link(offer["client_name"], lang),
         "idea_link": _wa_idea_link(offer["client_name"], lang),
     }
 

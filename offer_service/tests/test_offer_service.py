@@ -191,6 +191,33 @@ def test_idea_invitation_is_available_to_every_tier(tmp_path, monkeypatch):
             assert "Несколько магазинов" not in html
 
 
+def test_existing_bot_transition_is_asked_without_assuming_a_bot(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "offers.db")
+    db.init_db()
+    db.upsert_offer({"slug": "bot-start", "client_name": "Магазин", "product_count": 25})
+    db.upsert_offer({"slug": "bot-hunter", "client_name": "Магазин", "product_count": 100})
+    client = TestClient(app)
+
+    for lang, question, provider_prompt in (
+        ("ru", "Уже пользуетесь ботом цен?", "Какой бот:"),
+        ("kz", "Баға ботын қазір қолданасыз ба?", "Қай бот:"),
+    ):
+        start = client.get(f"/bot-start?lang={lang}").text
+        hunter = client.get(f"/bot-hunter?lang={lang}").text
+        for html in (start, hunter):
+            assert question in html
+            assert 'data-bot-choice="yes" aria-pressed="false"' in html
+            assert 'data-bot-panel="yes" hidden' in html
+            assert 'data-bot-panel="no" hidden' in html
+            assert "PriceFeed.kz" in html
+            assert provider_prompt in unquote(html)
+            assert 'id="current-bot-price"' in html
+        assert ("Автоматические правила цен доступны" if lang == "ru" else
+                "Автоматты баға ережелері") in start
+        assert ("Автоматические правила цен доступны" if lang == "ru" else
+                "Автоматты баға ережелері") not in hunter
+
+
 def test_kazakh_text_for_unlimited_and_unknown_catalog(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "offers.db")
     db.init_db()

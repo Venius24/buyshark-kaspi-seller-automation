@@ -162,6 +162,24 @@
   .offer-footer p { color: var(--muted); font-size: 12px; margin: 0; max-width: 55ch; }
   .offer-footer strong { color: var(--white); }
   .offer-footer .button { flex: none; }
+  .switch-panel { margin-top: 28px; padding: clamp(22px, 3.5vw, 38px); border: 1px solid rgba(248,173,113,.5); border-radius: 26px; background: radial-gradient(circle at 95% 0%, rgba(248,173,113,.18), transparent 42%), #162b32; }
+  .switch-kicker { display: inline-block; margin-bottom: 10px; color: var(--orange); font-size: 10px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; }
+  .switch-panel h3 { margin: 0 0 8px; font-size: clamp(24px, 3vw, 36px); }
+  .switch-panel > p { max-width: 65ch; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+  .switch-options { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 22px; }
+  .switch-options button { min-height: 46px; padding: 10px 18px; border: 1px solid rgba(248,173,113,.55); border-radius: 999px; background: rgba(248,173,113,.08); color: var(--white); font: 800 12px Manrope, sans-serif; cursor: pointer; transition: background .2s, color .2s, transform .2s; }
+  .switch-options button:hover, .switch-options button[aria-pressed="true"] { background: var(--orange); color: #1c2a2c; transform: translateY(-2px); }
+  .switch-options button:focus-visible, .switch-fields input:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
+  .switch-detail { margin-top: 19px; padding: 21px; border: 1px solid var(--line-strong); border-radius: 18px; background: rgba(4,20,26,.52); }
+  .switch-detail[hidden] { display: none; }
+  .switch-detail h4 { margin: 0 0 8px; font: 800 18px/1.3 Manrope, sans-serif; }
+  .switch-detail p { max-width: 70ch; margin: 0 0 13px; color: var(--muted); font-size: 12px; line-height: 1.65; }
+  .switch-detail strong { color: var(--white); }
+  .switch-fields { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px; margin: 17px 0; }
+  .switch-fields label { display: grid; gap: 7px; color: var(--white); font-size: 12px; font-weight: 800; }
+  .switch-fields input { min-width: 0; min-height: 45px; padding: 11px 13px; border: 1px solid var(--line-strong); border-radius: 11px; background: #0b2028; color: var(--white); font: 600 13px Manrope, sans-serif; }
+  .switch-detail .button { min-height: 45px; }
+  .switch-note { margin: 12px 0 0 !important; font-size: 11px !important; }
   .capability-panel { position: relative; overflow: hidden; margin-top: 28px; border: 1px solid rgba(140,231,215,.26); border-radius: 26px; padding: clamp(22px, 3.5vw, 40px); background: radial-gradient(circle at 90% 0%, rgba(105,224,202,.13), transparent 35%), linear-gradient(155deg, #112b32, #091d27 72%); }
   .capability-panel::before { content: ""; position: absolute; width: 330px; height: 330px; top: -250px; right: -110px; border: 1px solid rgba(140,231,215,.14); border-radius: 50%; box-shadow: 0 0 0 44px rgba(140,231,215,.035), 0 0 0 88px rgba(140,231,215,.025); pointer-events: none; }
   .capability-head { position: relative; display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 24px; }
@@ -298,6 +316,8 @@
     .offer-features { grid-template-columns: 1fr; gap: 8px; }
     .offer-footer { flex-direction: column; align-items: stretch; }
     .offer-footer .button { width: 100%; }
+    .switch-fields { grid-template-columns: 1fr; }
+    .switch-detail .button { width: 100%; }
     .capability-head { align-items: start; }
     .capability-count { min-width: 110px; }
     .capability-filters { flex-wrap: wrap; overflow: visible; }
@@ -359,7 +379,9 @@
     @page { size: A4; margin: 12mm; }
     html { scroll-behavior: auto; }
     body { background: var(--bg) !important; }
-    .reading-progress, .header-nav, .header-cta, .hero-actions, .mobile-cta, .explorer, .lineup-toggle, .capability-filters { display: none !important; }
+    .reading-progress, .header-nav, .header-cta, .hero-actions, .mobile-cta, .explorer, .lineup-toggle, .capability-filters, .switch-options, .switch-fields, .switch-detail .button { display: none !important; }
+    .switch-detail[data-bot-panel="yes"] { display: block !important; }
+    .switch-detail[data-bot-panel="no"] { display: none !important; }
     .capability[hidden] { display: flex !important; }
     .hero, .section { padding: 25px 0; }
     .hero { grid-template-columns: 1fr 280px; }
@@ -568,6 +590,33 @@
           <a class="button button-primary" href="{{ wa_link }}" target="_blank" rel="noopener">{{ tr('Обсудить подключение') }} <span aria-hidden="true">↗</span></a>
         </div>
       </div>
+      <section class="switch-panel reveal" id="switch-bot" aria-labelledby="switch-title">
+        <span class="switch-kicker">{{ tr('Переход с другого сервиса') }}</span>
+        <h3 id="switch-title">{{ tr('Уже пользуетесь ботом цен?') }}</h3>
+        <p>{{ tr('Расскажите, какой бот у вас сейчас. Покажем, как перейти на BuyShark и какие настройки можно сохранить.') }}</p>
+        <div class="switch-options" role="group" aria-label="{{ tr('Пользуетесь ли вы ботом цен') }}">
+          <button type="button" data-bot-choice="yes" aria-pressed="false" aria-controls="switch-yes">{{ tr('Да, бот уже есть') }}</button>
+          <button type="button" data-bot-choice="no" aria-pressed="false" aria-controls="switch-no">{{ tr('Нет, пока без бота') }}</button>
+        </div>
+        <div class="switch-detail" id="switch-yes" data-bot-panel="yes" hidden>
+          <h4>{{ tr('Сохраним подходящие настройки') }}</h4>
+          <p>{{ tr('Для PriceFeed.kz проверим и перенесём доступные правила цен: минимум, максимум, шаг и режим. Сначала покажем предварительный результат, затем включим правила после вашей проверки.') }}</p>
+          <p>{{ tr('Для другого бота посмотрим вашу выгрузку и заранее скажем, какие настройки получится перенести.') }}</p>
+          <p><strong>{{ tr('Платите за текущего бота?') }}</strong> {{ tr('Сравним стоимость подписки и обсудим более выгодные условия перехода, если это возможно.') }}</p>
+          {% if tier.key == 'start' %}<p class="switch-note">{{ tr('Автоматические правила цен доступны с тарифа «Охотник». При переходе подберём подходящий тариф и цену.') }}</p>{% endif %}
+          <div class="switch-fields">
+            <label for="current-bot">{{ tr('Какой бот используете?') }}<input id="current-bot" type="text" maxlength="80" autocomplete="off" placeholder="PriceFeed.kz" aria-label="{{ tr('Название вашего текущего бота') }}"></label>
+            <label for="current-bot-price">{{ tr('Сколько платите в месяц?') }}<input id="current-bot-price" type="number" min="0" step="1" inputmode="numeric" placeholder="₸" aria-label="{{ tr('Текущая плата за бота в месяц') }}"></label>
+          </div>
+          <a class="button button-primary" id="switch-contact" href="{{ switch_link }}" target="_blank" rel="noopener">{{ tr('Обсудить перенос и цену') }} <span aria-hidden="true">↗</span></a>
+          <p class="switch-note">{{ tr('Поля необязательные: можно уточнить всё в переписке. Цена этого КП изменится только после согласования.') }}</p>
+        </div>
+        <div class="switch-detail" id="switch-no" data-bot-panel="no" hidden>
+          <h4>{{ tr('Начнём с ваших товаров') }}</h4>
+          <p>{{ tr('Попробуйте BuyShark 7 дней бесплатно. Поможем настроить функции вашего тарифа для магазина.') }}</p>
+          <a class="button button-primary" href="{{ wa_link }}" target="_blank" rel="noopener">{{ tr('Обсудить подключение') }} <span aria-hidden="true">↗</span></a>
+        </div>
+      </section>
       <div class="capability-panel reveal" id="capabilities">
         <div class="capability-head">
           <div><span class="capability-kicker">{{ tr('Инструменты для роста') }}</span><h3>{{ tr('Что умеет BuyShark') }}</h3><p>{{ tr('Выберите, что посмотреть: возможности вашего тарифа или то, что можно подключить позже.') }}</p></div>
@@ -757,6 +806,36 @@
           : filter === 'later' ? card.dataset.included !== 'false' : false;
       });
     }));
+
+    const botChoices = [...document.querySelectorAll('[data-bot-choice]')];
+    const botPanels = [...document.querySelectorAll('[data-bot-panel]')];
+    const mobileContact = mobileCta.querySelector('a');
+    const defaultMobileLink = mobileContact.href;
+    botChoices.forEach(button => button.addEventListener('click', () => {
+      const choice = button.dataset.botChoice;
+      botChoices.forEach(option => option.setAttribute('aria-pressed', String(option === button)));
+      botPanels.forEach(panel => { panel.hidden = panel.dataset.botPanel !== choice; });
+      mobileContact.href = choice === 'yes' ? switchContact.href : defaultMobileLink;
+      mobileContact.textContent = choice === 'yes'
+        ? {{ tr('Переход ↗') | tojson }} : {{ tr('Написать ↗') | tojson }};
+    }));
+    const botName = document.querySelector('#current-bot');
+    const botPrice = document.querySelector('#current-bot-price');
+    const switchContact = document.querySelector('#switch-contact');
+    const updateSwitchLink = () => {
+      const url = new URL(switchContact.href);
+      const name = botName.value.trim() || {{ tr('уточню') | tojson }};
+      const price = botPrice.value && Number(botPrice.value) >= 0
+        ? new Intl.NumberFormat('ru-RU').format(Number(botPrice.value)) + ' ₸'
+        : {{ tr('уточню') | tojson }};
+      url.searchParams.set('text', {{ tr('Здравствуйте! Я из {name}. Уже пользуюсь другим ботом цен. Хочу обсудить перенос правил цен и стоимость подписки BuyShark.', name=offer.client_name) | tojson }}
+        + '\n' + {{ tr('Какой бот:') | tojson }} + ' ' + name
+        + '\n' + {{ tr('Текущая плата в месяц:') | tojson }} + ' ' + price);
+      switchContact.href = url.toString();
+      if (botChoices[0].getAttribute('aria-pressed') === 'true') mobileContact.href = switchContact.href;
+    };
+    botName.addEventListener('input', updateSwitchLink);
+    botPrice.addEventListener('input', updateSwitchLink);
   })();
 </script>
 </body>
