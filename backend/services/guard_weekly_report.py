@@ -116,22 +116,47 @@ def _db():
     return _get_sync_db_session()
 
 
+def _archived_skus(db, store_id: str) -> set:
+    row = db.execute(text("select payload from store_products where store_id=:s"), {"s": store_id}).fetchone()
+    try:
+        items = json.loads(row.payload) if row and row.payload else []
+    except ValueError:
+        items = []
+    return {(p.get("merchantSku") or p.get("sku")) for p in items
+            if str(p.get("status") or "").strip() == "Архив"}
+
+
+def split_groups(snapshots, moves, archived: set, ge: dt.datetime) -> Dict[str, set]:
+    """Группы товаров недели из снимков войны, ходов и архива.
+
+    dumping — товар был в цикле демпинга в эту неделю (снимок обновлялся или
+    был ход) и сейчас не в архиве. Старые снимки не в счёт: price_war_snapshots
+    не чистится, и 09.10.2026 в ней висело 168 товаров, выпавших из цикла ещё в
+    августе–сентябре (119 — в архиве после инвентаризации 25.09). С ними группа
+    «под демпингом» показывала −19% заказов, а без них +15%.
+    archived — сейчас в архиве: продаж нет из-за остатка, а не из-за цены, поэтому
+    они не входят ни в демпинг, ни в контрольную группу."""
+    live = {r.sku for r in snapshots if r.updated_at and r.updated_at >= ge} | {m.sku for m in moves}
+    cooled = {m.sku for m in moves if m.action == "GUARD_LADDER_RESET"}
+    guarded = {m.sku for m in moves if (m.action or "").startswith("GUARD_")}
+    return {"cooled": cooled, "guarded": guarded | cooled, "dumping": live - archived, "archived": set(archived)}
+
+
 def sku_groups(store_id: str, ge: dt.datetime, le: dt.datetime) -> Dict[str, set]:
     """cooled — было охлаждение рынка; guarded — защита хоть раз держала/двигала
-    цену; dumping — товары под демпингом (есть в раскладе войны); остальное —
-    контрольная группа."""
+    цену; dumping — товары в цикле демпинга за неделю; archived — в архиве;
+    остальное — контрольная группа (см. split_groups)."""
     db = _db()
     try:
         moves = db.execute(text(
             "select sku, action from price_war_moves where store_id=:s and created_at>=:a and created_at<:b"),
             {"s": store_id, "a": ge, "b": le}).fetchall()
-        dumping = {r.sku for r in db.execute(text(
-            "select sku from price_war_snapshots where store_id=:s"), {"s": store_id}).fetchall()}
+        snaps = db.execute(text(
+            "select sku, updated_at from price_war_snapshots where store_id=:s"), {"s": store_id}).fetchall()
+        archived = _archived_skus(db, store_id)
     finally:
         db.close()
-    cooled = {m.sku for m in moves if m.action == "GUARD_LADDER_RESET"}
-    guarded = {m.sku for m in moves if (m.action or "").startswith("GUARD_")}
-    return {"cooled": cooled, "guarded": guarded | cooled, "dumping": dumping | {m.sku for m in moves}}
+    return split_groups(snaps, moves, archived, ge)
 
 
 def _bucket(orders: List[dict], ge: dt.datetime, le: dt.datetime, skus: Optional[set], exclude: Optional[set] = None):
@@ -169,15 +194,18 @@ def _change(cur: float, base: float) -> Optional[float]:
     return round((cur / base - 1) * 100, 1) if base else None
 
 
-def competitors(store_id: str) -> dict:
+def competitors(store_id: str, fresh_hours: int = 24) -> dict:
     """Текущий расклад по товарам под демпингом: наше место, лучший соперник,
-    топ-5 соперников с отзывами (пишется циклом демпинга с 07.10.2026)."""
+    топ-5 соперников с отзывами (пишется циклом демпинга с 07.10.2026).
+    Только снимки за последние fresh_hours: старые остаются от товаров, давно
+    выпавших из цикла, и показывают их место на тот день."""
     db = _db()
     try:
         rows = db.execute(text(
             "select sku, name, our_price, our_rank, competitors_count, best_competitor_price, "
-            "best_competitor_name, guard_json, updated_at from price_war_snapshots where store_id=:s"),
-            {"s": store_id}).fetchall()
+            "best_competitor_name, guard_json, updated_at from price_war_snapshots "
+            "where store_id=:s and updated_at>=:f"),
+            {"s": store_id, "f": dt.datetime.utcnow() - dt.timedelta(hours=fresh_hours)}).fetchall()
     finally:
         db.close()
     items, merchants = [], {}
@@ -299,7 +327,8 @@ def build(store_id: str = STORE_ID, week_start_local: Optional[dt.date] = None) 
         "cooled": side(groups["cooled"]),
         "guarded": side(groups["guarded"]),
         "dumping": side(groups["dumping"]),
-        "control": side(None, exclude=groups["dumping"]),
+        "control": side(None, exclude=groups["dumping"] | groups["archived"]),
+        "archived": side(groups["archived"]),
     }
     ctrl = sales["control"]["change_pct"]
     for k in ("cooled", "guarded", "dumping"):

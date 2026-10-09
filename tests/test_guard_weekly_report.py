@@ -43,5 +43,20 @@ class TestBucket(unittest.TestCase):
             self.assertFalse(gwr._is_cancelled(s))
 
 
+class TestSplitGroups(unittest.TestCase):
+    GE = dt.datetime(2026, 10, 4, 19)
+
+    def test_stale_snapshots_and_archive_are_not_dumping(self):
+        from types import SimpleNamespace as R
+        snaps = [R(sku="LIVE", updated_at=self.GE + dt.timedelta(hours=3)),
+                 R(sku="STALE", updated_at=dt.datetime(2026, 8, 12)),
+                 R(sku="ARCH", updated_at=self.GE + dt.timedelta(hours=1))]
+        moves = [R(sku="MOVED", action="DUMP_TOP_1"), R(sku="LIVE", action="GUARD_LADDER_RESET")]
+        g = gwr.split_groups(snaps, moves, {"ARCH", "STALE_ARCH"}, self.GE)
+        self.assertEqual(g["dumping"], {"LIVE", "MOVED"})
+        self.assertEqual(g["cooled"], {"LIVE"})
+        self.assertEqual(g["archived"], {"ARCH", "STALE_ARCH"})
+
+
 if __name__ == "__main__":
     unittest.main()
