@@ -33,7 +33,9 @@ def _launch_browser(playwright):
 
 class PlaywrightSessionManager:
     def run_in_browser_pool(self, fn, *args, **kwargs):
-        raise WithheldError("browser pool")
+        # no pool here: run inline; anything that actually needs a browser
+        # fails in _launch_browser() with WithheldError
+        return fn(*args, **kwargs)
 
     def send_cmd(self, cmd, data=None, store_id: str = None):
         """Same contract as the private version: (ok, message, cookies)."""
