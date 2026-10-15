@@ -25,6 +25,7 @@ from backend.assistant.provider import ROLE_ASSISTANT, ROLE_USER, get_provider
 from backend.assistant.tools import ToolContext
 from backend.db.database import get_db
 from backend.db.models import Store
+from backend.services.ai_metrics import record_assistant_run
 from backend.security.store_context import StoreContext
 from backend.security.store_roles import require_section
 
@@ -192,8 +193,9 @@ async def send_message(
     try:
         # A savepoint isolates trace INSERT failures from messages/proposals.
         async with db.begin_nested():
-            await runs.save_run(db, store_id=ctx.store_id, conversation_id=conversation_id,
-                                user_id=_request_user_id(request), started_at=started_at, turn=turn, cfg=cfg)
+            run_row = await runs.save_run(db, store_id=ctx.store_id, conversation_id=conversation_id,
+                                          user_id=_request_user_id(request), started_at=started_at, turn=turn, cfg=cfg)
+        record_assistant_run(turn, run_row)
     except Exception:
         logger.exception("Assistant run persistence failed")
 

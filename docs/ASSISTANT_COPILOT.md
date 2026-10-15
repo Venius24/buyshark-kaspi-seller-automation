@@ -87,6 +87,24 @@ tools: обзор, заказы, поиск товаров, статус дем�
 как прежде. Затем в той же request-сессии сохраняется только run до возврата
 прежнего HTTP 502; отдельный commit нужен из-за rollback в get_db при HTTPException.
 
+## Метрики и дашборд
+
+`/metrics` экспортирует метрики ассистента: `assistant_runs_total{outcome}`,
+`assistant_run_duration_seconds`, `assistant_tokens_total{type}`,
+`assistant_tool_calls_total{tool,ok}`, `assistant_cost_usd_total` (только при
+известном тарифе). Для автоответчика: `chatbot_replies_total{kind}`,
+`chatbot_tokens_total{type}`, `chatbot_ai_latency_seconds` и
+`chatbot_ai_replies_total{card_facts}`. Метки фиксированы; идентификаторов
+магазина, товара и текстов нет. Токены автоответчика считаются для отправленных
+`inbound_reply`; латентность — для всех вызовов модели.
+
+Применение на VPS выполняется по шагам [README мониторинга](../deploy/monitoring/README.md):
+после установки кода и существующего scrape job скопировать
+`buyshark-ai.json` в каталог provisioning Grafana. Здесь эти действия не
+выполнялись. Историческая база из БД: `python scripts/ai_baseline.py --days 14`
+при установленном `DATABASE_URL`; скрипт только читает агрегаты. Сравнение
+двух полных недель через `increase(...[7d])` и `offset 7d` также описано в README.
+
 ## Известные ограничения
 
 - RAG индексирует карточки/остатки, дневные продажи, снимки ценовой войны и логи;

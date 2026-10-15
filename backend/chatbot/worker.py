@@ -15,6 +15,9 @@ from backend.chatbot.notifications import notify_startup, notify_cookie_expired,
 from backend.chatbot.handlers import register_handlers, register_bot_commands
 from backend.dumper.config import discover_merchant_id
 from backend.security.store_context import list_active_stores
+from backend.services.ai_metrics import (
+    record_chatbot_reply, observe_chatbot_ai_latency, record_chatbot_ai_reply,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +256,7 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
                     client_text=client_text, reply_text=reply_text,
                     order_code=facts.order_code, detail=detail, **extra,
                 )
+                record_chatbot_reply(kind, extra)
 
             async def _escalate(kind: str, detail: str):
                 hold = await notify_manager_and_block(
@@ -332,10 +336,15 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
             if store_id:
                 bot_texts, tracking_since = await asyncio.to_thread(_load_bot_sent_texts, store_id, group_id)
             dialog = build_dialog(raw_history, bot_texts, tracking_since)
-            ai_reply, is_human_override, ai_usage = await generate_ai_reply(
-                client_name, item_title, dialog, store_id=store_id, awaiting_review_reply=was_awaiting_review,
-                facts_block=render_facts_block(facts), client_text=client_text,
-            )
+            ai_started = time.monotonic()
+            try:
+                ai_reply, is_human_override, ai_usage = await generate_ai_reply(
+                    client_name, item_title, dialog, store_id=store_id, awaiting_review_reply=was_awaiting_review,
+                    facts_block=render_facts_block(facts), client_text=client_text,
+                )
+            finally:
+                observe_chatbot_ai_latency(time.monotonic() - ai_started)
+            record_chatbot_ai_reply(facts)
 
             if is_human_override:
                 await _escalate("inbound_escalated_ai", "модель: " + (ai_reply or "")[:180])

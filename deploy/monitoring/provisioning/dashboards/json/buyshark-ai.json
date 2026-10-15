@@ -1,0 +1,86 @@
+{
+  "uid": "buyshark-ai",
+  "title": "BuyShark · ИИ",
+  "tags": ["buyshark", "ai"],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-7d", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "timeseries", "title": "Исходы автоответчика / час",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [{ "refId": "A", "expr": "sum by (kind) (increase(chatbot_replies_total{job=\"kaspi-saas\"}[1h]))", "legendFormat": "{{kind}}" }],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Доля эскалаций за период",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "refId": "A", "expr": "sum(increase(chatbot_replies_total{job=\"kaspi-saas\",kind=~\"inbound_escalated_ai|inbound_escalated_trigger\"}[$__range])) / clamp_min(sum(increase(chatbot_replies_total{job=\"kaspi-saas\"}[$__range])), 1)" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Токены на отправленный ИИ-ответ",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "targets": [{ "refId": "A", "expr": "sum by (type) (rate(chatbot_tokens_total{job=\"kaspi-saas\"}[5m])) / scalar(clamp_min(sum(rate(chatbot_replies_total{job=\"kaspi-saas\",kind=\"inbound_reply\"}[5m])), 0.000001))", "legendFormat": "{{type}}" }],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Латентность ИИ автоответчика, секунды",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(chatbot_ai_latency_seconds_bucket{job=\"kaspi-saas\"}[5m])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(chatbot_ai_latency_seconds_bucket{job=\"kaspi-saas\"}[5m])))", "legendFormat": "p95" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "ИИ-ответы с фактами карточки / час",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [{ "refId": "A", "expr": "sum by (card_facts) (increase(chatbot_ai_replies_total{job=\"kaspi-saas\"}[1h]))", "legendFormat": "{{card_facts}}" }],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Запуски ассистента / час",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [{ "refId": "A", "expr": "sum by (outcome) (increase(assistant_runs_total{job=\"kaspi-saas\"}[1h]))", "legendFormat": "{{outcome}}" }],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "p95 длительности запуска ассистента",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(assistant_run_duration_seconds_bucket{job=\"kaspi-saas\"}[5m])))", "legendFormat": "p95" }],
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Токены ассистента / час",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 24 },
+      "targets": [{ "refId": "A", "expr": "sum by (type) (increase(assistant_tokens_total{job=\"kaspi-saas\"}[1h]))", "legendFormat": "{{type}}" }],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Известная стоимость ассистента, USD / час",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 24 },
+      "targets": [{ "refId": "A", "expr": "sum(increase(assistant_cost_usd_total{job=\"kaspi-saas\"}[1h]))", "legendFormat": "USD" }],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Ошибки инструментов ассистента / час",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
+      "targets": [{ "refId": "A", "expr": "sum by (tool) (increase(assistant_tool_calls_total{job=\"kaspi-saas\",ok=\"no\"}[1h]))", "legendFormat": "{{tool}}" }],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] }
+    }
+  ]
+}
