@@ -22,6 +22,7 @@ async def get_store_index(store_id: str) -> BM25Retriever:
             return entry[1]
 
     from backend.assistant.builtin_tools import _annotated_catalog
+    from backend.autolist.validator import list_drafts
     from backend import state_helpers
 
     # Каждый загрузчик уже применяет store_id в запросе. Ошибка одного
@@ -39,12 +40,15 @@ async def get_store_index(store_id: str) -> BM25Retriever:
             logger.warning("RAG source %s for %s: %s", fn.__name__, store_id, exc)
             return []
 
-    daily, war, logs = await asyncio.gather(
+    daily, war, logs, approved, submitted = await asyncio.gather(
         optional(state_helpers._load_sales_daily, days=90),
         optional(state_helpers._load_price_war_snapshot),
         optional(state_helpers._load_dumper_logs, limit=_MAX_LOGS),
+        optional(list_drafts, status="approved"),
+        optional(list_drafts, status="submitted"),
     )
-    index = await asyncio.to_thread(lambda: BM25Retriever(build_documents(products, daily, war, logs)))
+    index = await asyncio.to_thread(lambda: BM25Retriever(
+        build_documents(products, daily, war, logs, approved + submitted)))
     with _LOCK:
         _CACHE[store_id] = (time.monotonic() + rag_ttl_seconds(), index)
     return index
