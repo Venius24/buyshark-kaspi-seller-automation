@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import threading
 import time
 
@@ -21,7 +22,8 @@ async def get_store_index(store_id: str) -> BM25Retriever:
         if entry and entry[0] > time.monotonic():
             return entry[1]
 
-    from backend.assistant.builtin_tools import _annotated_catalog
+    from backend.assistant.builtin_tools import _annotated_catalog, _stock_of
+    from backend.assistant.card_facts import load_reviewed_cards
     from backend.autolist.validator import list_drafts
     from backend import state_helpers
 
@@ -40,15 +42,30 @@ async def get_store_index(store_id: str) -> BM25Retriever:
             logger.warning("RAG source %s for %s: %s", fn.__name__, store_id, exc)
             return []
 
-    daily, war, logs, approved, submitted = await asyncio.gather(
+    daily, war, logs, approved, submitted, cards, groups = await asyncio.gather(
         optional(state_helpers._load_sales_daily, days=90),
         optional(state_helpers._load_price_war_snapshot),
         optional(state_helpers._load_dumper_logs, limit=_MAX_LOGS),
         optional(list_drafts, status="approved"),
         optional(list_drafts, status="submitted"),
+        optional(load_reviewed_cards),
+        optional(state_helpers._load_master_stock_groups),
     )
+    card_skus = {card["draft_payload"]["sku"] for card in cards}
+    drafts = [d for d in approved + submitted
+              if str((d.get("draft_payload") or {}).get("sku") or "").strip() not in card_skus]
+    try:
+        limit = max(0, int(os.environ.get("ASSISTANT_RAG_MAX_PRODUCTS", "20000")))
+    except ValueError:
+        limit = 20000
+    if len(products) > limit:
+        total = len(products)
+        products = sorted(products, key=lambda p: (
+            p.get("status") != "Активен", (_stock_of(p) or 0) <= 0))[:limit]
+        logger.warning("RAG products for %s truncated: total=%d retained=%d limit=%d",
+                       store_id, total, len(products), limit)
     index = await asyncio.to_thread(lambda: BM25Retriever(
-        build_documents(products, daily, war, logs, approved + submitted)))
+        build_documents(products, daily, war, logs, cards + drafts, groups=groups)))
     with _LOCK:
         _CACHE[store_id] = (time.monotonic() + rag_ttl_seconds(), index)
     return index

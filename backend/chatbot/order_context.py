@@ -198,10 +198,21 @@ def _card_text(value, limit: int) -> str:
 def _reviewed_cards(store_id: str) -> dict:
     from backend.autolist.validator import list_drafts
 
+    from backend.assistant.card_facts import load_reviewed_cards
+
     cards = {}
-    try:
+
+    def sources():
+        yield "approved", load_reviewed_cards(store_id)
         for status in ("approved", "submitted"):
-            for draft in list_drafts(store_id, status):
+            try:
+                yield status, list_drafts(store_id, status)
+            except Exception:
+                logger.warning("[Chatbot] Проверенные карточки товаров не прочитаны", exc_info=False)
+
+    try:
+        for status, drafts in sources():
+            for draft in drafts:
                 if draft.get("status") != status or draft.get("store_id", store_id) != store_id:
                     continue
                 payload = draft.get("draft_payload") or {}

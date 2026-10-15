@@ -1155,3 +1155,22 @@ class AssistantRunDB(Base):
     truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     error: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     steps: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+
+
+class StoreCardFactDB(Base):
+    """Reviewed public product facts, independent of autolist drafts."""
+    __tablename__ = "store_card_facts"
+    __table_args__ = (UniqueConstraint("store_id", "sku", name="uq_store_card_facts_store_sku"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False, index=True)
+    sku: Mapped[str] = mapped_column(String(100), nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    brand: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    features: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    reviewed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
