@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from backend.assistant import builtin_tools  # noqa: F401 — регистрирует инструменты в реестре
+from backend.assistant import report_tool, rag_tool  # noqa: F401 — регистрирует инструменты
+from backend.assistant import proposals_tool  # noqa: F401
 from backend.assistant import tools as tool_registry
 from backend.assistant.config import AssistantConfig, load_config
 from backend.assistant.prompt import StoreBrief, build_system_prompt

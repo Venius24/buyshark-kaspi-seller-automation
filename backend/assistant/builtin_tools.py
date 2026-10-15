@@ -19,6 +19,8 @@
 
 import asyncio
 import logging
+from datetime import date, datetime, timezone
+import re
 from typing import Optional
 
 from backend.assistant.tools import ToolContext, tool
@@ -524,9 +526,65 @@ async def search_products(args: dict, ctx: ToolContext) -> dict:
     },
     section="overview",
 )
-def get_sales_stats(args: dict, ctx: ToolContext) -> dict:
-    # Подключать к backend/routers/analytics.py + SalesOrderDB
-    return _stub("backend/routers/analytics.py", store_id=ctx.store_id, period=[args.get("date_from"), args.get("date_to")])
+async def get_sales_stats(args: dict, ctx: ToolContext) -> dict:
+    from backend import state_helpers
+
+    if any(not isinstance(args.get(key), str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args[key])
+           for key in ("date_from", "date_to")):
+        return {"error": "date_from и date_to должны быть датами YYYY-MM-DD"}
+    try:
+        start = date.fromisoformat(args["date_from"])
+        end = date.fromisoformat(args["date_to"])
+    except (KeyError, TypeError, ValueError):
+        return {"error": "date_from и date_to должны быть датами YYYY-MM-DD"}
+    if start > end:
+        return {"error": "date_from не может быть позже date_to"}
+    if (end - start).days >= 365:
+        return {"error": "Период не может превышать 365 дней"}
+    today = datetime.now(timezone.utc).date()
+    if end > today:
+        return {"error": "Будущие UTC-даты недоступны"}
+
+    # Загрузчики принимают окно от текущего времени, а не произвольный
+    # интервал. Берём с запасом один день и отсекаем UTC-даты в коде.
+    days = (today - start).days + 1
+    try:
+        summary, daily = await asyncio.gather(
+            asyncio.to_thread(state_helpers._load_sales_summary, ctx.store_id, days=days),
+            asyncio.to_thread(state_helpers._load_sales_daily, ctx.store_id, days=days),
+        )
+    except Exception as exc:
+        logger.warning("Ассистент: продажи не получены для %s: %s", ctx.store_id, exc)
+        return {"status": "unavailable", "message": "Данные продаж недоступны"}
+
+    selected = [row for row in (daily or []) if start.isoformat() <= str(row.get("date", "")) <= end.isoformat()]
+    revenue = round(sum(float(row.get("revenue") or 0) for row in selected), 2)
+    orders = sum(int(row.get("orders") or 0) for row in selected)
+    result = {
+        "store_id": ctx.store_id,
+        "period": {"date_from": start.isoformat(), "date_to": end.isoformat(), "timezone": "UTC"},
+        "total_revenue": revenue,
+        "total_orders": orders,
+        "avg_order_value": round(revenue / orders, 2) if orders else 0.0,
+        "daily_total": len(selected),
+        "daily": [{"date": row.get("date"), "revenue": row.get("revenue"), "orders": row.get("orders")}
+                  for row in selected[:30]],
+    }
+    # Сводка SKU относится к скользящему окну загрузчика. Показываем её
+    # лишь когда все его дни попали в запрошенный интервал.
+    summary_days = (summary or {}).get("daily") or []
+    if summary_days and end == today and all(
+        start.isoformat() <= str(row.get("date", "")) <= end.isoformat() for row in summary_days
+    ):
+        result["top_skus"] = [
+            {"sku": str(row.get("sku") or "")[:80], "name": str(row.get("name") or "")[:120],
+             "revenue": row.get("revenue"), "quantity": row.get("quantity")}
+            for row in ((summary or {}).get("top_skus") or [])[:10]
+        ]
+    else:
+        result["top_skus"] = []
+        result["top_skus_note"] = "Точный топ SKU для произвольного интервала загрузчик не предоставляет"
+    return result
 
 
 @tool(

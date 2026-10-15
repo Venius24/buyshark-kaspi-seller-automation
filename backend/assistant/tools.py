@@ -45,6 +45,9 @@ class ToolContext:
     # Разделы кабинета, доступные пользователю (StoreContext.sections, вторая
     # ось прав — см. backend/security/sections.py). None = ограничений нет.
     sections: Optional[frozenset[str]] = None
+    # Только серверная DB-сессия и проверенный роутером диалог.
+    db: Any = None
+    conversation_id: Optional[str] = None
 
 
 @dataclass

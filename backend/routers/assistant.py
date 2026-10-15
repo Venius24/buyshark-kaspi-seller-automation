@@ -9,12 +9,13 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.assistant import storage
+from backend.assistant import proposals
 from backend.assistant import tools as tool_registry
 from backend.assistant.config import load_config
 from backend.assistant.engine import run_turn
@@ -34,6 +35,7 @@ router = APIRouter(prefix="/api/v1/assistant", tags=["assistant"])
 # закрыты отдельно (tools.py: read_only + подтверждение + min_role).
 _read_dep = require_section("assistant")
 _write_dep = require_section("assistant")
+_proposal_decide_dep = require_section("assistant", min_role="MANAGER")
 
 
 class NewConversationRequest(BaseModel):
@@ -134,6 +136,7 @@ async def get_messages(
 async def send_message(
     conversation_id: str,
     req: SendMessageRequest,
+    request: Request,
     ctx: StoreContext = Depends(_write_dep),
     db: AsyncSession = Depends(get_db),
 ):
@@ -165,7 +168,7 @@ async def send_message(
         brief=await _brief(db, ctx),
         ctx=ToolContext(
             store_id=ctx.store_id,
-            user_id=_user_id(ctx),
+            user_id=_request_user_id(request),
             role=ctx.role,
             confirmed=req.confirmed,
             # Токен Kaspi и разделы кабинета — инструменты читают заказы и
@@ -173,6 +176,8 @@ async def send_message(
             # ось прав (см. backend/security/sections.py).
             token=ctx.token,
             sections=ctx.sections,
+            db=db,
+            conversation_id=conversation_id,
         ),
         cfg=cfg,
     )
@@ -223,3 +228,58 @@ def _user_id(ctx: StoreContext) -> Optional[str]:
 
     payload = decode_token(ctx.token) if ctx.token else None
     return (payload or {}).get("sub")
+
+
+def _request_user_id(request: Request) -> str:
+    # require_section already verified this JWT/user/store membership. ctx.token
+    # is a Kaspi API credential and must never be decoded as an auth JWT.
+    from backend.security.auth import decode_token
+    header = request.headers.get("Authorization", "")
+    payload = decode_token(header[7:]) if header.startswith("Bearer ") else None
+    if not payload or payload.get("type") != "access" or not payload.get("sub"):
+        raise HTTPException(status_code=401, detail="Требуется AccessToken пользователя")
+    return payload["sub"]
+
+
+def _proposal_context(ctx, user_id=None):
+    return ToolContext(store_id=ctx.store_id, user_id=user_id, role=ctx.role,
+                       sections=ctx.sections)
+
+
+def _proposal_error(exc):
+    code = 404 if isinstance(exc, proposals.ProposalNotFound) else (
+        409 if isinstance(exc, proposals.ProposalConflict) else 400)
+    return HTTPException(status_code=code, detail=str(exc))
+
+
+@router.get("/proposals")
+async def get_proposals(status: Optional[str] = None, ctx: StoreContext = Depends(_read_dep),
+                        db: AsyncSession = Depends(get_db)):
+    try:
+        rows = await proposals.list_proposals(db, _proposal_context(ctx), status)
+    except proposals.ProposalError as exc:
+        raise _proposal_error(exc) from exc
+    return {"success": True, "proposals": [proposals.proposal_out(row) for row in rows]}
+
+
+@router.post("/proposals/{proposal_id}/approve")
+async def approve_price_proposal(proposal_id: str, request: Request, ctx: StoreContext = Depends(_proposal_decide_dep),
+                                 db: AsyncSession = Depends(get_db)):
+    try:
+        gateway = proposals.get_gateway()
+        row = await proposals.approve_proposal(db, _proposal_context(ctx, _request_user_id(request)), proposal_id, gateway)
+    except proposals.ProposalError as exc:
+        raise _proposal_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"success": True, "proposal": proposals.proposal_out(row)}
+
+
+@router.post("/proposals/{proposal_id}/reject")
+async def reject_price_proposal(proposal_id: str, request: Request, ctx: StoreContext = Depends(_proposal_decide_dep),
+                                db: AsyncSession = Depends(get_db)):
+    try:
+        row = await proposals.reject_proposal(db, _proposal_context(ctx, _request_user_id(request)), proposal_id)
+    except proposals.ProposalError as exc:
+        raise _proposal_error(exc) from exc
+    return {"success": True, "proposal": proposals.proposal_out(row)}

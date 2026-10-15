@@ -123,12 +123,13 @@ def test_unknown_tool_returns_error_not_raise():
     assert res["ok"] is False
 
 
-def test_read_tool_returns_not_implemented_stub():
-    """Ещё не реализованный инструмент честно говорит об этом, а не выдумывает."""
+def test_sales_stats_empty_data(monkeypatch):
+    monkeypatch.setattr(state_helpers, "_load_sales_summary", lambda store_id, days: {"daily": [], "top_skus": []})
+    monkeypatch.setattr(state_helpers, "_load_sales_daily", lambda store_id, days: [])
     res = asyncio.run(tool_registry.execute("get_sales_stats", {"date_from": "2026-09-01", "date_to": "2026-09-06"}, _ctx()))
     assert res["ok"] is True
-    assert res["result"]["status"] == "not_implemented"
-    # store_id всегда из контекста, не из аргументов модели
+    assert res["result"]["total_orders"] == 0
+    assert res["result"]["total_revenue"] == 0
     assert res["result"]["store_id"] == "store-1"
 
 

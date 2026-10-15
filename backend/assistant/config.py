@@ -13,6 +13,18 @@ from dataclasses import dataclass
 # работать и отвечать понятной болванкой, а не падать 500.
 DEFAULT_PROVIDER = "deepseek"
 DEFAULT_MODEL = "deepseek-chat"
+DEFAULT_MAX_PENDING_PROPOSALS = 50
+
+
+def max_pending_proposals() -> int:
+    return max(1, _int_env("ASSISTANT_MAX_PENDING_PROPOSALS", DEFAULT_MAX_PENDING_PROPOSALS))
+
+
+def price_gateway_name() -> str:
+    value = os.environ.get("ASSISTANT_PRICE_GATEWAY", "dry_run")
+    if value != "dry_run":
+        raise ValueError("ASSISTANT_PRICE_GATEWAY: допустимо только dry_run; реальный шлюз отсутствует")
+    return value
 
 # Совместимые с OpenAI chat/completions эндпоинты. Оба уже используются в
 # проекте: OpenAI — backend/autolist/extractor.py, DeepSeek — backend/chatbot/ai.py.
@@ -75,6 +87,7 @@ class AssistantConfig:
     # Пока инструменты только читают. Когда появятся пишущие (изменить цену,
     # принять заказ) — они обязаны спрашивать подтверждение, см. tools.py.
     allow_write_tools: bool
+    rag_ttl_seconds: int = 300
 
     @property
     def has_api_key(self) -> bool:
@@ -110,4 +123,10 @@ def load_config() -> AssistantConfig:
         request_timeout=float(_int_env("ASSISTANT_TIMEOUT_SECONDS", 45)),
         max_output_tokens=_int_env("ASSISTANT_MAX_OUTPUT_TOKENS", 1200),
         allow_write_tools=_bool_env("ASSISTANT_ALLOW_WRITE_TOOLS", False),
+        rag_ttl_seconds=max(1, _int_env("ASSISTANT_RAG_TTL_SECONDS", 300)),
     )
+
+
+def rag_ttl_seconds() -> int:
+    """TTL индекса без чтения .env при выполнении локального tool."""
+    return max(1, _int_env("ASSISTANT_RAG_TTL_SECONDS", 300))

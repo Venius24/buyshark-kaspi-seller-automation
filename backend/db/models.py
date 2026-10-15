@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Boolean, Integer, BigInteger, Float, Text, DateTime, ForeignKey, Column, Index, UniqueConstraint
+from sqlalchemy import String, Boolean, Integer, BigInteger, Float, Text, DateTime, ForeignKey, Column, Index, UniqueConstraint, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.db.database import Base
 
@@ -1108,3 +1108,27 @@ class AssistantMessageDB(Base):
     prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class AssistantPriceProposalDB(Base):
+    """Предложение цены; approved означает одобренный dry run, цена не меняется."""
+    __tablename__ = "assistant_price_proposals"
+    __table_args__ = (
+        Index("ix_assistant_proposals_store_status_created", "store_id", "status", "created_at"),
+        CheckConstraint("status IN ('pending', 'approved', 'rejected', 'failed')", name="ck_assistant_proposal_status"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False)
+    conversation_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("assistant_conversations.id", ondelete="SET NULL"), nullable=True)
+    sku: Mapped[str] = mapped_column(String(100), nullable=False)
+    old_price: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    new_price: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    min_price_at_creation: Mapped[float] = mapped_column(Float, nullable=False)
+    max_price_at_creation: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    reason: Mapped[str] = mapped_column(String(300), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    decided_by_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    apply_result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
