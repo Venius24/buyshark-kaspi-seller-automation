@@ -6,6 +6,7 @@
 """
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -55,6 +56,9 @@ class AssistantTurn:
     error: Optional[str] = None
     # Модель упёрлась в лимит итераций tool-calling — ответ может быть неполным.
     truncated: bool = False
+    steps: list[dict] = field(default_factory=list)
+    duration_ms: float = 0
+    llm_calls: int = 0
 
 
 async def run_turn(
@@ -70,6 +74,14 @@ async def run_turn(
     history — предыдущие сообщения БЕЗ систем-промпта и без текущего вопроса;
     их подрезает вызывающий (storage.py отдаёт последние cfg.history_limit).
     """
+    started = time.monotonic()
+    steps: list[dict] = []
+
+    def finish(**kwargs):
+        return AssistantTurn(**kwargs, steps=steps,
+                             duration_ms=(time.monotonic() - started) * 1000,
+                             llm_calls=sum(s["kind"] == "llm" for s in steps))
+
     cfg = cfg or load_config()
     provider = provider or get_provider(cfg)
 
@@ -89,14 +101,30 @@ async def run_turn(
             usage_total["prompt_tokens"] += result.usage.get("prompt_tokens") or 0
             usage_total["completion_tokens"] += result.usage.get("completion_tokens") or 0
 
+    async def complete(tools):
+        step_start = time.monotonic()
+        try:
+            result = await provider.complete(messages, tools=tools)
+        except Exception:
+            steps.append({"kind": "llm", "name": cfg.model,
+                          "duration_ms": (time.monotonic() - step_start) * 1000,
+                          "ok": False, "error": "Provider raised an exception"})
+            raise
+        step = {"kind": "llm", "name": result.usage.get("model") or cfg.model,
+                "duration_ms": (time.monotonic() - step_start) * 1000, "ok": not bool(result.error)}
+        if result.error:
+            step["error"] = str(result.error)[:200]
+        steps.append(step)
+        return result
+
     truncated = False
 
     for iteration in range(cfg.max_tool_iterations + 1):
-        result = await provider.complete(messages, tools=wire_tools or None)
+        result = await complete(wire_tools or None)
         _account(result)
 
         if result.error:
-            return AssistantTurn(
+            return finish(
                 reply="",
                 tool_trace=trace,
                 usage=usage_total,
@@ -105,7 +133,7 @@ async def run_turn(
             )
 
         if not result.tool_calls:
-            return AssistantTurn(
+            return finish(
                 reply=result.text,
                 tool_trace=trace,
                 usage=usage_total,
@@ -114,7 +142,15 @@ async def run_turn(
 
         messages.append(Message(role=ROLE_ASSISTANT, content=result.text, tool_calls=result.tool_calls))
         for call in result.tool_calls:
+            step_start = time.monotonic()
             payload = await tool_registry.execute(call.name, call.arguments, ctx, allow_write=cfg.allow_write_tools)
+            tool_error = payload.get("error") or (payload.get("result") or {}).get("error")
+            step = {"kind": "tool", "name": call.name,
+                    "duration_ms": (time.monotonic() - step_start) * 1000,
+                    "ok": payload.get("ok", False) and not bool(tool_error)}
+            if tool_error:
+                step["error"] = str(tool_error)[:200]
+            steps.append(step)
             trace.append(ToolInvocation(name=call.name, arguments=call.arguments, result=payload))
             messages.append(
                 Message(
@@ -141,11 +177,11 @@ async def run_turn(
     # она успела собрать, и единственное, что ей остаётся — ответить.
     logger.warning(f"⚠️ Ассистент: лимит итераций tool-calling ({cfg.max_tool_iterations}), добираю ответ без инструментов")
     messages.append(Message(role=ROLE_SYSTEM, content=FORCE_ANSWER_PROMPT))
-    final = await provider.complete(messages, tools=None)
+    final = await complete(None)
     _account(final)
 
     if final.error or not final.text:
-        return AssistantTurn(
+        return finish(
             reply=(
                 "Не удалось собрать ответ: запрос потребовал слишком много обращений к данным. "
                 "Попробуй спросить конкретнее — например, назови категорию или артикул."
@@ -156,7 +192,7 @@ async def run_turn(
             truncated=True,
         )
 
-    return AssistantTurn(
+    return finish(
         reply=final.text,
         tool_trace=trace,
         usage=usage_total,

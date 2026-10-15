@@ -6,6 +6,7 @@ FastAPI-процесс грузит .env в main.py сам, но тесты и a
 """
 
 import os
+import math
 from dataclasses import dataclass
 
 # Целевой провайдер — DeepSeek. Без ASSISTANT_API_KEY он всё равно
@@ -70,6 +71,14 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _price_env(name: str):
+    try:
+        value = float(os.environ.get(name, ""))
+        return value if math.isfinite(value) and value >= 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass(frozen=True)
 class AssistantConfig:
     enabled: bool
@@ -88,6 +97,8 @@ class AssistantConfig:
     # принять заказ) — они обязаны спрашивать подтверждение, см. tools.py.
     allow_write_tools: bool
     rag_ttl_seconds: int = 300
+    price_prompt_per_1m: float | None = None
+    price_completion_per_1m: float | None = None
 
     @property
     def has_api_key(self) -> bool:
@@ -123,6 +134,8 @@ def load_config() -> AssistantConfig:
         request_timeout=float(_int_env("ASSISTANT_TIMEOUT_SECONDS", 45)),
         max_output_tokens=_int_env("ASSISTANT_MAX_OUTPUT_TOKENS", 1200),
         allow_write_tools=_bool_env("ASSISTANT_ALLOW_WRITE_TOOLS", False),
+        price_prompt_per_1m=_price_env("ASSISTANT_PRICE_PROMPT_PER_1M"),
+        price_completion_per_1m=_price_env("ASSISTANT_PRICE_COMPLETION_PER_1M"),
         rag_ttl_seconds=max(1, _int_env("ASSISTANT_RAG_TTL_SECONDS", 300)),
     )
 

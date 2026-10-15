@@ -7,15 +7,16 @@
 """
 
 import logging
+from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.assistant import storage
-from backend.assistant import proposals
+from backend.assistant import proposals, runs
 from backend.assistant import tools as tool_registry
 from backend.assistant.config import load_config
 from backend.assistant.engine import run_turn
@@ -162,6 +163,7 @@ async def send_message(
     if not prior and convo.title in ("", "Новый диалог"):
         convo.title = text[:80]
 
+    started_at = datetime.utcnow()
     turn = await run_turn(
         user_text=text,
         history=history,
@@ -183,8 +185,22 @@ async def send_message(
     )
 
     if turn.error:
-        # Ход пользователя уже сохранён — ответ не сохраняем, чтобы повтор
-        # не тащил в историю пустое сообщение помощника.
+        # Preserve the existing failure rollback, including pending proposals.
+        # Only observability is retained, using the same request session.
+        await db.rollback()
+
+    try:
+        # A savepoint isolates trace INSERT failures from messages/proposals.
+        async with db.begin_nested():
+            await runs.save_run(db, store_id=ctx.store_id, conversation_id=conversation_id,
+                                user_id=_request_user_id(request), started_at=started_at, turn=turn, cfg=cfg)
+    except Exception:
+        logger.exception("Assistant run persistence failed")
+
+    if turn.error:
+        # Retain only the failed run before get_db handles HTTPException.
+        await db.commit()
+        # Ответ и сообщения неуспешного хода не сохраняются, как и прежде.
         raise HTTPException(status_code=502, detail=turn.error)
 
     reply_row = await storage.append_message(
@@ -283,3 +299,23 @@ async def reject_price_proposal(proposal_id: str, request: Request, ctx: StoreCo
     except proposals.ProposalError as exc:
         raise _proposal_error(exc) from exc
     return {"success": True, "proposal": proposals.proposal_out(row)}
+
+
+@router.get("/runs")
+async def get_runs(limit: int = Query(20, ge=1, le=100), ctx: StoreContext = Depends(_read_dep),
+                   db: AsyncSession = Depends(get_db)):
+    return {"success": True, "runs": await runs.list_runs(db, ctx.store_id, limit)}
+
+
+@router.get("/runs/{run_id}")
+async def get_run(run_id: str, ctx: StoreContext = Depends(_read_dep), db: AsyncSession = Depends(get_db)):
+    row = await runs.get_run(db, ctx.store_id, run_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Запуск не найден")
+    return {"success": True, "run": row}
+
+
+@router.get("/metrics/summary")
+async def get_metrics_summary(days: int = Query(7, ge=1, le=90), ctx: StoreContext = Depends(_read_dep),
+                              db: AsyncSession = Depends(get_db)):
+    return {"success": True, **await runs.summary(db, ctx.store_id, days)}

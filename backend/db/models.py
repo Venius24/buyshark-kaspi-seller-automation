@@ -1132,3 +1132,26 @@ class AssistantPriceProposalDB(Base):
     decided_by_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     apply_result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class AssistantRunDB(Base):
+    """Run metadata only; steps exclude messages, tool arguments and results."""
+    __tablename__ = "assistant_runs"
+    __table_args__ = (Index("ix_assistant_runs_store_started", "store_id", "started_at"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    store_id: Mapped[str] = mapped_column(String(36), ForeignKey("stores.id", ondelete="CASCADE"), nullable=False)
+    conversation_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("assistant_conversations.id", ondelete="SET NULL"), nullable=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    duration_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    model: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    provider: Mapped[str] = mapped_column(String(50), nullable=False, default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    llm_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tool_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tool_errors: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    error: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    steps: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
