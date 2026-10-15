@@ -9,8 +9,8 @@
    принцип, что и во всём остальном бэкенде после Phase 4 (см.
    backend/security/store_context.py).
 2. **Пишущие инструменты по умолчанию выключены** (`read_only=False` +
-   ASSISTANT_ALLOW_WRITE_TOOLS=0) и должны требовать явного подтверждения
-   пользователя. Модель не меняет цены и не принимает заказы молча.
+   ASSISTANT_ALLOW_WRITE_TOOLS=0) и по умолчанию требуют явного подтверждения
+   пользователя. Pending-предложения могут не требовать подтверждения в чате.
 3. **Схема аргументов — JSON Schema**, отдаётся модели как есть.
 4. **Инструмент наследует права раздела** (`section=`). Помощник не должен
    становиться обходным путём вокруг прав сотрудника: если сборщику не выдали
@@ -35,8 +35,7 @@ class ToolContext:
     store_id: str
     user_id: Optional[str] = None
     role: str = "OWNER"
-    # Пользователь ещё не подтвердил изменение — пишущие инструменты обязаны
-    # вернуть "нужно подтверждение", а не выполниться.
+    # Подтверждение для пишущих инструментов с requires_confirmation=True.
     confirmed: bool = False
     # Токен Kaspi API этого магазина (StoreContext.token). Нужен инструментам,
     # которые читают заказы/каталог: половина данных кабинета живёт не в нашей
@@ -64,6 +63,7 @@ class ToolSpec:
     # не выдали раздел "products", он не должен спрашивать цены у ассистента и
     # получать их. None = раздел не требуется.
     section: Optional[str] = None
+    requires_confirmation: bool = True
 
     def to_wire(self) -> dict:
         """В формат tools[] OpenAI chat/completions."""
@@ -96,6 +96,7 @@ def tool(
     read_only: bool = True,
     min_role: str = "VIEWER",
     section: Optional[str] = None,
+    requires_confirmation: bool = True,
 ):
     """Декоратор регистрации: см. backend/assistant/builtin_tools.py."""
 
@@ -109,6 +110,7 @@ def tool(
                 read_only=read_only,
                 min_role=min_role,
                 section=section,
+                requires_confirmation=requires_confirmation,
             )
         )
         return fn
@@ -176,7 +178,7 @@ async def execute(name: str, arguments: dict, ctx: ToolContext, allow_write: boo
     if not spec.read_only:
         if not allow_write:
             return {"ok": False, "error": f"Изменяющие инструменты выключены (ASSISTANT_ALLOW_WRITE_TOOLS=0): '{name}'"}
-        if not ctx.confirmed:
+        if spec.requires_confirmation and not ctx.confirmed:
             return {"ok": False, "error": f"Действие '{name}' меняет данные магазина и требует подтверждения пользователя"}
 
     try:

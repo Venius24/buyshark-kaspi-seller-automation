@@ -188,8 +188,10 @@ def test_tool_gates_and_result(database, monkeypatch):
     async def scenario():
         async with database() as (db, ctx, _):
             args = {"sku": "SKU", "new_price": 160, "reason": "test"}
+            ctx.confirmed = False
             spec = tools.get("propose_price")
             assert spec.read_only is False and spec.min_role == "MANAGER"
+            assert spec.requires_confirmation is False
             monkeypatch.setenv("ASSISTANT_ALLOW_WRITE_TOOLS", "0")
             assert not (await tools.execute("propose_price", args, ctx, allow_write=False))["ok"]
             assert not (await tools.execute("propose_price", args, ctx, allow_write=True))["ok"]
@@ -199,14 +201,67 @@ def test_tool_gates_and_result(database, monkeypatch):
             with pytest.raises(PermissionError):
                 await create(db, ctx)
             ctx.role = "MANAGER"
-            ctx.confirmed = False
-            assert not (await tools.execute("propose_price", args, ctx, allow_write=True))["ok"]
-            ctx.confirmed = True
             assert not (await tools.execute("propose_price", dict(args, store_id="b"), ctx, allow_write=True))["ok"]
             assert await p.list_proposals(db, ctx) == []
             result = await tools.execute("propose_price", args, ctx, allow_write=True)
             assert result["ok"] and result["result"]["status"] == "pending"
             assert "цена НЕ изменена" in result["result"]["message"]
+    run(scenario())
+
+
+@pytest.mark.parametrize("allow_write,role,new_price,sections,error", [
+    (True, "MANAGER", 160, frozenset({"assistant"}), None),
+    (False, "MANAGER", 160, frozenset({"assistant"}), "ASSISTANT_ALLOW_WRITE_TOOLS=0"),
+    (True, "VIEWER", 160, frozenset({"assistant"}), "Недостаточно прав"),
+    (True, "MANAGER", 99, frozenset({"assistant"}), "ниже минимальной"),
+    (True, "MANAGER", 160, frozenset(), "Раздел 'assistant'"),
+])
+def test_engine_proposal_without_chat_confirmation(database, monkeypatch, allow_write, role, new_price, sections, error):
+    from backend.assistant.config import AssistantConfig
+    from backend.assistant.engine import run_turn
+    from backend.assistant.prompt import StoreBrief
+    from evals.run import ScriptedProvider
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Agent must not access approval or gateway")
+
+    monkeypatch.setenv("ASSISTANT_ALLOW_WRITE_TOOLS", "1" if allow_write else "0")
+    monkeypatch.setattr(p, "get_gateway", forbidden)
+    monkeypatch.setattr(p, "approve_proposal", forbidden)
+    monkeypatch.setattr(p.DryRunGateway, "apply", forbidden)
+
+    async def scenario():
+        async with database() as (db, ctx, _):
+            ctx.confirmed = False
+            ctx.role = role
+            ctx.sections = sections
+            cfg = AssistantConfig(enabled=True, provider="stub", model="test", api_key="",
+                base_url="", max_tool_iterations=2, history_limit=10, request_timeout=5,
+                max_output_tokens=100, allow_write_tools=allow_write)
+            provider = ScriptedProvider([
+                {"tool_calls": [{"name": "propose_price", "arguments": {
+                    "sku": "SKU", "new_price": new_price, "reason": "Запрос пользователя"}}]},
+                {"text": "Результат получен."},
+            ])
+            turn = await run_turn(f"Подними цену SKU до {new_price}", [],
+                                  StoreBrief(store_id=ctx.store_id), ctx, cfg, provider)
+            assert turn.error is None
+            assert len(turn.tool_trace) == 1
+            result = turn.tool_trace[0].result
+            rows = list((await db.execute(select(AssistantPriceProposalDB))).scalars())
+            if error:
+                assert result["ok"] is False and error in result["error"]
+                assert rows == []
+            else:
+                assert result["ok"] is True
+                assert len(rows) == 1
+                row = rows[0]
+                assert (row.id, row.status) == (result["result"]["id"], "pending")
+                assert (row.sku, row.old_price, row.new_price) == ("SKU", 150, 160)
+                assert row.decided_at is None and row.apply_result is None
+            payload = (await db.execute(select(StoreProductDB.payload).where(
+                StoreProductDB.store_id == ctx.store_id))).scalar_one()
+            assert json.loads(payload)[0]["price_num"] == 150
     run(scenario())
 
 

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Sparkles, Send, Plus, Trash2, Wrench, AlertTriangle } from 'lucide-react';
 import { MarkdownLite } from '../MarkdownLite';
+import { AssistantProposals } from './AssistantProposals';
 import {
   useAssistantActions,
   useAssistantConversations,
@@ -158,6 +159,7 @@ export function AssistantTab() {
 
         {/* Диалог */}
         <section style={chatStyle}>
+          <AssistantProposals />
           <div style={messagesStyle}>
             {messages.length === 0 && !isFetching && (
               <div style={emptyStateStyle}>

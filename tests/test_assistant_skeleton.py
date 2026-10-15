@@ -113,6 +113,7 @@ def test_viewer_does_not_see_manager_tool():
 
 
 def test_write_tool_requires_confirmation():
+    assert tool_registry.get("set_dumping_enabled").requires_confirmation is True
     res = asyncio.run(tool_registry.execute("set_dumping_enabled", {"enabled": True}, _ctx(), allow_write=True))
     assert res["ok"] is False
     assert "подтверждения" in res["error"]

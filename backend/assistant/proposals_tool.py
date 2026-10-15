@@ -5,8 +5,8 @@ from backend.assistant.tools import tool
 from backend.assistant.proposals import create_proposal
 
 
-@tool(name="propose_price", read_only=False, min_role="MANAGER", section="assistant",
-      description="Только по запросу пользователя: предложить цену для одобрения человеком. Цена НЕ меняется.",
+@tool(name="propose_price", read_only=False, requires_confirmation=False, min_role="MANAGER", section="assistant",
+      description="По явному запросу пользователя с однозначными SKU и новой ценой сразу создай предложение без повторного подтверждения в чате; при неоднозначном SKU уточни. После успеха сообщи: предложение создано и ждёт одобрения человеком на вкладке ассистента, цена НЕ изменена.",
       parameters={"type": "object", "properties": {
           "sku": {"type": "string", "maxLength": 100},
           "new_price": {"type": "integer", "minimum": 1},
@@ -16,12 +16,10 @@ async def propose_price(arguments, ctx):
     # Defense in depth for direct handler invocation; never read .env here.
     if os.environ.get("ASSISTANT_ALLOW_WRITE_TOOLS") != "1":
         raise ValueError("propose_price выключен: требуется ASSISTANT_ALLOW_WRITE_TOOLS=1")
-    if not ctx.confirmed:
-        raise ValueError("Требуется подтверждение пользователя")
     if set(arguments) != {"sku", "new_price", "reason"}:
         raise ValueError("Допустимы только sku, new_price, reason")
     if ctx.db is None:
         raise ValueError("DB-сессия не передана сервером")
     row = await create_proposal(ctx.db, ctx, **arguments)
     return {"id": row.id, "status": row.status,
-            "message": "Предложение создано, ждёт одобрения человеком, цена НЕ изменена"}
+            "message": "Предложение создано, ждёт одобрения человеком на вкладке ассистента, цена НЕ изменена"}

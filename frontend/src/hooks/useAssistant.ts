@@ -157,3 +157,80 @@ export function useAssistantActions() {
 
   return { createConversation, sendMessage, deleteConversation };
 }
+
+export type AssistantProposalStatus = 'pending' | 'approved' | 'rejected' | 'failed';
+
+export interface AssistantProposal {
+  id: string;
+  store_id: string;
+  conversation_id: string | null;
+  sku: string;
+  old_price: number | null;
+  new_price: number;
+  min_price_at_creation: number | null;
+  max_price_at_creation: number | null;
+  reason: string;
+  status: AssistantProposalStatus;
+  created_by_user_id: string | null;
+  created_at: string | null;
+  decided_by_user_id: string | null;
+  decided_at: string | null;
+  apply_result: Record<string, unknown> | null;
+}
+
+export class AssistantProposalError extends Error {
+  readonly status: number;
+
+  constructor(status: number, detail: string) {
+    super(detail);
+    this.status = status;
+  }
+}
+
+async function proposalJson(url: string, init?: RequestInit) {
+  const res = await apiFetch(url, init);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new AssistantProposalError(res.status, typeof data?.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+  }
+  return data;
+}
+
+export function useAssistantProposals(status?: AssistantProposalStatus) {
+  const storeId = useActiveStoreId();
+  const query = useQuery({
+    queryKey: ['assistant-proposals', storeId, status],
+    queryFn: async () => {
+      const data = await proposalJson(`${BASE()}/proposals${status ? `?status=${status}` : ''}`);
+      return (data.proposals || []) as AssistantProposal[];
+    },
+    refetchInterval: (query) => query.state.error instanceof AssistantProposalError && query.state.error.status === 403 ? false : 15_000,
+    refetchIntervalInBackground: false,
+    retry: (count, error) => !(error instanceof AssistantProposalError && error.status < 500) && count < 2,
+  });
+  return { ...query, proposals: query.data ?? [] };
+}
+
+function useDecideProposal(action: 'approve' | 'reject') {
+  const queryClient = useQueryClient();
+  const storeId = useActiveStoreId();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['assistant-proposals', storeId] });
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const data = await proposalJson(`${BASE()}/proposals/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
+      return data.proposal as AssistantProposal;
+    },
+    onSuccess: invalidate,
+    onError: (error) => {
+      if (error instanceof AssistantProposalError && error.status === 409) return invalidate();
+    },
+  });
+}
+
+export function useApproveProposal() {
+  return useDecideProposal('approve');
+}
+
+export function useRejectProposal() {
+  return useDecideProposal('reject');
+}
