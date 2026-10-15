@@ -39,3 +39,11 @@ Prompt на ответ помощника включает историю диа
 - Job `kaspi-saas` работает, `up = 1`.
 - Хранение данных: **1 неделя** (`storage.tsdb.retention.time = 1w`). Сравнение двух недель по Prometheus сейчас невозможно.
 - Для сравнения «до/после» используй БД (`chat_response_logs`, `assistant_runs`) или увеличь хранение Prometheus.
+
+## Окно «после»
+
+- Включено на проде: **2026-10-15 20:25 UTC** (2026-10-16 01:25 Алматы). Коммит `499c585`, миграции 050 и 051 применены.
+- Флаги в `.env`: `ASSISTANT_ALLOW_WRITE_TOOLS=1`, `CHATBOT_CARD_FACTS_ENABLED=1`.
+- Сравнение по БД, не по Prometheus. Проверка через 2–3 дня: `scripts/ai_baseline.py --days 7`, строки с 2026-10-16 против строк до 2026-10-15.
+- Что сравнивать: доля эскалаций, средние prompt/completion токены на `inbound_reply`, число ответов. Выборка мала (около 8–15 ИИ-ответов в день), выводы за 2–3 дня предварительные.
+- Откат карточки: `CHATBOT_CARD_FACTS_ENABLED=0` в `/root/buyshark/.env` и рестарт `kaspi-saas`. Бэкап прежнего `.env`: `/root/buyshark/.env.bak-ai-20261016`.
