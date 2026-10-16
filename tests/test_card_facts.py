@@ -227,3 +227,91 @@ def test_dry_run_never_opens_database(files, monkeypatch, capsys):
     products, rows = files
     importer.main(["--store-id", "a", "--products", str(products), "--rows", str(rows)])
     assert json.loads(capsys.readouterr().out)["applied"] == 0
+
+
+@pytest.mark.parametrize("size,height,width", [
+    ("240x200", "200", "240"),
+    ("180x180", "180", "180"),
+    ("178x183", "178", "183"),
+    ("240х200", "200", "240"),
+    ("240 × 200", "200", "240"),
+    (" 240 * 200 ", "200", "240"),
+    ("240X200", "200", "240"),
+    ("240Х200", "200", "240"),
+    ("1,8x2,4", "1.8", "2.4"),
+    ("2.40x1.80", "1.8", "2.4"),
+    ("200.0x240", "200", "240"),
+    ("9999x0.001", "0.001", "9999"),
+])
+def test_derive_curtain_dimensions(size, height, width):
+    features = [["Материал", "ткань"], ["  РАЗМЕР ШТОРЫ, СМ  ", size]]
+    original = [pair[:] for pair in features]
+    result = importer.derive_curtain_dimensions(features)
+    assert result == original + [["Высота шторы, см", height], ["Ширина шторы, см", width]]
+    assert features == original
+    assert importer.derive_curtain_dimensions(result) == result
+
+
+@pytest.mark.parametrize("size", [
+    "большая", "", "240x200x180", "240x200 см", "240/200", "240 200",
+    "0x200", "200x0", "-1x200", "+1x200", "1e2x200", "10000x200",
+    "12.345x200", "NaNx200", "1..8x2.4", ".8x2.4",
+])
+def test_derive_curtain_dimensions_invalid(size):
+    features = [["Размер шторы, см", size]]
+    assert importer.derive_curtain_dimensions(features) == features
+
+
+@pytest.mark.parametrize("existing", ["  ВЫСОТА ШТОРЫ, СМ ", "  ШИРИНА ШТОРЫ, СМ "])
+def test_derive_curtain_dimensions_preserves_existing(existing):
+    features = [["Размер шторы, см", "240x200"], [existing, "123"]]
+    assert importer.derive_curtain_dimensions(features) == features
+
+
+@pytest.mark.parametrize("features", [
+    [["Ширина", "1000 мм"], ["Высота", "2100 мм"]],
+    [["Материал", "ткань"]],
+    [["Размер шторы", "240x200"]],
+    [],
+])
+def test_derive_curtain_dimensions_without_matching_size(features):
+    assert importer.derive_curtain_dimensions(features) == features
+
+
+def test_curtain_import_dry_run_and_repeated_apply(database, files, monkeypatch, capsys):
+    _, factory, url = database
+    products, rows = files
+    products.write_text("[]", encoding="utf-8")
+    rows.write_text(json.dumps({
+        "CURTAIN": {" Размер шторы, см ": " 240x200 ", "k" * 110: "v" * 700},
+        "DECIMAL": {"Размер шторы, см": "1,8x2,4"},
+        "EXISTING": {"Размер шторы, см": "240x200", "Высота шторы, см": "123"},
+        "INVALID": {"Размер шторы, см": "большая"},
+        "MOSQUITO": {"Ширина": "1000", "Высота": "2100"},
+        "EMPTY": {},
+    }, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setenv("DATABASE_URL", url)
+    argv = ["--store-id", "a", "--products", str(products), "--rows", str(rows)]
+    importer.main(argv)
+    output = capsys.readouterr().out
+    summary = json.loads(output)
+    assert summary["derived_curtain_dimensions"] == 2
+    assert summary["records"] == 6 and summary["applied"] == 0
+    assert "240" not in output and "1.8" not in output and "Высота" not in output
+    records, _ = importer.read_records(products, rows)
+    expected = {record["sku"]: record["features"] for record in records}
+    with factory() as session:
+        assert session.scalars(select(StoreCardFactDB)).all() == []
+    for _ in range(2):
+        importer.main(argv + ["--apply"])
+        assert json.loads(capsys.readouterr().out)["derived_curtain_dimensions"] == 2
+        with factory() as session:
+            stored = session.scalars(select(StoreCardFactDB)).all()
+            assert len(stored) == 6
+            assert {record.sku: record.features for record in stored} == expected
+    curtain = json.loads(expected["CURTAIN"])
+    assert curtain[-2:] == [["Высота шторы, см", "200"], ["Ширина шторы, см", "240"]]
+    assert curtain[0] == ["Размер шторы, см", "240x200"]
+    assert curtain[1] == ["k" * 100, "v" * 600]
+    assert all(len(name) <= 100 and len(value) <= 600
+               for value in expected.values() for name, value in json.loads(value))
