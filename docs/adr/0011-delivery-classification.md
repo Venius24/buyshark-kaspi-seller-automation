@@ -6,40 +6,62 @@
 ## Context
 
 The system reported no customer pickups although the seller's cabinet showed
-them. Both locker delivery and customer pickup had `DELIVERY_PICKUP` as
-`deliveryMode`, so the existing parser labeled every such order as a locker
-delivery. This also made the pickup message campaign unreachable.
+them. Both locker delivery and customer pickup use `DELIVERY_PICKUP` as
+`deliveryMode`; labeling that value as locker delivery made pickup campaigns
+unreachable. `pickupPointId` is also populated for both classes.
+
+## Decision drivers
+
+1. Distinguish actual customer pickup from carriage by Kaspi.
+2. Target pickup automation without messaging locker-delivery customers.
+3. Reconcile normalized types against raw fields and seller-visible counts.
+4. Keep one parser shared by downstream order workflows.
+
+## Options considered
+
+| Option | Correct distinction | Campaign targeting | Verifiable meaning | Shared normalization |
+| --- | --- | --- | --- | --- |
+| deliveryMode alone | - | - | - | + |
+| pickupPointId alone | - | - | - | + |
+| Raw carriage flag + delivery block | + | + | + | + |
+
+**Mode alone:** is simple to normalize but conflates two real workflows.
+The observed missing pickups and unreachable campaign were consequences of
+exactly this mapping, not an empty seller order queue.
+
+**Pickup-point ID alone:** looks useful because the field names a pickup location.
+It identifies the seller's point and appears in both cases, so its presence cannot
+determine who carries the order.
+
+**Raw carriage attributes:** distinguish whether Kaspi delivers the parcel.
+They require a compound rule, but that rule can be checked against cabinet counts
+and preserved in regression fixtures rather than inferred from a label.
 
 ## Decision
 
-Use `isKaspiDelivery` and the delivery block to distinguish whether Kaspi
-carries the order. For `DELIVERY_PICKUP` without Kaspi carriage, classify
-customer pickup; with carriage, classify locker or pickup-point delivery.
-Preserve explicit express indicators ahead of this distinction in
-[the parser](../../backend/kaspi_wrapper.py).
+For `DELIVERY_PICKUP`, use `isKaspiDelivery` and the delivery block to determine
+Kaspi carriage. Without carriage, classify customer pickup; with carriage,
+classify locker/pickup-point delivery. Preserve explicit express indicators first
+in [the shared parser](../../backend/kaspi_wrapper.py).
 
-Reconcile the classification against seller-visible counts before changing
-downstream behavior. Replace an unproductive poll of transient new orders with
-a poll of pickup-state orders for stores that have pickup points; filter the
-same-state locker orders using the corrected type. See
-[the worker](../../backend/services/stock_sync_worker.py).
-
-## Alternatives considered
-
-- `deliveryMode` alone: the two order classes share its value; it caused the
-  original misclassification.
-- `pickupPointId` alone: it is populated for both classes and identifies the
-  seller's point, so it cannot distinguish them.
-- Keep the old new-order poll for the campaign: observed no usable new orders
-  while making repeated requests; the pickup-state poll was chosen instead.
+Poll pickup-state orders for stores with pickup points and filter locker orders
+using the corrected type in [the worker](../../backend/services/stock_sync_worker.py).
+The earlier transient new-order poll produced no usable campaign orders while
+repeating requests; it was not a reliable substitute for pickup-state selection.
 
 ## Consequences
 
-- Pickup-specific automation can now select its actual orders. The
-  [regression tests](../../tests/test_pickup_delivery_type.py) preserve both
-  cases.
-- Historical derived `deliveryType` values in logs or snapshots remain
-  unreliable; interpretation should use raw order attributes.
-- The first corrected pass queued old pickup orders as well as recent ones.
-  Those messages were held rather than sent automatically, exposing the need
-  for an order-age gate in addition to a queue-age gate.
+- Pickup automation can select its actual orders;
+  [regression tests](../../tests/test_pickup_delivery_type.py) preserve both cases.
+- Historical derived `deliveryType` values remain unreliable; raw attributes
+  must be used when interpreting old logs or snapshots.
+- Correct type selection was insufficient for send safety: the first corrected
+  pass queued old pickup orders too. Those messages were held, exposing the need
+  for an order-age gate as well as a queue-age gate.
+
+## Revisit triggers
+
+- Reconcile counts and revise fixtures if platform fields change or a new delivery
+  mode makes the carriage rule ambiguous; do not guess from a renamed label.
+- Recheck campaign eligibility before expanding sends to a new order state or
+  backlog; correct delivery type alone does not establish message timeliness.

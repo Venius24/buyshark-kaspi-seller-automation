@@ -5,47 +5,76 @@
 
 ## Context
 
-The core service and frontend were deployed to one host with systemd and nginx.
-Commit `05bb3090` added that deployment package on 2026-07-26; commit `238d06d2`
-hardened the pipeline with rollback and an atomic frontend swap on 2026-07-28.
-Before the hardening phases, CI could deploy from any branch, deployment reset
-the checkout without a verified recovery path, and deployment configuration
-contained a hard-coded database password. The password was removed and rotated;
-the current script still uses Git reset to select a revision.
+One operator ran a live tenant on one VPS without staging. Early CI deployed
+from any branch, scripts contained a database password, and checkout resets
+had no verified recovery path. Containment restricted CI, removed/rotated the
+password and hardened deployment before changing authorization.
+Commit `238d06d2` added rollback and the frontend release switch on 2026-07-28.
+
+## Decision drivers
+
+1. Reject an unhealthy release and restore service with a checkable outcome.
+2. Keep deployment and diagnosis executable by one operator.
+3. Stay within the cost and scope of the first manually onboarded customers.
+4. Coordinate backend, schema and frontend changes without staging.
+5. Make the served revision observable, not just the checkout's Git HEAD.
+
+## Options considered
+
+| Option | Recovery | One-operator fit | Cost/scope | Release coordination | Revision visibility |
+| --- | --- | --- | --- | --- | --- |
+| VPS + systemd + deploy script | + | + | + | ~ | + |
+| Docker Compose on the same VPS | ~ | ~ | ~ | ~ | + |
+| PaaS | ~ | ~ | ~ | ~ | + |
+| Kubernetes | + | - | - | - | + |
+
+**VPS/systemd:** reuses the installed application and database with a small
+number of operating concepts. Health checks and release directories add recovery
+without a platform migration; host failure remains outside that protection.
+
+**Compose:** would make runtime packaging more repeatable and separate process
+configuration. On the same host it adds image/volume management and still needs
+health checks, database compatibility and rollback; it provides no host failover.
+
+**PaaS:** could transfer some runtime supervision and release management to a
+provider. Persistent state, long-running jobs and the current deployment layout
+would need adaptation; managed hosting does not resolve external interface failures.
+
+**Kubernetes:** provides stronger scheduling and independent rollout mechanisms.
+Cluster operation, manifests and stateful-service recovery exceed this stage's
+needs; the priority was stability and observability before infrastructure for
+50 projected customers.
 
 ## Decision
 
-Run the FastAPI app through [one systemd unit](../../deploy/kaspi-saas.service),
-route traffic with [nginx](../../deploy/nginx.conf), and deploy through
-[the script](../../deploy.sh) from [CI](../../.github/workflows/ci-cd.yml).
-Publish the frontend through a release directory switch.
+Run [one systemd unit](../../deploy/kaspi-saas.service) behind
+[nginx](../../deploy/nginx.conf), using [deploy.sh](../../deploy.sh) from
+[CI](../../.github/workflows/ci-cd.yml). Apply Alembic and switch the frontend
+release link, restart, then check HTTP health.
 
-After restart, check application health. Save the passing commit in
-`.last_good_sha`; on a failed check, reset to the pre-deploy Git revision,
-restore dependencies and the frontend release link, then check health again.
-The marker records the last passing revision; it is not the rollback target in
-the current [script](../../deploy.sh).
-
-## Alternatives considered
-
-- Kubernetes, PaaS or a containerized core deployment: the repository does not
-  record an in-depth evaluation. At this stage, the author's explicit priority
-  was stability and observability for the live service, rather than building
-  infrastructure for a projected 50 customers.
-- Relying on Git HEAD or a successful code copy as proof of deployment:
-  rejected by failures after restart and frontend builds that left an older
-  release serving traffic. The health gate and release link must be checked.
+Write a passing revision to `.last_good_sha`. On a failed health check, restore
+the pre-deploy `PREV_SHA`, dependencies and previous frontend link, then check
+health again. The marker records success; the script's rollback target is the
+pre-deploy revision, not the marker. Git reset remains part of this mechanism.
 
 ## Consequences
 
-- A failed release can be rejected automatically, and frontend release switches
-  are atomic.
-- The one-host layout has a common failure domain; the deployment script does
-  not provide host-level failover. There was no staging environment, so
-  containment, tests and a verified rollback path carried extra weight.
-- The health window must accommodate startup time. A later fix in commit
-  `c7cb24c4` extended it after slow startup triggered repeated false rollbacks.
-- Rollback may leave Git HEAD ahead of the running revision. This is called out
-  in [Post-mortems](../../README.md#post-mortems); operators must inspect the
-  healthy marker and served frontend link when diagnosing a deployment. The
-  script does not automatically reverse an already applied database migration.
+- One command coordinates the release and rejects an unhealthy restart.
+- [Silent rollbacks](../../README.md#post-mortems) left expected changes unserved:
+  startup grew to 50–57 seconds while the health window was 45 seconds. The
+  script now permits 120 attempts; inspect the healthy marker and served release,
+  since Git HEAD alone did not establish which version users received.
+- Code rollback does not undo database migrations; they must remain compatible
+  with the previous application. Startup schema creation makes this discipline
+  especially important; a release switch is not a database recovery plan.
+- The health check establishes HTTP availability, not every worker's readiness.
+  One host remains a common failure domain and all core jobs restart together.
+
+## Revisit triggers
+
+- Move toward multiple hosts or managed hosting when required recovery time
+  cannot tolerate one-host loss or manual restoration.
+- Reassess Compose when repeatable environments or a second operator justify it;
+  add staging when releases cannot be verified safely with the current checks.
+- Extract a separately supervised worker when one job needs independent recovery;
+  require orchestration only when scheduling several hosts becomes a real need.

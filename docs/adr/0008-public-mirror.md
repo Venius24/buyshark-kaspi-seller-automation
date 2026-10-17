@@ -5,41 +5,62 @@
 
 ## Context
 
-After the business closed, the project was prepared as a public portfolio
-repository. The private working repository contains operational material and
-integrations that are inappropriate for the public version. Commit `846b64d4`
-introduced the public mirror builder and scanner on 2026-10-10; the
-[README](../../README.md#what-is-not-published) describes the visible limits.
-The recorded publication goal was a reproducible public copy with history,
-while keeping the private repository as the source of truth.
+After the business closed, the project was prepared as a public portfolio with
+history. The working repository included operational material and integrations
+outside the public scope. Commit `846b64d4` introduced the mirror builder and
+scanner; the [README](../../README.md#what-is-not-published) explains the limits.
+
+## Decision drivers
+
+1. Exclude private data and implementations outside the publication scope.
+2. Preserve useful architecture, tests and development history.
+3. Reproduce the public tree from the private source of truth.
+4. Make accidental disclosure detectable before publication.
+5. Keep missing implementations explicit to readers.
+
+## Options considered
+
+| Option | Public scope | History | Reproducibility | Disclosure gate | Explicit boundaries |
+| --- | --- | --- | --- | --- | --- |
+| Publish the working history unchanged | - | + | + | - | - |
+| Publish a cleaned current snapshot | + | - | + | + | + |
+| Filter/rewrite history and install stubs | + | + | ~ | + | + |
+
+**Unchanged history:** preserves development context with little transformation.
+It also exposes material outside the public scope, including earlier versions;
+cleaning only the current checkout cannot make that history suitable.
+
+**Current snapshot:** makes review smaller and avoids carrying old content.
+It removes the evolution and fixes that help readers understand the engineering
+work; it remains an option if historical filtering cannot meet the gate.
+
+**Filtered history:** retains that evolution while enforcing a narrow path scope.
+It requires deterministic transformations and scans across the resulting history,
+so publication is a maintained build process rather than a one-time file copy.
 
 ## Decision
 
-Build a deterministic mirror from an allowlist of publishable paths while
-rewriting the history. Scrub private data from published text and block
-publication if a final scan finds sensitive material. Replace selected
-integration modules throughout the public history with interface-compatible
-stubs marked `WITHHELD`.
-
-The public repository keeps the surrounding decision logic and tests where they
-remain meaningful. It does not publish code whose purpose is to get around
-another platform's protections. The categories of withheld modules are listed in
-[What is not published](../../README.md#what-is-not-published).
-
-## Alternatives considered
-
-- Publishing the private tree unchanged: inconsistent with the documented public
-  scope and private data review.
-- Publishing only a current source snapshot: it would omit the evolution that
-  the chosen history-preserving mirror exposes. A detailed comparison is not
-  recorded.
+Rewrite history from an allowlist of publishable paths, scrub private text and
+block publication when the final scan finds sensitive material. Replace selected
+modules throughout history with interface-compatible `WITHHELD` stubs.
+Keep surrounding logic and meaningful tests. The public version excludes code
+whose purpose is to get around another platform's protections; its boundaries
+are listed in [What is not published](../../README.md#what-is-not-published).
 
 ## Consequences
 
-- Readers can inspect the architecture and its evolution without receiving the
-  withheld implementations or private records.
-- The public version cannot exercise every production integration end to end;
-  stubs state the boundary explicitly.
-- Any change to publication rules can rewrite historical commit identities. The
-  mirror must pass its scan gate before publication; stable rules let a later
-  run extend the public branch without rewriting earlier published commits.
+- Readers retain code and history with explicit implementation gaps.
+- Stubs prevent some production integrations from running end to end; tests of
+  withheld implementations cannot establish public-version behavior.
+- Filtering mistakes can disclose historical content, so every generated mirror
+  must pass the scan gate. The gate reduces disclosure risk, not manual review work.
+- Changing transformation rules can change historical commit identities; stable
+  rules let later runs extend the public branch without rewriting published commits.
+
+## Revisit triggers
+
+- Rebuild and rescan affected history whenever scope or redaction rules change.
+- Stop publication on a detected disclosure; assess already published history
+  before treating a clean current tree as sufficient.
+- Prefer a reviewed snapshot if maintaining safe reproducible history becomes
+  infeasible, or revise stubs when the declared public integration scope changes.

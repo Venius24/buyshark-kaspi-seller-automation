@@ -5,50 +5,71 @@
 
 ## Context
 
-Store integrations need credentials such as API tokens and session data.
-[Store context resolution](../../backend/security/store_context.py) decrypts the
-stored API key before passing it to store-scoped operations. The encryption
-module was present by late July; the original encryption decision date is not
-recorded. On 2026-07-29, a process-generated key was found to make stored
-credentials unreadable after a restart, so a persistent configured key became
-an operational requirement.
+Store integrations persist API tokens and session data so background work can
+continue after a restart. The early deployment had one tenant, one host and no
+separate secret-management infrastructure. On 2026-07-29, process-generated keys
+were found to make previously stored credentials unreadable after a restart.
+A durable key source was therefore necessary for availability as well as secrecy.
 
-The separate JWT signing secret also had a hard-coded fallback. Production
-configuration was corrected in the same hardening period; the source fallback
-still exists.
+## Decision drivers
+
+1. Keep a database-only disclosure from exposing integration credentials.
+2. Decrypt the same stored values reliably across restarts and maintenance tools.
+3. Keep key custody manageable for one operator and one host.
+4. Avoid adding a remote dependency to every credential read.
+5. Leave an explicit path toward rotation and stronger access separation.
+
+## Options considered
+
+| Option | DB disclosure | Restart durability | Simplicity | Local availability | Rotation/access separation |
+| --- | --- | --- | --- | --- | --- |
+| Plaintext fields | - | + | + | + | - |
+| Fernet + configured key | + | ~ | + | + | - |
+| KMS/Vault-backed keys | + | + | - | ~ | + |
+| Database/disk encryption alone | - | + | ~ | + | ~ |
+
+**Plaintext:** avoids key lifecycle failures and is easy to operate.
+It exposes usable marketplace credentials with any logical database copy,
+which is an unacceptable expansion of a seller's account exposure.
+
+**Fernet with an environment key:** protects encrypted fields in a database-only
+copy without another service. It fits one-host operation, but the operator must
+preserve the key separately; losing it makes ciphertext unusable.
+
+**KMS/Vault:** can separate key access and improve rotation/auditing.
+It adds provisioning, permissions, recovery and service availability work;
+that was outside the chosen single-host scope, rather than a failed experiment.
+
+**Database/disk encryption:** protects storage media while keeping application
+access transparent. Alone it does not protect credentials in a logical dump or
+an authorized database read, so it cannot replace field encryption here.
 
 ## Decision
 
-Encrypt sensitive strings with [Fernet](../../backend/security/crypto.py) before
-storage. The module reads `ENCRYPTION_KEY` from the environment, loading the
-local `.env` when needed, and constructs one cipher at import time. Decryption
-returns an empty string and logs an error if it fails.
-
-The code has one active key; it does not implement multi-key decryption or a
-key-rotation workflow. If the key is missing or invalid, it generates a
-process-local replacement. That fallback is not a durable production key source.
-
-## Alternatives considered
-
-- Plaintext credential storage: not used by the encrypted store field, but the
-  repository does not record a formal comparison.
-- External key management or multi-key rotation: outside the scope chosen for
-  the then single-tenant, single-host deployment. The repository does not
-  record a comparison or a design for either option.
+Encrypt stored strings with [Fernet](../../backend/security/crypto.py).
+Load `ENCRYPTION_KEY` from the environment, with local `.env` loading in the
+crypto module before cipher initialization. Use one configured key across
+processes; the code has no multi-key decryption or automatic rotation workflow.
 
 ## Consequences
 
-- Database contents alone do not expose the plaintext of encrypted credentials.
-- Losing or silently replacing the key makes existing ciphertext unreadable. The
-  [crypto module](../../backend/security/crypto.py) documents an earlier
-  initialization-order failure and now loads the local environment itself before
-  choosing a key.
-- A one-off script that imports the module before its environment is loaded can
-  still select a new key when configuration is absent or invalid. That failure
-  later damaged local development ciphertext; the production key was verified
-  separately after a real restart.
-- Operators must keep the configured key stable and protect it separately from
-  the database. There is no automatic rotation path in this code.
-- The JWT signing secret is separate from the Fernet key. Its remaining
-  [source fallback](../../backend/security/auth.py) means production still
-  depends on correct environment configuration.
+- A database-only copy does not reveal encrypted plaintext. An attacker with
+  both the running application's access and key can still decrypt it.
+- Missing/invalid configuration still generates a process-local replacement;
+  decryption errors return an empty string. The restart incident was repaired
+  by persisting a key, re-encrypting credentials and verifying a real restart.
+- A maintenance import before environment loading later damaged local ciphertext.
+  The crypto module now loads `.env` itself, but an absent or invalid key remains
+  a footgun; startup does not yet fail closed on that configuration error.
+- JWT signing uses a separate secret. Production configuration was hardened too,
+  but [its source fallback](../../backend/security/auth.py) remains; encryption
+  does not compensate for a weak signing configuration.
+- Operators must back up and protect the stable key separately from ciphertext;
+  rotation requires an explicit re-encryption and recovery procedure.
+
+## Revisit triggers
+
+- Introduce managed key custody or a versioned keyring before a second host,
+  multiple operators or compliance requirements demand access separation.
+- Revisit immediately after suspected key disclosure, or before routine rotation;
+  replacing the only key without migrating ciphertext repeats the incident.

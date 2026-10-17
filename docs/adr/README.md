@@ -1,6 +1,13 @@
 # Architecture decision records
 
-These records describe decisions visible in the published BuyShark code and its history. A date marked `approx.` identifies the period supported by the repository, not a documented decision meeting. Alternatives are listed only to the extent the project records them.
+These records were written retrospectively in October 2026 from the code,
+incidents and project constraints. Options are assessed against the factors
+that actually applied to this project; these are not meeting minutes. A date
+marked `approx.` identifies the supported period of a decision.
+
+In option tables, `+` means a good fit, `~` means a trade-off, and `-` means a
+poor fit for the stated drivers. Revisit triggers are proposed review criteria,
+not claims that those thresholds have already been reached.
 
 | Number | Title | Status | Date |
 | --- | --- | --- | --- |

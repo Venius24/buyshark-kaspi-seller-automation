@@ -5,61 +5,72 @@
 
 ## Context
 
-Kaspi interprets an XML price list as the full offer catalogue. A two-item test
-file caused roughly 800 omitted offers to be withdrawn; see the first
-[Post-mortem](../../README.md#post-mortems). The guarded pipeline's
-dry-run stage, which diffs the generated price list against the live catalogue,
-landed on 2026-08-23. The previous prohibition on file feeds was lifted that
-day under explicit completeness and rollout conditions. Point updates remained
-the default for urgent changes. The point-update quota was 250 offers per 30
-minutes, while the file quota was two uploads per 30 minutes; one complete file
-could cover the catalogue.
+Kaspi interprets a price-list XML file as the complete offer catalogue. A two-item
+file withdrew roughly 800 omitted offers; see [Post-mortems](../../README.md#post-mortems).
+File feeds were prohibited after that incident. The prohibition was lifted on
+2026-08-23 under completeness and rollout conditions: point writes were capped at
+250 offers per 30 minutes, while two file uploads could each cover the catalogue.
+
+## Decision drivers
+
+1. Never withdraw offers merely because a source read or generated file is partial.
+2. Reject unknown prices and transformed offer identities before submission.
+3. Refresh large catalogues within the platform's separate offer/file quotas.
+4. Preserve an urgent path for withdrawals and time-sensitive price changes.
+5. Make detection, recovery and human intervention possible after acceptance.
+
+## Options considered
+
+| Option | Completeness | Price/identity safety | Bulk capacity | Urgency | Recovery |
+| --- | --- | --- | --- | --- | --- |
+| Point writes only | + | ~ | - | + | ~ |
+| Unguarded XML/old generated file | - | - | + | - | - |
+| Guarded full XML + urgent point writes | + | + | + | ~ | + |
+
+**Point only:** bounds a bad request to the offers being changed and supports
+urgent updates. It cannot refresh a large catalogue within one offer window;
+queued low-priority changes already competed with time-sensitive writes.
+
+**Unguarded XML:** uses the bulk quota but makes omission a destructive command.
+The test-feed incident demonstrated that price acceptance does not prove catalogue
+safety; the old generated file also differed from an accepted full-catalogue file.
+
+**Guarded hybrid:** combines catalogue-sized uploads with urgent point writes.
+It costs snapshot collection, diffing, identity checks and post-upload settlement,
+but makes completeness and recovery prerequisites rather than manual cleanup.
 
 ## Decision
 
-Use XML for bulk updates only after constructing a full snapshot and a
-previewable [plan](../../backend/dumper/feed_plan.py). Parse the generated file
-back and compare its offer identities with the snapshot. Refuse incomplete or
-unsafe plans.
+Build a full snapshot and previewable [plan](../../backend/dumper/feed_plan.py).
+Parse the generated file back, compare identities and reject incomplete reads or
+unsafe prices. The [guard](../../backend/dumper/feed_guard.py) checks whether
+normalization preserves active offer identities.
 
-Keep upload behind explicit controls and revalidate the plan immediately before
-sending it in [the uploader](../../backend/dumper/feed_uploader.py). Preserve
-snapshots and backups, verify the accepted result, and
-[disable the feed](../../backend/dumper/feed_state.py) on suspected loss until a
-human re-enables it. The [guard](../../backend/dumper/feed_guard.py) also checks
-whether active offer identities survive file normalization.
-
-## Alternatives considered
-
-- Point updates through the seller cabinet: retained alongside the feed for
-  urgent and small-catalogue changes. Kaspi counts individual offers against a
-  separate 250-per-30-minute quota; a large catalogue cannot be refreshed
-  quickly through that path. Stores below the quota-window size do not use XML;
-  see
-  [feed state](../../backend/dumper/feed_state.py).
-- An unguarded partial XML file: rejected by the observed withdrawal incident.
-- Reuse the old generated file or spreadsheet feed: the earlier file path was
-  prohibited after the incident, and the old XML generator did not match an
-  accepted full-catalogue file. The pipeline was rebuilt around a checked
-  snapshot. The spreadsheet import investigated for *new product creation* was
-  a different workflow, not a substitute for repricing.
+Revalidate before [upload](../../backend/dumper/feed_uploader.py), preserve backups
+and [settle against the resulting catalogue](../../backend/dumper/feed_settle.py).
+[Disable the feed](../../backend/dumper/feed_state.py) on suspected loss until a
+person reviews it. The current minimum catalogue size is 250 offers; smaller
+stores retain point writes. Start rollout with an unchanged complete file.
 
 ## Consequences
 
-- Bulk updates can cover a catalogue within the file-upload path rather than
-  sending each offer individually.
-- The risk profile reverses: a bad point update affects an offer, while a bad
-  complete file can affect the catalogue. In an earlier catalogue snapshot,
-  roughly 35% of offers had a zero price field, so treating raw values as
-  ready-to-publish prices would have been unsafe.
-- Snapshot collection, identity checks, upload verification and
-  [settlement](../../backend/dumper/feed_settle.py) add code and operational
-  delay. A suspected mismatch stops automation and requires a person to inspect
-  it.
-- A missing or transformed offer identity is a safety failure, not a permissible
-  partial success. The corresponding [Post-mortem](../../README.md#post-mortems)
-  also records offer loss from normalized identifiers.
-- File acceptance counters alone proved insufficient: settlement checks the
-  resulting catalogue, since an unmapped zero-stock offer need not mean an
-  unexpected withdrawal. Point updates must also wait while a matching file
-  update is in flight, without discarding the queued intent.
+- Bulk writes escape the per-offer bottleneck; point writes remain the urgent path.
+- The risk profile grows from selected offers to the whole catalogue. A real
+  point-writer regression sent zero prices after reading a flat field that was
+  zero for roughly 35% of offers. [Shared price extraction](../../backend/kaspi_offer_price.py)
+  and rejection of nonpositive prices prevent that bug from becoming a bulk file.
+- Identity normalization caused further offer loss; see
+  [Post-mortems](../../README.md#post-mortems). A successful upload counter is
+  insufficient: guards compare identities and settlement inspects actual offers.
+- Snapshot collection and settlement delay bulk writes. Point writes must wait
+  for matching in-flight file updates without losing their pending intent.
+- Safety stops require an operator; a disabled feed favors preserved offers over
+  automatic continuation with uncertain catalogue state.
+
+## Revisit triggers
+
+- Reassess the transport mix when offer/file quotas or official write coverage change.
+- Stop bulk writes after any unexplained omission, identity change or settlement
+  mismatch; require a new safe unchanged-file rollout before re-enabling changes.
+- Reassess point-only operation if a catalogue falls below the bulk threshold or
+  settlement latency prevents required urgent actions.
