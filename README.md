@@ -68,6 +68,10 @@ systemd and nginx on a single VPS, deploys with a health check and automatic rol
 
 Code comments and commit messages are mostly in Russian.
 
+## Architecture decisions
+
+The [ADR index](docs/adr/README.md) records the main design choices, alternatives and trade-offs.
+
 ## Post-mortems
 
 - **A 2-SKU test price list took ~800 offers off sale.** Kaspi treats the XML price list as the
