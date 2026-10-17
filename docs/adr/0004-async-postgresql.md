@@ -23,11 +23,15 @@ aiosqlite for local execution and tests. The
 [CI workflow](../../.github/workflows/ci-cd.yml) runs the test suite without
 provisioning a production PostgreSQL instance.
 
+An earlier SQLite database file was tracked in the repository and used by CI;
+that historical fixture is absent from the current tree.
+
 ## Alternatives considered
 
 - SQLite as the production database: it was the earlier layer replaced by the
-  documented migration. The repository does not record a benchmark or full
-  option analysis.
+  documented migration. No benchmark or full initial option analysis is
+  recorded. Later store-scoped tables and composite keys relied on relational
+  migrations, not shared JSON files.
 - Synchronous database access: not evaluated in depth in the repository.
 
 ## Consequences
@@ -36,8 +40,15 @@ provisioning a production PostgreSQL instance.
   [database setup](../../backend/db/database.py) sets pool size, overflow and
   connection checks.
 - Schema evolution requires migrations and deployment coordination. Local SQLite
-  and production PostgreSQL can differ in SQL behavior; CI alone cannot prove
-  every production database path.
+  and production PostgreSQL differ in SQL behavior: SQLite accepted Boolean
+  and timestamp backfill values that asyncpg rejected during a billing deploy.
+  Database migrations need a PostgreSQL check, not only SQLite CI.
+- A later pool-exhaustion incident showed that async sessions must be closed
+  before long external calls; [store context](../../backend/security/store_context.py)
+  now resolves and closes its own read session before returning.
 - The app also calls `create_all` at startup, so the migration discipline must
   be checked against actual deployment behavior rather than inferred from
   Alembic's presence alone.
+- A local development server started with live credentials can also start
+  background jobs and queue real outbound actions. The SQLite fallback does
+  not by itself isolate local development from production integrations.

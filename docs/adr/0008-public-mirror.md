@@ -10,6 +10,8 @@ repository. The private working repository contains operational material and
 integrations that are inappropriate for the public version. Commit `846b64d4`
 introduced the public mirror builder and scanner on 2026-10-10; the
 [README](../../README.md#what-is-not-published) describes the visible limits.
+The recorded publication goal was a reproducible public copy with history,
+while keeping the private repository as the source of truth.
 
 ## Decision
 
@@ -28,9 +30,9 @@ another platform's protections. The categories of withheld modules are listed in
 
 - Publishing the private tree unchanged: inconsistent with the documented public
   scope and private data review.
-- Publishing only a current source snapshot: the chosen mirror preserves a
-  filtered, rewritten commit history. The repository does not record an in-depth
-  comparison of these two presentation options.
+- Publishing only a current source snapshot: it would omit the evolution that
+  the chosen history-preserving mirror exposes. A detailed comparison is not
+  recorded.
 
 ## Consequences
 
@@ -39,5 +41,5 @@ another platform's protections. The categories of withheld modules are listed in
 - The public version cannot exercise every production integration end to end;
   stubs state the boundary explicitly.
 - Any change to publication rules can rewrite historical commit identities. The
-  mirror must pass its scan gate before publication, and historical continuity
-  needs care when rules change.
+  mirror must pass its scan gate before publication; stable rules let a later
+  run extend the public branch without rewriting earlier published commits.

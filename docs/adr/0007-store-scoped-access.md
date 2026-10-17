@@ -5,10 +5,14 @@
 
 ## Context
 
-The initial single-store assumptions were unsuitable once users could manage
-multiple stores. The tracked 2026-07-28 migration introduced a dual-auth
-resolver while routes moved to store-scoped access; later slices removed the
-legacy fallback and tightened public API isolation.
+An audit found two incompatible authorization paths: a shared file-backed
+session and JWT users in PostgreSQL. Product data, API keys, order markers and
+timers also had shared state; some tables lacked `store_id` or keyed rows only
+by SKU, so another store could overwrite them. The tracked 2026-07-28 migration
+introduced a dual-auth resolver. With one live tenant and no staging, the
+author first hardened deployment and added price and characterization tests,
+then migrated authorization. This order protected the live order flow while
+the routes and workers changed.
 
 ## Decision
 
@@ -16,7 +20,11 @@ Resolve a JWT user and an authorized store in
 [one dependency](../../backend/security/store_context.py). An explicit
 `X-Store-Id` must belong to that user; otherwise the resolver chooses the user's
 oldest connected store. Requests without an eligible user and store fail closed.
-The former shared-session fallback was removed after the transition.
+During migration, the resolver temporarily supported a shared-session fallback
+while routers and workers were converted one at a time. Store-scoped state
+moved to database rows keyed by store; the fallback was removed after the
+clients sent JWT and store selection consistently. Store-scoped reads did not
+fall back to the shared legacy session.
 
 Keep permission checks server-side.
 [Store roles](../../backend/security/store_roles.py) define VIEWER, MANAGER and
@@ -28,8 +36,14 @@ writes to it.
 
 ## Alternatives considered
 
-- A permanent shared-session fallback: used during migration, then removed
-  because it could grant access outside the requesting user's store.
+- Dual-auth migration, chosen: the resolver accepted both paths while the
+  frontend, routers and workers moved in tested slices. It preserved live
+  requests but required a temporary isolation-sensitive fallback.
+- Coordinate the frontend first: listed as a cutover option, without a
+  recorded detailed comparison against the chosen sequence.
+- Hard cutover: would remove the old path at once, but risked breaking live
+  calls before all routes and workers were converted.
+- Stop the migration: would leave the audited cross-store hazards in place.
 - A single role enum for both job type and privilege depth: the
   [role module](../../backend/security/store_roles.py) explains why sections and
   rank are separate.
@@ -40,6 +54,7 @@ writes to it.
   trusting a frontend selection or an arbitrary store identifier.
 - Routers and state access must consistently use the resolved store ID. The
   [store-scoping tests](../../tests/test_public_api_store_scoping.py) cover
-  cross-store key behavior; gaps in unconverted paths remain a regression risk.
+  cross-store key behavior; the audit found that protecting a router alone did
+  not fix shared files, cache keys or worker state.
 - A user with multiple stores must send the explicit header to select anything
   other than the default oldest store.
