@@ -127,4 +127,4 @@ Real use needs a Kaspi Shop API token.
 Not affiliated with Kaspi.kz. Client data in the history is anonymized: store names, SKUs,
 merchant and product ids are replaced with fictional ones ("Barkhan" is not a real store).
 
-License: [MIT](LICENSE).
+License: [Attribution License](LICENSE) — free to use, modify and sell, credit "Venius24 & Buyshark" is required.

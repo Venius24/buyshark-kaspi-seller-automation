@@ -1,21 +1,25 @@
-MIT License
+Attribution License
 
-Copyright (c) 2026 Venius24
+Copyright (c) 2026 Venius24 & Buyshark
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Permission is hereby granted to any person obtaining a copy of this software and associated documentation files to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software, including for commercial purposes, subject to the following condition:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Attribution is required.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Any project, product, repository, application, game, website, service, or other work that uses a substantial portion of this software must provide clear credit to the original authors:
+
+Venius24 & Buyshark
+
+The attribution must be reasonably visible in at least one appropriate location, such as:
+
+* the project's README;
+* documentation;
+* an About or Credits section;
+* the source code repository;
+* or another location reasonably accessible to users or developers.
+
+The copyright notice and this license notice must also be included in copies or substantial portions of the software.
+
+The software is provided "AS IS", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and noninfringement.
+
+In no event shall the authors be liable for any claim, damages, or other liability arising from the software or its use.
