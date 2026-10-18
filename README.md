@@ -17,7 +17,7 @@ and store finance/analytics. It ran in production on real stores from July to Oc
 
 - **~3 months** of work, July → October 2026, with the commit history preserved
 - **~83,000 lines**: backend ~40k (Python), frontend ~22k (TypeScript), tests ~22k
-- **1,375 tests** in the public version, run in CI
+- **1,570 tests** in the public version, run in CI
 - one developer working with AI coding agents (Claude Code)
 
 ## Architecture
@@ -115,7 +115,7 @@ logic around these modules is open; the full code can be shown in a live walkthr
 
 ```bash
 python -m venv venv && venv/bin/pip install -r requirements-dev.txt
-pytest tests/                      # 1,375 tests, no external services needed
+pytest tests/                      # 1,570 tests, no external services needed
 cd frontend && bun install && bun run dev
 ```
 

@@ -13,7 +13,7 @@ SaaS для продавцов маркетплейса [Kaspi.kz](https://kaspi
 
 - **~3 месяца**, июль → октябрь 2026, история коммитов сохранена
 - **~83 000 строк**: backend ~40k (Python), frontend ~22k (TypeScript), тесты ~22k
-- **1375 тестов** в публичной версии, гоняются в CI
+- **1570 тестов** в публичной версии, гоняются в CI
 - один разработчик + AI-агенты (Claude Code)
 
 Схема архитектуры и таблица модулей — в [английском README](README.md#architecture).
@@ -64,7 +64,7 @@ SaaS для продавцов маркетплейса [Kaspi.kz](https://kaspi
 
 ```bash
 python -m venv venv && venv/bin/pip install -r requirements-dev.txt
-pytest tests/                      # 1375 тестов, без внешних сервисов
+pytest tests/                      # 1570 тестов, без внешних сервисов
 cd frontend && bun install && bun run dev
 ```
 
