@@ -26,7 +26,7 @@ source ~/.bashrc
 ```bash
 sudo mkdir -p /root/buyshark
 sudo chown $USER:$USER /root/buyshark
-git clone https://github.com/Venius24/sbx_plwrght.git /root/buyshark
+git clone https://github.com/Venius24/buyshark-kaspi-seller-automation.git /root/buyshark
 cd /root/buyshark
 git checkout main
 ```

@@ -131,6 +131,11 @@ cd frontend && bun install && bun run dev
 Backend: `start.sh` / `start.bat`; without `DATABASE_URL` it falls back to a local SQLite.
 Real use needs a Kaspi Shop API token.
 
+Deployment files (`deploy.sh`, `deploy/`) are published as they ran: one VPS, the app in
+`/root/buyshark` started by systemd as root. That was a shortcut of a one-person project; today I
+would run it as a dedicated unprivileged user under `/opt`, with secrets in a root-owned
+`EnvironmentFile` outside the app directory.
+
 ## Notes
 
 Not affiliated with Kaspi.kz. Client data in the history is anonymized: store names, SKUs,

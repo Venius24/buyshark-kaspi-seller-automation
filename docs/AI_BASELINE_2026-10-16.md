@@ -46,4 +46,4 @@ Prompt на ответ помощника включает историю диа
 - Флаги в `.env`: `ASSISTANT_ALLOW_WRITE_TOOLS=1`, `CHATBOT_CARD_FACTS_ENABLED=1`.
 - Сравнение по БД, не по Prometheus. Проверка через 2–3 дня: `scripts/ai_baseline.py --days 7`, строки с 2026-10-16 против строк до 2026-10-15.
 - Что сравнивать: доля эскалаций, средние prompt/completion токены на `inbound_reply`, число ответов. Выборка мала (около 8–15 ИИ-ответов в день), выводы за 2–3 дня предварительные.
-- Откат карточки: `CHATBOT_CARD_FACTS_ENABLED=0` в `/root/buyshark/.env` и рестарт `kaspi-saas`. Бэкап прежнего `.env`: `/root/buyshark/.env.bak-ai-20261016`.
+- Откат карточки: `CHATBOT_CARD_FACTS_ENABLED=0` в `.env` и рестарт сервиса `kaspi-saas`; прежний `.env` сохранён на сервере.
