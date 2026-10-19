@@ -71,6 +71,8 @@ Code comments and commit messages are mostly in Russian.
 ## Architecture decisions
 
 The [ADR index](docs/adr/README.md) records the main design choices, alternatives and trade-offs.
+The seller assistant (tool calling, store-scoped retrieval, human-approved price proposals,
+traces and evals) is described in [docs/ASSISTANT_DESIGN.md](docs/ASSISTANT_DESIGN.md).
 
 ## Post-mortems
 
