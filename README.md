@@ -96,6 +96,15 @@ competitor's repricing bot. The one free segment was brand-new sellers without a
 outreach to 30 of them, each with a personal offer starting at 1,000 ₸, converted 0. On top of that
 came structural risk: key integrations depend on unofficial interfaces Kaspi can change at any time.
 
+## LLM autoresponder: quality in production
+
+- A manual review of 195 buyer-chat exchanges from one store (2–19 Oct 2026, DeepSeek chat model).
+- Of 167 model replies, **84 % (95 % CI 78–89) had no visible problem**; 4 % (2–8) held a likely
+  invented fact and 4 % (2–8) should have gone to a human.
+- Of 28 hand-offs the model started, 25 % (13–43) were unnecessary; 28 % of all exchanges ended in a hand-off.
+- One store, 18 days, one annotator reviewing LLM first-pass labels, no order data for the annotator.
+- Method, tables, failure analysis and examples: [docs/AUTORESPONDER_EVAL.md](docs/AUTORESPONDER_EVAL.md).
+
 ## What is not published
 
 Some modules are replaced by interface stubs (marked `WITHHELD`) in this repository and in its
