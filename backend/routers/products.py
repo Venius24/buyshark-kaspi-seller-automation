@@ -83,7 +83,7 @@ def get_products(
     from backend.services import dumping_filters
 
     dumping_configs = _load_dumping_configs(store_id=ctx.store_id)
-    master_groups = _load_master_stock_groups(store_id=ctx.store_id)
+    master_groups = _load_master_stock_groups(store_id=ctx.store_id, include_sync_logs=False)
     price_war_items = _load_price_war_snapshot(ctx.store_id)
 
     dumping_filters.annotate_products(

@@ -4,12 +4,12 @@ import logging
 
 from backend.chatbot import config, bot_instance, chat_client
 from backend.chatbot import outbound as bot_outbound
-from backend.chatbot.kaspi import load_chat_cookies, format_time, check_logistics_question, http_session
+from backend.chatbot.kaspi import load_chat_cookies, format_time, http_session
 from backend.chatbot.ai import build_dialog, generate_ai_reply
 from backend.chatbot.order_context import collect_chat_facts, render_facts_block
-from backend.chatbot.prompt import (
-    get_profile as get_bot_profile, find_human_triggers, find_escalation_reason, promises_manager, says_message_empty, STOCK_TRIGGERS,
-)
+from backend.chatbot.catalog_search import catalog_search_enabled, is_catalog_question, find_catalog_matches
+from backend.chatbot.prompt import get_profile as get_bot_profile
+from backend.chatbot.pipeline import MEDIA_HANDLED_BY_MODEL, route_after_model, route_before_model
 from backend.state_helpers import _load_bot_sent_texts
 from backend.chatbot.notifications import notify_startup, notify_cookie_expired, notify_manager_and_block, reset_cookie_alert
 from backend.chatbot.handlers import register_handlers, register_bot_commands
@@ -17,6 +17,7 @@ from backend.dumper.config import discover_merchant_id
 from backend.security.store_context import list_active_stores
 from backend.services.ai_metrics import (
     record_chatbot_reply, observe_chatbot_ai_latency, record_chatbot_ai_reply,
+    record_chatbot_catalog_search, record_chatbot_llm_call,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,22 @@ def _pending_client_text(raw_history: list) -> str:
 _MEDIA_TYPES = {"IMAGE": "фото", "VIDEO": "видео", "AUDIO": "голосовое"}
 # Голосовые бот не эскалирует: на них отвечает модель по правилу 8 промпта
 # (решение владельца 03.10.2026). Фото и видео — сразу менеджеру.
-_MEDIA_HANDLED_BY_MODEL = {"голосовое"}
+_MEDIA_HANDLED_BY_MODEL = MEDIA_HANDLED_BY_MODEL
+
+
+def _llm_trace_fields(usage: dict) -> dict:
+    """Трасса вызова LLM (ai.generate_ai_reply) -> поля chat_response_logs."""
+    return {
+        "model": usage.get("model", ""),
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "completion_tokens": usage.get("completion_tokens"),
+        "latency_ms": usage.get("latency_ms"),
+        "llm_attempts": usage.get("attempts"),
+        "cost_usd": usage.get("cost_usd"),
+        "prompt_version": usage.get("prompt_version"),
+        "llm_parse": usage.get("structured"),
+        "llm_action": usage.get("action"),
+    }
 
 
 def _pending_client_media(raw_history: list) -> list:
@@ -246,6 +262,18 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
 
             bot_profile = await asyncio.to_thread(get_bot_profile, store_id)
             facts = await collect_chat_facts(store_id, token, group)
+            if catalog_search_enabled():
+                if is_catalog_question(client_text):
+                    try:
+                        facts.catalog_matches = await asyncio.wait_for(
+                            asyncio.to_thread(find_catalog_matches, store_id, client_text), timeout=5,
+                        )
+                    except Exception:
+                        logger.warning("[Chatbot] Поиск товаров недоступен", exc_info=False)
+                        facts.catalog_matches = []
+                    record_chatbot_catalog_search("hit" if facts.catalog_matches else "miss")
+                else:
+                    record_chatbot_catalog_search("skipped")
 
             async def _journal(kind: str, reply_text=None, detail=None, **extra):
                 if not store_id:
@@ -258,7 +286,7 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
                 )
                 record_chatbot_reply(kind, extra)
 
-            async def _escalate(kind: str, detail: str):
+            async def _escalate(kind: str, detail: str, **extra):
                 hold = await notify_manager_and_block(
                     group_id=group_id,
                     client_name=client_name,
@@ -270,39 +298,14 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
                     last_msg_created=msg_created,
                     store_id=store_id
                 )
-                await _journal(kind, reply_text=hold, detail=detail, billed_units=0)
+                await _journal(kind, reply_text=hold, detail=detail, billed_units=0, **extra)
 
-            triggers = find_human_triggers(client_text, bot_profile.get("human_triggers"))
-            # Вопрос только про наличие, а остаток товара известен из каталога —
-            # отвечает бот, менеджер не нужен.
-            if triggers and set(triggers) <= STOCK_TRIGGERS and facts.stock_known:
-                triggers = []
-
-            if triggers:
-                await _escalate("inbound_escalated_trigger", "триггеры: " + ", ".join(triggers))
+            route = route_before_model(client_text, bot_profile, facts, _pending_client_media(raw_history))
+            if route.action == "escalate":
+                await _escalate("inbound_escalated_trigger", route.detail)
                 continue
 
-            reason = find_escalation_reason(client_text)
-            if reason:
-                await _escalate("inbound_escalated_trigger", f"жалоба/просьба: {reason}")
-                continue
-
-            pending_media = _pending_client_media(raw_history)
-            media = [k for k in pending_media if k not in _MEDIA_HANDLED_BY_MODEL]
-            if not client_text.strip() and not pending_media:
-                media = ["пустое сообщение"]  # история не загрузилась или в ней нечего прочесть
-            if media:
-                await _escalate("inbound_escalated_trigger", "клиент прислал: " + ", ".join(sorted(set(media))))
-                continue
-
-            logistics_reply = check_logistics_question(client_text, bot_profile)
-            # Шаблон говорит «мы передали заказ, дальше везёт Kaspi». Если по
-            # данным заказа это неправда (ещё на сборке, самовывоз, заказа нет) —
-            # отвечает модель, у которой есть статус заказа. Данные не
-            # получили (сбой Kaspi) — шаблон, как раньше.
-            if logistics_reply and (facts.order or not facts.order_code) and not facts.handed_to_courier:
-                logistics_reply = None
-
+            logistics_reply = route.reply if route.action == "template" else None
             if logistics_reply:
                 await asyncio.to_thread(config.mark_chat_replied, store_id, group_id, msg_id)
                 chat_state["last_replied_msg_id"] = msg_id
@@ -345,18 +348,16 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
             finally:
                 observe_chatbot_ai_latency(time.monotonic() - ai_started)
             record_chatbot_ai_reply(facts)
+            record_chatbot_llm_call(ai_usage)
 
-            if is_human_override:
-                await _escalate("inbound_escalated_ai", "модель: " + (ai_reply or "")[:180])
-                continue
-
-            if says_message_empty(ai_reply):
-                await _escalate("inbound_escalated_ai", "модель не увидела сообщение: " + (ai_reply or "")[:150])
-                continue
-
-            promise = promises_manager(ai_reply)
-            if promise:
-                await _escalate("inbound_escalated_ai", f"модель обещала человека без метки ({promise}): " + (ai_reply or "")[:150])
+            llm_trace = _llm_trace_fields(ai_usage)
+            escalation = route_after_model(ai_reply, is_human_override)
+            if escalation:
+                if ai_usage.get("error"):
+                    escalation = "сбой LLM: " + str(ai_usage["error"])[:150]
+                elif ai_usage.get("handoff_reason"):
+                    escalation = f"модель ({ai_usage['handoff_reason'][:60]}): " + (ai_reply or "")[:120]
+                await _escalate("inbound_escalated_ai", escalation, **llm_trace)
                 continue
 
             await chat_client.mark_read(group_id, [{"id": msg_id, "created": last_msg.get("created")}], cookies, merchant_id)
@@ -369,11 +370,9 @@ async def _run_chatbot_pass(cookies: dict, merchant_id: str, store_id=None, toke
                     "inbound_reply",
                     reply_text=ai_reply,
                     prompt_tier=bot_profile.get("prompt_tier", ""),
-                    model=ai_usage.get("model", ""),
-                    prompt_tokens=ai_usage.get("prompt_tokens"),
-                    completion_tokens=ai_usage.get("completion_tokens"),
                     billed_units=1,
                     credit_units_milli=credit_units_milli,
+                    **llm_trace,
                 )
             else:
                 logger.error(f"❌ [Chatbot] Сбой отправки ответа клиенту {client_name}: {send_result.get('error')}")

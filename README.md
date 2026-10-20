@@ -17,7 +17,7 @@ and store finance/analytics. It ran in production on real stores from July to Oc
 
 - **~3 months** of work, July → October 2026, with the commit history preserved
 - **~83,000 lines**: backend ~40k (Python), frontend ~22k (TypeScript), tests ~22k
-- **1,570 tests** in the public version, run in CI
+- **1,675 tests** in the public version, run in CI
 - one developer working with AI coding agents (Claude Code)
 
 ## Architecture
@@ -106,6 +106,12 @@ came structural risk: key integrations depend on unofficial interfaces Kaspi can
 - Of 28 hand-offs the model started, 25 % (13–43) were unnecessary; 28 % of all exchanges ended in a hand-off.
 - One store, 18 days, one annotator reviewing LLM first-pass labels, no order data for the annotator.
 - Method, tables, failure analysis and examples: [docs/AUTORESPONDER_EVAL.md](docs/AUTORESPONDER_EVAL.md).
+- **Then the loop was closed: measure → fix → measure.** The review became a 102-case anonymised regression
+  set, an LLM judge was calibrated against the 195 manual labels (κ 0.57 on "acceptable", unusable on 4 classes),
+  and the fixes were measured with the same judge. Deployed version vs before: chats **resolved by the bot
+  41.8 % → 49.3 %**, unnecessary hand-offs 11.3 % → 2.8 %, success +11.4 points (95 % CI +4.2…+19.0, McNemar p 0.035),
+  at +66 % prompt tokens. Including the iteration that looked better on one metric and was worse at the real job:
+  [docs/AUTORESPONDER_IMPROVEMENT.md](docs/AUTORESPONDER_IMPROVEMENT.md).
 
 ## What is not published
 
@@ -126,7 +132,7 @@ logic around these modules is open; the full code can be shown in a live walkthr
 
 ```bash
 python -m venv venv && venv/bin/pip install -r requirements-dev.txt
-pytest tests/                      # 1,570 tests, no external services needed
+pytest tests/                      # 1,675 tests, no external services needed
 cd frontend && bun install && bun run dev
 ```
 

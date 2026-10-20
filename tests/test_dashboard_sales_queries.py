@@ -35,6 +35,7 @@ class DashboardSalesQueriesTest(unittest.TestCase):
         self.state_helpers = state_helpers
         self.analytics = analytics
         analytics._abc_xyz_cache.clear()
+        analytics._leaderboard_cache.clear()
         factory = lambda: Session(self._engine)  # noqa: E731
         self._patches = [
             patch.object(state_helpers, "_get_sync_db_session", side_effect=factory),
@@ -71,6 +72,7 @@ class DashboardSalesQueriesTest(unittest.TestCase):
 
     def tearDown(self):
         self.analytics._abc_xyz_cache.clear()
+        self.analytics._leaderboard_cache.clear()
         for p in self._patches:
             p.stop()
         self._engine.dispose()
@@ -99,6 +101,34 @@ class DashboardSalesQueriesTest(unittest.TestCase):
         self.assertEqual(sum(sum(row) for row in grid), 4)  # 90 дней: заказ 200-дневной давности не входит
         local_today = self.now + _dt.timedelta(hours=self.analytics.ALMATY_UTC_OFFSET_HOURS)
         self.assertEqual(grid[local_today.weekday()][local_today.hour], 2)
+
+    def test_insights_heatmap_shifts_late_utc_orders_into_next_almaty_day(self):
+        """21:30 UTC — это уже 02:30 следующего дня в Алматы: группировка в БД
+        идёт по UTC-дню и часу, сдвиг обязан переносить и день недели."""
+        from sqlalchemy.orm import Session
+        from backend.db.models import SalesOrderDB
+        late_utc = (self.now - _dt.timedelta(days=3)).replace(hour=21, minute=30)
+        session = Session(self._engine)
+        for i in range(3):
+            session.add(SalesOrderDB(
+                store_id="store-late", order_internal_id=f"late-{i}", order_code=f"late-code-{i}",
+                created_at=late_utc + _dt.timedelta(minutes=i), total_price=100.0,
+                status="COMPLETED", state="ARCHIVE", entries_payload="[]",
+            ))
+        session.commit()
+        session.close()
+
+        class Ctx:
+            store_id = "store-late"
+        with patch.object(self.analytics, "_load_products", return_value=[]), \
+             patch.object(self.analytics, "_load_dumping_configs", return_value={}), \
+             patch.object(self.analytics, "_load_competitor_leaderboard", return_value=[]), \
+             patch.object(self.analytics, "_load_chat_activity", return_value=[]):
+            grid = self.analytics.get_insights(Ctx())["hourly_heatmap"]
+        local = late_utc + _dt.timedelta(hours=self.analytics.ALMATY_UTC_OFFSET_HOURS)
+        self.assertEqual(local.hour, 2)
+        self.assertEqual(grid[local.weekday()][2], 3)
+        self.assertEqual(sum(sum(row) for row in grid), 3)
 
     def test_abc_xyz_reads_entries(self):
         class Ctx:

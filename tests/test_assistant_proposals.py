@@ -304,10 +304,10 @@ def test_default_gateway_and_limit(monkeypatch):
 def test_migration_single_head():
     from alembic.script import ScriptDirectory
     directory = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "alembic"))
-    assert directory.get_heads() == ["052_store_card_facts"]
+    assert directory.get_heads() == ["053_chat_response_log_llm_trace"]
     assert directory.get_revision("050_assistant_price_proposals").down_revision == "049_stock_group_float_stock"
     # The old head was the only revision without a child before adding 050.
-    revisions = [r for r in directory.walk_revisions() if r.revision not in {"050_assistant_price_proposals", "051_assistant_runs", "052_store_card_facts"}]
+    revisions = [r for r in directory.walk_revisions() if r.revision not in {"050_assistant_price_proposals", "051_assistant_runs", "052_store_card_facts", "053_chat_response_log_llm_trace"}]
     parents = {r.down_revision for r in revisions if isinstance(r.down_revision, str)}
     assert {r.revision for r in revisions} - parents == {"049_stock_group_float_stock"}
 

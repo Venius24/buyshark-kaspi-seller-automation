@@ -66,6 +66,24 @@ def test_chatbot_metrics_and_failure_isolation(monkeypatch):
     metrics.record_chatbot_reply("inbound_reply", {"prompt_tokens": object()})
 
 
+def test_catalog_metrics_fixed_labels_and_failure_isolation(monkeypatch, caplog):
+    for outcome in ("hit", "miss", "skipped"):
+        before = sample("chatbot_catalog_search_total", {"outcome": outcome})
+        metrics.record_chatbot_catalog_search(outcome)
+        assert sample("chatbot_catalog_search_total", {"outcome": outcome}) == before + 1
+    for invalid in ("PRIVATE_QUERY", None, [], {}):
+        metrics.record_chatbot_catalog_search(invalid)
+    family = next(f for f in REGISTRY.collect() if f.name == "chatbot_catalog_search")
+    assert {s.labels["outcome"] for s in family.samples} == {"hit", "miss", "skipped"}
+
+    def fail(**kwargs):
+        raise RuntimeError("PRIVATE_EXCEPTION")
+
+    monkeypatch.setattr(metrics.chatbot_catalog_search_total, "labels", fail)
+    metrics.record_chatbot_catalog_search("hit")
+    assert "PRIVATE_EXCEPTION" not in caplog.text
+
+
 def test_baseline_read_only_and_aggregates(tmp_path):
     query_text = str(CHAT_SQL) + str(RUN_SQL)
     for forbidden in ("client_text", "reply_text", "order_code", "detail"):

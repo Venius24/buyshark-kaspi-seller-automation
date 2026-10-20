@@ -389,16 +389,18 @@ def list_blocked_chats_detailed(store_id: Optional[str] = None) -> list:
 
 def count_processed_chats(store_id: Optional[str] = None) -> int:
     from backend.state_helpers import _get_sync_db_session
-    from sqlalchemy import select
+    from sqlalchemy import func, select
     session = _get_sync_db_session()
     count = 0
     if session:
         try:
             from backend.db.models import ChatStateDB
-            stmt = select(ChatStateDB)
+            # COUNT в БД: раньше в Python поднимались все строки ChatStateDB
+            # магазина ради len() — на каждый 30-секундный опрос /chatbot/status.
+            stmt = select(func.count()).select_from(ChatStateDB)
             if store_id is not None:
                 stmt = stmt.where(ChatStateDB.store_id == store_id)
-            count = len(session.scalars(stmt).all())
+            count = int(session.scalar(stmt) or 0)
         finally:
             session.close()
     if store_id is None:

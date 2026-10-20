@@ -78,7 +78,7 @@ def get_orders(
     """Получить заказы с полной цепочкой."""
     token = ctx.token
     try:
-        orders = KaspiAPI.get_orders_with_products(token, state=state, status=status, limit=limit, assembled=assembled)
+        orders = KaspiAPI.get_orders_with_products_cached(token, state=state, status=status, limit=limit, assembled=assembled)
         _attach_entry_images(orders, _image_map_for_store(ctx.store_id))
         return {"success": True, "orders": orders, "count": len(orders)}
     except Exception as e:
@@ -151,7 +151,7 @@ def get_transfers(filter: str = Query("ALL"), ctx: StoreContext = Depends(_trans
     """Получить список передач."""
     token = ctx.token
     try:
-        transfers = KaspiAPI.get_transfers(token, delivery_filter=filter)
+        transfers = KaspiAPI.get_transfers_cached(token, delivery_filter=filter)
         return {"success": True, "transfers": transfers, "count": len(transfers)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

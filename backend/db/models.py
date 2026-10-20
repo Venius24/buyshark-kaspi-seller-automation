@@ -686,6 +686,17 @@ class ChatResponseLogDB(Base):
     reply_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     order_code: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     detail: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # Трасса вызова LLM (миграция 053, backend/chatbot/llm.py): пишется на
+    # inbound_reply и inbound_escalated_ai. cost_usd — только если заданы цены
+    # CHATBOT_LLM_PRICE_*; prompt_version — prompt.prompt_fingerprint();
+    # llm_parse — как разобран ответ: json / fallback / text.
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    llm_attempts: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    cost_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    llm_parse: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    # llm_action — решение модели: answer / clarify / safe_unknown / escalate.
+    llm_action: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 

@@ -61,7 +61,7 @@ def test_disabled_exact_legacy_fixture(monkeypatch, flag):
     facts = collect()
     assert asdict(facts) == {"order_code": "1025596212", "order": ctx.parse_order(
         _order_json(creationDate=None, kaspiDelivery={})), "order_lookup_failed": False,
-        "products": [{"name": "Пеногенератор", "sku": SKU, "stock": 4}]}
+        "products": [{"name": "Пеногенератор", "sku": SKU, "stock": 4}], "catalog_matches": []}
     expected = (
         "\n📋 ДАННЫЕ ИЗ СИСТЕМЫ (достоверные, на сейчас; опирайся на них, ничего сверх не выдумывай):\n"
         "- Заказ №1025596212, оформлен —, сумма 4600 ₸.\n"

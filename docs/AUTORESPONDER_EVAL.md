@@ -237,7 +237,12 @@ All paraphrased; identifying details removed.
 This is not a benchmark of the model. The deterministic suite in [`evals/`](../evals/README.md)
 covers the staff assistant and does not evaluate model quality at all.
 
-## Follow-ups (not done)
+## Follow-ups
+
+The regression set, the calibrated judge, the fixes and the before/after measurement were done on
+19–20 October 2026: see [AUTORESPONDER_IMPROVEMENT.md](AUTORESPONDER_IMPROVEMENT.md). The list
+below is the original one, as written after this review.
+
 
 - A second annotator, with order and catalogue facts in the sheet, on the same exchanges.
 - Extend the Kazakh complaint stems and make the safety net ignore past-tense reports.

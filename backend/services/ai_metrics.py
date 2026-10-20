@@ -34,6 +34,23 @@ chatbot_ai_latency_seconds = Histogram(
     buckets=(.5, 1, 2, 3, 5, 10, 15, 30, 45, 60),
 )
 chatbot_ai_replies_total = Counter("chatbot_ai_replies_total", "Completed chatbot AI generations", ["card_facts"])
+chatbot_catalog_search_total = Counter("chatbot_catalog_search_total", "Chatbot catalog retrieval outcomes", ["outcome"])
+chatbot_llm_calls_total = Counter(
+    "chatbot_llm_calls_total", "Chatbot LLM calls by result and output parsing mode", ["result", "parse"],
+)
+chatbot_llm_retries_total = Counter("chatbot_llm_retries_total", "Chatbot LLM retry attempts beyond the first")
+chatbot_llm_actions_total = Counter(
+    "chatbot_llm_actions_total", "Chatbot model decisions: answer / clarify / safe_unknown / escalate", ["action"],
+)
+chatbot_cost_usd_total = Counter("chatbot_cost_usd_total", "Known chatbot LLM cost in USD (needs CHATBOT_LLM_PRICE_*)")
+
+
+def record_chatbot_catalog_search(outcome):
+    try:
+        if isinstance(outcome, str) and outcome in ("hit", "miss", "skipped"):
+            chatbot_catalog_search_total.labels(outcome=outcome).inc()
+    except Exception:
+        logger.warning("Failed to record chatbot catalog search metrics", exc_info=False)
 
 
 def _nonnegative(value):
@@ -91,3 +108,26 @@ def record_chatbot_ai_reply(facts):
         chatbot_ai_replies_total.labels(card_facts="yes" if has_card else "no").inc()
     except Exception:
         logger.exception("Failed to record chatbot AI facts")
+
+
+def record_chatbot_llm_call(usage):
+    """Трасса ai.generate_ai_reply: успех/сбой, режим разбора, ретраи, стоимость."""
+    try:
+        usage = usage or {}
+        parse = usage.get("structured")
+        chatbot_llm_calls_total.labels(
+            result="error" if usage.get("error") else "ok",
+            parse=parse if parse in ("json", "fallback", "text", "off") else "other",
+        ).inc()
+        action = usage.get("action")
+        if action:
+            chatbot_llm_actions_total.labels(
+                action=action if action in ("answer", "clarify", "safe_unknown", "escalate") else "other",
+            ).inc()
+        attempts = usage.get("attempts") or 0
+        if attempts > 1:
+            chatbot_llm_retries_total.inc(attempts - 1)
+        if usage.get("cost_usd") is not None:
+            chatbot_cost_usd_total.inc(_nonnegative(usage["cost_usd"]))
+    except Exception:
+        logger.exception("Failed to record chatbot LLM call metrics")

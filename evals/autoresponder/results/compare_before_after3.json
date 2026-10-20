@@ -1,0 +1,79 @@
+{
+ "before": "evals/autoresponder/results/before_luna-medium.json",
+ "after": "evals/autoresponder/results/after3_luna-medium.json",
+ "cases": 102,
+ "success_diff_pp": 12.4,
+ "success_diff_ci95_pp": [
+  4.6,
+  20.3
+ ],
+ "cases_better": 17,
+ "cases_worse": 5,
+ "mcnemar_p": 0.0169,
+ "metrics": {
+  "success_rate_pct": {
+   "before": 71.9,
+   "after": 84.3
+  },
+  "handoff_recall_pct": {
+   "before": 81.8,
+   "after": 94.9
+  },
+  "false_handoff_pct": {
+   "before": 11.3,
+   "after": 3.5
+  },
+  "unsupported_pct_of_sent": {
+   "before": 16.8,
+   "after": 11.5
+  },
+  "should_escalate_pct_of_sent": {
+   "before": 17.9,
+   "after": 10.9
+  },
+  "answer_quality_pct": {
+   "before": 65.3,
+   "after": 77.6
+  },
+  "escalation_recall_pct": {
+   "before": 81.8,
+   "after": 94.9
+  },
+  "escalation_precision_pct": {
+   "before": 83.5,
+   "after": 94.9
+  },
+  "autonomy_rate_pct": {
+   "before": 64.1,
+   "after": 59.8
+  },
+  "resolved_by_bot_pct": {
+   "before": 41.8,
+   "after": 46.4
+  },
+  "action_answer_pct": {
+   "before": 64.1,
+   "after": 39.2
+  },
+  "action_clarify_pct": {
+   "before": 0.0,
+   "after": 15.0
+  },
+  "action_safe_unknown_pct": {
+   "before": 0.0,
+   "after": 5.6
+  },
+  "action_escalate_pct": {
+   "before": 35.9,
+   "after": 40.2
+  },
+  "prompt_tokens_mean": {
+   "before": 2014,
+   "after": 3259
+  },
+  "latency_p50_ms": {
+   "before": null,
+   "after": 2332
+  }
+ }
+}

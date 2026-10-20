@@ -245,7 +245,7 @@ def test_send_message_persists_or_isolates_trace_failure(database,monkeypatch,fa
 def test_migration_chain():
     from alembic.script import ScriptDirectory
     scripts=ScriptDirectory(str(Path(__file__).resolve().parents[1]/'alembic'))
-    assert scripts.get_heads()==['052_store_card_facts']
+    assert scripts.get_heads()==['053_chat_response_log_llm_trace']
     assert scripts.get_revision('051_assistant_runs').down_revision=='050_assistant_price_proposals'
 
 def test_run_conversation_fk_set_null(database):

@@ -55,7 +55,7 @@ def derive_curtain_dimensions(features: list[list[str]]) -> list[list[str]]:
     return features
 
 
-def read_records(products_path, rows_path, source="baitaq-cards", reviewed=False):
+def read_records(products_path, rows_path, source="barkhan-cards", reviewed=False):
     products = json.loads(Path(products_path).read_text(encoding="utf-8-sig"))
     rows = json.loads(Path(rows_path).read_text(encoding="utf-8-sig"))
     if not isinstance(products, list) or not isinstance(rows, dict):
@@ -143,7 +143,7 @@ def main(argv=None):
     parser.add_argument("--store-id", required=True)
     parser.add_argument("--products", type=Path, required=True)
     parser.add_argument("--rows", type=Path, required=True)
-    parser.add_argument("--source", default="baitaq-cards")
+    parser.add_argument("--source", default="barkhan-cards")
     parser.add_argument("--reviewed", action="store_true")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args(argv)

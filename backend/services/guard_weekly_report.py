@@ -28,7 +28,7 @@ from typing import Dict, List, Optional
 
 from sqlalchemy import text
 
-STORE_ID = "3cce2de7-6c6e-4345-9b22-dc664214e9e6"
+STORE_ID = "00000000-0000-4000-8000-000000000001"
 LOCAL = dt.timedelta(hours=5)                      # Казахстан, UTC+5
 OUT_DIR = os.environ.get("GUARD_REPORT_DIR", "/root/guard_reports")
 PRIOR_WEEKS = 3

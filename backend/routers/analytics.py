@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from datetime import date as _date, datetime, timedelta
 from collections import OrderedDict
-from sqlalchemy import select
+from sqlalchemy import extract, func, select
 import io
 import json
 import time
@@ -93,6 +93,28 @@ def _get_cached_offers(master_sku: str, city_code: str) -> list:
     offers = _fetch_offers_sync(master_sku, city_code)
     _widget_offers_cache[cache_key] = (now, offers)
     return offers
+
+
+# Лидерборд конкурентов — COUNT ... GROUP BY по ~150k строк
+# competitor_encounter_logs за 30 дней у Бархана, ~0.1 с в БД на каждый опрос
+# insights (составной индекс планировщик не берёт: агрегируется почти вся
+# выборка магазина). Новые строки появляются раз за цикл демпинга (~5 мин),
+# так что ответ свежее TTL всё равно не бывает заметно другим.
+_LEADERBOARD_CACHE_TTL_SECONDS = 5 * 60
+_leaderboard_cache: dict[str, tuple[float, list]] = {}
+_leaderboard_cache_lock = threading.Lock()
+
+
+def _get_competitor_leaderboard_cached(store_id: str) -> list:
+    now = time.monotonic()
+    with _leaderboard_cache_lock:
+        cached = _leaderboard_cache.get(store_id)
+    if cached and cached[0] > now:
+        return cached[1]
+    leaderboard = _load_competitor_leaderboard(store_id, days=30, limit=10)
+    with _leaderboard_cache_lock:
+        _leaderboard_cache[store_id] = (now + _LEADERBOARD_CACHE_TTL_SECONDS, leaderboard)
+    return leaderboard
 
 @router.get("/widgets")
 def get_dashboard_widgets(ctx: StoreContext = Depends(get_store_context)):
@@ -322,7 +344,7 @@ def get_insights(ctx: StoreContext = Depends(get_store_context)):
     import datetime as _dt
 
     # Лидерборд конкурентов (накапливается с деплоя price_war piggyback'а)
-    leaderboard = _load_competitor_leaderboard(ctx.store_id, days=30, limit=10)
+    leaderboard = _get_competitor_leaderboard_cached(ctx.store_id)
 
     # Покрытие каталога демпингом
     products = _load_products(ctx.store_id)
@@ -346,13 +368,23 @@ def get_insights(ctx: StoreContext = Depends(get_store_context)):
         try:
             from backend.db.models import SalesOrderDB
             since = _dt.datetime.utcnow() - _dt.timedelta(days=90)
-            created = session.scalars(
-                select(SalesOrderDB.created_at)
+            # Группируем в БД по (UTC-день, UTC-час) — не больше 90×24 строк
+            # вместо ~25k created_at (~0.45 с CPU под GIL, замер 2026-10-17);
+            # сдвиг в Алматы делаем уже над группами. extract('hour') SQLAlchemy
+            # компилирует и для Postgres, и для SQLite (strftime).
+            day_col = func.date(SalesOrderDB.created_at)
+            hour_col = extract("hour", SalesOrderDB.created_at)
+            buckets = session.execute(
+                select(day_col, hour_col, func.count())
                 .where(SalesOrderDB.store_id == ctx.store_id, SalesOrderDB.created_at >= since)
+                .group_by(day_col, hour_col)
             ).all()
-            for created_at in created:
-                local = created_at + _dt.timedelta(hours=ALMATY_UTC_OFFSET_HOURS)
-                hourly_grid[local.weekday()][local.hour] += 1
+            for day, hour, count in buckets:
+                # fromisoformat, не strptime: ~2k групп через strptime стоили
+                # ~50 мс CPU под GIL на каждый опрос (замер 2026-10-18).
+                utc = _dt.datetime.combine(_dt.date.fromisoformat(str(day)[:10]), _dt.time()) + _dt.timedelta(hours=int(hour))
+                local = utc + _dt.timedelta(hours=ALMATY_UTC_OFFSET_HOURS)
+                hourly_grid[local.weekday()][local.hour] += int(count)
         finally:
             session.close()
 

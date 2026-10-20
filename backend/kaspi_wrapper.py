@@ -19,6 +19,35 @@ from backend.product_name_overrides import resolve_product_name
 logger = logging.getLogger(__name__)
 
 
+def _build_http_session() -> requests.Session:
+    """Один keep-alive пул на процесс для токен-API Kaspi (shop/api/v2).
+
+    Раньше каждый `requests.get` открывал новое TCP+TLS-соединение: замер с
+    VPS 2026-10-17 — ~390 мс на вызов против ~105 мс по живому соединению
+    (8 запросов подряд, `page[size]=1`). Постраничный обход «Передачи» и
+    опросы радара/авто-списания платили это на каждой странице.
+
+    Куки сессии отключены намеренно: пул общий для всех магазинов, и
+    сохранённая кука одного (WAF/балансировщик Kaspi) не должна уезжать в
+    запросы другого. Авторизация здесь — только заголовок X-Auth-Token.
+    """
+    from http.cookiejar import DefaultCookiePolicy
+    from requests.adapters import HTTPAdapter
+
+    session = requests.Session()
+    session.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
+    # pool_maxsize ≥ числа потоков, которые одновременно ходят в Kaspi
+    # (дефолтный executor 24 + свои пулы воркеров), иначе urllib3 молча
+    # открывает лишние соединения и тут же их выбрасывает.
+    adapter = HTTPAdapter(pool_connections=4, pool_maxsize=32)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+_http = _build_http_session()
+
+
 class AssortmentTruncated(Exception):
     """Выкачка ассортимента оборвалась и вернула НЕ весь каталог.
 
@@ -74,6 +103,79 @@ class KaspiAPI:
     # Синтетический m_<hash> — это «не резолвится», а не ответ: держим его
     # недолго, чтобы погасить шторм, но не залипнуть, если Kaspi оживёт.
     _MERCHANT_ID_NEGATIVE_TTL_SECONDS = 60.0
+
+    # Экранные списки «Упаковка» (/api/orders) и «Передача» (/api/transfers):
+    # App.tsx опрашивает оба раз в 30 с на любой вкладке, и каждый опрос был
+    # живым постраничным обходом Kaspi (замер 2026-10-17: transfers p50 5.0 с,
+    # orders p50 0.45 с / p95 1.5 с). Stale-while-revalidate: свежая копия —
+    # сразу; протухшая — тоже сразу, а обновление уходит в фоновый поток;
+    # дольше _VIEW_MAX_STALE не отдаём — тогда обход синхронно, как раньше.
+    # Ключ начинается с токена — это и есть разделение магазинов.
+    _view_cache: Dict[tuple, dict] = {}
+    _view_cache_lock = threading.Lock()
+    _view_refreshing: set = set()
+    # Поколение кэша на токен: обход, начатый ДО сброса, не должен записать
+    # устаревший список ПОСЛЕ сброса (упаковали заказ, пока шёл фоновый обход).
+    _view_gen: Dict[str, int] = {}
+    _VIEW_TTL_SECONDS = 20.0
+    _VIEW_MAX_STALE_SECONDS = 300.0
+
+    @staticmethod
+    def _cached_view(key: tuple, fetch, ttl_seconds: float = None):
+        ttl = KaspiAPI._VIEW_TTL_SECONDS if ttl_seconds is None else ttl_seconds
+        now = time.time()
+        with KaspiAPI._view_cache_lock:
+            entry = KaspiAPI._view_cache.get(key)
+            if entry and now - entry["at"] < ttl:
+                return entry["data"]
+            if entry and now - entry["at"] < KaspiAPI._VIEW_MAX_STALE_SECONDS:
+                if key not in KaspiAPI._view_refreshing:
+                    KaspiAPI._view_refreshing.add(key)
+                    threading.Thread(
+                        target=KaspiAPI._refresh_view, args=(key, fetch, KaspiAPI._view_gen.get(key[0], 0)),
+                        name="kaspi-view-refresh", daemon=True,
+                    ).start()
+                return entry["data"]
+            gen = KaspiAPI._view_gen.get(key[0], 0)
+        data = fetch()
+        KaspiAPI._store_view(key, data, gen)
+        return data
+
+    @staticmethod
+    def _store_view(key: tuple, data, gen: int) -> None:
+        with KaspiAPI._view_cache_lock:
+            if KaspiAPI._view_gen.get(key[0], 0) == gen:
+                KaspiAPI._view_cache[key] = {"data": data, "at": time.time()}
+
+    @staticmethod
+    def _refresh_view(key: tuple, fetch, gen: int) -> None:
+        try:
+            KaspiAPI._store_view(key, fetch(), gen)
+        except Exception:
+            # Протухшая копия остаётся; после _VIEW_MAX_STALE запрос сам
+            # пойдёт в Kaspi синхронно и отдаст ошибку как раньше.
+            logger.warning("[KaspiAPI] фоновое обновление %s не удалось", key[1], exc_info=True)
+        finally:
+            with KaspiAPI._view_cache_lock:
+                KaspiAPI._view_refreshing.discard(key)
+
+    @staticmethod
+    def invalidate_order_views(token: str) -> None:
+        """Сбросить кэш экранных списков магазина — после действий над заказами."""
+        with KaspiAPI._view_cache_lock:
+            KaspiAPI._view_gen[token] = KaspiAPI._view_gen.get(token, 0) + 1
+            for key in [k for k in KaspiAPI._view_cache if k[0] == token]:
+                del KaspiAPI._view_cache[key]
+
+    @staticmethod
+    def get_orders_with_products_cached(token: str, **kwargs) -> list:
+        key = (token, "orders", tuple(sorted(kwargs.items())))
+        return KaspiAPI._cached_view(key, lambda: KaspiAPI.get_orders_with_products(token, **kwargs))
+
+    @staticmethod
+    def get_transfers_cached(token: str, delivery_filter: str = "ALL") -> list:
+        key = (token, "transfers", delivery_filter)
+        return KaspiAPI._cached_view(key, lambda: KaspiAPI.get_transfers(token, delivery_filter=delivery_filter))
 
     # ── helpers ──────────────────────────────────────────────
 
@@ -168,7 +270,7 @@ class KaspiAPI:
         """GET with exponential backoff on 429."""
         headers = KaspiAPI._headers(token)
         for attempt in range(KaspiAPI.MAX_RETRIES):
-            resp = requests.get(url, headers=headers, params=params, timeout=KaspiAPI.TIMEOUT)
+            resp = _http.get(url, headers=headers, params=params, timeout=KaspiAPI.TIMEOUT)
             if resp.status_code == 429:
                 wait = 2 ** attempt
                 logger.warning(f"[KaspiAPI] 429 Too Many Requests — backing off {wait}s (attempt {attempt+1})")
@@ -958,13 +1060,14 @@ class KaspiAPI:
                 "attributes": {"status": new_status},
             }
         }
-        resp = requests.post(
+        resp = _http.post(
             f"{KaspiAPI.BASE_URL}/orders",
             headers=headers,
             json=payload,
             timeout=KaspiAPI.TIMEOUT,
         )
         resp.raise_for_status()
+        KaspiAPI.invalidate_order_views(token)
         return True
 
     # ── 6.1. cargo assembly ──────────────────────────────────
@@ -1029,6 +1132,7 @@ class KaspiAPI:
         resp = KaspiAPI._request_with_mc_refresh("POST", url, cookies, store_id=store_id, headers=headers, json=payload, timeout=15)
 
         if resp.status_code == 200:
+            KaspiAPI.invalidate_order_views(token)
             return True
         raise Exception(f"Kaspi MC API returned {resp.status_code}: {resp.text}")
 
@@ -1062,6 +1166,7 @@ class KaspiAPI:
         resp = KaspiAPI._request_with_mc_refresh("POST", url, cookies, store_id=store_id, headers=headers, json={"cargos": cargos_payload}, timeout=15)
 
         if resp.status_code == 200:
+            KaspiAPI.invalidate_order_views(token)
             return len(cargo_items)
         raise Exception(f"Kaspi MC API returned {resp.status_code}: {resp.text}")
 

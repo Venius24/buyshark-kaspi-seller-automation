@@ -37,30 +37,12 @@ def _load_guard_data(store_id) -> dict:
     return data
 
 
-async def run_price_dumping_job(
-    token: str,
-    configs: dict,
-    products: List[dict],
-    save_override_func,
-    store_id=None
-) -> dict:
-    """
-    Оркестратор трех воркеров (Radar -> Brain -> Executor).
-    Сохраняет 100% обратную совместимость с API бэкенда.
-
-    store_id=None (по умолчанию) — легаси-поведение, нескоуп-чтение мастер-групп
-    остатка (как было всегда). store_id задан (Phase 7 per-store вызовы) —
-    мастер-группы остатка фильтруются по стору, чтобы не подмешивать чужие.
-    """
+def _prepare_dumping_inputs(token: str, configs: dict, products: List[dict], store_id):
+    """Синхронная подготовка цикла (merchant_id, мастер-группы, эффективные
+    конфиги) — вызывается из run_price_dumping_job через asyncio.to_thread."""
     merchant_id = discover_merchant_id(token)
     if not merchant_id:
-        # НЕ подставляем чужой merchant_id (раньше был хардкод "20186986" —
-        # реальный ID Barkhan, из-за чего демпинг для любого другого магазина
-        # с недоступным /pointofservices тихо работал под его личностью и
-        # ловил 403 от Kaspi на каждом шаге). Честно пропускаем цикл для
-        # этого стора — следующий тик может определить merchant_id успешно.
-        logger.warning("Не удалось определить merchant_id — пропускаем цикл демпинга для этого магазина.")
-        return {"success": False, "message": "Не удалось определить Merchant ID магазина (Kaspi API недоступен). Попробуйте позже.", "logs": []}
+        return None, None, None
 
     from backend.state_helpers import _load_master_stock_groups
     master_groups = _load_master_stock_groups(store_id=store_id)
@@ -71,25 +53,21 @@ async def run_price_dumping_job(
     effective_configs, _cfg_sources = build_effective_dumping_configs(
         products, configs, master_groups
     )
+    return merchant_id, master_groups, effective_configs
 
-    # 1. 📡 Воркер-Радар
-    market_snapshot = await RadarWorker.scan_market(products, effective_configs, store_id=store_id)
-    if not market_snapshot:
-        return {
-            "success": True,
-            "updated_count": 0,
-            "message": "Нет товаров с включенным авто-демпингом.",
-            "logs": []
-        }
 
-    # 2. 🧠 Воркер-Мозг
+def _decide_and_persist(market_snapshot, effective_configs: dict, merchant_id: str, store_id):
+    """Расчёт решений Мозга и все синхронные записи цикла в прежнем порядке.
+
+    Возвращает (brain_result, new_asks); new_asks=None — вопросы защиты не
+    сохранились (уведомления тогда не шлём, как и раньше при исключении).
+    """
     guard_data = _load_guard_data(store_id)
     brain_result = BrainWorker.calculate_price_decisions(
         market_snapshot, effective_configs, merchant_id, guard_data=guard_data
     )
     update_queue = brain_result["update_queue"]
     analytics = brain_result["analytics"]
-    calculation_logs = brain_result.get("calculation_logs", [])
 
     # Сохраняем агрегированную аналитику в стейт (per-store, Слайс 5)
     try:
@@ -108,6 +86,7 @@ async def run_price_dumping_job(
     except Exception:
         pass
 
+    new_asks = None
     # История ходов для защиты от лесенки и отчёта об атаках: каждое наше
     # изменение цены и соперник, на которого мы отвечали.
     if store_id is not None:
@@ -126,14 +105,70 @@ async def run_price_dumping_job(
         except Exception as e:
             logger.error(f"Не удалось записать ходы демпинга: {e}")
 
+        try:
+            from backend.state_helpers import _upsert_guard_asks
+            new_asks = _upsert_guard_asks(brain_result.get("guard_asks") or [], store_id=store_id)
+        except Exception as e:
+            logger.error(f"Не удалось обработать вопросы/тревоги защиты демпинга: {e}")
+
+    return brain_result, new_asks
+
+
+async def run_price_dumping_job(
+    token: str,
+    configs: dict,
+    products: List[dict],
+    save_override_func,
+    store_id=None
+) -> dict:
+    """
+    Оркестратор трех воркеров (Radar -> Brain -> Executor).
+    Сохраняет 100% обратную совместимость с API бэкенда.
+
+    store_id=None (по умолчанию) — легаси-поведение, нескоуп-чтение мастер-групп
+    остатка (как было всегда). store_id задан (Phase 7 per-store вызовы) —
+    мастер-группы остатка фильтруются по стору, чтобы не подмешивать чужие.
+    """
+    merchant_id, master_groups, effective_configs = await asyncio.to_thread(
+        _prepare_dumping_inputs, token, configs, products, store_id
+    )
+    if not merchant_id:
+        # НЕ подставляем чужой merchant_id (раньше был хардкод "20186986" —
+        # реальный ID Barkhan, из-за чего демпинг для любого другого магазина
+        # с недоступным /pointofservices тихо работал под его личностью и
+        # ловил 403 от Kaspi на каждом шаге). Честно пропускаем цикл для
+        # этого стора — следующий тик может определить merchant_id успешно.
+        logger.warning("Не удалось определить merchant_id — пропускаем цикл демпинга для этого магазина.")
+        return {"success": False, "message": "Не удалось определить Merchant ID магазина (Kaspi API недоступен). Попробуйте позже.", "logs": []}
+
+    # 1. 📡 Воркер-Радар
+    market_snapshot = await RadarWorker.scan_market(products, effective_configs, store_id=store_id)
+    if not market_snapshot:
+        return {
+            "success": True,
+            "updated_count": 0,
+            "message": "Нет товаров с включенным авто-демпингом.",
+            "logs": []
+        }
+
+    # 2. 🧠 Воркер-Мозг + запись результатов. Всё синхронное (расчёт и
+    # 6-7 записей в БД) — одним вызовом в пуле потоков: на event loop это
+    # стоило ~2.2 с блокировки на магазин за цикл (py-spy на проде
+    # 2026-10-17, из них _upsert_price_war_snapshot ~1.4 с).
+    brain_result, new_asks = await asyncio.to_thread(
+        _decide_and_persist, market_snapshot, effective_configs, merchant_id, store_id
+    )
+    update_queue = brain_result["update_queue"]
+    analytics = brain_result["analytics"]
+    calculation_logs = brain_result.get("calculation_logs", [])
+
+    if store_id is not None and new_asks is not None:
         # Продавцы без рейтинга, о которых ещё не спрашивали менеджера, и
         # паузы после резкого падения цены — в Телеграм. Сбой уведомлений
         # не должен ронять цикл.
         try:
-            from backend.state_helpers import _upsert_guard_asks
             from backend.dumper import guard_notify
             all_asks = brain_result.get("guard_asks") or []
-            new_asks = _upsert_guard_asks(all_asks, store_id=store_id)
             await guard_notify.notify_new_asks(store_id, new_asks, all_asks)
             await guard_notify.notify_drop_pauses(store_id, brain_result.get("guard_alerts") or [])
         except Exception as e:

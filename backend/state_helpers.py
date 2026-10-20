@@ -487,21 +487,29 @@ def _save_dumping_configs(configs: dict, store_id: str):
             session.rollback()
             session.close()
 
-def _load_master_stock_groups(store_id: str) -> dict:
+def _load_master_stock_groups(store_id: str, include_sync_logs: bool = True) -> dict:
     """Мастер-Группы остатка этого магазина. Пустой результат означает "у
-    этого магазина ещё нет групп"."""
+    этого магазина ещё нет групп".
+
+    include_sync_logs=False — для читающих ручек (товары, прогноз): журнал
+    синка — это ~1 МБ JSON на 305 групп Бархана, ~0.13 с на каждый опрос
+    /api/products (замер 2026-10-18), а нужен он только экрану групп и
+    воркеру. В таком словаре ключа "sync_logs" нет вовсе, и
+    _save_master_stock_groups журнал тогда не трогает."""
     session = _get_sync_db_session()
     groups = {}
     if session:
         try:
             from backend.db.models import MasterStockGroupDB
             stmt = select(MasterStockGroupDB).where(MasterStockGroupDB.store_id == store_id)
+            if not include_sync_logs:
+                from sqlalchemy.orm import defer
+                stmt = stmt.options(defer(MasterStockGroupDB.sync_logs))
             rows = session.scalars(stmt).all()
             for r in rows:
                 linked_skus = json.loads(r.linked_skus) if r.linked_skus else []
                 dumping_cfg = json.loads(r.dumping_config) if r.dumping_config else None
                 dumping_excluded_skus = json.loads(r.dumping_excluded_skus) if r.dumping_excluded_skus else []
-                sync_logs = json.loads(r.sync_logs) if r.sync_logs else []
                 sku_recipes = json.loads(r.sku_recipes) if r.sku_recipes else {}
                 groups[r.group_id] = {
                     "group_id": r.group_id,
@@ -521,8 +529,9 @@ def _load_master_stock_groups(store_id: str) -> dict:
                     "updated_at": r.updated_at,
                     "last_synced_at": r.last_synced_at,
                     "last_sync_log": r.last_sync_log,
-                    "sync_logs": sync_logs
                 }
+                if include_sync_logs:
+                    groups[r.group_id]["sync_logs"] = json.loads(r.sync_logs) if r.sync_logs else []
         except Exception as e:
             logger.debug(f"DB load master stock groups error: {e}")
         finally:
@@ -591,7 +600,10 @@ def _save_master_stock_groups(groups: dict, store_id: str):
                 db_obj.updated_at = g.get("updated_at")
                 db_obj.last_synced_at = g.get("last_synced_at")
                 db_obj.last_sync_log = g.get("last_sync_log")
-                db_obj.sync_logs = logs_str
+                # Словарь из _load_master_stock_groups(include_sync_logs=False)
+                # журнала не несёт — стирать его нельзя.
+                if "sync_logs" in g:
+                    db_obj.sync_logs = logs_str
         session.commit()
         session.close()
     except Exception as e:
@@ -1467,6 +1479,8 @@ def _upsert_sales_orders(orders: list, store_id: str, review_eligible: bool = Tr
                 ))
                 inserted.append(o)
         session.commit()
+        from backend.services import sales_orders_cache
+        sales_orders_cache.bump(store_id)
         return inserted
     except Exception as e:
         logger.error(f"Error upserting sales orders to DB: {e}")
@@ -2225,6 +2239,12 @@ def _append_chat_response_log(
     reply_text: str | None = None,
     order_code: str | None = None,
     detail: str | None = None,
+    latency_ms: int | None = None,
+    llm_attempts: int | None = None,
+    cost_usd: float | None = None,
+    prompt_version: str | None = None,
+    llm_parse: str | None = None,
+    llm_action: str | None = None,
 ):
     session = _get_sync_db_session()
     if not session:
@@ -2246,6 +2266,12 @@ def _append_chat_response_log(
             reply_text=reply_text,
             order_code=(order_code or None) and str(order_code)[:30],
             detail=(detail or None) and str(detail)[:200],
+            latency_ms=latency_ms,
+            llm_attempts=llm_attempts,
+            cost_usd=cost_usd,
+            prompt_version=(prompt_version or None) and str(prompt_version)[:20],
+            llm_parse=(llm_parse or None) and str(llm_parse)[:10],
+            llm_action=(llm_action or None) and str(llm_action)[:16],
             created_at=_dt.datetime.utcnow(),
         ))
         session.commit()
@@ -2451,16 +2477,17 @@ def _load_chat_activity(store_id: str, days: int = 180) -> list:
     try:
         from backend.db.models import ChatResponseLogDB
         since = _dt.datetime.utcnow() - _dt.timedelta(days=days)
-        rows = session.scalars(
-            select(ChatResponseLogDB)
+        # Группировка в БД: раньше поднимались ORM-объекты целиком (с текстами
+        # реплик) только ради счётчика по дням. func.date() и в Postgres, и в
+        # SQLite — UTC-дата, как прежний created_at.strftime.
+        day_col = func.date(ChatResponseLogDB.created_at)
+        rows = session.execute(
+            select(day_col, func.count())
             .where(ChatResponseLogDB.store_id == store_id, ChatResponseLogDB.created_at >= since)
+            .group_by(day_col)
         ).all()
-        daily: dict = {}
-        for r in rows:
-            day_key = r.created_at.strftime("%Y-%m-%d")
-            daily.setdefault(day_key, {"date": day_key, "count": 0})
-            daily[day_key]["count"] += 1
-        return sorted(daily.values(), key=lambda x: x["date"])
+        daily = [{"date": str(day)[:10], "count": int(count)} for day, count in rows]
+        return sorted(daily, key=lambda x: x["date"])
     finally:
         session.close()
 
@@ -2477,17 +2504,21 @@ def _load_sales_daily(store_id: str, days: int = 30) -> list:
     try:
         from backend.db.models import SalesOrderDB
         since = _dt.datetime.utcnow() - _dt.timedelta(days=days)
+        # Агрегация в БД: у Бархана 56k заказов за 180 дней, и даже два
+        # столбца через SQLAlchemy стоили ~0.5-0.7 с CPU под GIL (замер
+        # 2026-10-17), GROUP BY отдаёт ~170 строк за ~40 мс. func.date() и в
+        # Postgres, и в SQLite — UTC-дата, как прежний created_at.strftime.
+        day_col = func.date(SalesOrderDB.created_at)
         rows = session.execute(
-            select(SalesOrderDB.created_at, SalesOrderDB.total_price)
+            select(day_col, func.sum(SalesOrderDB.total_price), func.count())
             .where(SalesOrderDB.store_id == store_id, SalesOrderDB.created_at >= since)
+            .group_by(day_col)
         ).all()
-        daily: dict = {}
-        for created_at, total_price in rows:
-            day_key = created_at.strftime("%Y-%m-%d")
-            bucket = daily.setdefault(day_key, {"date": day_key, "revenue": 0.0, "orders": 0})
-            bucket["revenue"] += total_price
-            bucket["orders"] += 1
-        return sorted(daily.values(), key=lambda x: x["date"])
+        daily = [
+            {"date": str(day)[:10], "revenue": float(revenue or 0.0), "orders": int(orders)}
+            for day, revenue, orders in rows
+        ]
+        return sorted(daily, key=lambda x: x["date"])
     finally:
         session.close()
 
@@ -2496,63 +2527,51 @@ def _load_sales_summary(store_id: str, days: int = 30) -> dict:
     """Реальная агрегация выручки/продаж из sales_orders за последние N дней:
     выручка и число заказов по дням, топ-SKU по выручке, средний чек."""
     import datetime as _dt
-    session = _get_sync_db_session()
-    if not session:
-        return {"daily": [], "top_skus": [], "total_revenue": 0.0, "total_orders": 0, "avg_order_value": 0.0}
-    try:
-        from backend.db.models import SalesOrderDB
-        since = _dt.datetime.utcnow() - _dt.timedelta(days=days)
-        # Только нужные столбцы, без ORM-объектов: у Бархана ~48k заказов за
-        # 180 дней, и гидратация SalesOrderDB занимала больше половины из ~3.5с.
-        rows = session.execute(
-            select(SalesOrderDB.created_at, SalesOrderDB.total_price, SalesOrderDB.entries_payload)
-            .where(SalesOrderDB.store_id == store_id, SalesOrderDB.created_at >= since)
-            .order_by(SalesOrderDB.created_at.asc())
-        ).all()
+    from backend.services import sales_orders_cache
 
-        # Kaspi's order-entries API иногда не отдаёт offer.name/title (пропущенный
-        # include) — kaspi_wrapper.py тогда пишет в entries_payload литерал "Товар"
-        # как заглушку. Разные SKU с этой заглушкой выглядят как один и тот же товар,
-        # заполняющий все топы. Подменяем заглушку реальным названием из каталога
-        # магазина по SKU, если оно у нас есть.
-        catalog_names = {
-            p.get("sku"): p.get("name")
-            for p in _load_products(store_id)
-            if p.get("sku") and p.get("name") and not is_placeholder_name(p.get("name"), p.get("sku"))
-        }
+    since = _dt.datetime.utcnow() - _dt.timedelta(days=days)
+    # Строки с уже разобранным entries_payload — из кэша процесса
+    # (sales_orders_cache, сбрасывается в _upsert_sales_orders): json.loads
+    # ~18k заказов за 30 дней стоил ~0.2 с под GIL на каждый опрос.
+    rows = sales_orders_cache.orders_since(store_id, since)
 
-        daily: dict = {}
-        sku_revenue: dict = {}
-        total_revenue = 0.0
-        for r in rows:
-            day_key = r.created_at.strftime("%Y-%m-%d")
-            bucket = daily.setdefault(day_key, {"date": day_key, "revenue": 0.0, "orders": 0})
-            bucket["revenue"] += r.total_price
-            bucket["orders"] += 1
-            total_revenue += r.total_price
-            try:
-                entries = json.loads(r.entries_payload)
-            except Exception:
-                entries = []
-            for e in entries:
-                sku = e.get("sku") or "?"
-                name = resolve_product_name(sku, e.get("name"), catalog_names=catalog_names) or sku
-                entry = sku_revenue.setdefault(sku, {"sku": sku, "name": name, "revenue": 0.0, "quantity": 0})
-                entry["revenue"] += e.get("totalPrice", 0) or 0
-                entry["quantity"] += e.get("quantity", 0) or 0
+    # Kaspi's order-entries API иногда не отдаёт offer.name/title (пропущенный
+    # include) — kaspi_wrapper.py тогда пишет в entries_payload литерал "Товар"
+    # как заглушку. Разные SKU с этой заглушкой выглядят как один и тот же товар,
+    # заполняющий все топы. Подменяем заглушку реальным названием из каталога
+    # магазина по SKU, если оно у нас есть.
+    catalog_names = {
+        p.get("sku"): p.get("name")
+        for p in _load_products(store_id)
+        if p.get("sku") and p.get("name") and not is_placeholder_name(p.get("name"), p.get("sku"))
+    }
 
-        total_orders = len(rows)
-        # Полный список по каждому SKU (не топ-10) — фронтенд сам сортирует/фильтрует
-        # по выручке или количеству, лучшие/худшие товары, без доп. запросов.
-        top_skus = sorted(sku_revenue.values(), key=lambda x: x["revenue"], reverse=True)
+    daily: dict = {}
+    sku_revenue: dict = {}
+    total_revenue = 0.0
+    for r in rows:
+        day_key = r.created_at.strftime("%Y-%m-%d")
+        bucket = daily.setdefault(day_key, {"date": day_key, "revenue": 0.0, "orders": 0})
+        bucket["revenue"] += r.total_price
+        bucket["orders"] += 1
+        total_revenue += r.total_price
+        for e in r.entries:
+            sku = e.sku or "?"
+            name = resolve_product_name(sku, e.name, catalog_names=catalog_names) or sku
+            entry = sku_revenue.setdefault(sku, {"sku": sku, "name": name, "revenue": 0.0, "quantity": 0})
+            entry["revenue"] += e.total_price or 0
+            entry["quantity"] += e.quantity or 0
 
-        return {
-            "daily": sorted(daily.values(), key=lambda x: x["date"]),
-            "top_skus": top_skus,
-            "total_revenue": round(total_revenue, 2),
-            "total_orders": total_orders,
-            "avg_order_value": round(total_revenue / total_orders, 2) if total_orders else 0.0,
-        }
-    finally:
-        session.close()
+    total_orders = len(rows)
+    # Полный список по каждому SKU (не топ-10) — фронтенд сам сортирует/фильтрует
+    # по выручке или количеству, лучшие/худшие товары, без доп. запросов.
+    top_skus = sorted(sku_revenue.values(), key=lambda x: x["revenue"], reverse=True)
+
+    return {
+        "daily": sorted(daily.values(), key=lambda x: x["date"]),
+        "top_skus": top_skus,
+        "total_revenue": round(total_revenue, 2),
+        "total_orders": total_orders,
+        "avg_order_value": round(total_revenue / total_orders, 2) if total_orders else 0.0,
+    }
 

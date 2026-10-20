@@ -38,16 +38,12 @@ routers/analytics.py): продавец думает в своих сутках.
 
 import datetime as dt
 import io
-import json
 import logging
 import math
 from typing import Optional
 
-from sqlalchemy import select
-
 from backend.product_name_overrides import is_placeholder_name, resolve_product_name
 from backend.state_helpers import (
-    _get_sync_db_session,
     _load_master_stock_groups,
     _load_products,
 )
@@ -463,39 +459,37 @@ def load_daily_sales(store_id: str, since: dt.date) -> dict:
     (пустая строка), и группировка по нему разваливает один товар на два —
     ровно тот баг, что уже был пойман вживую в sales_export.py::_entry_group_key.
     """
-    daily: dict = {}
-    session = _get_sync_db_session()
-    if not session:
-        return daily
-    try:
-        from backend.db.models import SalesOrderDB
+    from backend.services import sales_orders_cache
 
-        # Запас в сутки с каждой стороны — created_at в БД лежит в UTC, а
-        # режем мы по алматинскому дню (UTC+5).
-        since_dt = dt.datetime.combine(since - dt.timedelta(days=1), dt.time.min)
-        rows = session.scalars(
-            select(SalesOrderDB).where(
-                SalesOrderDB.store_id == store_id,
-                SalesOrderDB.created_at >= since_dt,
-            )
-        ).all()
-        for r in rows:
-            try:
-                entries = json.loads(r.entries_payload)
-            except Exception:
+    # Запас в сутки с каждой стороны — created_at в БД лежит в UTC, а
+    # режем мы по алматинскому дню (UTC+5).
+    since_dt = dt.datetime.combine(since - dt.timedelta(days=1), dt.time.min)
+    # Строки с разобранным entries_payload и сам дневной агрегат живут в кэше
+    # процесса (sales_orders_cache, сбрасывается синком продаж): json.loads
+    # ~18k заказов Бархана держал GIL ~0.35 с на каждый опрос дашборда, а
+    # проход по ним с раскладкой по дням — ещё ~0.1 с (замер 2026-10-18).
+    # build_forecast агрегат только читает.
+    return sales_orders_cache.derived(store_id, since_dt, "forecast_daily_sales", _aggregate_daily_sales)
+
+
+_ALMATY_DELTA = dt.timedelta(hours=ALMATY_UTC_OFFSET_HOURS)
+
+
+def _aggregate_daily_sales(rows) -> dict:
+    daily: dict = {}
+    for row in rows:
+        if not row.entries:
+            continue
+        day = (row.created_at + _ALMATY_DELTA).date()  # = _local_day()
+        for e in row.entries:
+            m_sku = _norm(e.sku)
+            if not m_sku:
                 continue
-            day = _local_day(r.created_at)
-            for e in entries:
-                m_sku = _norm(e.get("sku"))
-                if not m_sku:
-                    continue
-                qty = int(e.get("quantity") or 0)
-                if qty <= 0:
-                    continue
-                daily.setdefault(m_sku, {})
-                daily[m_sku][day] = daily[m_sku].get(day, 0) + qty
-    finally:
-        session.close()
+            qty = int(e.quantity or 0)
+            if qty <= 0:
+                continue
+            daily.setdefault(m_sku, {})
+            daily[m_sku][day] = daily[m_sku].get(day, 0) + qty
     return daily
 
 
@@ -519,7 +513,7 @@ def compute_stock_forecast(
     since = today - dt.timedelta(days=window_days)
     return build_forecast(
         products=_load_products(store_id),
-        groups=_load_master_stock_groups(store_id=store_id),
+        groups=_load_master_stock_groups(store_id=store_id, include_sync_logs=False),
         daily_by_sku=load_daily_sales(store_id, since),
         today=today,
         window_days=window_days,

@@ -68,6 +68,7 @@ class ChatbotBillingIntegrationTest(unittest.TestCase):
         session.close()
 
         from backend.chatbot import worker as chatbot_worker
+        from backend.chatbot import pipeline as chatbot_pipeline
         self.chatbot_worker = chatbot_worker
 
         # bot_profile: band0 (множитель 1.0x), без human_triggers.
@@ -78,10 +79,10 @@ class ChatbotBillingIntegrationTest(unittest.TestCase):
         self._profile_patch.start()
 
         # Логистический шаблон никогда не срабатывает — идём по ИИ-ветке.
-        self._logistics_patch = patch.object(chatbot_worker, "check_logistics_question", return_value=None)
+        self._logistics_patch = patch.object(chatbot_pipeline, "check_logistics_question", return_value=None)
         self._logistics_patch.start()
 
-        self._match_trigger_patch = patch.object(chatbot_worker, "find_human_triggers", return_value=[])
+        self._match_trigger_patch = patch.object(chatbot_pipeline, "find_human_triggers", return_value=[])
         self._match_trigger_patch.start()
 
         self._chat_client_patch = patch.multiple(
