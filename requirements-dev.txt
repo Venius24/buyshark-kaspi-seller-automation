@@ -1,2 +1,4 @@
 -r requirements.txt
 pytest>=8.0.0,<10
+# zoneinfo needs IANA data on Windows
+tzdata>=2024.1
